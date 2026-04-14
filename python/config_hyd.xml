@@ -1,0 +1,66 @@
+<!-- THIS FILE IS GENERATED AUTOMATICALLY BY param.py. DO NOT EDIT. --><atom>    <common>
+        <output_path>output_ATOM_Precipitation/</output_path>  <!-- directory where model outputs should be placed(must end in /)(string) -->
+        <bathymetry_path>../data/topo_grids</bathymetry_path>  <!-- directory where the topografic grids are located(string) -->
+        <BathymetrySuffix>Ma_smooth.xyz</BathymetrySuffix>  <!-- suffix of the timesteps Ma in million years(string) -->
+        <config_xml_path>../python</config_xml_path>  <!-- directory where the configuration files are located(string) -->
+        <verbose>false</verbose>  <!-- some description of the module(bool) -->
+        <paraview_panorama_vts_flag>false</paraview_panorama_vts_flag>  <!-- flag to control if create paraview panorama(bool) -->
+        <Coriolis>1</Coriolis>  <!-- Coriolis force(double) -->
+        <centrifugal>1</centrifugal>  <!-- centrifugal force(double) -->
+        <buoyancy>1</buoyancy>  <!-- buoyancy force(double) -->
+        <r_Earth>6370.001</r_Earth>  <!-- radius of the Earth in km(double) -->
+        <omega>7.292e-05</omega>  <!-- rotation rate of the earth in rad/s(double) -->
+        <g>9.8066</g>  <!-- gravitational acceleration of the earth in m/s²(double) -->
+        <time_start>0</time_start>  <!-- start time(int) -->
+        <time_end>100</time_end>  <!-- end time(int) -->
+        <time_step>10</time_step>  <!-- step size between timeslices(int) -->
+        <velocity_v_file>../data/v_surface.txt</velocity_v_file>  <!-- (string) -->
+        <velocity_w_file>../data/w_surface.txt</velocity_w_file>  <!-- (string) -->
+        <temperature_file>../data/SurfaceTemperature_NASA.xyz</temperature_file>  <!-- (string) -->
+        <precipitation_file>../data/SurfacePrecipitation_NASA.xyz</precipitation_file>  <!-- (string) -->
+        <salinity_file>../data/SurfaceSalinity_NASA.xyz</salinity_file>  <!-- (string) -->
+        <temperature_global_file>../data/scotese_etal_2021_global_temp_1my.txt</temperature_global_file>  <!-- (string) -->
+        <temperature_equat_file>../data/scotese_etal_2021_equat_temp_1my.txt</temperature_equat_file>  <!-- (string) -->
+        <temperature_pole_file>../data/scotese_etal_2021_polar_temp_1my.txt</temperature_pole_file>  <!-- (string) -->
+        <reconstruction_script_path>../reconstruction/reconstruct_atom_data.py</reconstruction_script_path>  <!-- (string) -->
+        <use_earthbyte_reconstruction>true</use_earthbyte_reconstruction>  <!-- control whether use earthbyte method to recontruct grids(bool) -->
+        <use_NASA_velocity>false</use_NASA_velocity>  <!-- if use NASA velocity to initialise velocity(bool) -->
+        <use_NASA_temperature>true</use_NASA_temperature>  <!-- if use NASA temperature to initialise surface temperature(bool) -->
+        <Ma_switch>100</Ma_switch>  <!-- switch initial temperatur from NASA to parabolic approach(int) -->
+        <CategoryIceScheme>2</CategoryIceScheme>  <!-- number chooses Two(2)-Category Ice Scheme with rain, snow(int) -->
+        <p_0>1013.25</p_0>  <!-- pressure at sea level in hPa(double) -->
+        <t_0>273.15</t_0>  <!-- temperature in K compare to 0°C(double) -->
+        <r_air>1.2041</r_air>  <!-- density of dry air in kg/m³ at 20°C(double) -->
+        <r_0_water>997.0</r_0_water>  <!-- reference density of fresh water in kg/m3(double) -->
+        <t_equat_modern>15.4</t_equat_modern>  <!-- mean temperature of the modern earth in °C(double) -->
+        <t_pole_modern>-15.4</t_pole_modern>  <!-- pole temperature of the modern earth in °C(double) -->
+        <t_paleo_max>10.0</t_paleo_max>  <!-- maximum add of mean temperature in °C during paleo times(double) -->
+        <rad_equator>398.2</rad_equator>  <!-- long wave radiation in W/m2, t_equator = 1.0976 compares to 28.0°C = 299.81 K(double) -->
+        <rad_pole>360.0</rad_pole>  <!-- long wave radiation in W/m2, t_pole = 0.9436 compares to -15.4°C = 257.75 K(double) -->
+        <rad_equator_short>163.3</rad_equator_short>  <!-- short wave radiation in W/m2(double) -->
+        <rad_pole_short>100.0</rad_pole_short>  <!-- short wave radiation in W/m2(double) -->
+        <sigma>5.67028e-08</sigma>  <!-- Stefan-Boltzmann constant W/(m²*K4)(double) -->
+        <eps_residuum>0.0001</eps_residuum>  <!-- relative error, end of iterations reached, 1% error  allowed(double) -->
+        <turb_model>k_omega_SST</turb_model>  <!-- turbulence model: none, k_epsilon, k_omega, k_omega_SST(string) -->
+    </common>
+    <hydrosphere>
+        <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->
+        <nm>4</nm>  <!-- the maximum number of iterations(int) -->
+        <checkpoint>2</checkpoint>  <!-- control when to write output files(int) -->
+        <panorama_print>10</panorama_print>  <!-- control when to write panorama files(int) -->
+        <ocean_depth_mode>shallow</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
+        <L_hyd>200.0</L_hyd>  <!-- extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"(double) -->
+        <re>10.0</re>  <!-- Reynolds number: ratio viscous to inertia forces, Re = u * L/nue(double) -->
+        <sc>1.7329</sc>  <!-- Schmidt number for salt water(double) -->
+        <pr>6.957</pr>  <!-- Prandtl number for water(double) -->
+        <cp_w>4182.0</cp_w>  <!-- specific heat capacity of water at constant pressure and 20°C in J/(kg K)(double) -->
+        <c_35>34.6</c_35>  <!-- rate of salt in psu at temperature t_0 in g/kg or psu(double) -->
+        <u_0_wind>8.0</u_0_wind>  <!-- annual mean of surface wind velocity in m/s(double) -->
+        <u_0>0.24</u_0>  <!-- annual mean of surface water velocity in m/s(double) -->
+        <r_0_saltwater>1027.0</r_0_saltwater>  <!-- reference density of salt water in kg/m3(double) -->
+        <t_pole_salt>0.993</t_pole_salt>  <!-- compares to -1.9°C, freezing temperature of sea water at poles(double) -->
+        <co2_vegetation>140.0</co2_vegetation>  <!-- value compares to ppm of co2 consumed by the vegetation(double) -->
+        <co2_ocean>0.0</co2_ocean>  <!-- value compares to ppm of co2 consumed by the vegetation(double) -->
+        <co2_land>0.0</co2_land>  <!-- value compares to ppm of co2 consumed by the vegetation(double) -->
+    </hydrosphere>
+</atom>

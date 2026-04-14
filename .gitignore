@@ -1,0 +1,36 @@
+# Compiled objects and archives
+*.o
+*.a
+
+# Compiled binaries
+cli/atm
+cli/hyd
+
+# Compiled shared libraries
+*.so
+
+# Python build artifacts
+python/build/
+__pycache__/
+*.pyc
+*.pyo
+
+# OpenDocument text files
+*.odt
+
+# Generated output files
+python/output_ATOM_Precipitation/
+data/
+
+# Log and history files
+*.txt
+*.history
+gmt.history
+
+# Claude Code local settings
+.claude/
+
+# Editor/OS
+.DS_Store
+*.swp
+*~
