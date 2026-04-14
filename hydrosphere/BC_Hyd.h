@@ -176,30 +176,31 @@ public:
             for (int j = 0; j < m.jm; j++) {
                 for (int k = 0; k < m.km; k++) {
                     if (is_land(m.h, i, j, k)) {
-                        m.u.x[i][j][k]                    = 0.0;
-                        m.v.x[i][j][k]                    = 0.0;
-                        m.w.x[i][j][k]                    = 0.0;
-                        m.un.x[i][j][k]                   = 0.0;
-                        m.vn.x[i][j][k]                   = 0.0;
-                        m.wn.x[i][j][k]                   = 0.0;
-                        m.p_dyn.x[i][j][k]                = 0.0;
-                        m.p_hydro.x[i][j][k]              = 0.0;
-                        m.r_water.x[i][j][k]              = m.r_0_water;
-                        m.r_salt_water.x[i][j][k]         = m.r_0_saltwater;
-//                        m.c.x[i][j][k]                    = 0.0;
-                        m.BuoyancyForce.x[i][j][k]        = m.r_0_saltwater * m.g;
-                        m.CoriolisForce.x[i][j][k]        = 0.0;
-                        m.CentrifugalForce.x[i][j][k]     = 0.0;
-                        m.PresGradForce.x[i][j][k]        = 0.0;
+                        m.u.x[i][j][k]                = 0.0;
+                        m.v.x[i][j][k]                = 0.0;
+                        m.w.x[i][j][k]                = 0.0;
+                        m.un.x[i][j][k]               = 0.0;
+                        m.vn.x[i][j][k]               = 0.0;
+                        m.wn.x[i][j][k]               = 0.0;
+                        m.p_dyn.x[i][j][k]            = 0.0;
+                        m.p_hydro.x[i][j][k]          = 0.0;
+                        m.r_water.x[i][j][k]          = m.r_0_water;
+                        m.r_salt_water.x[i][j][k]     = m.r_0_saltwater;
+//                        m.c.x[i][j][k]                = 0.0;
+                        m.BuoyancyForce.x[i][j][k]    = m.r_0_saltwater * m.g;
+                        m.CoriolisForce.x[i][j][k]    = 0.0;
+                        m.CentrifugalForce.x[i][j][k] = 0.0;
+                        m.PresGradForce.x[i][j][k]    = 0.0;
+
                         // Turbulence: zero all scalars at solid surfaces.
-                        m.tke.x[i][j][k]        = 0.0;
-                        m.tken.x[i][j][k]       = 0.0;
-                        m.dis.x[i][j][k]        = 0.0;
-                        m.disn.x[i][j][k]       = 0.0;
-                        m.nue.x[i][j][k]        = 0.0;
-                        m.prod.x[i][j][k]       = 0.0;
-                        m.tke_source.x[i][j][k] = 0.0;
-                        m.dis_source.x[i][j][k] = 0.0;
+                        m.tke.x[i][j][k]              = 0.0;
+                        m.tken.x[i][j][k]             = 0.0;
+                        m.dis.x[i][j][k]              = 0.0;
+                        m.disn.x[i][j][k]             = 0.0;
+                        m.nue.x[i][j][k]              = 0.0;
+                        m.prod.x[i][j][k]             = 0.0;
+                        m.tke_source.x[i][j][k]       = 0.0;
+                        m.dis_source.x[i][j][k]       = 0.0;
                     }
                 }
             }

@@ -52,11 +52,11 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
             geo.sinthe2 = geo.sinthe * geo.sinthe;
             geo.costhe  = costhe_tbl[j];
 
-            geo.inv_rm              = 1.0 / geo.rm;
-            geo.inv_rm2             = 1.0 / geo.rm2;
-            geo.inv_rmsinthe        = 1.0 / (geo.rm * geo.sinthe);
-            geo.inv_rm2sinthe       = geo.inv_rm2 / geo.sinthe;
-            geo.inv_rm2sinthe2      = geo.inv_rm2 / geo.sinthe2;
+            geo.inv_rm               = 1.0 / geo.rm;
+            geo.inv_rm2              = 1.0 / geo.rm2;
+            geo.inv_rmsinthe         = 1.0 / (geo.rm * geo.sinthe);
+            geo.inv_rm2sinthe        = geo.inv_rm2 / geo.sinthe;
+            geo.inv_rm2sinthe2       = geo.inv_rm2 / geo.sinthe2;
             geo.costhe_inv_rm2sinthe = geo.costhe * geo.inv_rm2sinthe;
 
             geo.inv_2dr   = inv_2dr;
