@@ -1,6 +1,6 @@
 # ATOM
 
-ATOM (Atmospheric and Ocean Model) is a fast, low-complexity, non-parallel climate model implementing a finite-difference Navier-Stokes solver on a spherical shell with RK4 time integration. It includes atmosphere and hydrosphere components with optional turbulence closures (k-ε, k-ω, k-ω SST).
+ATOM (Atmospheric and Ocean Model) is a paleo-climate model implementing a finite-difference Navier-Stokes solver on a spherical shell with RK4 time integration. Vertical coordinate stretching in both models is applied. It includes atmosphere and hydrosphere components with optional turbulence closures (k-ε, k-ω, k-ω SST). Topography and bathymetry are greatfully supported by pygplates. Zero-, One-, Two- and Three-Category-Ice-Schemes (COSMO) by switch are available for precipitation computations. A Saturation-Adjustment-Scheme balances water vapour, cloud water and ice. The ocean model detects in the upper levels where Ekman flow is present upwelling and downwelling regions. The temperature and salinity distributions are controlled as well. In preparation is a deep ocean part as challenge counts here the thermohaline conveyor belt.
 
 ## Repository layout
 
