@@ -1,454 +1,211 @@
-# Given a parameter definition, generates necessary C++, Python and XML bindings
+# Given a parameter definition, generates necessary C++ bindings:
+#   cube/CubeParameters.h   — member-variable declarations (included in cCubeModel class body)
+#   cube/CubeParameters.cpp — SetDefaultConfig() implementation
 # coding=utf-8
 
-
+import os
 
 def main():
 
-    # read the input definition
-    # name, description, datatype, default in the tuples
+    # Tuples: (name, description, datatype, default)
+    # L_atm is already a static const in cCubeModel.h — omit it here.
 
 
-    PARAMS = {                                                          # dictionary{} (PARAMS) with keys ('common', etc.):[ and their tuples ('output_path', etc.)]
+
+
+
+
+
+    PARAMS = {
         'common': [
-            ('output_path', 'directory where model outputs should be placed(must end in /)', 'string', 'output_ATOM_Precipitation/'),
-
-            ('bathymetry_path', 'directory where the topografic grids are located', 'string', '../data/topo_grids'),
-#            ('bathymetry_path', 'directory where the topografic grids are located', 'string', '../data/simon_topo'),
-
-            ('BathymetrySuffix', 'suffix of the timesteps Ma in million years', 'string', 'Ma_smooth.xyz'),
-#            ('BathymetrySuffix', 'suffix of the timesteps Ma in million years', 'string', 'Ma_Simon.xyz'),
-
-            ('config_xml_path', 'directory where the configuration files are located', 'string', '../python'),
-
-            ('verbose', 'some description of the module', 'bool', False),
-
-            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', False),
-#            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', True),
-
-            ('Coriolis', 'Coriolis force', 'double', 1),
-#            ('Coriolis', 'Coriolis force', 'double', 0),
-
-            ('centrifugal', 'centrifugal force', 'double', 1),
-#            ('centrifugal', 'centrifugal force', 'double', 0),
-
-            ('buoyancy', 'buoyancy force', 'double', 1),
-#            ('buoyancy', 'buoyancy force', 'double', 0),
-
-            ('r_Earth', 'radius of the Earth in km', 'double', 6370.001),
-            ('omega', 'rotation rate of the earth in rad/s', 'double', 7.292e-5),
-
-            ('g', 'gravitational acceleration of the earth in m/s²', 'double', 9.8066),
+            ('output_path',             'directory where model outputs should be placed (must end in /)', 'string',  'output_ATOM_Cube_Turbulence/'),
+            ('verbose',                 'enable verbose diagnostic output',                               'bool',    False),
+#            ('paraview_panorama_vts_flag', 'flag to control if create paraview panorama',                 'bool',    False),
+            ('paraview_panorama_vts_flag', 'flag to control if create paraview panorama',                 'bool',    True),
 
 
+#            ('L_atm',                    'extension of the atmosphere shell in m, Benocci',                'double', 500.0),
+            ('L_atm',                   'extension of the atmosphere shell in m, Benocci',                'double', 1.0),
+#            ('L_atm',                   'extension of the atmosphere shell in m, Benocci',                'double', 0.2),
 
+            ('p_0',                     'pressure at sea level in hPa',                                   'double',  1013.25),
 
+            ('sigma',                   'Stefan-Boltzmann constant W/(m²*K4)',                            'double',  5.670280e-8),
+            ('eps_residuum',            'relative error, end of iterations reached, 1% error allowed',    'double',  1.0e-4),
 
-
-
-
-            #parameters for data reconstruction
-
-            ('time_start', 'start time', 'int', 0),
-#            ('time_end', 'end time', 'int', 10),
-            ('time_end', 'end time', 'int', 100),
-            ('time_step', 'step size between timeslices', 'int', 10),
-
-            ('velocity_v_file', '' ,'string','../data/v_surface.txt'),
-            ('velocity_w_file', '' ,'string','../data/w_surface.txt'),
-
-            ('temperature_file', '', 'string', '../data/SurfaceTemperature_NASA.xyz'),
-
-            ('precipitation_file', '', 'string', '../data/SurfacePrecipitation_NASA.xyz'),
-
-            ('salinity_file', '', 'string', '../data/SurfaceSalinity_NASA.xyz'),
-
-            ('temperature_global_file', '', 'string', '../data/scotese_etal_2021_global_temp_1my.txt'),
-            ('temperature_equat_file', '', 'string', '../data/scotese_etal_2021_equat_temp_1my.txt'),
-            ('temperature_pole_file', '', 'string', '../data/scotese_etal_2021_polar_temp_1my.txt'),
-
-            ('reconstruction_script_path', '', 'string', '../reconstruction/reconstruct_atom_data.py'),
-
-#            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', False),
-            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', True),
-
-            ('use_NASA_velocity', 'if use NASA velocity to initialise velocity', 'bool', False),
-#            ('use_NASA_velocity', 'if use NASA velocity to initialise velocity', 'bool', True),
-
-            ('use_NASA_temperature', 'if use NASA temperature to initialise surface temperature', 'bool', True),
-
-#            ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 50),
-            ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 100),
-
-#            ('CategoryIceScheme', 'number chooses Three(3)-Category Ice Scheme with rain, snow and graupel', 'int', 3),
-            ('CategoryIceScheme', 'number chooses Two(2)-Category Ice Scheme with rain, snow', 'int', 2),
-#            ('CategoryIceScheme', 'number chooses One(1)-Category Ice Scheme with rain, snow', 'int', 1),
-#            ('CategoryIceScheme', 'number chooses Zero(0)-Category Ice Scheme with rain (Warm Rain Scheme)', 'int', 0),
-#            ('CategoryIceScheme', 'number chooses no scheme(-1) no precipitation', 'int', -1),
-
-            ('p_0', 'pressure at sea level in hPa', 'double', 1013.25),
-            ('t_0', 'temperature in K compare to 0°C', 'double', 273.15),
-            ('r_air', 'density of dry air in kg/m³ at 20°C', 'double', 1.2041),
-            ('r_0_water', 'reference density of fresh water in kg/m3', 'double', 997.0),
-            ('t_equat_modern', 'mean temperature of the modern earth in °C', 'double', 15.4),
-            ('t_pole_modern', 'pole temperature of the modern earth in °C', 'double', - 15.4),
-
-            ('t_paleo_max', 'maximum add of mean temperature in °C during paleo times', 'double', 10.0),
- 
-            ('rad_equator', 'long wave radiation in W/m2, t_equator = 1.0976 compares to 28.0°C = 299.81 K', 'double', 398.2),
-            ('rad_pole', 'long wave radiation in W/m2, t_pole = 0.9436 compares to -15.4°C = 257.75 K', 'double', 360.0),
-#            ('rad_equator', 'long wave radiation in W/m2, t_equator = 1.0976 compares to 28.0°C = 299.81 K', 'double', 239.9),
-#            ('rad_pole', 'long wave radiation in W/m2, t_pole = 0.9436 compares to -15.4°C = 257.75 K', 'double', 250.26),
-
-            ('rad_equator_short', 'short wave radiation in W/m2', 'double', 163.3),
-            ('rad_pole_short', 'short wave radiation in W/m2', 'double', 100.0),
-
-            ('sigma', 'Stefan-Boltzmann constant W/(m²*K4)', 'double', 5.670280e-8),
-
-            ('eps_residuum', 'relative error, end of iterations reached, 1% error  allowed', 'double', 1.0e-4),
-
-#            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'none'),
-            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_omega_SST'),
-#            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_omega'),
-#            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_epsilon'),
+#            ('turb_model',             'turbulence model: none, k_epsilon, k_omega, k_omega_SST',         'string',  'none'),
+            ('turb_model',              'turbulence model: none, k_epsilon, k_omega, k_omega_SST',        'string',  'k_omega_SST'),
+#            ('turb_model',             'turbulence model: none, k_epsilon, k_omega, k_omega_SST',         'string',  'k_omega'),
+#            ('turb_model',             'turbulence model: none, k_epsilon, k_omega, k_omega_SST',         'string',  'k_epsilon'),
         ],
 
+        'cube': [
+#            ('nm',            'the maximum number of iterations',                                         'int',     4),
+#            ('nm',            'the maximum number of iterations',                                         'int',     60),
+#            ('nm',            'the maximum number of iterations',                                         'int',     120),
+#            ('nm',            'the maximum number of iterations',                                         'int',     256),
+#            ('nm',            'the maximum number of iterations',                                         'int',     560),
+            ('nm',            'the maximum number of iterations',                                         'int',     1120),
+#            ('checkpoint',    'control when to write output files',                                       'int',     20),
+#            ('checkpoint',    'control when to write output files',                                       'int',     56),
+            ('checkpoint',    'control when to write output files',                                       'int',     112),
+#            ('panorama_print','control when to write panorama files',                                     'int',     10),
+            ('panorama_print','control when to write panorama files',                                     'int',     560),
 
-        'atmosphere': [
-
-            ('nm', 'the maximum number of iterations', 'int', 4),
-            ('checkpoint', "control when to write output files", 'int', 2),
-            ('panorama_print', "control when to write panorama files", 'int', 10),
-
-
-            ('coeff_Dalton', "diffusion coefficient in evaporation by Dalton", 'double', 0.7),
-
-#            ('convection_perturbation', 'convective trigger perturbation: 0=fixed, 1=Bechtold (2008) surface-flux-based for shallow/fixed for deep', 'int', 0),
-            ('convection_perturbation', 'convective trigger perturbation: 0=fixed, 1=Bechtold (2008) surface-flux-based for shallow/fixed for deep', 'int', 1),
-
-#            ('convection_mode', 'convection type: 0=deep only (precipitating), 1=deep+shallow (non-precipitating if p_diff<p_stat_diff), 2=deep+shallow+midlevel (also non-precipitating for cloud base above p_stat_midlevel/700 hPa)', 'int', 0),
-            ('convection_mode', 'convection type: 0=deep only (precipitating), 1=deep+shallow (non-precipitating if p_diff<p_stat_diff), 2=deep+shallow+midlevel (also non-precipitating for cloud base above p_stat_midlevel/700 hPa)', 'int', 1),
-
-#            ('iter_prec', 'precipitation sub-iteration count: min 3 for evaporation (e_d, e_p) to act on non-zero P_conv; check convergence at 4-5', 'int', 4),
-            ('iter_prec', 'precipitation sub-iteration count: min 3 for evaporation (e_d, e_p) to act on non-zero P_conv; check convergence at 4-5', 'int', 3),
-
-            ('evap_model', "evaporation formula driving surface humidity update: Dalton, Meyer, or Rohwer", 'string', 'Meyer'),
-
-
-            ('Ma_max', 'parabolic temperature distribution 300 Ma(from Ruddiman)', 'int', 300),
-            ('Ma_max_half', 'half of time scale', 'int', 150),
-
-            ('L_atm', 'extension of the atmosphere shell in m, total height is 16000m*40 steps', 'double', 400.0),
-
-            ('tropopause_pole', 'extension of the troposphere at the poles in m', 'double', 8000.0),
-            ('tropopause_equator', 'extension of the troposphere at the equator in m', 'double', 15000.0),
-
-
-            ('albedo_pole', 'albedo around the poles', 'double', 0.294),
-            ('albedo_equator', 'albedo around the equator', 'double', 0.1),
-
-            ('epsilon_equator', 'emissivity and absorptivity caused by other gases than water vapour/(by Häckel)', 'double', 0.48),
-            ('epsilon_pole', 'emissivity and absorptivity caused by other gases than water vapour at the poles', 'double', 0.45),
-            ('epsilon_tropopause', 'emissivity and absorptivity caused by other gases than water vapour in the tropopause', 'double', 0.001),
-
-            ('re', 'Reynolds number for laminar flows: ratio viscous to inertia forces, Re = u * L/nue', 'double', 1000.0),
-            ('sc_WaterVapour', 'Schmidt number of water vapour, Sc = nue/D', 'double', 0.61),
-            ('sc_CO2', 'Schmidt number of CO2', 'double', 0.96),
-            ('pr', 'Prandtl number of air for laminar flows', 'double', 0.7179),
-            ('pr_turb', 'turbulent Prandtl number for temperature transport in turbulent flows', 'double', 0.9),
-            ('ep', 'ratio of the gas constants of dry air to water vapour [kg_air/kg_vapour]', 'double', 0.62198),
-            ('hp', 'water vapour pressure at T = 0°C: E = 6.1 hPa', 'double', 6.1078),
-            ('R_Air', 'specific gas constant of air in J/(kg*K)', 'double', 286.9),
-            ('R_WaterVapour', 'specific gas constant of water vapour in J/(kg*K)', 'double', 461.4),
-            ('r_water_vapour', 'density of saturated water vapour in kg/m³ at 10°C', 'double', 0.0094),
-            ('R_co2', 'specific gas constant of CO2 in J/(kg*4.5K)', 'double', 188.91),
-            ('lv', 'specific latent evaporation heat(condensation heat) in J/kg', 'double', 2.52e6),
-            ('ls', 'specific latent vaporisation heat(sublimation heat) in J/kg', 'double', 2.83e6),
-            ('cp_l', 'specific heat capacity of dry air at constant pressure and 20°C in J/(kg K)', 'double', 1005.0),
-            ('cv_l', 'specific heat capacity of dry air at constant volume and 20°C in J/(kg K)', 'double', 717.0),
-            ('lamda', 'heat transfer coefficient of air in W/(m K)', 'double', 0.0262),
-            ('r_co2', 'density of CO2 in kg/m³ at 25°C', 'double', 0.0019767),
-            ('gam', 'constant slope of temperature    gam = 6.5 K/1000 m', 'double', 0.0065),
-
-            ('u_0', 'annual mean of surface wind velocity in m/s, 8 m/s compare to 28.8 km/h', 'double', 8.0),
-            ('t_00', 'temperature in K compare to -37°C', 'double', 236.15),
-            ('t_000', 'temperature in K compare to -20°C', 'double', 253.15),
-            ('s_0', 'entropy at 0°C, cp_l * t_0 in J/kg', 'double', 274515.75),
-            ('c_0', 'maximum value of water vapour in kg/kg', 'double', 0.035),
-
-#            ('co2_0', 'maximum value of CO2 in ppm at preindustrial times', 'double', 280.0),
-            ('co2_0', 'maximum value of CO2 in ppm at preindustrial times', 'double', 380.0),
-            ('co2_paleo', 'value at modern times', 'double', 330.0),
-            ('co2_tropopause', 'minimum rate CO2 at tropopause 320.0 ppm', 'double', 385.0),
-            ('co2_vegetation', 'value compares to ppm of co2 consumed by the vegetation', 'double', 140.0),
-            ('co2_ocean', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
-            ('co2_land', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
-
-            ('c_land', 'water vapour reduction on land(60% of the saturation value)', 'double', 66),
-            ('c_ocean', 'water vapour reduction on sea surface(64% of the saturation value)', 'double', 70),
-        ],
-
-
-
-        'hydrosphere': [
-            ('input_path', 'directory where Atmosphere output can be read(must end in /)', 'string', 'output_ATOM_Precipitation'),
-
-            ('nm', 'the maximum number of iterations', 'int', 4),
-            ('checkpoint', "control when to write output files", 'int', 2),
-            ('panorama_print', "control when to write panorama files", 'int', 10),
-
-#            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),
-            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'shallow'),
-            ('L_hyd', 'extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"', 'double', 200.0),
-
-            ('re', 'Reynolds number: ratio viscous to inertia forces, Re = u * L/nue', 'double', 10.0),
-#            ('re', 'Reynolds number: ratio viscous to inertia forces, Re = u * L/nue', 'double', 1000.0),
-            ('sc', 'Schmidt number for salt water', 'double', 1.7329),
-            ('pr', 'Prandtl number for water', 'double', 6.957),
-            ('cp_w', 'specific heat capacity of water at constant pressure and 20°C in J/(kg K)', 'double', 4182.0),
-
-            ('c_35', 'rate of salt in psu at temperature t_0 in g/kg or psu', 'double', 34.6),
-            ('u_0_wind', 'annual mean of surface wind velocity in m/s', 'double', 8.0),
-            ('u_0', 'annual mean of surface water velocity in m/s', 'double', 0.24),
-            ('r_0_saltwater', 'reference density of salt water in kg/m3', 'double', 1027.0),
-            ('t_pole_salt', 'compares to -1.9°C, freezing temperature of sea water at poles', 'double', 0.9930),
-
-            ('co2_vegetation', 'value compares to ppm of co2 consumed by the vegetation', 'double', 140.0),
-            ('co2_ocean', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
-            ('co2_land', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
-
-        ],
+            ('re',            'Reynolds number for laminar flows',                                        'double',  1000.0),
+            ('pr',            'Prandtl number of air for laminar flows',                                  'double',  0.7179),
+            ('pr_turb',       'turbulent Prandtl number for temperature transport',                       'double',  0.9),
+            ('R_Air',         'specific gas constant of air in J/(kg*K)',                                 'double',  286.9),
+#            ('u_0',           'annual mean of surface wind velocity in m/s',                              'double',  8.0),
+            ('u_0',           'annual mean of surface wind velocity in m/s, Benocci',                     'double',  1.0),
+#            ('u_0',           'annual mean of surface wind velocity in m/s',                              'double',  0.02),
+#            ('u_0', 'annual mean of surface wind velocity in m/s, Benocci',                               'double', 5.81), 
+    ]
+}
+    # Map param.py type names to C++ types
+    cpp_type = {
+        'string': 'std::string',
+        'bool':   'bool',
+        'int':    'int',
+        'double': 'double',
+        'float':  'float',
     }
 
+    # Helper: format a default value as a C++ literal
+    def cpp_default(dtype, val):
+        if dtype == 'string':
+            return f'"{val}"'
+        if dtype == 'bool':
+            return 'true' if val else 'false'
+        if dtype == 'double':
+            # Preserve scientific notation when appropriate
+            return repr(float(val)).replace('e-0', 'e-').replace('e+0', 'e+')
+        return str(val)
 
+    # ------------------------------------------------------------------ #
+    # Generate cube/CubeParameters.h
+    # This file is #included inside the cCubeModel class body (public:).
+    # It only contains member-variable declarations.
+    # ------------------------------------------------------------------ #
+    header_path = os.path.join('cube', 'CubeParameters.h')
+    with open(header_path, 'w') as f:
+        f.write('// cube/CubeParameters.h\n')
+        f.write('// THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n')
+        f.write('// ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n')
+        f.write('\n')
+        for section, params in PARAMS.items():
+            f.write(f'    // {section} section\n')
+            for name, desc, dtype, default in params:
+                ctype = cpp_type[dtype]
+                f.write(f'    {ctype} {name};  // {desc}\n')
+            f.write('\n')
 
+    # ------------------------------------------------------------------ #
+    # Generate cube/CubeParameters.cpp
+    # Implements cCubeModel::SetDefaultConfig().
+    # ------------------------------------------------------------------ #
+    cpp_path = os.path.join('cube', 'CubeParameters.cpp')
+    with open(cpp_path, 'w') as f:
+        f.write('// cube/CubeParameters.cpp\n')
+        f.write('// THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n')
+        f.write('// ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n')
+        f.write('\n')
+        f.write('#include "cCubeModel.h"\n')
+        f.write('\n')
+        f.write('void cCubeModel::SetDefaultConfig() {\n')
+        f.write('\n')
+        for section, params in PARAMS.items():
+            f.write(f'    // {section} section\n')
+            for name, desc, dtype, default in params:
+                val = cpp_default(dtype, default)
+                f.write(f'    {name} = {val};\n')
+            f.write('\n')
+        f.write('}\n')
 
-    XML_READ_FUNCS = {                                                  # dictionary (XML_READ_FUNCS) with keys ('"string", etc.) and one list element ("FillStringWithElement")
-        "string": "FillStringWithElement",
-        "double": "FillDoubleWithElement",
-        "int": "FillIntWithElement",
-        "bool": "FillBoolWithElement"
+    print(f'Generated {header_path}')
+    print(f'Generated {cpp_path}')
+
+    # ------------------------------------------------------------------ #
+    # Generate python/cube.pxd
+    # Cython extern declarations for cCubeModel, consumed by pycube.pyx.
+    # ------------------------------------------------------------------ #
+    cython_type = {
+        'string': 'string',
+        'bool':   'bool',
+        'int':    'int',
+        'double': 'double',
+        'float':  'float',
     }
 
-
-
-    # functions begin
-
-    def write_cpp_defaults(filename, classname, sections):
-
-        with open(filename, 'w') as f:
-
-            f.write("// header files\n")
-            f.write("// THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n")
-            f.write("// ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n")
-            f.write("\n")
-            f.write("void %s::SetDefaultConfig() {\n" % classname)
-
-            for section in sections:
-                f.write('\n  // %s section\n' % section)
-
-                for slug, desc, ctype, default in PARAMS[section]:
-                    rhs = default
-
-                    if ctype == 'string':
-                        rhs = '"%s"' % default
-                    elif ctype == 'bool':
-
-                        if default:
-                            rhs = 'true'
-                        else:
-                            rhs = 'false'
-
-                    f.write('  %s = %s;\n' %(slug, rhs))
-
-            f.write("}")
-
-
-
-    def write_cpp_load_config(filename, classname, sections):
-
-        with open(filename, 'w') as f:
-
-            f.write("// config files\n")
-            f.write("// THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n")
-            f.write("// ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n")
-            f.write("\n")
-
-            for section in sections:
-                f.write('\n  // %s section\n' % section)
-                element_var_name = 'elem_%s' % section
-                f.write('\n  if(%s) {\n' %(element_var_name))
-
-                for slug, desc, ctype, default in PARAMS [section]:
-                    func_name = XML_READ_FUNCS [ctype]
-                    f.write('    Config::%s(%s, "%s", %s);\n' %(func_name, element_var_name, slug, slug))
-
-                f.write("  }\n")
-
-
-
-    def write_cpp_headers(filename, sections, is_extern = False):
-
-        with open(filename, 'w') as f:
-
-            f.write("// header files\n")
-            f.write("// THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n")
-            f.write("// ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n")
-            f.write("\n")
-
-            if is_extern:
-                f.write("#include<string>\n\n")
-                f.write("using namespace std;\n")
-
-                #if 'atmosphere' in filename:
-                #    f.write("namespace AtmParameters{\n")
-                #else:
-                #    f.write("namespace HydParameters{\n")
-
-            for section in sections:
-                f.write('\n// %s section\n' % section)
-
-                for slug, desc, ctype, default in PARAMS [section]:
-                    if is_extern:
-                        f.write('   extern %s %s;\n' %(ctype, slug))
-                    else:
-                        f.write('%s %s;\n' %(ctype, slug))
-           
-            if is_extern:
-                f.write("}\n")
-
-
-
-    def write_pxi(input_filename, output_filename, substitutions):
-
-        data = open(input_filename, 'r').read()
-        indent = '    '
-
-        for key, classname, sections in substitutions:
-            rep = ''
-
-            for section in sections:
-                rep += '%s# %s section\n' %(indent, section)
-
-                for slug, desc, ctype, default in PARAMS[section]:
-                    rep += '%sproperty %s:\n' %(indent, slug)
-                    rep += '%s    def __get__(%s self):\n' %(indent, classname)
-                    rep += '%s        self._check_alive()\n' % indent
-                    rep += '%s        return self._thisptr.%s\n' %(indent, slug)
-                    rep += '%s\n' % indent
-                    rep += '%s    def __set__(%s self, value):\n' %(indent, classname)
-                    rep += '%s        self._check_alive()\n' % indent
-                    rep += '%s        self._thisptr.%s = <%s> value\n' %(indent, slug, ctype)
-                    rep += '%s\n' % indent
-
-            data = data.replace('{{ %s }}' % key, rep)
-
-        with open(output_filename, 'w') as f:
-
-            f.write("""# pxi files\n""")
-            f.write("# THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n")
-            f.write("# ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n")
-            f.write(data)
-
-
-
-    def write_pxd(filename, model, sections):
-
-        with open(filename, 'w') as f:
-            # Sadly, Cython docs are incorrect on usage of 'include', so we must include a whole lot of boilerplate
-
-            f.write("""# pxd files\n""")
-            f.write("""# THIS FILE IS AUTOMATICALLY GENERATED BY param.py
-# ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME
-from libcpp.vector cimport vector
-cdef extern from "c%sModel.h":
-    cppclass c%sModel:
-        c%sModel() except +  # NB! std::bad_alloc will be converted to MemoryError
-        void LoadConfig(const char *filename)
-        void Run()
-        void RunTimeSlice(int time_slice)
-        vector[float] get_layer_heights()
-""" %(model, model, model))
-
-            for section in sections:
-                f.write('        # %s section\n' % section)
-
-                for slug, desc, ctype, default in PARAMS [section]:
-                    f.write('        %s %s\n' %(ctype, slug))
-
-
-
-    def write_config_xml(filename, sections):
-
-        with open(filename, 'w') as f:
-            f.write("""<!-- THIS FILE IS GENERATED AUTOMATICALLY BY param.py. DO NOT EDIT. -->""")
-            f.write('<atom>')
-
-            for section in sections:
-                f.write('    <%s>\n' % section)
-
-                for slug, desc, ctype, default in PARAMS [section]:
-                    if ctype == 'bool':
-                        default = str(default).lower()                  # Python uses True/False, C++, uses true/false
-                    f.write('        <%s>%s</%s>  <!-- %s(%s) -->\n' %(slug, default, slug, desc, ctype))
-
-                f.write('    </%s>\n' % section)
- 
-            f.write('</atom>')
-
-    # functions end
-
-
-
-    atmosphere_sections = ['common', 'atmosphere']
-    hydrosphere_sections = ['common', 'hydrosphere']
-
-    for filename, classname, sections in [
-        ('atmosphere/cAtmosphereDefaults.cpp.inc', 'cAtmosphereModel', atmosphere_sections),
-        ('hydrosphere/cHydrosphereDefaults.cpp.inc', 'cHydrosphereModel', hydrosphere_sections)
-    ]:
-        write_cpp_defaults(filename, classname, sections)
-
-
-    for filename, classname, sections in [
-        ('atmosphere/AtmosphereLoadConfig.cpp.inc', 'cAtmosphereModel', atmosphere_sections),
-        ('hydrosphere/HydrosphereLoadConfig.cpp.inc', 'cHydrosphereModel', hydrosphere_sections)
-    ]:
-        write_cpp_load_config(filename, classname, sections)
-
-
-    for filename, sections in [
-        ('atmosphere/AtmosphereParams.h.inc', atmosphere_sections),
-        ('hydrosphere/HydrosphereParams.h.inc', hydrosphere_sections)
-    ]:
-        write_cpp_headers(filename, sections)
-
-
-    write_pxi('python/pyatom.pyx.template', 'python/pyatom.pyx', [
-        ('atmosphere_params', 'Atmosphere', atmosphere_sections),
-        ('hydrosphere_params', 'Hydrosphere', hydrosphere_sections)])
-
-
-    for filename, model, sections in [
-        ('python/atmosphere_pxd.pxi', 'Atmosphere', atmosphere_sections),
-        ('python/hydrosphere_pxd.pxi', 'Hydrosphere', hydrosphere_sections)
-    ]:
-        write_pxd(filename, model, sections)
-
-
-    for  filename, sections in [
-        ('python/config_atm.xml', atmosphere_sections),
-        ('python/config_hyd.xml', hydrosphere_sections)
-    ]:
-        write_config_xml(filename, sections)
-
-
-    for  filename, sections in [
-        ('cli/config_atm.xml', atmosphere_sections),
-        ('cli/config_hyd.xml', hydrosphere_sections)
-    ]:
-        write_config_xml(filename, sections)
-
+    pxd_path = os.path.join('python', 'cube.pxd')
+    with open(pxd_path, 'w') as f:
+        f.write('# python/cube.pxd\n')
+        f.write('# THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n')
+        f.write('# ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n')
+        f.write('from libcpp cimport bool\n')
+        f.write('from libcpp.string cimport string\n')
+        f.write('from libcpp.vector cimport vector\n')
+        f.write('\n')
+        f.write('cdef extern from "cCubeModel.h":\n')
+        f.write('    cppclass cCubeModel:\n')
+        f.write('        cCubeModel() except +\n')
+        f.write('        void LoadConfig(const char *filename)\n')
+        f.write('        void Run()\n')
+        f.write('        void RunTimeSlice(int time_slice)\n')
+        f.write('        vector[float] get_layer_heights()\n')
+        for section, params in PARAMS.items():
+            f.write(f'        # {section} section\n')
+            for name, desc, dtype, default in params:
+                ctype = cython_type[dtype]
+                f.write(f'        {ctype} {name}\n')
+
+    print(f'Generated {pxd_path}')
+
+    # ------------------------------------------------------------------ #
+    # Generate python/pycube.pyx
+    # Fill the {{ cube_params }} placeholder in the template with Cython
+    # property wrappers for every parameter.
+    # ------------------------------------------------------------------ #
+    cython_cast = {
+        'string': 'string',
+        'bool':   'bool',
+        'int':    'int',
+        'double': 'double',
+        'float':  'float',
+    }
+
+    props = []
+    for section, params in PARAMS.items():
+        props.append(f'    # {section} section')
+        for name, desc, dtype, default in params:
+            cast = cython_cast[dtype]
+            props.append(f'    property {name}:')
+            props.append(f'        def __get__(CubeModel self):')
+            props.append(f'            self._check_alive()')
+            props.append(f'            return self._thisptr.{name}')
+            props.append(f'    ')
+            props.append(f'        def __set__(CubeModel self, value):')
+            props.append(f'            self._check_alive()')
+            props.append(f'            self._thisptr.{name} = <{cast}> value')
+            props.append(f'    ')
+    cube_params_block = '\n'.join(props)
+
+    template_path = os.path.join('python', 'pyatom.pyx.template')
+    pyx_path      = os.path.join('python', 'pycube.pyx')
+    with open(template_path) as f:
+        template = f.read()
+    pyx_content = template.replace('{{ cube_params }}', cube_params_block)
+    # Prepend the standard auto-generated header comment
+    header = (
+        '# python/pycube.pyx\n'
+        '# THIS FILE IS AUTOMATICALLY GENERATED BY param.py\n'
+        '# ANY CHANGES WILL BE OVERWRITTEN AT COMPILE TIME\n'
+        '\n'
+    )
+    with open(pyx_path, 'w') as f:
+        f.write(header + pyx_content)
+
+    print(f'Generated {pyx_path}')
 
 
 if __name__ == '__main__':

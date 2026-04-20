@@ -1,13 +1,12 @@
-// cli version: does nothing (cout goes to cout)
+#include <iostream>
+#include <fstream>
 
-#include "PythonStream.h"
-
-bool PythonStream::is_enable(){
-    return false;
-}
-
-void PythonStream::OverrideCout() { }
-
-int PythonStream::sync() {
-    return 0;
-}
+// Redirect std::clog to a file so that verbose library output does not
+// clutter the terminal.  The ofstream is kept open for the lifetime of
+// the process via a static local.
+struct DefaultStreamInit {
+    DefaultStreamInit() {
+        static std::ofstream log_file("atom_cube.log", std::ofstream::out);
+        std::clog.rdbuf(log_file.rdbuf());
+    }
+} default_stream_init;

@@ -1,54 +1,32 @@
 #!/usr/bin/env python
 
-from pyatom import Atmosphere, Hydrosphere
+from pycube import CubeModel
 
 
-class Model(object):
+class Model:
     """
-    ATOM Model Object
+    ATOM Cube Turbulence Model wrapper.
+    Drives the C++ cCubeModel via the pycube Cython extension.
     """
-    def __init__(self):
-        self.atm = Atmosphere()
-        self.hyd = Hydrosphere()
-        self.time_slice = ""
-        self.config_atm_xml = "config_atm_xml"
-        self.config_hyd_xml = "config_hyd_xml"
+    def __init__(self, config="cli/config_cube.xml"):
+        self.cube = CubeModel()
+        self.cube.load_config(config)
+        self.config_xml = config
+        self.time_slice = 0
+
+    def print_config(self):
+        print("\n\n\n\n   ATOM Cube Turbulence Model")
+        print(f"\n   configuration file       : {self.config_xml}")
+        print(f"   output path              : {self.cube.output_path}")
+
+    def run(self, time_slice=0):
+        self.time_slice = time_slice
+        print(f"\n   Running turbulent flow around a cube  —  time-slice Ma = {self.time_slice}")
+        self.cube.run()
+        print(f"\n   Successfully terminated  —  time-slice Ma = {self.time_slice}\n")
 
 
-    def print_config_atm(self, config_atm_xml):
-        print("\n\n\n\n   Paleo Atmospheric Circulations") 
-        print("\n\n   atmosphere configuration file name is         ", self.config_atm_xml)
-        print("   output path for config_atm_xml file is        ", self.atm.config_xml_path.decode('utf-8'))
-        print("   output path for atmosphere results is         ", self.atm.output_path.decode('utf-8'))
-        print("   topography path is at                         ", self.atm.bathymetry_path.decode('utf-8'))
-
-    def print_config_hyd(self, config_hyd_xml):
-        print("\n\n\n\n   Paleo Ocean Circulations") 
-        print("\n\n   ocean configuration file name is              ", self.config_hyd_xml)
-        print("   output path for config_atm_xml file is at     ", self.hyd.config_xml_path.decode('utf-8'))
-        print("   output path for ocean results is at           ", self.hyd.output_path.decode('utf-8'))
-        print("   bathymetry path is at                         ", self.hyd.bathymetry_path.decode('utf-8'))
-
-    def run_Model_atm(self, t_s):
-        self.time_slice = t_s
-        print("\n   run_Model for the Paleo Atmospheric Circulations code prepared for time-slice    Ma = ", self.time_slice)
-        self.atm.run()
-        print("\n    successfully terminated Paleo Atmospheric Circulations code for time-slice    Ma = ", self.time_slice)
-        print("\n")
-
-    def run_Model_hyd(self, t_s):
-        self.time_slice = t_s
-        print("\n   run_Model for the Paleo Ocean Circulations code prepared for time-slice    Ma = ", self.time_slice)
-        self.hyd.run()
-        print("\n    successfully terminated Paleo Ocean Circulations code for time-slice    Ma = ", self.time_slice)
-        print("\n")
-
-
-#atm = Model()
-#atm.print_config_atm("config_atm_xml")
-#atm.run_Model_atm(0)
-
-
-hyd = Model()
-hyd.print_config_hyd("config_hyd_xml")
-hyd.run_Model_hyd(0)
+if __name__ == "__main__":
+    model = Model()
+    model.print_config()
+    model.run(0)

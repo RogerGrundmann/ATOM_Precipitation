@@ -1,145 +1,220 @@
-# ATOM
+# ATOM Cube Turbulence
 
-ATOM (Atmospheric and Ocean Model) is a paleo-climate model implementing a finite-difference Navier-Stokes solver on a spherical shell with RK4 time integration. Vertical coordinate stretching in both models is applied. It includes atmosphere and hydrosphere components with optional turbulence closures (k-ε, k-ω, k-ω SST). Topography and bathymetry are greatfully supported by pygplates. Zero-, One-, Two- and Three-Category-Ice-Schemes (COSMO) by switch are available for precipitation computations. A Saturation-Adjustment-Scheme balances water vapour, cloud water and ice. The ocean model detects in the upper levels where Ekman flow is present upwelling and downwelling regions. The temperature and salinity distributions are controlled as well. In preparation is a deep ocean part as challenge counts here the thermohaline conveyor belt.
+Three-dimensional turbulent flow solver for flow around a surface-mounted cube, formulated in Cartesian coordinates. Built on the ATOM (Atmosphere General Circulation Model) numerical framework and extended with two-equation turbulence closures.
 
-## Repository layout
+## Physical Problem
+
+A cube is mounted on a flat surface inside a computational domain discretised on a uniform Cartesian grid. Uniform inflow at reference velocity `u_0` impinges on the cube; the solver computes the steady turbulent velocity and pressure fields that develop around it.
+
+### Non-dimensionalisation
+
+| Quantity | Scale |
+|----------|-------|
+| Velocity | `u_0 = 1.0 m/s` |
+| Length | `L_atm = 1.0 m` |
+| Pressure | `ρ u_0²` |
+| TKE k\* | `k / u_0²` |
+| ω\* (k-ω) | `ω · L_atm / u_0` |
+| ε\* (k-ε) | `ε · L_atm / u_0³` |
+| ν\* | `ν / (u_0 · L_atm)` |
+
+## Numerical Methods
+
+| Component | Method |
+|-----------|--------|
+| Spatial discretisation | 2nd-order central differences in spherical coordinates (r, θ, φ) |
+| Radial coordinate | Exponentially stretched (`ζ = 3.715`) — finer cells near the surface |
+| Time integration | 4th-order Runge-Kutta |
+| Pressure | Jacobi-type Poisson solver; solid cells enforced to p\_dyn = 0 |
+| Boundary conditions | One-sided (3-point) differences at land/air interfaces; von Neumann zero-gradient at grid boundaries |
+| Wiggle control | Post-step smoothing via `damp_wiggles` |
+| Parallelism | OpenMP (`collapse(2)` and `collapse(3)` loops) |
+
+## Grid
 
 ```
-atmosphere/   C++ source — atmosphere model
-hydrosphere/  C++ source — hydrosphere model
-cli/          Command-line interface source and config files
-lib/          Shared utilities (arrays, geometry, …)
-python/       Python bindings (Cython)
-data/         Input data (bathymetry, temperature, precipitation, salinity)
-tinyxml2/     Embedded TinyXML-2 XML parser
-param.py      Parameter definitions (generates .inc and .pyi at compile time)
-Makefile      Top-level build file
+im =  41   (radial,      r direction)
+jm = 101   (lateral,     θ direction, centred at j = 50)
+km = 241   (longitudinal, φ direction)
 ```
 
-## Prerequisites
+### Cube location (index space)
 
-| Dependency | Notes |
-|---|---|
-| g++ ≥ 7 or clang++ ≥ 6 | C++17 required |
-| OpenMP | Typically ships with the compiler |
-| Cython | Only needed for the Python interface (`pip install cython`) |
-| Python ≥ 3.6 | Only needed for the Python interface |
+| Direction | Step | Begin | End | Clearance each side |
+|-----------|------|-------|-----|---------------------|
+| i — vertical | `dr = 0.025` | 0 | 10 | — (floor-mounted) |
+| j — lateral | `dy = 0.025` | 45 | 55 | 45 × 0.025 = 1.125 = **4.5H** |
+| k — streamwise | `dx = 0.050` | 80 | 90 | upstream 60 × 0.05 = 3.0 = **12H**; downstream 150 × 0.05 = 7.5 = **30H** |
 
-On Debian/Ubuntu:
+The cube bottom face coincides with `i = 0`; the top face at `i = 10` is exposed to the flow.
+The cube face (j × i) is square (0.25 × 0.25); the streamwise extent is 10 × 0.05 = 0.50 (2:1 prism).
+The sponge layer (`bcSpongeInflow`, `k_sponge = 20`) covers k = 0–19, leaving **60 undisturbed cells = 3.0 = 12H** before the cube leading edge.
+
+## Turbulence Models
+
+Selected by the `turb_model` parameter (default: `k_omega_SST`).
+
+| Model | Parameter | Reference |
+|-------|-----------|-----------|
+| k-ε (low-Re) | `k_epsilon` | Chien (1982) |
+| k-ω | `k_omega` | Wilcox (1988) |
+| k-ω SST | `k_omega_SST` | Menter (1994) |
+| Laminar | `none` | — |
+
+Wall boundary conditions:
+- **Velocity**: no-slip (u = v = w = 0) on all cube faces.
+- **TKE**: log-layer equilibrium `k_wall = u_τ² / √C_wall`, where `C_wall = C_μ = 0.028` (k-ε) or `β* = 0.09` (k-ω, k-ω SST).
+- **ω** (k-ω): `ω_wall = 6 ν / (β₁ y₁²)`, β₁ = 0.075.
+- **ω** (k-ω SST): `ω_wall = 60 ν / (β₁ y₁²)`, β₁ = 0.0333.
+- **ε** (k-ε): Dirichlet ε = 0 (Chien).
+
+## Repository Structure
+
+```
+ATOM_Cube_Turbulence/
+├── cube/                   # Core model (C++)
+│   ├── cCubeModel.h/cpp        Main model class, run loop
+│   ├── RHS_Cube_Turb.cpp       Right-hand sides of the NS equations
+│   ├── RungeKutta_Cube_Turb.cpp  RK4 time integration
+│   ├── PressureSolverCube.h    Poisson pressure solver
+│   ├── TurbulenceCube.h        k-ε / k-ω / k-ω SST closures
+│   ├── BC_Cube.h               Boundary conditions
+│   ├── UtilsCube.h             Grid initialisation, file I/O helpers
+│   ├── CubeParameters.h/cpp    Auto-generated parameter declarations (param.py)
+│   ├── FileIO_Cube.cpp         ParaView VTS output
+│   └── ...
+├── lib/                    # Shared array and utility library
+│   ├── Array.cpp/h             3D array with bounds checking
+│   ├── Array_1D/2D             1-D and 2-D variants
+│   └── Utils.cpp/h             Coordinate helpers, wiggle damping, FFT filter
+├── cli/                    # Command-line driver
+│   ├── cube.cpp                main(), calls cCubeModel::Run()
+│   └── DefaultStream.cpp       stdout/stderr stream setup
+├── python/                 # Python/Cython interface
+│   ├── pycube.pyx              Cython wrapper (auto-generated from param.py)
+│   ├── cube.pxd                Cython declarations
+│   ├── model.py                Python Model class
+│   └── setup.py                Cython build script
+├── param.py                Parameter definition and code generator
+└── Makefile
+```
+
+## Building
+
+### Prerequisites
+
+- C++17 compiler (GCC or Clang)
+- OpenMP
+- Python 3, Cython, setuptools (for the Python interface)
+
+### Compile
 
 ```bash
-apt-get install g++ cython3
+# Build everything (CLI binary + Python extension)
+make
+
+# CLI binary only
+make cube
+
+# Python extension only
+make python
+
+# Clean
+make clean
 ```
 
-On Fedora/RHEL:
+The parameter files `cube/CubeParameters.h`, `cube/CubeParameters.cpp`, `python/cube.pxd`, and `python/pycube.pyx` are auto-generated by `param.py` at build time — do not edit them by hand.
+
+## Running
+
+### Command-line
 
 ```bash
-dnf install gcc-c++ python3-cython
+./cli/cube
 ```
 
-## Build
+Output VTS files are written to `output_ATOM_Cube_Turbulence/` and can be opened directly in ParaView.
+
+### Python
+
+```python
+from python.model import Model
+
+model = Model()
+model.print_config()
+model.run()
+```
+
+Or run the script directly from the `python/` directory:
 
 ```bash
-git clone https://github.com/atom-model/ATOM.git
-cd ATOM
-make all
+cd python
+python model.py
 ```
 
-This produces two executables: `cli/atm` (atmosphere) and `cli/hyd` (hydrosphere).
+## Key Parameters (`param.py`)
 
-To build only one component:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `turb_model` | `k_omega_SST` | Turbulence model (`none`, `k_epsilon`, `k_omega`, `k_omega_SST`) |
+| `nm` | 512 | Number of time iterations |
+| `panorama_print` | 112 | Write output every N iterations (`panorama_cnt` resets after each write) |
+| `u_0` | 1.0 m/s | Reference inflow velocity (Benocci) |
+| `L_atm` | 1.0 m | Domain length scale (Benocci) |
+| `re` | 1000 | Reynolds number (laminar mode) |
+| `output_path` | `output_ATOM_Cube_Turbulence/` | ParaView output directory |
 
-```bash
-make atm
-make hyd
-```
+To change defaults, edit the relevant entry in `param.py` and rebuild (`make`).
 
-## Running the CLI
+## Solution Procedure (each iteration)
 
-### Atmosphere
-
-```bash
-./cli/atm cli/config_atm.xml
-```
-
-### Hydrosphere
-
-```bash
-./cli/hyd cli/config_hyd.xml
-```
-
-### Both coupled
-
-Run the atmosphere first for an initial transfer file, then the hydrosphere, or follow whatever coupling sequence your configuration uses. Each executable reads its own XML config and writes output independently.
-
-Output lands in the `output/` directory organised by time slice.
-
-## Configuration
-
-Both models are configured through XML files. The defaults ship in `cli/config_atm.xml` and `cli/config_hyd.xml`. Copy and edit whichever you need — you only have to include parameters you want to change; everything else falls back to the compiled default.
-
-The top-level structure is:
-
-```xml
-<atom>
-  <common>
-    <time_start>0</time_start>
-    <time_end>100</time_end>
-    <!-- … -->
-  </common>
-  <atmosphere>
-    <turb_model>k_omega_SST</turb_model>
-    <!-- … -->
-  </atmosphere>
-</atom>
-```
-
-Key parameters for the atmosphere:
-
-| Parameter | Example value | Effect |
-|---|---|---|
-| `time_start` / `time_end` | `0` / `100` | Time slice range (Ma) |
-| `n` | `200` | Number of time steps per slice |
-| `turb_model` | `k_omega_SST` | Turbulence closure (`k_epsilon`, `k_omega`, `k_omega_SST`) |
-| `dr` | `0.003` | Radial grid spacing |
-
-The full parameter set and documentation are in `param.py`. The build step auto-generates C++ and Python stubs from this file.
+1. **Pressure** — Poisson solver updates `p_dyn`; interior cube cells held at zero.
+2. **Turbulence sources** — `TurbulenceCube::run()` computes `tke_source`, `dis_source`, `nue`, `prod` from current velocity field.
+3. **Wiggle damping** — turbulence scalars smoothed with `damp_wiggles`.
+4. **Boundary conditions** — `bcRadius`, `bcTheta`, `bcPhi`, `bcScalarSurfSur`, `bcSolidGround` applied in sequence; wall ω reasserted by `apply_wall_bc`.
+5. **Time advance** — `solveRungeKutta_Cube_Turb` advances u, v, w, k, ω (or ε) with 4-stage RK4.
+6. **Store** — current fields copied to `un`, `vn`, `tken`, `disn` for the next step.
+7. **Output** — `panorama_cnt` is incremented; when it reaches `panorama_print`, min/max diagnostics are printed, a VTS file is written, and `panorama_cnt` resets to 0.
 
 ## Output
 
-Each run writes output files to `output/`:
+VTS files are written every `panorama_print` iterations to `output_ATOM_Cube_Turbulence/`. Fields exported:
 
-- **VTK files** — radial, zonal, and longitudinal slices readable by [ParaView](https://www.paraview.org/)
-- **XYZ grid files** — tab-separated gridded data for post-processing
+- Velocity components u, v, w
+- Dynamic pressure p_dyn
+- TKE (k\*), dissipation/specific-dissipation (ε\* or ω\*)
+- Eddy viscosity ν\*, production P_k
+- Geometry mask h (1 = solid, 0 = fluid)
 
-## Python interface
+## Wake Development Estimate
 
-Install the Python bindings:
+With the current Benocci settings (`u_0 = 1.0 m/s`, `L_atm = 1.0 m`, `dt = 0.01`, `Re = 1000`, `turb_model = k_omega_SST`) the following timescales apply.
 
-```bash
-pip install -e python/
-```
+**Derived grid quantities**
 
-Then use the `Atmosphere` and `Hydrosphere` classes:
+| Quantity | Value |
+|----------|-------|
+| Grid spacing | `dr = dy = 0.025` (vertical/lateral); `dx = 0.05` (streamwise) |
+| Streamwise domain | `L_x = (km−1) × dx = 240 × 0.05 = 12.0` (non-dim) |
+| Cube size H | `10 × 0.025 = 0.25` (lateral/vertical); cube is a 2:1 prism in streamwise (`10 × 0.05 = 0.50`) |
+| Cube trailing edge | `k = 90`, `x = 4.5` (non-dim) |
+| CFL (streamwise) | `u_0 · dt / dx = 1.0 · 0.01 / 0.05 = 0.20` — stable |
 
-```python
-from atom import Atmosphere
+**Convective timescales → iteration count (N = T / dt)**
 
-atm = Atmosphere("cli/config_atm.xml")
-atm.run()
-```
+| Phase | Non-dim time | Iterations |
+|-------|-------------|------------|
+| Flow reaches cube (inlet → k = 80, dx = 0.05) | 4.00 | ~400 |
+| Recirculation forms (3–5 H downstream) | 0.75 – 1.25 | ~75 – 125 |
+| **First visible wake** | **4.75 – 5.25** | **~475 – 525** |
+| One full domain traversal (L_x = 12.0) | 12.00 | ~1200 |
+| Well-developed, quasi-stable wake | 12 – 24 | ~1200 – 2400 |
+| k-ω SST converged wake | 36 – 60 | ~3600 – 6000 |
 
-See `benchmark/run.py` for a fuller example and `benchmark/Demo.ipynb` for visualisation.
+**Assessment of `nm = 512`**
 
-## Input data
+512 iterations ≈ 1.3 domain traversals. The wake will be visible but the k-ω SST turbulence scalars are unlikely to be converged. For a fully developed, turbulence-converged wake set `nm` to at least 1000–2000.
 
-The `data/` directory ships with:
+## Author
 
-- Paleotopography/bathymetry grids 0–140 Ma (Smith et al. 1994; Golonka et al. 1997)
-- Present-day surface temperature (NASA)
-- Present-day precipitation (NASA)
-- Present-day salinity (NASA)
-
-## Authors
-
-Roger Grundmann, Michael Chin
+Roger Grundmann — roger.grundmann@web.de

@@ -7,8 +7,7 @@
 
 #include "Array.h"
 #include "Utils.h"
-#include "cAtmosphereModel.h"
-#include "cHydrosphereModel.h"
+#include "cCubeModel.h"
 
 using namespace std;
 using namespace AtomUtils;
@@ -123,6 +122,7 @@ void Array::printArray(string dir, int im, int jm, int km){
 /*
 *
 */
+/*
 void Array::inspect(const std::string& prefix) const{
     std::vector<double> mins(im, 0), maxes(im, 0), means(im, 0), s_means(im, 0);
     for(int i=0; i<im; i++){
@@ -169,4 +169,4 @@ void Array::inspect(const std::string& prefix) const{
     logger()<<std::endl;
     logger()<<prefix<<"==================================="<<std::endl;
 }
-
+*/

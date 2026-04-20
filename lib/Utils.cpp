@@ -4,8 +4,7 @@
 #include <cstring>
 
 #include <Utils.h>
-#include "cAtmosphereModel.h"
-#include "cHydrosphereModel.h"
+#include "cCubeModel.h"
 
 using namespace AtomUtils;
 using namespace std;
@@ -314,20 +313,13 @@ void AtomUtils::CalculateNodeWeights(int jm, int km){
 *
 */
 int AtomUtils::RunStart(string comment){
-    string at = "AGCM";
-    string hy = "OGCM";
+    string at = "CUBE";
     string comment_1 = "";
     string comment_2 = "";
     if(comment.compare(at) == 0){
-        comment_1 = " ... AGCM: time and date at run time begin:   ";
+        comment_1 = " ... Cube_Turbulent: time and date at run time begin:   ";
         comment_2 = "    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   \
-             Atmosphere General Circulation Model \
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% \n";
-    }
-    if(comment.compare(hy) == 0){
-        comment_1 = " ... OGCM: time and date at run time begin:   ";
-        comment_2 = "    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   \
-            Ocean General Circulation Model \
+             Turbulent Cube Flow Model \
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% \n";
     }
     std::time_t Run_start;
@@ -344,21 +336,14 @@ int AtomUtils::RunStart(string comment){
 /*
 *
 */
-int AtomUtils::RunEnd(string comment, int Ma, int Run_start){
-    string at = "AGCM";
-    string hy = "OGCM";
+int AtomUtils::RunEnd(string comment, int Run_start){
+    string at = "CUBE";
     string comment_1 = "";
     string comment_2 = "";
         if(comment.compare(at) == 0){
         comment_1 = " ... AGCM: time and date at run time begin:   ";
         comment_2 = "    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   \
-             Atmosphere General Circulation Model \
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% \n";
-    }
-    if(comment.compare(hy) == 0){
-        comment_1 = " ... OGCM: time and date at run time begin:   ";
-        comment_2 = "    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%   \
-            Ocean General Circulation Model \
+             Turbulent Cube Flow Model \
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% \n";
     }
     std::time_t Run_end;
@@ -373,9 +358,7 @@ int AtomUtils::RunEnd(string comment, int Ma, int Run_start){
     int Run_total = Run_end - Run_start;
     int Run_total_minutes = Run_total/60;
     int Run_total_hours = Run_total_minutes/60;
-    std::cout << std::endl << " ... computed time slice:"
-        << "  Ma = " << Ma << std::endl << std::endl
-        << " ... computer time needed:" << std::endl << std::endl
+    std::cout << std::endl << " ... computer time needed:" << std::endl << std::endl
         << setw(20) << setfill(' ') << Run_total 
         << " seconds" << std::endl
         << " ... compares to:" << std::endl << std::endl
@@ -425,12 +408,9 @@ void AtomUtils::damp_wiggles(Array& field,
     // Coefficient for the Shapiro update: f += coeff*(f_{-1} - 2f + f_{+1})
     const double coeff = strength * 0.25;
 
-    // Helper: true when cell (i,j,k) is in the fluid domain.
-    // Works for both i_topography (atmosphere) and i_bathymetry (hydrosphere):
-    // in both cases i_surface[j][k] is the first fluid cell; solid cells have i < i_surface[j][k].
     auto in_fluid = [&](int i, int j, int k) -> bool {
         if (!i_surface) return true;
-        // std::max guards against i_surface[j][k] < 0 (bathymetry deeper than L_hyd)
+        // std::max guards against i_surface[j][k] < 0 
         return i >= std::max((*i_surface)[j][k], 0);
     };
 

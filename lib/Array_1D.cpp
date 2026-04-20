@@ -56,17 +56,17 @@ void Array_1D::Coordinates(int mm, double z0, double dz){
 /*
 *
 */
-// Stretched coordinates — largest step at i=0, smallest at i=mm-1.
-// Formula:  z[i] = z0 + L · (1 − sinh(β·(1 − i/(mm−1))) / sinh(β))
+// Stretched coordinates — smallest step at i=0, largest at i=mm-1.
+// Formula:  z[i] = z0 + L · sinh(β · i/(mm−1)) / sinh(β)
 // where L = (mm−1)·dz.  At i=0: z=z0;  at i=mm-1: z=z0+L.
-// Larger β increases the stretching ratio (surface step / bottom step = cosh(β)).
+// Larger β increases the stretching ratio (far-field step / wall step ≈ cosh(β)).
 void Array_1D::StretchedCoordinates(int mm, double z0, double dz, double beta){
     assert(mm == this->mm);
     const double L        = (mm - 1) * dz;
     const double sinh_b   = sinh(beta);
     for (int i = 0; i < mm; i++) {
         const double xi = (double)i / (double)(mm - 1);
-        z[i] = z0 + L * (1.0 - sinh(beta * (1.0 - xi)) / sinh_b);
+        z[i] = z0 + L * sinh(beta * xi) / sinh_b;
     }
 }
 /*

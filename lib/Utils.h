@@ -94,7 +94,7 @@ namespace AtomUtils{
     int lon_2_index(double lon);
     int lat_2_index(double lat);
     int RunStart(string comment);
-    int RunEnd(string comment, int Ma, int Run_start);
+    int RunEnd(string comment, int Run_start);
 
     double C_Dalton(int i, int j, int k, double coeff_Dalton, 
         double u_0, Array &u, Array &v, Array &w);
