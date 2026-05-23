@@ -5,6 +5,9 @@
 
 #include "cHydrosphereModel.h"
 
+#include <cstdint>
+#include <cstring>
+
 using namespace std;
 
 
@@ -15,6 +18,28 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
 
     const double half_dt  = 0.5 * dt;
     const double dt_sixth = dt / 6.0;
+
+    // TKE cap.  Mirrors the atmosphere RK4 — after removing the conservative-form
+    // divergence correction the dominant tke growth path is still the
+    // −0.667·tke·∇·v term hidden inside `prod`, which is positive and linear in tke
+    // in convergent regions.  Until the production assembly is re-derived in
+    // strain-rate-only form, hard-clamp |k| to a physically generous bound at every
+    // RK4 stage so the simulation cannot diverge.  1000 m²/s² is well above any
+    // realistic ocean turbulence (open-ocean ε·L ≪ 1 m²/s² in the mixed layer).
+    const double tke_max_phys = 1000.0;                                 // [m²/s²]
+    const double tke_max_nd   = tke_max_phys / (u_0 * u_0);
+
+    // NaN-safe clamp.  std::clamp uses unguarded `<` comparisons; under -ffast-math
+    // (-ffinite-math-only) the compiler assumes operands are finite and the result
+    // on NaN input is undefined.  Detect non-finite values by IEEE-754 exponent bits
+    // and replace with lo (no ffast-math hazard).  Same trick used in
+    // Paraview_Hyd.cpp::safe_val and lib/Utils.h::is_finite_safe.
+    auto safe_clamp = [](double v, double lo, double hi) -> double {
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return lo;
+        return (v < lo) ? lo : (v > hi) ? hi : v;
+    };
 
     const double inv_2dr   = 1.0 / (2.0 * dr);
     const double inv_2dthe = 1.0 / (2.0 * dthe);
@@ -85,7 +110,7 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
                 v.x[i][j][k]   = vn_ijk   + kv1   * half_dt;
                 w.x[i][j][k]   = wn_ijk   + kw1   * half_dt;
                 c.x[i][j][k]   = cn_ijk   + kc1   * half_dt;
-                tke.x[i][j][k] = std::max(0.0,      tken_ijk + ktke1 * half_dt);
+                tke.x[i][j][k] = safe_clamp(tken_ijk + ktke1 * half_dt, 0.0, tke_max_nd);
                 dis.x[i][j][k] = std::max(1.0e-10,  disn_ijk + kdis1 * half_dt);
 
                 // --- Stage 2 ---
@@ -104,7 +129,7 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
                 v.x[i][j][k]   = vn_ijk   + kv2   * half_dt;
                 w.x[i][j][k]   = wn_ijk   + kw2   * half_dt;
                 c.x[i][j][k]   = cn_ijk   + kc2   * half_dt;
-                tke.x[i][j][k] = std::max(0.0,      tken_ijk + ktke2 * half_dt);
+                tke.x[i][j][k] = safe_clamp(tken_ijk + ktke2 * half_dt, 0.0, tke_max_nd);
                 dis.x[i][j][k] = std::max(1.0e-10,  disn_ijk + kdis2 * half_dt);
 
                 // --- Stage 3 ---
@@ -123,7 +148,7 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
                 v.x[i][j][k]   = vn_ijk   + kv3   * dt;
                 w.x[i][j][k]   = wn_ijk   + kw3   * dt;
                 c.x[i][j][k]   = cn_ijk   + kc3   * dt;
-                tke.x[i][j][k] = std::max(0.0,      tken_ijk + ktke3 * dt);
+                tke.x[i][j][k] = safe_clamp(tken_ijk + ktke3 * dt, 0.0, tke_max_nd);
                 dis.x[i][j][k] = std::max(1.0e-10,  disn_ijk + kdis3 * dt);
 
                 // --- Stage 4 + Final combination ---
@@ -142,8 +167,9 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
                 v.x[i][j][k]   = vn_ijk   + (kv1   + 2.0*kv2   + 2.0*kv3   + kv4)   * dt_sixth;
                 w.x[i][j][k]   = wn_ijk   + (kw1   + 2.0*kw2   + 2.0*kw3   + kw4)   * dt_sixth;
                 c.x[i][j][k]   = cn_ijk   + (kc1   + 2.0*kc2   + 2.0*kc3   + kc4)   * dt_sixth;
-                tke.x[i][j][k] = std::max(0.0,
-                    tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth);
+                tke.x[i][j][k] = safe_clamp(
+                    tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth,
+                    0.0, tke_max_nd);
                 dis.x[i][j][k] = std::max(1.0e-10,
                     disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth);
             }

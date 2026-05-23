@@ -48,17 +48,18 @@ void cHydrosphereModel::SetDefaultConfig() {
   sigma = 5.67028e-08;
   eps_residuum = 0.0001;
   turb_model = "k_omega_SST";
-  inviscid_spinup_iters = 300;
+  inviscid_spinup_iters = 0;
   inviscid_ramp_iters = 20;
-  dt_visc = 0.001;
+  moist_phys_start_iter = 300;
+  dt_visc = 0.0005;
   dt_inviscid = 0.0001;
 
   // hydrosphere section
   input_path = "output_ATOM_Precipitation";
-  nm = 4;
-  checkpoint = 2;
-  panorama_print = 10;
-  ocean_depth_mode = "shallow";
+  nm = 400;
+  checkpoint = 10;
+  panorama_print = 100;
+  ocean_depth_mode = "deep";
   L_hyd = 200.0;
   re = 10.0;
   sc = 1.7329;

@@ -42,17 +42,18 @@
         <sigma>5.67028e-08</sigma>  <!-- Stefan-Boltzmann constant W/(m²*K4)(double) -->
         <eps_residuum>0.0001</eps_residuum>  <!-- relative error, end of iterations reached, 1% error  allowed(double) -->
         <turb_model>k_omega_SST</turb_model>  <!-- turbulence model: none, k_epsilon, k_omega, k_omega_SST(string) -->
-        <inviscid_spinup_iters>300</inviscid_spinup_iters>  <!-- cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables(int) -->
+        <inviscid_spinup_iters>0</inviscid_spinup_iters>  <!-- cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables(int) -->
         <inviscid_ramp_iters>20</inviscid_ramp_iters>  <!-- iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase(int) -->
-        <dt_visc>0.001</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
+        <moist_phys_start_iter>300</moist_phys_start_iter>  <!-- cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)(int) -->
+        <dt_visc>0.0005</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
         <dt_inviscid>0.0001</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
     </common>
     <hydrosphere>
         <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->
-        <nm>4</nm>  <!-- the maximum number of iterations(int) -->
-        <checkpoint>2</checkpoint>  <!-- control when to write output files(int) -->
-        <panorama_print>10</panorama_print>  <!-- control when to write panorama files(int) -->
-        <ocean_depth_mode>shallow</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
+        <nm>400</nm>  <!-- the maximum number of iterations(int) -->
+        <checkpoint>10</checkpoint>  <!-- control when to write output files(int) -->
+        <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
+        <ocean_depth_mode>deep</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
         <L_hyd>200.0</L_hyd>  <!-- extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"(double) -->
         <re>10.0</re>  <!-- Reynolds number: ratio viscous to inertia forces, Re = u * L/nue(double) -->
         <sc>1.7329</sc>  <!-- Schmidt number for salt water(double) -->
