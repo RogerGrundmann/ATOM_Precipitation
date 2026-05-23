@@ -9,6 +9,8 @@
 #include <iostream>
 #include <fstream>
 #include <limits>
+#include <cstdint>
+#include <cstring>
 
 #include "Array.h"
 #include "Array_1D.h"
@@ -32,6 +34,18 @@ namespace AtomUtils{
 
     std::tuple<double, int, int, int>
         max_diff(int i, int j, int k, const Array &a1, const Array &a2);
+
+    // Bit-level non-finite check.  The Makefile uses -ffast-math, which implies
+    // -ffinite-math-only; that lets the optimizer constant-fold std::isfinite(v)
+    // to true, silently disabling every NaN/Inf guard built on it. IEEE-754 NaN
+    // and ±Inf both have the 11 exponent bits all-set, so masking the raw bits
+    // detects them regardless of -ffast-math. Use this everywhere you would
+    // otherwise call std::isfinite / std::isnan / std::isinf.
+    inline bool is_finite_safe(double v){
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        return (bits & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
+    }
 
     inline bool is_land(const Array& h, int i, int j, int k){
         return fabs(h.x[i][j][k] - 1) < std::numeric_limits<double>::epsilon();
@@ -86,6 +100,7 @@ namespace AtomUtils{
         return pow(a, 3.0) // Versiera di Agnesi
             /(pow(a, 2.0) + pow(x, 2.0));
     }
+
     inline double exp_func(double T_K, const double co_1, const double co_2){
         return exp(co_1 * (T_K - 273.15) / (T_K - co_2));  // temperature in °K
     }

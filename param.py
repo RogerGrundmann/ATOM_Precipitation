@@ -45,6 +45,8 @@ def main():
 
 
 
+
+
             #parameters for data reconstruction
 
             ('time_start', 'start time', 'int', 0),
@@ -113,11 +115,17 @@ def main():
 #            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 100),
 #            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 40),
 #            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 80),
-            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 300),
+#            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 300),
+            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 0),
             ('inviscid_ramp_iters', 'iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase', 'int', 20),
 
-            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
+            ('moist_phys_start_iter', 'cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)', 'int', 300),
+
+#            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
+            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0005),
             ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0001),
+#            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0005),
+#            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0003),
         ],
 
 
@@ -202,12 +210,14 @@ def main():
         'hydrosphere': [
             ('input_path', 'directory where Atmosphere output can be read(must end in /)', 'string', 'output_ATOM_Precipitation'),
 
-            ('nm', 'the maximum number of iterations', 'int', 4),
-            ('checkpoint', "control when to write output files", 'int', 2),
-            ('panorama_print', "control when to write panorama files", 'int', 10),
+            ('nm', 'the maximum number of iterations', 'int', 400),
+            ('checkpoint', "control when to write output files", 'int', 10),
+            ('panorama_print', "control when to write panorama files", 'int', 100),
 
-#            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),
-            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'shallow'),
+
+
+            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),
+#            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'shallow'),
             ('L_hyd', 'extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"', 'double', 200.0),
 
             ('re', 'Reynolds number: ratio viscous to inertia forces, Re = u * L/nue', 'double', 10.0),
