@@ -9,6 +9,9 @@
 
 #include "cAtmosphereModel.h"
 
+#include <cstdint>
+#include <cstring>
+
 using namespace std;
 
 
@@ -19,6 +22,35 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
 
     const double half_dt  = 0.5 * dt;
     const double dt_sixth = dt / 6.0;
+
+    // Velocity caps removed (see RungeKutta_Atm.cpp note).  Multi-sweep
+    // PressureSolverAtm is the structural fix; the caps were breaking mass
+    // conservation by clipping the velocity at the same time the projection was
+    // trying to enforce ∇·v = 0.  TKE cap retained — it's mass-neutral.
+
+    // TKE cap.  After the buoyancy/projection/pole fixes unlocked the global circulation,
+    // tke was reaching ~1e98 m²/s² at a single high-altitude polar cell by iter 100.
+    // Removing the conservative-form divergence correction on transport_tke knocked the
+    // magnitude back but the runaway persisted via the −0.667·tke·∇·v term inside prod
+    // (positive contribution in convergent regions, linear in tke).  Pending a structural
+    // fix to the source assembly, hard-clamp |k| to a physically generous bound at every
+    // RK4 stage so the simulation cannot diverge.  1000 m²/s² = 50% above the strongest
+    // hurricane-core TKE on record; any legitimate physics fits well inside this cap.
+    const double tke_max_phys = 1000.0;                                  // [m²/s²]
+    const double tke_max_nd   = tke_max_phys / (u_0 * u_0);
+
+    // NaN-safe clamp.  std::clamp uses unguarded `<` comparisons; under -ffast-math
+    // (-ffinite-math-only) the compiler assumes operands are finite and the result
+    // on NaN input is undefined.  Observed: tke reaching 7×10²⁰⁰ at one cell despite
+    // a 1000 m²/s² cap, because a NaN intermediate leaked through std::clamp.  Detect
+    // non-finite values by IEEE-754 exponent bits and replace with lo (no ffast-math
+    // hazard).  Same trick we used in Paraview_Atm.cpp::safe_val.
+    auto safe_clamp = [](double v, double lo, double hi) -> double {
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return lo;
+        return (v < lo) ? lo : (v > hi) ? hi : v;
+    };
 
     // Grid-spacing reciprocals — constant for the entire grid
     const double inv_2dr   = 1.0 / (2.0 * dr);
@@ -105,7 +137,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 ice.x[i][j][k]   = icen_ijk + ki1   * half_dt;
                 gr.x[i][j][k]    = grn_ijk  + kg1   * half_dt;
                 co2.x[i][j][k]   = co2n_ijk + kco1  * half_dt;
-                tke.x[i][j][k]   = std::max(0.0,           tken_ijk + ktke1 * half_dt);
+                tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke1 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + kdis1 * half_dt);
 
                 // --- Stage 2 ---
@@ -132,7 +164,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 ice.x[i][j][k]   = icen_ijk + ki2   * half_dt;
                 gr.x[i][j][k]    = grn_ijk  + kg2   * half_dt;
                 co2.x[i][j][k]   = co2n_ijk + kco2  * half_dt;
-                tke.x[i][j][k]   = std::max(0.0,      tken_ijk + ktke2 * half_dt);
+                tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke2 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis2 * half_dt);
 
                 // --- Stage 3 ---
@@ -159,7 +191,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 ice.x[i][j][k]   = icen_ijk + ki3   * dt;
                 gr.x[i][j][k]    = grn_ijk  + kg3   * dt;
                 co2.x[i][j][k]   = co2n_ijk + kco3  * dt;
-                tke.x[i][j][k]   = std::max(0.0,      tken_ijk + ktke3 * dt);
+                tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke3 * dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis3 * dt);
 
                 // --- Stage 4 + Final combination ---
@@ -186,8 +218,8 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 ice.x[i][j][k]   = icen_ijk + (ki1   + 2.0*ki2   + 2.0*ki3   + ki4)   * dt_sixth;
                 gr.x[i][j][k]    = grn_ijk  + (kg1   + 2.0*kg2   + 2.0*kg3   + kg4)   * dt_sixth;
                 co2.x[i][j][k]   = co2n_ijk + (kco1  + 2.0*kco2  + 2.0*kco3  + kco4)  * dt_sixth;
-                tke.x[i][j][k]   = tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth;
-                dis.x[i][j][k]   = disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth;
+                tke.x[i][j][k]   = safe_clamp(tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth, 0.0, tke_max_nd);
+                dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth);
             }
         }
     }

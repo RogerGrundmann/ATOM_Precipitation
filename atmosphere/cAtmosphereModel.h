@@ -222,6 +222,15 @@ private:
     double diffusion_ramp = 1.0;
     bool inviscid_phase = false;
 
+    // Buoyancy ramp ∈ [0,1] — linearly increases the Boussinesq body force in rhs_u
+    // from 0 at iter 0 to 1 at iter buoyancy_ramp_iters.  Set ramp_iters = 0 to
+    // disable (buoyancy_ramp stays 1.0).  A 500-iter ramp starved the system of
+    // thermal forcing during the spin-up window when it needed to set up a real
+    // pressure gradient; combined with the multi-sweep pressure solver, full-strength
+    // buoyancy from iter 1 reaches the healthy iter-100 Hadley state.
+    double buoyancy_ramp = 1.0;
+    static constexpr int buoyancy_ramp_iters = 0;
+
     double t_paleo_total = 0.0;
     double t_pole_total = 0.0;
     double t_global_mean = 0.0;

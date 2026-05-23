@@ -670,10 +670,15 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double transport_tke   = u_exp * dtkedr   + v_invrm * dtkedthe   + w_invrs * dtkedphi;
     double transport_dis   = u_exp * ddisdr   + v_invrm * ddisdthe   + w_invrs * ddisdphi;
 
-    // Divergence correction for tke/dis transport
-    double div_vel = dudr + dvdthe * inv_rm + dwdphi * inv_rmsinthe;
-    transport_tke += tke.x[i][j][k] * div_vel;
-    transport_dis += dis.x[i][j][k] * div_vel;
+    // Advective form only (v·∇k, v·∇ω) — matches the standard k-ε / k-ω derivations
+    // (Pope, Wilcox, Menter).  A previous version added the conservative-form
+    // correction `+tke·∇·v` and `+dis·∇·v`; in an incompressible flow ∇·v=0 and the
+    // two forms agree, but ATOM is compressible and the term produced exponential
+    // growth of tke in any region with persistent negative divergence (top of an
+    // updraft, tropopause spreading).  Observed: max tke = 6.5e98 at 64°S 63°W
+    // 14566 m by iter 100 once the global circulation activated div_vel.  tke's sink
+    // Y_k = β*·tke·dis is linear in tke so it can never catch the runaway; dis was
+    // bounded only because Y_w = β₀·dis² is quadratic and self-limiting.
 
 
     // ===== Diffusion terms =====
@@ -742,7 +747,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + Q_Latent.x[i][j][k] / coeff_L;
 
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoyancy * (t.x[i][j][k] - 1.0)
+        + buoyancy_ramp * buoyancy * (t.x[i][j][k] - 1.0)
         + coriolis * coriolis_rad;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v

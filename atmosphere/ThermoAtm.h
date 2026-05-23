@@ -442,7 +442,11 @@ public:
                     m.CentrifugalForce.x[i][j][k] =
                         m.centrifugal * m.r_air * omega2 * rad_Earth * (1.0 + abs_sinthe);
 
-                    m.BuoyancyForce.x[i][j][k] = - 1.0e-3 * m.buoyancy * m.r_humid.x[i][j][k] * m.g;
+                    // Diagnostic buoyancy force for ParaView/Results — must match the
+                    // perturbation-form body force applied in RHS_Atm.cpp (rhs_u), i.e.
+                    // +g·ρ·(t − 1) [t=1 ↔ t_0]. Same convention used by RHS_Atm_Turb.cpp:375.
+                    m.BuoyancyForce.x[i][j][k] = 1.0e-3 * m.buoyancy * m.r_humid.x[i][j][k] * m.g
+                                                 * (m.t.x[i][j][k] - 1.0);
 
                     double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k])
                                     * inv_2dr * exp_rm;

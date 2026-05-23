@@ -20,6 +20,12 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere(){
     const double half_dt = 0.5 * dt;
     const double dt_sixth = dt / 6.0;
 
+    // Velocity caps removed.  They didn't preserve mass: every clipped cell injected
+    // a divergence that the (now-multi-sweep) pressure solver absorbed by relaxing
+    // p_dyn → 0, which collapsed the whole system into a saturated-velocity /
+    // zero-pressure degenerate state by iter 100.  Multi-sweep PressureSolverAtm is
+    // the structural fix; caps were a band-aid that did more harm than good.
+
     // Grid-spacing reciprocals — constant for the entire grid
     const double inv_2dr   = 1.0 / (2.0 * dr);
     const double inv_2dthe = 1.0 / (2.0 * dthe);

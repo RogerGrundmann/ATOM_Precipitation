@@ -1004,6 +1004,18 @@ void findCloudBaseLFS() {
                         m.v_d.x[i][j][k]   = dummy_v_d   * inv_M_d;
                         m.w_d.x[i][j][k]   = dummy_w_d   * inv_M_d;
                         m.s_d.x[i][j][k]   = dummy_s_d   * inv_M_d;
+                    } else {
+                        // Mirrors the updraft else-branch above. When |M_d| ≤ coeff_recurr
+                        // the downdraft is negligible, but skipping the assignment leaves
+                        // stale q_v_d / s_d from the previous MoistConvection call. The
+                        // next iteration then feeds that stale value through the D_d*q_v_d
+                        // term in dummy_q_v_d and through the M_d*(q_v_d-c) flux in
+                        // rhsForcing — amplifying it by the M_d ratio across marginal cells
+                        // (observed blow-up at 1°N 119°E, 0–38 m once spin-up was off).
+                        m.q_v_d.x[i][j][k] = m.c.x[i][j][k];
+                        m.v_d.x[i][j][k]   = m.v.x[i][j][k];
+                        m.w_d.x[i][j][k]   = m.w.x[i][j][k];
+                        m.s_d.x[i][j][k]   = m.s.x[i][j][k];
                     }
 
                     double inv_a_d = 1.0 / (a_d * m.u_0);

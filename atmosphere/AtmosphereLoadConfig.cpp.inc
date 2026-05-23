@@ -51,6 +51,7 @@
     Config::FillStringWithElement(elem_common, "turb_model", turb_model);
     Config::FillIntWithElement(elem_common, "inviscid_spinup_iters", inviscid_spinup_iters);
     Config::FillIntWithElement(elem_common, "inviscid_ramp_iters", inviscid_ramp_iters);
+    Config::FillIntWithElement(elem_common, "moist_phys_start_iter", moist_phys_start_iter);
     Config::FillDoubleWithElement(elem_common, "dt_visc", dt_visc);
     Config::FillDoubleWithElement(elem_common, "dt_inviscid", dt_inviscid);
   }

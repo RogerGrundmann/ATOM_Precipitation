@@ -55,6 +55,7 @@ cdef extern from "cAtmosphereModel.h":
         string turb_model
         int inviscid_spinup_iters
         int inviscid_ramp_iters
+        int moist_phys_start_iter
         double dt_visc
         double dt_inviscid
         # atmosphere section

@@ -22,10 +22,10 @@ public:
         : m(model)
     {}
 
-    void run()
+    void run(bool verbose = true)
     {
         using namespace std;
-        cout << endl << endl << endl << "      ATOM: PressureSolverAtm" << endl;
+        if (verbose) cout << endl << endl << endl << "      ATOM: PressureSolverAtm" << endl;
 
         auto begin = std::chrono::high_resolution_clock::now();
 
@@ -211,25 +211,47 @@ public:
 
         #undef LAND
 
-        // Radial boundary extrapolation
+        // Radial boundary extrapolation.
+        //
+        // At i=0 the old cubic p[0] = p[3] - 3*p[2] + 3*p[1] has condition number ~7
+        // and amplifies any cliff-cell pressure into the reference layer by up to 3×.
+        // Over many pressure-solve calls this compounds into huge ± spikes at steep
+        // topography (e.g. Himalaya). Replaced by:
+        //   - i_topography[j][k] >= 1 (i=0 inside the mountain): hold p_dyn = 0, matching
+        //     bcSolidGround's treatment of fully buried interior cells; acts as a Dirichlet
+        //     pin for the otherwise all-Neumann pressure Poisson.
+        //   - i_topography[j][k] == 0 (i=0 is a real ocean surface): von Neumann zero-gradient
+        //     ∂p/∂n = 0 — physically correct at a free-slip wall.
+        // Tried fully zero-gradient (no Dirichlet anywhere) — Poisson becomes singular and
+        // diverges to NaN within 100 iters at the pole.
+        // At i=im-1 the column is always air, so the cubic is fine and is kept.
         #pragma omp parallel for collapse(2)
         for (int k = 0; k < m.km; k++) {
             for (int j = 0; j < m.jm; j++) {
-                m.p_dyn.x[0][j][k]      = m.p_dyn.x[3][j][k]
-                    - 3.0 * m.p_dyn.x[2][j][k]
-                    + 3.0 * m.p_dyn.x[1][j][k];
+                if (m.i_topography[j][k] >= 1) {
+                    m.p_dyn.x[0][j][k] = 0.0;
+                } else {
+                    m.p_dyn.x[0][j][k] = m.c43 * m.p_dyn.x[1][j][k]
+                                       - m.c13 * m.p_dyn.x[2][j][k];
+                }
                 m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-4][j][k]
                     - 3.0 * m.p_dyn.x[m.im-3][j][k]
                     + 3.0 * m.p_dyn.x[m.im-2][j][k];
             }
         }
 
-        // Theta boundary extrapolation
+        // Theta-pole BC: plain copy (zero-gradient, no extrapolation).
+        // The 2nd-order Neumann form p[0] = (4/3)·p[1] − (1/3)·p[2] amplifies polar
+        // grid noise by 4/3 per call. The Poisson iteration is rerun every moist_stride,
+        // and the metric 1/sin²θ already blows up near the pole — compounding the 4/3
+        // factor drove p_dyn to NaN at 90°N within ~150 iters, then dpdr/dpdthe/dpdphi
+        // propagated NaN into u,v,w in the next RHS call. Plain copy = amplification 1
+        // and matches the axisymmetric-pole assumption used for the same fields in bcTheta.
         #pragma omp parallel for collapse(2)
         for (int k = 0; k < m.km; k++) {
             for (int i = 0; i < m.im; i++) {
-                m.p_dyn.x[i][0][k]      = m.c43 * m.p_dyn.x[i][1][k]      - m.c13 * m.p_dyn.x[i][2][k];
-                m.p_dyn.x[i][m.jm-1][k] = m.c43 * m.p_dyn.x[i][m.jm-2][k] - m.c13 * m.p_dyn.x[i][m.jm-3][k];
+                m.p_dyn.x[i][0][k]      = m.p_dyn.x[i][1][k];
+                m.p_dyn.x[i][m.jm-1][k] = m.p_dyn.x[i][m.jm-2][k];
             }
         }
 
@@ -245,9 +267,106 @@ public:
         }
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-        printf(" time measured: %.3f seconds for PressureSolverAtm\n", elapsed.count() * 1e-9);
-        cout << "      ATOM: PressureSolverAtm ended" << endl;
+        if (verbose) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+            printf(" time measured: %.3f seconds for PressureSolverAtm\n", elapsed.count() * 1e-9);
+            cout << "      ATOM: PressureSolverAtm ended" << endl;
+        }
+    }
+
+    // One-shot Helmholtz projection of the prescribed initial velocity onto its
+    // divergence-free subspace.  Without this, the incremental projection that runs
+    // every moist_stride iters spends the first ~100 iters silently destroying the
+    // dilatational component of the Hadley/Ferrel profile, taking the prescribed
+    // global circulation with it (max u decays from 30 m/s to <0.5 m/s by iter 150).
+    // Performing the projection once at t=0 lets the simulation start from a clean
+    // divergence-free state; the surviving solenoidal part is preserved and only the
+    // unphysical dilatational artefact of the analytical profile is removed.
+    //
+    // The standard solver loop assembles ∇²p = ∇·v* where v* is the post-RHS
+    // intermediate velocity; here we feed v itself as the source by copying v into
+    // aux_u/aux_v/aux_w. After n_sweeps Jacobi passes, p_dyn approximates the
+    // projection pressure; we then apply v ← v − ∇p in the same metric form used
+    // by the time-stepping RHS, and reset p_dyn to 0 so the next RK4 call does not
+    // double-correct via its own −∂p/∂r term.
+    void project_initial_velocity(int n_sweeps = 200)
+    {
+        using namespace std;
+        cout << endl << endl << "      ATOM: project_initial_velocity ("
+             << n_sweeps << " Jacobi sweeps)" << endl;
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        // Step 1 — seed Poisson source from current velocity, zero p_dyn.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    m.aux_u.x[i][j][k] = m.u.x[i][j][k];
+                    m.aux_v.x[i][j][k] = m.v.x[i][j][k];
+                    m.aux_w.x[i][j][k] = m.w.x[i][j][k];
+                    m.p_dyn.x[i][j][k] = 0.0;
+                }
+            }
+        }
+
+        // Step 2 — quiet Jacobi iteration until p_dyn approximates the projection
+        // pressure.  Each call to run() also re-applies the i, theta, and phi BCs on
+        // p_dyn, so polar/topographic anchors stay consistent with the time loop.
+        for (int s = 0; s < n_sweeps; s++) {
+            run(false);
+        }
+
+        // Step 3 — gradient correction v ← v − ∇p_dyn in the interior.
+        // Metric factors match the rhs_u/v/w pressure-gradient term so the magnitudes
+        // are consistent with the rest of the code.  Boundary cells (i, theta, phi
+        // outer faces) are left untouched; bcRadius / bcTheta / bcPhi will re-impose
+        // their patterns at the next call.
+        const double inv_2dr   = 1.0 / (2.0 * m.dr);
+        const double inv_2dthe = 1.0 / (2.0 * m.dthe);
+        const double inv_2dphi = 1.0 / (2.0 * m.dphi);
+
+        std::vector<double> sinthe_tab(m.jm);
+        for (int j = 0; j < m.jm; j++) {
+            sinthe_tab[j] = sin(m.the.z[j]);
+            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;
+        }
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm           = m.rad.z[i];
+                const double exp_rm       = 1.0 / (rm + 1.0);
+                const double inv_rm       = 1.0 / rm;
+                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+
+                for (int k = 1; k < m.km-1; k++) {
+                    const double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * inv_2dr;
+                    const double dpdthe = (m.p_dyn.x[i][j+1][k] - m.p_dyn.x[i][j-1][k]) * inv_2dthe;
+                    const double dpdphi = (m.p_dyn.x[i][j][k+1] - m.p_dyn.x[i][j][k-1]) * inv_2dphi;
+
+                    m.u.x[i][j][k] -= dpdr   * exp_rm;
+                    m.v.x[i][j][k] -= dpdthe * inv_rm;
+                    m.w.x[i][j][k] -= dpdphi * inv_rmsinthe;
+                }
+            }
+        }
+
+        // Step 4 — clear p_dyn and aux so the time loop starts fresh.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    m.p_dyn.x[i][j][k] = 0.0;
+                    m.aux_u.x[i][j][k] = 0.0;
+                    m.aux_v.x[i][j][k] = 0.0;
+                    m.aux_w.x[i][j][k] = 0.0;
+                }
+            }
+        }
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0);
+        printf("      ATOM: project_initial_velocity ended (%.3fs)\n", elapsed.count() * 1e-9);
     }
 
 private:

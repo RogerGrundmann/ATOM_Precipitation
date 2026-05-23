@@ -131,8 +131,24 @@ public:
                 }
             }
         }
-
-        cout << "      AGCM: init_velocities ended" << endl;
+/*
+        // Surface taper on v and w: linearly damp from the local value at i=5
+        // down to zero at i=0, so the lowest five layers carry no horizontal
+        // wind at the ground reference and grow smoothly into the prescribed
+        // profile above. u is left alone (its zonal-jet profile already
+        // ramps to zero at the surface via init_u).
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int j = 0; j < m.jm; j++) {
+            for (int k = 0; k < m.km; k++) {
+                for (int i = 0; i <= 5; i++) {
+                    const double factor = static_cast<double>(i) / 5.0;
+                    m.v.x[i][j][k] *= factor;
+                    m.w.x[i][j][k] *= factor;
+                }
+            }
+        }
+*/
+    cout << "      AGCM: init_velocities ended" << endl;
     }
 
     // Linear blend of u/v/w across j in [lat-3, lat+3].

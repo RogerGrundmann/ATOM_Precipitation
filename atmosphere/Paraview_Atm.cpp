@@ -12,6 +12,8 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 
 #include "cAtmosphereModel.h"
 #include "Utils.h"
@@ -20,7 +22,18 @@ using namespace std;
 using namespace AtomUtils;
 
 namespace ParaViewAtm{
-    inline double safe_val(double v){ return std::isfinite(v) ? v : 0.0; }
+    // Bit-level non-finite check.
+    // The Makefile uses -ffast-math, which implies -ffinite-math-only; under that flag the
+    // compiler assumes no NaN/Inf can occur and optimizes std::isfinite(v) into constant true.
+    // That silently disables this filter and lets the literal text "nan" reach the VTK file,
+    // tripping vtkDataReader with "Unsupported point attribute type: nan". Reading the IEEE-754
+    // exponent bits via memcpy is invisible to the math optimizer: NaN and ±Inf both have all
+    // 11 exponent bits set, so masking with 0x7FF0…ULL detects them regardless of -ffast-math.
+    inline double safe_val(double v) {
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        return ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) ? 0.0 : v;
+    }
 
     void dump_array(const string &name, Array &a, double multiplier, ofstream &f){
         f <<  "    <DataArray type=\"Float32\" Name=\"" << name << "\" format=\"ascii\">\n";
@@ -97,7 +110,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
         + Name_Bathymetry_File + "_Atm_panorama_" + std::to_string(n) + ".vts";
     ofstream Atmosphere_panorama_vts_File;
 
-    Atmosphere_panorama_vts_File.precision(4);
+    Atmosphere_panorama_vts_File.precision(8);
     Atmosphere_panorama_vts_File.setf(ios::fixed);
 
     Atmosphere_panorama_vts_File.open(Atmosphere_panorama_vts_File_Name);
@@ -108,7 +121,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     }
 
     ostringstream buf;
-    buf.precision(4);
+    buf.precision(8);
     buf.setf(ios::fixed);
 
     buf << "<?xml version=\"1.0\"?>\n\n"
@@ -121,8 +134,8 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     for(int k = 0; k < km; k++){
         for(int j = 0; j < jm; j++){
             for(int i = 0; i < im; i++){
-                buf << u.x[i][j][k] << " "
-                    << v.x[i][j][k] << " " << w.x[i][j][k] << '\n';
+                buf << safe_val(u.x[i][j][k]) << " "
+                    << safe_val(v.x[i][j][k]) << " " << safe_val(w.x[i][j][k]) << '\n';
             }
             buf << "\n\n";
         }
@@ -147,7 +160,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     for(int k = 0; k < km; k++){
         for(int j = 0; j < jm; j++){
             for(int i = 0; i < im; i++){
-                buf << t.x[i][j][k] * t_0 - t_0 << '\n';
+                buf << safe_val(t.x[i][j][k] * t_0 - t_0) << '\n';
             }
             buf << "\n\n";
         }
@@ -258,7 +271,7 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
 
     ofstream Atmosphere_panorama_vts_File;
 
-    Atmosphere_panorama_vts_File.precision(4);
+    Atmosphere_panorama_vts_File.precision(8);
     Atmosphere_panorama_vts_File.setf(ios::fixed);
 
     Atmosphere_panorama_vts_File.open(Atmosphere_panorama_vts_File_Name);
@@ -269,7 +282,7 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
     }
 
     ostringstream buf;
-    buf.precision(4);
+    buf.precision(8);
     buf.setf(ios::fixed);
 
     buf << "<?xml version=\"1.0\"?>\n\n"
@@ -374,7 +387,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
         + Name_Bathymetry_File + "_Atm_radial_" + std::to_string(i_radial)
         + "_" + std::to_string(n) + ".vtk";
     ofstream Atmosphere_vtk_radial_File;
-    Atmosphere_vtk_radial_File.precision(4);
+    Atmosphere_vtk_radial_File.precision(8);
     Atmosphere_vtk_radial_File.setf(ios::fixed);
     Atmosphere_vtk_radial_File.open(Atmosphere_radial_File_Name);
     if(!Atmosphere_vtk_radial_File.is_open()){
@@ -383,7 +396,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     }
 
     ostringstream buf;
-    buf.precision(4);
+    buf.precision(8);
     buf.setf(ios::fixed);
 
     buf << "# vtk DataFile Version 3.0\n"
@@ -517,8 +530,8 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     buf << "VECTORS v-w-ATOM float\n";
     for(int j = 0; j < jm; j++){
         for(int k = 0; k < km; k++){
-            buf << v.x[i_radial][j][k]
-                << " " << w.x[i_radial][j][k] << " " << 0.0 << '\n';
+            buf << safe_val(v.x[i_radial][j][k])
+                << " " << safe_val(w.x[i_radial][j][k]) << " " << 0.0 << '\n';
         }
     }
 
@@ -561,16 +574,16 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     for(int j = 0; j < jm; j++){
         for(int k = 0; k < km; k++){
             if(u.x[i_radial][j][k] < 0.0) u_u.x[i_radial][j][k] = 0.0;
-                buf << v_u.x[i_radial][j][k]
-                    << " " << w_u.x[i_radial][j][k] << " " << 0.0 << '\n';
+                buf << safe_val(v_u.x[i_radial][j][k])
+                    << " " << safe_val(w_u.x[i_radial][j][k]) << " " << 0.0 << '\n';
         }
     }
     buf << "VECTORS v-w-Downdraft float\n";
     for(int j = 0; j < jm; j++){
         for(int k = 0; k < km; k++){
         if(u.x[i_radial][j][k] < 0.0) u_u.x[i_radial][j][k] = 0.0;
-        buf << v_d.x[i_radial][j][k]
-            << " " << w_d.x[i_radial][j][k] << " " << 0.0 << '\n';
+        buf << safe_val(v_d.x[i_radial][j][k])
+            << " " << safe_val(w_d.x[i_radial][j][k]) << " " << 0.0 << '\n';
         }
     }
     Atmosphere_vtk_radial_File << buf.str();
@@ -589,7 +602,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     string Atmosphere_zonal_File_Name = output_path + "/" + Name_Bathymetry_File
         + "_Atm_zonal_" + std::to_string(k_zonal) + "_" + std::to_string(n) + ".vtk";
     ofstream Atmosphere_vtk_zonal_File;
-    Atmosphere_vtk_zonal_File.precision(4);
+    Atmosphere_vtk_zonal_File.precision(8);
     Atmosphere_vtk_zonal_File.setf(ios::fixed);
     Atmosphere_vtk_zonal_File.open(Atmosphere_zonal_File_Name);
     if(!Atmosphere_vtk_zonal_File.is_open()){
@@ -599,7 +612,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
 
     // Buffer all output to reduce I/O syscalls
     ostringstream buf;
-    buf.precision(4);
+    buf.precision(8);
     buf.setf(ios::fixed);
 
     buf << "# vtk DataFile Version 3.0\n"
@@ -633,8 +646,8 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     buf << "VECTORS u-v-Cell float\n";
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
-            buf << u.x[i][j][k_zonal] * inv_u_0 << " "
-                << v.x[i][j][k_zonal] * inv_u_0 << " " << 0.0 << '\n';
+            buf << safe_val(u.x[i][j][k_zonal] * inv_u_0) << " "
+                << safe_val(v.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
         }
     }
 
@@ -642,7 +655,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
         << "LOOKUP_TABLE default\n";
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
-            buf << t.x[i][j][k_zonal] * t_0 - t_0 << '\n';
+            buf << safe_val(t.x[i][j][k_zonal] * t_0 - t_0) << '\n';
         }
     }
     Atmosphere_vtk_zonal_File << buf.str();
@@ -757,8 +770,8 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
             if(u.x[i][j][k_zonal] < 0.0) u_u.x[i][j][k_zonal] = 0.0;
-            buf << u_u.x[i][j][k_zonal] * inv_u_0
-                << " " << v_u.x[i][j][k_zonal] * inv_u_0 << " " << 0.0 << '\n';
+            buf << safe_val(u_u.x[i][j][k_zonal] * inv_u_0)
+                << " " << safe_val(v_u.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
         }
     }
 
@@ -766,8 +779,8 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
             if(u.x[i][j][k_zonal] < 0.0) u_d.x[i][j][k_zonal] = 0.0;
-            buf << u_d.x[i][j][k_zonal] * inv_u_0
-                << " " << v_d.x[i][j][k_zonal] * inv_u_0 << " " << 0.0 << '\n';
+            buf << safe_val(u_d.x[i][j][k_zonal] * inv_u_0)
+                << " " << safe_val(v_d.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
         }
     }
     Atmosphere_vtk_zonal_File << buf.str();
@@ -786,7 +799,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     string Atmosphere_longal_File_Name = output_path + "/" + Name_Bathymetry_File
         + "_Atm_longal_" + std::to_string(j_longal) + "_" + std::to_string(n) + ".vtk";
     ofstream Atmosphere_vtk_longal_File;
-    Atmosphere_vtk_longal_File.precision(4);
+    Atmosphere_vtk_longal_File.precision(8);
     Atmosphere_vtk_longal_File.setf(ios::fixed);
     Atmosphere_vtk_longal_File.open(Atmosphere_longal_File_Name);
     if(!Atmosphere_vtk_longal_File.is_open()){
@@ -796,7 +809,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     }
 
     ostringstream buf;
-    buf.precision(4);
+    buf.precision(8);
     buf.setf(ios::fixed);
 
     buf << "# vtk DataFile Version 3.0\n"
@@ -828,7 +841,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
         << "LOOKUP_TABLE default\n";
     for(int i = 0; i < im; i++){
         for(int k = 0; k < km; k++){
-            buf << t.x[i][j_longal][k] * t_0 - t_0 << '\n';
+            buf << safe_val(t.x[i][j_longal][k] * t_0 - t_0) << '\n';
         }
     }
     Atmosphere_vtk_longal_File << buf.str();
@@ -897,8 +910,8 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     buf << "VECTORS u-w-Cell float\n";
     for(int i = 0; i < im; i++){
         for(int k = 0; k < km; k++){
-            buf << u.x[i][j_longal][k]
-                << " " << 0.0 << " " << w.x[i][j_longal][k] << '\n';
+            buf << safe_val(u.x[i][j_longal][k])
+                << " " << 0.0 << " " << safe_val(w.x[i][j_longal][k]) << '\n';
         }
     }
     Atmosphere_vtk_longal_File << buf.str();
@@ -941,16 +954,16 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     for(int i = 0; i < im; i++){
         for(int k = 0; k < km; k++){
             if(u.x[i][j_longal][k] < 0.0) u_u.x[i][j_longal][k] = 0.0;
-            buf << u_u.x[i][j_longal][k]
-                << " " << w_u.x[i][j_longal][k] << " " << 0.0 << '\n';
+            buf << safe_val(u_u.x[i][j_longal][k])
+                << " " << safe_val(w_u.x[i][j_longal][k]) << " " << 0.0 << '\n';
         }
     }
     buf << "VECTORS u-w-Downdraft float\n";
     for(int i = 0; i < im; i++){
         for(int k = 0; k < km; k++){
             if(u.x[i][j_longal][k] < 0.0) u_u.x[i][j_longal][k] = 0.0;
-            buf << u_d.x[i][j_longal][k]
-                << " " << w_d.x[i][j_longal][k] << " " << 0.0 << '\n';
+            buf << safe_val(u_d.x[i][j_longal][k])
+                << " " << safe_val(w_d.x[i][j_longal][k]) << " " << 0.0 << '\n';
         }
     }
     Atmosphere_vtk_longal_File << buf.str();

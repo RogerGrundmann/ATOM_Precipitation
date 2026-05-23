@@ -81,6 +81,17 @@ private:
                     double q_i_old = std::max(0.0, ice_row[k]);
 
                     double T       = t_row[k] * m.t_0;
+                    // Cap T to the Magnus-formula validity range. Above ~101°C the
+                    // saturation vapor pressure exceeds p_local and the q_sat fallback
+                    // (ep * 1e-5) collapses by 5000×, triggering runaway condensation
+                    // that releases lv/cp * q_v ≈ 87 K of latent heat per call and drives
+                    // T further out of range. Cap at 60°C — well above any physical
+                    // surface temperature — so a single corrupt cell cannot poison the run.
+                    constexpr double T_max = 333.15;
+                    if (T > T_max) {
+                        T = T_max;
+                        t_row[k] = T_max / m.t_0;
+                    }
                     double p_local = p_row[k];
 
                     double E_sat  = m.hp * exp_func(T, 17.2694, 35.86);
@@ -144,6 +155,15 @@ private:
                         q_c_b = std::max(0.0, q_c_b);
                         q_i_b = std::max(0.0, q_i_b);
 
+                        // Cap T after the Newton loop. The q_v_hyp = 0.5*(q_v_target + q_v_b)
+                        // damping is too weak when dq_sat/dT is steep (marginal saturation),
+                        // so the iteration's amplitude grows. Within one call T can swing from
+                        // a physical entry value into the Magnus-cliff regime (>101 °C at
+                        // p = 1080 hPa), and the write-back below would persist that bad value.
+                        // The entry-time cap is not enough because the runaway happens during
+                        // the loop, not between calls.
+                        if (T > T_max) T = T_max;
+
                         if (!std::isnan(T) && !std::isnan(q_v_b)) {
                             S_c_c_row[k] = alpha_entry * (q_c_b - q_c_old) / dt_dim;
                             c_row[k]     = q_v_old + alpha_entry * (q_v_b - q_v_old);
@@ -170,7 +190,7 @@ private:
                 m.c.x[0][j][k]     = m.c.x[i_mount][j][k];
                 m.cloud.x[0][j][k] = m.cloud.x[i_mount][j][k];
                 m.ice.x[0][j][k]   = m.ice.x[i_mount][j][k];
-                if (std::isfinite(m.t.x[i_mount][j][k]))
+                if (AtomUtils::is_finite_safe(m.t.x[i_mount][j][k]))
                     m.t.x[0][j][k] = m.t.x[i_mount][j][k];
             }
         }

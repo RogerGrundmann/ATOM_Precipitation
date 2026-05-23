@@ -379,8 +379,14 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
         + coeff_energy * ls * (S_i.x[i][j][k] + S_s.x[i][j][k] + S_g.x[i][j][k])
         + coeff_MC_t * MC_t.x[i][j][k];
 
+    // Boussinesq buoyancy in perturbation-pressure form: the radial body force is the
+    // density-anomaly contribution, +g·(t − 1) [t is non-dim, t=1 ↔ t_0]. The hydrostatic
+    // -g·ρ_0 is absorbed into p_stat and does not appear here. A constant -g (no anomaly
+    // factor) accumulated u_radial drift every step until the pressure solver caught up;
+    // with (t-1) the force vanishes at the reference state and grows smoothly with the
+    // thermal anomaly — same convention ASTIM uses.
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        - buoyancy * g * dt / u_0
+        + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - 1.0)
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v

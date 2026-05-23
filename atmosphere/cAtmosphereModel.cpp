@@ -182,12 +182,13 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // field when an inviscid spin-up is requested: those routines suppress exactly the
     // large-scale near-surface gradients that the Euler phase needs in order to organise
     // a global circulation. The viscous phase that follows will re-apply both.
-    if(inviscid_spinup_iters <= 0){
+//    if(inviscid_spinup_iters <= 0){
         BC_Atm(*this).bcVelSurfSur();                                   // velocities close to surfaces, resembling a boundary layer
+
         AtomUtils::damp_wiggles(u, &i_topography, true, true, true);
         AtomUtils::damp_wiggles(v, &i_topography, true, true, true);
         AtomUtils::damp_wiggles(w, &i_topography, true, true, true);
-    }
+//    }
 
 //    BC_Atm(*this).coastalCurrents();
 
@@ -268,15 +269,25 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     BC_Atm(*this).bcScalarSurfSur();                                    // scalar variable at surfaces extrapolated by von Neumann
     BC_Atm(*this).bcSolidGround();                                      // values inside mountains
 
+    // One-shot Helmholtz projection of the prescribed initial velocity.  The
+    // analytical Hadley/Ferrel profile in VelocityInitializer is NOT divergence-
+    // free; without this step the incremental projection in PressureSolverAtm
+    // strips the dilatational component over the first ~100 iters and the
+    // prescribed global circulation decays to noise (max u → <0.5 m/s by iter 150).
+    // Doing the projection once here lets the time loop start from a clean
+    // ∇·v = 0 state with the solenoidal part of the prescribed flow intact.
+    PressureSolverAtm(*this).project_initial_velocity(200);
+
     UtilsAtm(*this).storeIntermediateData3D(1.0);
     UtilsAtm(*this).findResiduumAtm();
 
 
 //    goto Printout;
+
+
     print_min_max_atm();
     ThermoAtm(*this).printDataAtm();
 
-//    Printout:
     UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);     // printing files for ParaView, AtmosphereDataTransfer and AtmospherePlotData
 
 
@@ -285,7 +296,9 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     cout << endl << endl;
     if(Ma > 0) run_3D_loop(Ma);                                         // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
     cout << endl << endl;
+
 /*
+    Printout:
     print_min_max_atm();
     ThermoAtm(*this).printDataAtm();
     UtilsAtm(*this).writeFile(bathymetry_name, output_path, true);      // printing files for ParaView, AtmosphereDataTransfer and AtmospherePlotData
@@ -367,59 +380,101 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 : 1.0;
         }
         dt = inviscid_phase ? dt_inviscid : dt_visc;
+
+        // Buoyancy ramp: linearly from 0 at iter 0 to 1 at buoyancy_ramp_iters.
+        // Spreads the build-up of the thermal driving force across many iters so the
+        // multi-sweep Jacobi can converge p_dyn against the growing forcing instead
+        // of falling behind and ringing.
+        buoyancy_ramp = (buoyancy_ramp_iters > 0)
+            ? std::min(1.0, static_cast<double>(total_iter_count) / buoyancy_ramp_iters)
+            : 1.0;
+
         cout << "      AGCM: iter = " << total_iter_count
              << "  inviscid_phase = " << (inviscid_phase ? "true" : "false")
              << "  diffusion_ramp = " << std::fixed << std::setprecision(3) << diffusion_ramp
+             << "  buoyancy_ramp = " << std::fixed << std::setprecision(3) << buoyancy_ramp
              << "  dt = " << std::scientific << std::setprecision(4) << dt
              << std::defaultfloat << endl;
 
-        // Heavy block (pressure solver, saturation, ice scheme, moist convection, BCs, output)
-        // runs every 2 iterations in the viscous phase, but only every 10 iterations during
-        // the inviscid spin-up — dt_inviscid is 10× smaller so the physical-time cadence
-        // stays comparable, and the spin-up doesn't spend most of its cycles in the heavy block.
-        int heavy_block_stride = inviscid_phase ? 10 : 2;
-        if(iter_n % heavy_block_stride == 0){
-            PressureSolverAtm(*this).run();
+        // Two cadences during inviscid spin-up:
+        //   moist_stride    — PressureSolverAtm, SaturationAdjustment, ice scheme,
+        //                     MoistConvection, ThermoAtm, turbulence sources. Throttled
+        //                     because (a) the moist/thermo sources feed back unbounded
+        //                     in the undamped (diffusion_ramp=0) flow, and (b) the
+        //                     pressure solver is a single Jacobi sweep whose target
+        //                     balances the full body-force field — calling it every step
+        //                     races p_dyn toward that (very large) balance value.
+        //   momentum_stride — all BCs (radial/theta/phi extrapolation, scalar surface,
+        //                     solid ground). Run every step during spin-up so the
+        //                     topographic walls are re-enforced before each RK4 cycle —
+        //                     this is what lets the flow "see" the mountains and form
+        //                     lee/windward circulations.
+        // In the viscous phase the two strides collapse back to 2, matching the original behaviour.
+        int moist_stride    = inviscid_phase ? 10  : 2;
+        int momentum_stride = inviscid_phase ? 1  : 2;
 
-            SaturationAdjustment(*this).run();                          // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
-            AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
-
-//            AtomUtils::remove_peaks(cloud, &i_topography, true, true, true);
-//            AtomUtils::remove_peaks(ice,   &i_topography, true, true, true);
-
-            switch(CategoryIceScheme){                                  // rain, snow graupel and precipitation production and reduction
-                case -1: cout << endl << endl << endl                   // no CategoryIceScheme used
-                    << "  no CategoryIceScheme used" << endl;
-                    break;
-                case 0: ZeroCatIceScheme(*this).run();                  // development of rain and snow fall, water vapour and cloud water
-                    break;
-                case 1: OneCatIceScheme(*this).run();                   // development of rain and snow fall, water vapour, cloud water and ice
-                    break;
-                case 2: TwoCatIceScheme(*this).run();                   // development of rain and snow fall, water vapour, cloud water and ice
-                    break;
-                case 3: ThreeCatIceScheme(*this).run();                 // development of rain and snow fall, water vapour, cloud water, ice and graupel
-                    break;
+        if(iter_n % moist_stride == 0){
+            // Multi-sweep Jacobi: the original single-sweep cadence (one sweep every
+            // moist_stride iters) couldn't keep up with the divergence accumulated by
+            // a fully-spun-up global circulation, letting p_dyn drift to ±750 hPa by
+            // iter 120 and the simulation crash into the velocity caps by iter 300.
+            // 20 sweeps per call (~10× the previous rate) actually converges the
+            // Poisson before the next time step, so dpdr/dpdthe/dpdphi in the RHS
+            // reflect the real pressure each iter.  Verbose only on the first sweep.
+            {
+                constexpr int n_pressure_sweeps = 20;
+                PressureSolverAtm solver(*this);
+                for(int s = 0; s < n_pressure_sweeps; s++){
+                    solver.run(s == 0);
+                }
             }
 
-            AtomUtils::damp_wiggles(P_rain, &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(P_snow, &i_topography, true, true, true);
+            // Moist-physics gate: the implicit microphysics (SaturationAdjustment,
+            // ice scheme, MoistConvection) is too stiff during the initial velocity
+            // transient — a single tropical maritime column repeatedly drove q_c, q_i
+            // and S_s into runaway. Delay activation until the circulation has formed
+            // on a dry field; the moist physics then sees a stable advection pattern
+            // it was designed for. 0 disables the gate (always on).
+            const bool moist_phys_active = (moist_phys_start_iter <= 0)
+                                        || (total_iter_count > moist_phys_start_iter);
 
-            MoistConvection(*this).run(iter_n);                         // rainfall from convecting clouds
+            if(moist_phys_active){
+                SaturationAdjustment(*this).run();                      // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
+                AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
 
-            AtomUtils::damp_wiggles(P_conv, &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(E_u,    &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(M_u,    &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(q_v_u,  &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(q_c_u,  &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(E_d,    &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(M_d,    &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(q_v_d,  &i_topography, true, true, true);
+                switch(CategoryIceScheme){                              // rain, snow graupel and precipitation production and reduction
+                    case -1: cout << endl << endl << endl               // no CategoryIceScheme used
+                        << "  no CategoryIceScheme used" << endl;
+                        break;
+                    case 0: ZeroCatIceScheme(*this).run();              // development of rain and snow fall, water vapour and cloud water
+                        break;
+                    case 1: OneCatIceScheme(*this).run();               // development of rain and snow fall, water vapour, cloud water and ice
+                        break;
+                    case 2: TwoCatIceScheme(*this).run();               // development of rain and snow fall, water vapour, cloud water and ice
+                        break;
+                    case 3: ThreeCatIceScheme(*this).run();             // development of rain and snow fall, water vapour, cloud water, ice and graupel
+                        break;
+                }
 
+                AtomUtils::damp_wiggles(P_rain, &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(P_snow, &i_topography, true, true, true);
 
+                MoistConvection(*this).run(iter_n);                     // rainfall from convecting clouds
 
-            UtilsAtm(*this).precipitationSum();
+                AtomUtils::damp_wiggles(P_conv, &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(E_u,    &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(M_u,    &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(q_v_u,  &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(q_c_u,  &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(E_d,    &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(M_d,    &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(q_v_d,  &i_topography, true, true, true);
+
+                UtilsAtm(*this).precipitationSum();
+            }  // moist_phys_active
+
             ThermoAtm(*this).densities();
             ThermoAtm(*this).forces();
             ThermoAtm(*this).standAtm_DewPoint_HumidRel();              // International Standard Atmosphere temperature profile, dew point temperature, relative humidity profile
@@ -429,18 +484,20 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             ThermoAtm(*this).co2Atmosphere();                           // greenhouse gas co2 as function of temperature
 
             if(turb_model != "none") {
-                TurbulenceAtm(*this).run();        // update turbulence sources (skipped in laminar mode)
+                TurbulenceAtm(*this).run();                             // update turbulence sources (skipped in laminar mode)
 
-            AtomUtils::damp_wiggles(tke,        &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(dis,        &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(nue,        &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(prod,       &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(tke_source, &i_topography, true, true, true);
-            AtomUtils::damp_wiggles(dis_source, &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(tke,        &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(dis,        &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(nue,        &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(prod,       &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(tke_source, &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(dis_source, &i_topography, true, true, true);
             }
 
 //            UtilsAtm(*this).valueLimitationAtm();                       // value limitation prevents local formation of NANs
+        }  // iter_n % moist_stride == 0
 
+        if(iter_n % momentum_stride == 0){
             BC_Atm(*this).bcRadius();                                   // extrapolation in i-direction alomg grid boundaries
             if(turb_model != "none") TurbulenceAtm(*this).apply_wall_bc();  // reassert ω_wall at i=0 after bcRadius cubic extrapolation
             BC_Atm(*this).bcTheta();                                    // extrapolation in j-direction alomg grid boundaries
@@ -449,11 +506,12 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             BC_Atm(*this).bcScalarSurfSur();                            // scalar variable at surfaces extrapolated by von Neumann
             BC_Atm(*this).bcSolidGround();                              // values inside mountains
 
-            print_min_max_atm();
-            UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
-            cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
-
-        }  // iter_n % heavy_block_stride == 0
+            if(iter_n % checkpoint == 0){
+                print_min_max_atm();
+                UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
+                cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
+            }
+        }  // iter_n % momentum_stride == 0
 
         if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
         else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations

@@ -25,111 +25,90 @@ public:
         using namespace std;
         cout << endl << endl << endl << "      AGCM: BC_SolidGround" << endl;
 
-        // 2nd-order one-sided (von Neumann) extrapolation into a land ghost cell from
-        // two adjacent air cells: x_ghost = (4/3)*x_near - (1/3)*x_far.
-        // Applied to the six fields that need smooth values at land/air interfaces:
-        // dynamic pressure, water vapour, cloud water, cloud ice, graupel, CO2.
+        // Multi-direction averaging from face-neighbouring air cells.
         //
-        // Non-negative bounded scalars (cloud, ice, gr, c, convective moisture/mass-flux)
-        // use a monotone clamp: result is restricted to [0, max(near, far)] to prevent
-        // overshoot at steep windward gradients from feeding spurious cloud into the air.
-        auto clamp_hydro = [](double extrap, double v1, double v2) -> double {
-            return std::clamp(extrap, 0.0, std::max(v1, v2));
-        };
+        // Replaces the previous (4/3)·x_near − (1/3)·x_far one-sided Neumann
+        // extrapolation, which amplified any boundary noise by 4/3 and overshot
+        // at steep topography.  Observed problem: the Himalaya peak, where a single
+        // land ghost cell has air neighbours in multiple directions of very different
+        // air-column heights, drove spurious p_dyn and velocity anomalies that
+        // propagated downstream and destabilised the whole NH at iter ~120.
+        //
+        // The new method: for each land ghost cell, look at the 6 face neighbours
+        // (i±1, j±1, k±1 with k periodic).  Average the values from whichever of
+        // those neighbours are air cells.  No amplification (factor 1.0 by
+        // construction), direction-independent (a peak with air on top, on the east
+        // face, and on the south face gets all three contributions equally weighted),
+        // and naturally degrades to plain copy when only one neighbour is air.
+        //
+        // Non-negative fields (tke, dis, nue, c, cloud, ice, gr, q_*, E_*, D_*, M_*)
+        // are clamped to [0, ∞); the averaging of non-negative values can only return
+        // non-negative results, so this clamp is defensive.
+        //
+        // p_dyn was previously held at 0 here as a Dirichlet pin.  It now averages too,
+        // so the pressure varies smoothly across the topographic surface.  The Poisson
+        // anchor is provided by (a) the still-zero p_dyn at fully-buried interior cells
+        // (Pass 1) and (b) the PressureSolverAtm i=0-over-land pin.
+        auto average_from_air_neighbors = [&](int i, int j, int k) {
+            int kp = (k + 1)        % m.km;
+            int km = (k - 1 + m.km) % m.km;
+            bool a_ip = (i + 1 < m.im) && is_air(m.h, i+1, j, k);
+            bool a_im = (i - 1 >= 0)    && is_air(m.h, i-1, j, k);
+            bool a_jp = (j + 1 < m.jm) && is_air(m.h, i, j+1, k);
+            bool a_jm = (j - 1 >= 0)    && is_air(m.h, i, j-1, k);
+            bool a_kp = is_air(m.h, i, j, kp);
+            bool a_km = is_air(m.h, i, j, km);
 
-        auto extrapolation = [&](int i, int j, int k,
-                           int i1, int j1, int k1,
-                           int i2, int j2, int k2) {
-            m.tke.x[i][j][k] = std::max(0.0, m.c43 * m.tke.x[i1][j1][k1] - m.c13 * m.tke.x[i2][j2][k2]);
-            m.dis.x[i][j][k] = std::max(0.0, m.c43 * m.dis.x[i1][j1][k1] - m.c13 * m.dis.x[i2][j2][k2]);
-            m.nue.x[i][j][k] = std::max(0.0, m.c43 * m.nue.x[i1][j1][k1] - m.c13 * m.nue.x[i2][j2][k2]);
+            int count = (int)a_ip + (int)a_im + (int)a_jp + (int)a_jm + (int)a_kp + (int)a_km;
+            if (count == 0) return;
+            const double inv = 1.0 / static_cast<double>(count);
 
-            m.t.x[i][j][k]       = m.c43 * m.t.x[i1][j1][k1]       - m.c13 * m.t.x[i2][j2][k2];
+            auto avg = [&](const Array& f) -> double {
+                double sum = 0.0;
+                if (a_ip) sum += f.x[i+1][j][k];
+                if (a_im) sum += f.x[i-1][j][k];
+                if (a_jp) sum += f.x[i][j+1][k];
+                if (a_jm) sum += f.x[i][j-1][k];
+                if (a_kp) sum += f.x[i][j][kp];
+                if (a_km) sum += f.x[i][j][km];
+                return sum * inv;
+            };
 
-            m.p_dyn.x[i][j][k]   = m.c43 * m.p_dyn.x[i1][j1][k1]   - m.c13 * m.p_dyn.x[i2][j2][k2];
+            m.tke.x[i][j][k] = std::max(0.0, avg(m.tke));
+            m.dis.x[i][j][k] = std::max(0.0, avg(m.dis));
+            m.nue.x[i][j][k] = std::max(0.0, avg(m.nue));
 
-            m.r_dry.x[i][j][k]   = m.c43 * m.r_dry.x[i1][j1][k1]   - m.c13 * m.r_dry.x[i2][j2][k2];
-            m.r_humid.x[i][j][k] = m.c43 * m.r_humid.x[i1][j1][k1] - m.c13 * m.r_humid.x[i2][j2][k2];
+            m.t.x[i][j][k]   = avg(m.t);
 
-            m.c.x[i][j][k]     = clamp_hydro(m.c43 * m.c.x[i1][j1][k1]     - m.c13 * m.c.x[i2][j2][k2],
-                                              m.c.x[i1][j1][k1],     m.c.x[i2][j2][k2]);
-            m.cloud.x[i][j][k] = clamp_hydro(m.c43 * m.cloud.x[i1][j1][k1] - m.c13 * m.cloud.x[i2][j2][k2],
-                                              m.cloud.x[i1][j1][k1], m.cloud.x[i2][j2][k2]);
-            m.ice.x[i][j][k]   = clamp_hydro(m.c43 * m.ice.x[i1][j1][k1]   - m.c13 * m.ice.x[i2][j2][k2],
-                                              m.ice.x[i1][j1][k1],   m.ice.x[i2][j2][k2]);
-            m.gr.x[i][j][k]    = clamp_hydro(m.c43 * m.gr.x[i1][j1][k1]    - m.c13 * m.gr.x[i2][j2][k2],
-                                              m.gr.x[i1][j1][k1],    m.gr.x[i2][j2][k2]);
+            m.p_dyn.x[i][j][k] = avg(m.p_dyn);
 
-            m.co2.x[i][j][k]   = m.c43 * m.co2.x[i1][j1][k1]   - m.c13 * m.co2.x[i2][j2][k2];
+            m.r_dry.x[i][j][k]   = avg(m.r_dry);
+            m.r_humid.x[i][j][k] = avg(m.r_humid);
 
-            m.S_c_c.x[i][j][k] = m.c43 * m.S_c_c.x[i1][j1][k1] - m.c13 * m.S_c_c.x[i2][j2][k2];
-            m.S_v.x[i][j][k]   = m.c43 * m.S_v.x[i1][j1][k1]   - m.c13 * m.S_v.x[i2][j2][k2];
-            m.S_c.x[i][j][k]   = m.c43 * m.S_c.x[i1][j1][k1]   - m.c13 * m.S_c.x[i2][j2][k2];
-            m.S_i.x[i][j][k]   = m.c43 * m.S_i.x[i1][j1][k1]   - m.c13 * m.S_i.x[i2][j2][k2];
-            m.S_r.x[i][j][k]   = m.c43 * m.S_r.x[i1][j1][k1]   - m.c13 * m.S_r.x[i2][j2][k2];
-            m.S_s.x[i][j][k]   = m.c43 * m.S_s.x[i1][j1][k1]   - m.c13 * m.S_s.x[i2][j2][k2];
+            m.c.x[i][j][k]     = std::max(0.0, avg(m.c));
+            m.cloud.x[i][j][k] = std::max(0.0, avg(m.cloud));
+            m.ice.x[i][j][k]   = std::max(0.0, avg(m.ice));
+            m.gr.x[i][j][k]    = std::max(0.0, avg(m.gr));
 
-            m.q_v_u.x[i][j][k] = clamp_hydro(m.c43 * m.q_v_u.x[i1][j1][k1] - m.c13 * m.q_v_u.x[i2][j2][k2],
-                                              m.q_v_u.x[i1][j1][k1], m.q_v_u.x[i2][j2][k2]);
-            m.q_c_u.x[i][j][k] = clamp_hydro(m.c43 * m.q_c_u.x[i1][j1][k1] - m.c13 * m.q_c_u.x[i2][j2][k2],
-                                              m.q_c_u.x[i1][j1][k1], m.q_c_u.x[i2][j2][k2]);
-            m.q_v_d.x[i][j][k] = clamp_hydro(m.c43 * m.q_v_d.x[i1][j1][k1] - m.c13 * m.q_v_d.x[i2][j2][k2],
-                                              m.q_v_d.x[i1][j1][k1], m.q_v_d.x[i2][j2][k2]);
+            m.co2.x[i][j][k]   = avg(m.co2);
 
-            m.E_u.x[i][j][k] = clamp_hydro(m.c43 * m.E_u.x[i1][j1][k1] - m.c13 * m.E_u.x[i2][j2][k2],
-                                            m.E_u.x[i1][j1][k1], m.E_u.x[i2][j2][k2]);
-            m.E_d.x[i][j][k] = clamp_hydro(m.c43 * m.E_d.x[i1][j1][k1] - m.c13 * m.E_d.x[i2][j2][k2],
-                                            m.E_d.x[i1][j1][k1], m.E_d.x[i2][j2][k2]);
-            m.D_u.x[i][j][k] = clamp_hydro(m.c43 * m.D_u.x[i1][j1][k1] - m.c13 * m.D_u.x[i2][j2][k2],
-                                            m.D_u.x[i1][j1][k1], m.D_u.x[i2][j2][k2]);
-            m.D_d.x[i][j][k] = clamp_hydro(m.c43 * m.D_d.x[i1][j1][k1] - m.c13 * m.D_d.x[i2][j2][k2],
-                                            m.D_d.x[i1][j1][k1], m.D_d.x[i2][j2][k2]);
-            m.M_u.x[i][j][k] = clamp_hydro(m.c43 * m.M_u.x[i1][j1][k1] - m.c13 * m.M_u.x[i2][j2][k2],
-                                            m.M_u.x[i1][j1][k1], m.M_u.x[i2][j2][k2]);
-            m.M_d.x[i][j][k] = clamp_hydro(m.c43 * m.M_d.x[i1][j1][k1] - m.c13 * m.M_d.x[i2][j2][k2],
-                                            m.M_d.x[i1][j1][k1], m.M_d.x[i2][j2][k2]);
-        };
+            m.S_c_c.x[i][j][k] = avg(m.S_c_c);
+            m.S_v.x[i][j][k]   = avg(m.S_v);
+            m.S_c.x[i][j][k]   = avg(m.S_c);
+            m.S_i.x[i][j][k]   = avg(m.S_i);
+            m.S_r.x[i][j][k]   = avg(m.S_r);
+            m.S_s.x[i][j][k]   = avg(m.S_s);
 
-        // Zero-gradient (Neumann) copy of the same six fields from one cell to another.
-        // Used at grid boundaries (poles, Greenwich seam, top layer) where a second
-        // air neighbour for extrapolation is not available.
-        auto copy = [&](int i, int j, int k,
-                         int i1, int j1, int k1) {
-            m.tke.x[i][j][k] = m.tke.x[i1][j1][k1];
-            m.dis.x[i][j][k] = m.dis.x[i1][j1][k1];
-            m.nue.x[i][j][k] = m.nue.x[i1][j1][k1];
+            m.q_v_u.x[i][j][k] = std::max(0.0, avg(m.q_v_u));
+            m.q_c_u.x[i][j][k] = std::max(0.0, avg(m.q_c_u));
+            m.q_v_d.x[i][j][k] = std::max(0.0, avg(m.q_v_d));
 
-            m.t.x[i][j][k]     = m.t.x[i1][j1][k1];
-
-            m.p_dyn.x[i][j][k] = m.p_dyn.x[i1][j1][k1];
-
-            m.r_dry.x[i][j][k] = m.r_dry.x[i1][j1][k1];
-            m.r_humid.x[i][j][k] = m.r_humid.x[i1][j1][k1];
-
-            m.c.x[i][j][k]     = m.c.x[i1][j1][k1];
-            m.cloud.x[i][j][k] = m.cloud.x[i1][j1][k1];
-            m.ice.x[i][j][k]   = m.ice.x[i1][j1][k1];
-            m.gr.x[i][j][k]    = m.gr.x[i1][j1][k1];
-
-            m.co2.x[i][j][k]   = m.co2.x[i1][j1][k1];
-
-            m.S_c_c.x[i][j][k] = m.S_c_c.x[i1][j1][k1];
-            m.S_v.x[i][j][k]   = m.S_v.x[i1][j1][k1];
-            m.S_c.x[i][j][k]   = m.S_c.x[i1][j1][k1];
-            m.S_i.x[i][j][k]   = m.S_i.x[i1][j1][k1];
-            m.S_r.x[i][j][k]   = m.S_r.x[i1][j1][k1];
-            m.S_s.x[i][j][k]   = m.S_s.x[i1][j1][k1];
-
-            m.q_v_u.x[i][j][k] = m.q_v_u.x[i1][j1][k1];
-            m.q_c_u.x[i][j][k] = m.q_c_u.x[i1][j1][k1];
-            m.q_v_d.x[i][j][k] = m.q_v_d.x[i1][j1][k1];
-
-            m.E_u.x[i][j][k] = m.E_u.x[i1][j1][k1];
-            m.E_d.x[i][j][k] = m.E_d.x[i1][j1][k1];
-            m.D_u.x[i][j][k] = m.D_u.x[i1][j1][k1];
-            m.D_d.x[i][j][k] = m.D_d.x[i1][j1][k1];
-            m.M_u.x[i][j][k] = m.M_u.x[i1][j1][k1];
-            m.M_d.x[i][j][k] = m.M_d.x[i1][j1][k1];
+            m.E_u.x[i][j][k] = std::max(0.0, avg(m.E_u));
+            m.E_d.x[i][j][k] = std::max(0.0, avg(m.E_d));
+            m.D_u.x[i][j][k] = std::max(0.0, avg(m.D_u));
+            m.D_d.x[i][j][k] = std::max(0.0, avg(m.D_d));
+            m.M_u.x[i][j][k] = std::max(0.0, avg(m.M_u));
+            m.M_d.x[i][j][k] = std::max(0.0, avg(m.M_d));
         };
 
         // Pass 1 — apply solid-wall conditions to every land cell from i=0 up to
@@ -393,52 +372,18 @@ public:
             }
         }
 
-        // Pass 2 — extrapolate p_dyn, microphysics, and CO2 from air into land ghost
-        // cells at every land/air interface in the j- and k-directions, and at the
-        // uppermost land level in the i-direction.  This gives the pressure-gradient
-        // and tracer-advection stencils smooth values across the topography boundary.
+        // Pass 2 — at every land cell that touches the air column in any of its 6
+        // face directions (i±1, j±1, k±1 with k periodic), replace its scalar fields
+        // with the equal-weight average of the air-neighbour values.  Buried interior
+        // cells (no air neighbour) are left at the Pass-1 zero state and continue to
+        // serve as the Poisson Dirichlet anchor for p_dyn.
         #pragma omp parallel for schedule(static)
         for (int i = 1; i < m.im-1; i++) {
-            for (int j = 1; j < m.jm-1; j++) {
-                for (int k = 1; k < m.km-1; k++) {
-
-                    bool land_ijk = is_land(m.h, i, j, k);
-
-                    // i-direction (radial): extrapolate outward from the first two air
-                    // cells above the surface.  At the second-to-last level use copy
-                    // because there is only one air cell available above.
-                    if (i < m.im-3) {
-                        if (land_ijk && is_air(m.h, i+1, j, k))
-                            extrapolation(i,j,k, i+1,j,k, i+2,j,k);
-                    } else if (i == m.im-2) {
-                        if (land_ijk && is_air(m.h, i+1, j, k))
-                            copy(i,j,k, i+1,j,k);
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    if (is_land(m.h, i, j, k)) {
+                        average_from_air_neighbors(i, j, k);
                     }
-
-                    // j-direction interior (latitude): extrapolate from whichever
-                    // side has two consecutive air cells.
-                    if (j > 2 && j < m.jm-3) {
-                        if (land_ijk && is_air(m.h, i, j+1, k) && is_air(m.h, i, j+2, k))
-                            extrapolation(i,j,k, i,j+1,k, i,j+2,k);
-                        if (land_ijk && is_air(m.h, i, j-1, k) && is_air(m.h, i, j-2, k))
-                            extrapolation(i,j,k, i,j-1,k, i,j-2,k);
-                    }
-
-                    // j-direction poles: single neighbour only, use copy.
-                    if (j == 0)        copy(i,j,k, i,j+1,k);
-                    if (j == m.jm-1)   copy(i,j,k, i,j-1,k);
-
-                    // k-direction interior (longitude): same logic as j-direction.
-                    if (k > 2 && k < m.km-3) {
-                        if (land_ijk && is_air(m.h, i, j, k+1) && is_air(m.h, i, j, k+2))
-                            extrapolation(i,j,k, i,j,k+1, i,j,k+2);
-                        if (land_ijk && is_air(m.h, i, j, k-1) && is_air(m.h, i, j, k-2))
-                            extrapolation(i,j,k, i,j,k-1, i,j,k-2);
-                    }
-
-                    // k-direction Greenwich seam (k=0 wraps to k=km-1): copy from inner neighbour.
-                    if (k == 0)        copy(i,j,k, i,j,k+1);
-                    if (k == m.km-1)   copy(i,j,k, i,j,k-1);
                 }
             }
         }
@@ -452,7 +397,7 @@ public:
             for (int k = 0; k < m.km; k++) {
                 int i_mount = m.i_topography[j][k];
 
-                if (std::isfinite(m.t.x[i_mount][j][k]))
+                if (is_finite_safe(m.t.x[i_mount][j][k]))
                     m.t.x[0][j][k] = m.t.x[i_mount][j][k];
  
                 m.p_dyn.x[0][j][k] = m.p_dyn.x[i_mount][j][k];
@@ -505,6 +450,46 @@ public:
                 }
             }
         }
+
+        // Pass 5 — defensive bit-level sanitization of turbulence fields.
+        // Under -ffast-math, std::max(0.0, x) and std::clamp(...) are unreliable on
+        // NaN inputs (the compiler assumes operands are finite).  TKE reached 7×10²⁰⁰
+        // at one polar tropopause cell despite the RK4 cap because a NaN intermediate
+        // in prod (computed as cnue * grad·grad − 0.667·tke·grad with grad large at
+        // the polar metric singularity) leaked through max(0,...).  Use the same
+        // bit-level non-finite check as Paraview_Atm::safe_val to reset non-finite
+        // values to a physically sane default, then clip to physical ceilings.
+        // This is the last operation in bcSolidGround so all fields are bounded by
+        // the time the next RK4 cycle reads them.
+        const double tke_max_phys = 1000.0;
+        const double tke_max_nd   = tke_max_phys / (m.u_0 * m.u_0);
+        const double nue_max      = 1000.0 / (m.u_0 * m.L_atm);
+        const double prod_max     = 1.0e4;            // [m²/s³] — generous; real prod ~ 1e0
+        const double dis_max      = 1.0e6;            // [m²/s³] — generous for ω*
+
+        auto safe_clamp = [](double v, double lo, double hi) -> double {
+            std::uint64_t bits;
+            std::memcpy(&bits, &v, sizeof(bits));
+            if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return lo;
+            return (v < lo) ? lo : (v > hi) ? hi : v;
+        };
+
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    m.tke.x[i][j][k]        = safe_clamp(m.tke.x[i][j][k],        0.0,        tke_max_nd);
+                    m.tken.x[i][j][k]       = safe_clamp(m.tken.x[i][j][k],       0.0,        tke_max_nd);
+                    m.dis.x[i][j][k]        = safe_clamp(m.dis.x[i][j][k],        1.0e-10,    dis_max);
+                    m.disn.x[i][j][k]       = safe_clamp(m.disn.x[i][j][k],       1.0e-10,    dis_max);
+                    m.nue.x[i][j][k]        = safe_clamp(m.nue.x[i][j][k],        0.0,        nue_max);
+                    m.prod.x[i][j][k]       = safe_clamp(m.prod.x[i][j][k],       0.0,        prod_max);
+                    m.tke_source.x[i][j][k] = safe_clamp(m.tke_source.x[i][j][k], -prod_max,  prod_max);
+                    m.dis_source.x[i][j][k] = safe_clamp(m.dis_source.x[i][j][k], -prod_max,  prod_max);
+                }
+            }
+        }
+
         cout << "      AGCM: BC_SolidGround ended" << endl;
     }
 /*
@@ -576,6 +561,17 @@ public:
                     xf[iml][j][k] = xf[iml-3][j][k] - 3.0 * xf[iml-2][j][k] + 3.0 * xf[iml-1][j][k];
                 }
 
+                // Inviscid spin-up: enforce a fully reflecting / free-slip wall at i=0.
+                // Wall-normal velocity u is set to zero (Dirichlet), tangential v, w keep
+                // the von Neumann (zero-gradient) values just assigned by Pattern B —
+                // that mirror across the wall is exactly the free-slip tangential BC.
+                // un is held in lockstep so the next-time-level field starts from the wall
+                // condition rather than drifting before the next storeIntermediateData3D copy.
+                if (m.inviscid_phase) {
+                    m.u.x[0][j][k]  = 0.0;
+                    m.un.x[0][j][k] = 0.0;
+                }
+
                 // Pattern C
                 for (int f = 0; f < n_cubic_vn; f++) {
                     double*** xf = cubic_bot_vn_top[f]->x;
@@ -595,10 +591,14 @@ public:
     // ------------------------------------------------------------------
     void bcTheta()
     {
-        // von Neumann at both j=0 and j=jm-1
-        // Turbulence scalars use this too: the cubic formula amplifies concave
-        // profiles near the pole singularity (sinθ→0), producing ghost-cell
-        // values larger than the interior and inflating prod and D_w.
+        // Pole BC: zero-gradient (copy from first interior cell). At the spherical
+        // singularity sin θ → 0, any extrapolation amplifies grid noise:
+        //   - (4/3, -1/3) form has amplification factor 4/3
+        //   - cubic p[0] = p[3] − 3 p[2] + 3 p[1] has condition number ~7
+        // With strong bulk flow these are washed out, but with a weak / spinning-up
+        // velocity field the amplified noise dominates and reaches NaN at the pole
+        // within ~150 iter (observed at 90°N 0°E, height 0 m). Plain copy gives
+        // factor 1.0 — same as an axisymmetric-pole assumption to first order.
         Array* fields_vn[] = {
             &m.t, &m.p_stat, &m.r_humid, &m.r_dry,
             &m.u, &m.v, &m.w,
@@ -608,7 +608,6 @@ public:
         };
         constexpr int n_vn = sizeof(fields_vn) / sizeof(fields_vn[0]);
 
-        // cubic extrapolation at both j=0 and j=jm-1
         Array* fields_cubic[] = {
             &m.S_c_c, &m.S_v, &m.S_c, &m.S_i, &m.S_r, &m.S_s, &m.S_g,
             &m.q_v_u, &m.q_c_u, &m.u_u, &m.v_u, &m.w_u,
@@ -627,14 +626,14 @@ public:
 
                 for (int f = 0; f < n_vn; f++) {
                     double*** xf = fields_vn[f]->x;
-                    xf[i][0][k]   = m.c43 * xf[i][1][k]     - m.c13 * xf[i][2][k];
-                    xf[i][jml][k] = m.c43 * xf[i][jml-1][k] - m.c13 * xf[i][jml-2][k];
+                    xf[i][0][k]   = xf[i][1][k];
+                    xf[i][jml][k] = xf[i][jml-1][k];
                 }
 
                 for (int f = 0; f < n_cubic; f++) {
                     double*** xf = fields_cubic[f]->x;
-                    xf[i][0][k]   = xf[i][3][k]     - 3.0 * xf[i][2][k]     + 3.0 * xf[i][1][k];
-                    xf[i][jml][k] = xf[i][jml-3][k] - 3.0 * xf[i][jml-2][k] + 3.0 * xf[i][jml-1][k];
+                    xf[i][0][k]   = xf[i][1][k];
+                    xf[i][jml][k] = xf[i][jml-1][k];
                 }
             }
         }
@@ -875,7 +874,7 @@ public:
             for (int k = 0; k < m.km; k++) {
                 int i_mount = m.i_topography[j][k];
 
-                if (std::isfinite(m.t.x[i_mount][j][k]))
+                if (is_finite_safe(m.t.x[i_mount][j][k]))
                     m.t.x[0][j][k] = m.t.x[i_mount][j][k];
                 m.c.x[0][j][k]     = m.c.x[i_mount][j][k];
                 m.cloud.x[0][j][k] = m.cloud.x[i_mount][j][k];
