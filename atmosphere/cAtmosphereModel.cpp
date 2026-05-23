@@ -145,23 +145,12 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     use_presets(use_earthbyte_reconstruction, 
         use_NASA_temperature, use_NASA_velocity);
 
-
     UtilsAtm(*this).resetArrays();
 
-// Courant-number    C = |a * dt/dr|       C = 2 * sqrt(2) = 2.8284, a == u_0
-//                   dt = 2.8284 * dr/u_0 = 2.8284 * 400/8 = 141.42 s
-//                   dt = L_atm/u_0 = 400/8 = 50 s
-
-//                   dt_rain_dim = 500.0 s, COSMO paper, p. 47
-//                   dt_snow_dim = 2500.0 s
-
-//    dt = 0.0005;                                                        //  no dimension      prevents wiggles
-    dt = 0.001;                                                         //  no dimension      prevents wiggles in laminar flows
-//    dt = 0.0001;                                                       //  no dimension      prevents wiggles in turbulent flows
-//    dt = 0.00001;                                                       //  no dimension      prevents wiggles in turbulent flows
-//    dt = 0.005;                                                         //  no dimension      prevents wiggles
+    dt = dt_visc;                                                       //  no dimension; toggled to dt_inviscid during spin-up
 
     iter_n = 0;
+    total_iter_count = 0;                                               // reset per time slice so the inviscid spin-up fires at the start of every Ma slice
 
     use_turbulence_model             = (turb_model != "none");
     use_k_epsilon_turbulence_model   = (turb_model == "k_epsilon");
@@ -189,11 +178,16 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
         VelocityInitializer(*this).compute();                           // construction of zonal initial velocities from measurements
     }
 
-    BC_Atm(*this).bcVelSurfSur();                                       // velocities close to surfaces, resembling a boundary layer
-
-    AtomUtils::damp_wiggles(u, &i_topography, true, true, true);
-    AtomUtils::damp_wiggles(v, &i_topography, true, true, true);
-    AtomUtils::damp_wiggles(w, &i_topography, true, true, true);
+    // Skip the boundary-layer damping and the wiggle filter on the initial velocity
+    // field when an inviscid spin-up is requested: those routines suppress exactly the
+    // large-scale near-surface gradients that the Euler phase needs in order to organise
+    // a global circulation. The viscous phase that follows will re-apply both.
+    if(inviscid_spinup_iters <= 0){
+        BC_Atm(*this).bcVelSurfSur();                                   // velocities close to surfaces, resembling a boundary layer
+        AtomUtils::damp_wiggles(u, &i_topography, true, true, true);
+        AtomUtils::damp_wiggles(v, &i_topography, true, true, true);
+        AtomUtils::damp_wiggles(w, &i_topography, true, true, true);
+    }
 
 //    BC_Atm(*this).coastalCurrents();
 
@@ -351,13 +345,40 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 void cAtmosphereModel::run_3D_loop(int Ma){ 
 
 cout << endl << endl << endl << "      AGCM: run_3D_loop atm ..........................." << endl;
- 
-    panorama_cnt = 0;
 
     for(iter_n = 1; iter_n <= nm; iter_n++){
         print_loop_3D_headings();
 
-        if(iter_n % 2 == 0){
+        // Inviscid spin-up: zero diffusion for the first `inviscid_spinup_iters`
+        // cumulative iterations, then ramp linearly to full over `inviscid_ramp_iters`.
+        // total_iter_count is per-RHS-call and persists across time slices.
+        total_iter_count++;
+        if(inviscid_spinup_iters <= 0){
+            inviscid_phase = false;
+            diffusion_ramp = 1.0;
+        } else if(total_iter_count <= inviscid_spinup_iters){
+            inviscid_phase = true;
+            diffusion_ramp = 0.0;
+        } else {
+            inviscid_phase = false;
+            int over = total_iter_count - inviscid_spinup_iters;
+            diffusion_ramp = (inviscid_ramp_iters > 0)
+                ? std::min(1.0, static_cast<double>(over) / inviscid_ramp_iters)
+                : 1.0;
+        }
+        dt = inviscid_phase ? dt_inviscid : dt_visc;
+        cout << "      AGCM: iter = " << total_iter_count
+             << "  inviscid_phase = " << (inviscid_phase ? "true" : "false")
+             << "  diffusion_ramp = " << std::fixed << std::setprecision(3) << diffusion_ramp
+             << "  dt = " << std::scientific << std::setprecision(4) << dt
+             << std::defaultfloat << endl;
+
+        // Heavy block (pressure solver, saturation, ice scheme, moist convection, BCs, output)
+        // runs every 2 iterations in the viscous phase, but only every 10 iterations during
+        // the inviscid spin-up — dt_inviscid is 10× smaller so the physical-time cadence
+        // stays comparable, and the spin-up doesn't spend most of its cycles in the heavy block.
+        int heavy_block_stride = inviscid_phase ? 10 : 2;
+        if(iter_n % heavy_block_stride == 0){
             PressureSolverAtm(*this).run();
 
             SaturationAdjustment(*this).run();                          // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
@@ -432,20 +453,16 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
             cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
 
-            if(panorama_cnt == panorama_print) panorama_cnt = 0;
+        }  // iter_n % heavy_block_stride == 0
 
-        }  // iter_n % 2 == 0
-
-        if(turb_model == "none") solveRungeKutta_Atmosphere();          // laminar: standard RK4 on transport equations
-        else                     solveRungeKutta_Atmosphere_Turb();     // turbulent: RK4 extended with k and ω equations
+        if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
+        else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations
 
         UtilsAtm(*this).findResiduumAtm();
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
 
         ThermoAtm(*this).printDataAtm();
-
-        panorama_cnt++;
 
     }  // end iter_n
 

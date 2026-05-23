@@ -215,6 +215,12 @@ private:
 
     int panorama_cnt, iter_n;
 
+    // Inviscid spin-up state.
+    // total_iter_count accumulates across time slices so the inviscid window is global, not per-slice.
+    // diffusion_ramp ∈ [0,1] multiplies every diff_*_re coefficient in RHS_Atm and the no-slip flag.
+    int total_iter_count = 0;
+    double diffusion_ramp = 1.0;
+    bool inviscid_phase = false;
 
     double t_paleo_total = 0.0;
     double t_pole_total = 0.0;

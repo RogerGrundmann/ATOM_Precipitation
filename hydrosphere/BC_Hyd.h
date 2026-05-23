@@ -5,6 +5,9 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -83,15 +86,25 @@ public:
 */
     // ------------------------------------------------------------------
     // bcTheta — polar boundary conditions (j = 0, j = jm-1)
-    // All fields: von Neumann at both poles
     // ------------------------------------------------------------------
     void bcTheta()
     {
+        // Pole BC: zero-gradient (copy from first interior cell). At the spherical
+        // singularity sin θ → 0, any extrapolation amplifies grid noise:
+        //   - (4/3, -1/3) form has amplification factor 4/3
+        //   - cubic p[0] = p[3] − 3 p[2] + 3 p[1] has condition number ~7
+        // With strong bulk flow these are washed out, but with a weak / spinning-up
+        // velocity field the amplified noise dominates and reaches NaN at the pole
+        // (atmosphere experience: NaN at 90°N within ~150 iter). Plain copy gives
+        // factor 1.0 — same as an axisymmetric-pole assumption to first order.
+        // Turbulence scalars (tke, dis, nue, prod, tke_source, dis_source) included
+        // so the polar metric singularity does not amplify them either.
         Array* fields_vn[] = {
             &m.t, &m.u, &m.v, &m.w, &m.c,
             &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance,
             &m.BuoyancyForce, &m.CoriolisForce,
-            &m.CentrifugalForce, &m.PresGradForce
+            &m.CentrifugalForce, &m.PresGradForce,
+            &m.tke, &m.dis, &m.nue, &m.prod, &m.tke_source, &m.dis_source
         };
         constexpr int n_vn = sizeof(fields_vn) / sizeof(fields_vn[0]);
 
@@ -102,8 +115,8 @@ public:
             for (int k = 0; k < m.km; k++) {
                 for (int f = 0; f < n_vn; f++) {
                     double*** xf = fields_vn[f]->x;
-                    xf[i][0][k]   = m.c43 * xf[i][1][k]       - m.c13 * xf[i][2][k];
-                    xf[i][jml][k] = m.c43 * xf[i][jml-1][k]   - m.c13 * xf[i][jml-2][k];
+                    xf[i][0][k]   = xf[i][1][k];
+                    xf[i][jml][k] = xf[i][jml-1][k];
                 }
             }
         }
@@ -149,25 +162,71 @@ public:
         using namespace std;
         cout << endl << "      OGCM: BC_SolidGround" << endl;
 
+        // 6-neighbour water averaging.
+        //
+        // Replaces the previous (4/3)·x_near − (1/3)·x_far one-sided Neumann
+        // extrapolation, which amplified any boundary noise by 4/3 and was
+        // direction-dependent (only the first matching side was used).  At steep
+        // bathymetric features (mid-ocean ridges, continental shelves) that
+        // single-direction stencil could overshoot, producing spurious p_dyn
+        // anomalies that propagated into the interior pressure field.  This
+        // mirrors the atmosphere fix for bcSolidGround Pass 2 (Himalaya peak).
+        //
+        // For each land ghost cell, look at the 6 face neighbours (i±1, j±1, k±1
+        // with k periodic).  Average whichever of those are water cells, with
+        // equal weights.  Amplification factor 1.0, direction-independent, and
+        // naturally degrades to plain copy when only one neighbour is water.
+        // Fully buried cells (no water neighbour) are left at the Step-1 default
+        // state and continue to anchor the Poisson Dirichlet for p_dyn.
+        //
+        // Non-negative fields (tke, dis, nue, c, t in non-dim form) are wrapped
+        // in std::max(0.0, ...) defensively — averaging non-negative values can
+        // only produce non-negative results, but the clamp protects against any
+        // pre-existing negative value in a contributing neighbour.
+        auto average_from_water_neighbors = [&](int i, int j, int k) {
+            int kp = (k + 1)        % m.km;
+            int kn = (k - 1 + m.km) % m.km;
+            bool w_ip = (i + 1 < m.im) && is_water(m.h, i+1, j, k);
+            bool w_im = (i - 1 >= 0)    && is_water(m.h, i-1, j, k);
+            bool w_jp = (j + 1 < m.jm) && is_water(m.h, i, j+1, k);
+            bool w_jm = (j - 1 >= 0)    && is_water(m.h, i, j-1, k);
+            bool w_kp = is_water(m.h, i, j, kp);
+            bool w_km = is_water(m.h, i, j, kn);
 
-        // Local c43/c13 as double — the class members are int (truncated),
-        // so shadow them explicitly for correct extrapolation here.
-        constexpr double c43 = 4.0 / 3.0;
-        constexpr double c13 = 1.0 / 3.0;
+            int count = (int)w_ip + (int)w_im + (int)w_jp + (int)w_jm + (int)w_kp + (int)w_km;
+            if (count == 0) return;
+            const double inv = 1.0 / static_cast<double>(count);
 
-        auto extrap2 = [&](int i, int j, int k,
-                           int i1, int j1, int k1,
-                           int i2, int j2, int k2) {
-            m.p_dyn.x[i][j][k]   = c43 * m.p_dyn.x[i1][j1][k1]   - c13 * m.p_dyn.x[i2][j2][k2];
-            m.p_hydro.x[i][j][k] = c43 * m.p_hydro.x[i1][j1][k1] - c13 * m.p_hydro.x[i2][j2][k2];
-//            m.c.x[i][j][k]       = c43 * m.c.x[i1][j1][k1]       - c13 * m.c.x[i2][j2][k2];
-        };
+            auto avg = [&](const Array& f) -> double {
+                double sum = 0.0;
+                if (w_ip) sum += f.x[i+1][j][k];
+                if (w_im) sum += f.x[i-1][j][k];
+                if (w_jp) sum += f.x[i][j+1][k];
+                if (w_jm) sum += f.x[i][j-1][k];
+                if (w_kp) sum += f.x[i][j][kp];
+                if (w_km) sum += f.x[i][j][kn];
+                return sum * inv;
+            };
 
-        auto copy2 = [&](int i, int j, int k,
-                         int i1, int j1, int k1) {
-            m.p_dyn.x[i][j][k]   = m.p_dyn.x[i1][j1][k1];
-            m.p_hydro.x[i][j][k] = m.p_hydro.x[i1][j1][k1];
-//            m.c.x[i][j][k]       = m.c.x[i1][j1][k1];
+            // Turbulence scalars (non-negative).
+            m.tke.x[i][j][k] = std::max(0.0, avg(m.tke));
+            m.dis.x[i][j][k] = std::max(0.0, avg(m.dis));
+            m.nue.x[i][j][k] = std::max(0.0, avg(m.nue));
+
+            // Thermodynamic / dynamic scalars.
+            m.t.x[i][j][k]            = avg(m.t);
+            m.c.x[i][j][k]            = std::max(0.0, avg(m.c));
+            m.p_dyn.x[i][j][k]        = avg(m.p_dyn);
+            m.p_hydro.x[i][j][k]      = avg(m.p_hydro);
+            m.r_water.x[i][j][k]      = avg(m.r_water);
+            m.r_salt_water.x[i][j][k] = avg(m.r_salt_water);
+
+            // Body-force diagnostics — averaged so cross-sections show smooth
+            // fields across the seafloor instead of a sharp zero step.
+            m.BuoyancyForce.x[i][j][k]    = avg(m.BuoyancyForce);
+            m.CoriolisForce.x[i][j][k]    = avg(m.CoriolisForce);
+            m.CentrifugalForce.x[i][j][k] = avg(m.CentrifugalForce);
+            m.PresGradForce.x[i][j][k]    = avg(m.PresGradForce);
         };
 
         // ---- Step 1: Zero all land cells --------------------------------
@@ -206,46 +265,103 @@ public:
             }
         }
 
-        // ---- Step 2: Extrapolate p_dyn, p_hydro and c at land-ocean interfaces ---
-        #pragma omp parallel for collapse(3)
+        // ---- Step 1b (inviscid spin-up only): free-slip override on surface land cells ---
+        // Step 1 above zeroed velocity in every land cell. Here we overwrite the velocity
+        // of land cells that border water with a reflecting condition: wall-normal component
+        // zero, tangential components mirrored from the adjacent water cell. The choice of
+        // "normal" follows the first water neighbour found (priority i+1, then j-faces, then
+        // k-faces with Greenwich wrap). One face per cell is enough for spin-up.
+        if (m.inviscid_phase) {
+            #pragma omp parallel for collapse(3)
+            for (int i = 0; i < m.im; i++) {
+                for (int j = 0; j < m.jm; j++) {
+                    for (int k = 0; k < m.km; k++) {
+                        if (!is_land(m.h, i, j, k)) continue;
+
+                        bool water_above = (i + 1 <= m.im - 1) && is_water(m.h, i+1, j, k);
+                        if (water_above) {
+                            m.u.x[i][j][k] = 0.0;
+                            m.v.x[i][j][k] = m.v.x[i+1][j][k];
+                            m.w.x[i][j][k] = m.w.x[i+1][j][k];
+                        } else if (j > 0 && is_water(m.h, i, j-1, k)) {
+                            m.u.x[i][j][k] = m.u.x[i][j-1][k];
+                            m.v.x[i][j][k] = 0.0;
+                            m.w.x[i][j][k] = m.w.x[i][j-1][k];
+                        } else if (j < m.jm-1 && is_water(m.h, i, j+1, k)) {
+                            m.u.x[i][j][k] = m.u.x[i][j+1][k];
+                            m.v.x[i][j][k] = 0.0;
+                            m.w.x[i][j][k] = m.w.x[i][j+1][k];
+                        } else {
+                            int k_prev = (k > 0)        ? k - 1 : m.km - 1;
+                            int k_next = (k < m.km - 1) ? k + 1 : 0;
+                            if (is_water(m.h, i, j, k_prev)) {
+                                m.u.x[i][j][k] = m.u.x[i][j][k_prev];
+                                m.v.x[i][j][k] = m.v.x[i][j][k_prev];
+                                m.w.x[i][j][k] = 0.0;
+                            } else if (is_water(m.h, i, j, k_next)) {
+                                m.u.x[i][j][k] = m.u.x[i][j][k_next];
+                                m.v.x[i][j][k] = m.v.x[i][j][k_next];
+                                m.w.x[i][j][k] = 0.0;
+                            }
+                            // else: fully buried — leave at the zero set by Step 1.
+                        }
+                        m.un.x[i][j][k] = m.u.x[i][j][k];
+                        m.vn.x[i][j][k] = m.v.x[i][j][k];
+                        m.wn.x[i][j][k] = m.w.x[i][j][k];
+                    }
+                }
+            }
+        }
+
+        // ---- Step 2: 6-neighbour water averaging at every land ghost cell ---
+        // Replaces direction-biased (4/3, -1/3) Neumann extrapolation.  Buried
+        // interior cells (no water neighbour) are left at the Step-1 zero/default
+        // state and continue to serve as the Poisson Dirichlet anchor for p_dyn.
+        #pragma omp parallel for schedule(static)
         for (int i = 1; i < m.im-1; i++) {
-            for (int j = 1; j < m.jm-1; j++) {
-                for (int k = 1; k < m.km-1; k++) {
-
-                    const bool land_ijk = is_land(m.h, i, j, k);
-
-                    // i-direction
-                    if (i < m.im-3) {
-                        if (land_ijk && is_water(m.h, i+1, j, k))
-                            extrap2(i,j,k, i+1,j,k, i+2,j,k);
-                    } else if (i == m.im-2) {
-                        if (land_ijk && is_water(m.h, i+1, j, k))
-                            copy2(i,j,k, i+1,j,k);
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    if (is_land(m.h, i, j, k)) {
+                        average_from_water_neighbors(i, j, k);
                     }
+                }
+            }
+        }
 
-                    // j-direction — interior
-                    if (j > 2 && j < m.jm-3) {
-                        if (land_ijk && is_water(m.h, i, j+1, k) && is_water(m.h, i, j+2, k))
-                            extrap2(i,j,k, i,j+1,k, i,j+2,k);
-                        if (land_ijk && is_water(m.h, i, j-1, k) && is_water(m.h, i, j-2, k))
-                            extrap2(i,j,k, i,j-1,k, i,j-2,k);
-                    }
+        // ---- Step 3: defensive bit-level sanitization of turbulence fields ---
+        // Under -ffast-math, std::max / std::clamp are unreliable on NaN inputs
+        // (the compiler assumes operands are finite).  A NaN intermediate in
+        // `prod` (computed in TurbulenceHyd / RHS_Hyd_Turb near the polar metric
+        // singularity or a steep bathymetric corner) could leak through max(0,...)
+        // and contaminate the next RK4 cycle.  Use the same bit-level non-finite
+        // check as Paraview_Hyd::safe_val to reset non-finite values to physically
+        // sane defaults, then clip to physical ceilings.  Last operation here so
+        // all fields are bounded by the time the next solver step reads them.
+        const double tke_max_phys = 1000.0;
+        const double tke_max_nd   = tke_max_phys / (m.u_0 * m.u_0);
+        const double nue_max      = 1000.0 / (m.u_0 * m.L_hyd);
+        const double prod_max     = 1.0e4;            // [m²/s³] — generous
+        const double dis_max      = 1.0e6;            // [m²/s³] — generous for ω*
 
-                    // j-direction — poles
-                    if (j == 0)        copy2(i,j,k, i,j+1,k);
-                    if (j == m.jm-1)   copy2(i,j,k, i,j-1,k);
+        auto safe_clamp = [](double v, double lo, double hi) -> double {
+            std::uint64_t bits;
+            std::memcpy(&bits, &v, sizeof(bits));
+            if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return lo;
+            return (v < lo) ? lo : (v > hi) ? hi : v;
+        };
 
-                    // k-direction — interior
-                    if (k > 2 && k < m.km-3) {
-                        if (land_ijk && is_water(m.h, i, j, k+1) && is_water(m.h, i, j, k+2))
-                            extrap2(i,j,k, i,j,k+1, i,j,k+2);
-                        if (land_ijk && is_water(m.h, i, j, k-1) && is_water(m.h, i, j, k-2))
-                            extrap2(i,j,k, i,j,k-1, i,j,k-2);
-                    }
-
-                    // k-direction — Greenwich
-                    if (k == 0)        copy2(i,j,k, i,j,k+1);
-                    if (k == m.km-1)   copy2(i,j,k, i,j,k-1);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    m.tke.x[i][j][k]        = safe_clamp(m.tke.x[i][j][k],        0.0,        tke_max_nd);
+                    m.tken.x[i][j][k]       = safe_clamp(m.tken.x[i][j][k],       0.0,        tke_max_nd);
+                    m.dis.x[i][j][k]        = safe_clamp(m.dis.x[i][j][k],        1.0e-10,    dis_max);
+                    m.disn.x[i][j][k]       = safe_clamp(m.disn.x[i][j][k],       1.0e-10,    dis_max);
+                    m.nue.x[i][j][k]        = safe_clamp(m.nue.x[i][j][k],        0.0,        nue_max);
+                    m.prod.x[i][j][k]       = safe_clamp(m.prod.x[i][j][k],       0.0,        prod_max);
+                    m.tke_source.x[i][j][k] = safe_clamp(m.tke_source.x[i][j][k], -prod_max,  prod_max);
+                    m.dis_source.x[i][j][k] = safe_clamp(m.dis_source.x[i][j][k], -prod_max,  prod_max);
                 }
             }
         }

@@ -142,7 +142,10 @@ public:
         int k_zonal = 185;
         m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.iter_n);
 
-        if (m.paraview_panorama_vts_flag && m.panorama_cnt == m.panorama_print)
+        // Panorama VTS fires whenever iter_n is a multiple of panorama_print (see comment
+        // in UtilsAtm.h::writeFile for why the panorama_cnt counter was replaced).
+        if (m.paraview_panorama_vts_flag && m.panorama_print > 0
+            && m.iter_n > 0 && m.iter_n % m.panorama_print == 0)
             m.paraview_panorama_vts(bathymetry_name, m.iter_n);
 
         m.HydrospherePlotData(bathymetry_name);

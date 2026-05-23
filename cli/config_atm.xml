@@ -4,7 +4,7 @@
         <BathymetrySuffix>Ma_smooth.xyz</BathymetrySuffix>  <!-- suffix of the timesteps Ma in million years(string) -->
         <config_xml_path>../python</config_xml_path>  <!-- directory where the configuration files are located(string) -->
         <verbose>false</verbose>  <!-- some description of the module(bool) -->
-        <paraview_panorama_vts_flag>false</paraview_panorama_vts_flag>  <!-- flag to control if create paraview panorama(bool) -->
+        <paraview_panorama_vts_flag>true</paraview_panorama_vts_flag>  <!-- flag to control if create paraview panorama(bool) -->
         <Coriolis>1</Coriolis>  <!-- Coriolis force(double) -->
         <centrifugal>1</centrifugal>  <!-- centrifugal force(double) -->
         <buoyancy>1</buoyancy>  <!-- buoyancy force(double) -->
@@ -42,11 +42,15 @@
         <sigma>5.67028e-08</sigma>  <!-- Stefan-Boltzmann constant W/(m²*K4)(double) -->
         <eps_residuum>0.0001</eps_residuum>  <!-- relative error, end of iterations reached, 1% error  allowed(double) -->
         <turb_model>k_omega_SST</turb_model>  <!-- turbulence model: none, k_epsilon, k_omega, k_omega_SST(string) -->
+        <inviscid_spinup_iters>300</inviscid_spinup_iters>  <!-- cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables(int) -->
+        <inviscid_ramp_iters>20</inviscid_ramp_iters>  <!-- iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase(int) -->
+        <dt_visc>0.001</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
+        <dt_inviscid>0.0001</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
     </common>
     <atmosphere>
-        <nm>4</nm>  <!-- the maximum number of iterations(int) -->
-        <checkpoint>2</checkpoint>  <!-- control when to write output files(int) -->
-        <panorama_print>10</panorama_print>  <!-- control when to write panorama files(int) -->
+        <nm>400</nm>  <!-- the maximum number of iterations(int) -->
+        <checkpoint>10</checkpoint>  <!-- control when to write output files(int) -->
+        <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
         <coeff_Dalton>0.7</coeff_Dalton>  <!-- diffusion coefficient in evaporation by Dalton(double) -->
         <convection_perturbation>1</convection_perturbation>  <!-- convective trigger perturbation: 0=fixed, 1=Bechtold (2008) surface-flux-based for shallow/fixed for deep(int) -->
         <convection_mode>1</convection_mode>  <!-- convection type: 0=deep only (precipitating), 1=deep+shallow (non-precipitating if p_diff<p_stat_diff), 2=deep+shallow+midlevel (also non-precipitating for cloud base above p_stat_midlevel/700 hPa)(int) -->

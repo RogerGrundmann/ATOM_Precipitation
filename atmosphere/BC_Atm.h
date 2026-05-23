@@ -255,13 +255,57 @@ public:
                         // Surface cell — either the topographic top (i == i_mount) or a
                         // cliff face (i < i_mount but adjacent to air in j or k).
 
-                        // No-slip velocity (current and next time level).
-                        m.u.x[i][j][k]  = 0.0;
-                        m.v.x[i][j][k]  = 0.0;
-                        m.w.x[i][j][k]  = 0.0;
-                        m.un.x[i][j][k] = 0.0;
-                        m.vn.x[i][j][k] = 0.0;
-                        m.wn.x[i][j][k] = 0.0;
+                        if (!m.inviscid_phase) {
+                            // No-slip velocity (current and next time level).
+                            m.u.x[i][j][k]  = 0.0;
+                            m.v.x[i][j][k]  = 0.0;
+                            m.w.x[i][j][k]  = 0.0;
+                            m.un.x[i][j][k] = 0.0;
+                            m.vn.x[i][j][k] = 0.0;
+                            m.wn.x[i][j][k] = 0.0;
+                        } else {
+                            // Free-slip (reflecting) wall: wall-normal component zero, tangential
+                            // components mirrored from the adjacent air cell. Direction of "normal"
+                            // is chosen by which neighbour is air. Priority: i+1 (top of column),
+                            // then j-faces, then k-faces. Only one face is handled per cell — good
+                            // enough for the spin-up phase; cliff corners get the i-face treatment.
+                            bool air_above = (i + 1 <= m.im - 1) && is_air(m.h, i+1, j, k);
+                            if (air_above) {
+                                // Top of topographic column: normal is i. Zero u, mirror v,w.
+                                m.u.x[i][j][k]  = 0.0;
+                                m.v.x[i][j][k]  = m.v.x[i+1][j][k];
+                                m.w.x[i][j][k]  = m.w.x[i+1][j][k];
+                            } else if (j > 0 && is_air(m.h, i, j-1, k)) {
+                                m.u.x[i][j][k]  = m.u.x[i][j-1][k];
+                                m.v.x[i][j][k]  = 0.0;
+                                m.w.x[i][j][k]  = m.w.x[i][j-1][k];
+                            } else if (j < m.jm-1 && is_air(m.h, i, j+1, k)) {
+                                m.u.x[i][j][k]  = m.u.x[i][j+1][k];
+                                m.v.x[i][j][k]  = 0.0;
+                                m.w.x[i][j][k]  = m.w.x[i][j+1][k];
+                            } else {
+                                int k_prev2 = (k > 0)        ? k - 1 : m.km - 1;
+                                int k_next2 = (k < m.km - 1) ? k + 1 : 0;
+                                if (is_air(m.h, i, j, k_prev2)) {
+                                    m.u.x[i][j][k]  = m.u.x[i][j][k_prev2];
+                                    m.v.x[i][j][k]  = m.v.x[i][j][k_prev2];
+                                    m.w.x[i][j][k]  = 0.0;
+                                } else if (is_air(m.h, i, j, k_next2)) {
+                                    m.u.x[i][j][k]  = m.u.x[i][j][k_next2];
+                                    m.v.x[i][j][k]  = m.v.x[i][j][k_next2];
+                                    m.w.x[i][j][k]  = 0.0;
+                                } else {
+                                    // Cell flagged as surface but no air neighbour — should not
+                                    // occur given on_surface check; fall back to no-slip.
+                                    m.u.x[i][j][k]  = 0.0;
+                                    m.v.x[i][j][k]  = 0.0;
+                                    m.w.x[i][j][k]  = 0.0;
+                                }
+                            }
+                            m.un.x[i][j][k] = m.u.x[i][j][k];
+                            m.vn.x[i][j][k] = m.v.x[i][j][k];
+                            m.wn.x[i][j][k] = m.w.x[i][j][k];
+                        }
 
                         m.t.x[i][j][k]     = 1.0;
                         m.p_dyn.x[i][j][k] = 0.0;

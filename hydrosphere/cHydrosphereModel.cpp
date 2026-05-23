@@ -146,12 +146,11 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
 
     UtilsHyd(*this).resetArrays();
 
-//    dt = 0.00005;                                                       //  no dimension      prevents wiggles
-//    dt = 0.000075;                                                      //  no dimension      prevents wiggles
-//    dt = 0.0001;                                                        //  no dimension      prevents wiggles
-    dt = 0.0005;                                                        //  no dimension      prevents wiggles
+//    dt = 0.0005;                                                        //  no dimension      prevents wiggles
+    dt = dt_visc;                                                       //  no dimension; toggled to dt_inviscid during spin-up
 
     iter_n = 0;
+    total_iter_count = 0;                                               // reset per time slice so the inviscid spin-up fires at the start of every Ma slice
 
     rad.StretchedCoordinates(im, r0, dr, dr_stretch);
     the.Coordinates(jm, the0, dthe);
@@ -165,8 +164,7 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     initTemperature(Ma);
     AtomUtils::damp_wiggles(t, &i_bathymetry, true, true, true);
 
-//    if(!use_NASA_temperature) 
-//        IC_t_WestEastCoast();
+//    if(!use_NASA_temperature)  IC_t_WestEastCoast();
 
     initSalinity();
     AtomUtils::damp_wiggles(c, &i_bathymetry, true, true, true);
@@ -295,8 +293,6 @@ void cHydrosphereModel::run_3D_loop(){
 
 cout << endl << endl << endl << "      OGCM: run_3D_loop ..........................." << endl;
 
-    panorama_cnt = 0;
-
     // Set turbulence model flags once, before the iteration loop
     if (!turb_model.empty() && turb_model != "none") {
         use_turbulence_model             = true;
@@ -309,13 +305,40 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 
         print_loop_3D_headings();
 
-        if (use_turbulence_model) {
+        // Inviscid spin-up: zero diffusion for the first `inviscid_spinup_iters`
+        // cumulative iterations, then ramp linearly to full over `inviscid_ramp_iters`.
+        total_iter_count++;
+        if(inviscid_spinup_iters <= 0){
+            inviscid_phase = false;
+            diffusion_ramp = 1.0;
+        } else if(total_iter_count <= inviscid_spinup_iters){
+            inviscid_phase = true;
+            diffusion_ramp = 0.0;
+        } else {
+            inviscid_phase = false;
+            int over = total_iter_count - inviscid_spinup_iters;
+            diffusion_ramp = (inviscid_ramp_iters > 0)
+                ? std::min(1.0, static_cast<double>(over) / inviscid_ramp_iters)
+                : 1.0;
+        }
+        dt = inviscid_phase ? dt_inviscid : dt_visc;
+        cout << "      OGCM: iter = " << total_iter_count
+             << "  inviscid_phase = " << (inviscid_phase ? "true" : "false")
+             << "  diffusion_ramp = " << std::fixed << std::setprecision(3) << diffusion_ramp
+             << "  dt = " << std::scientific << std::setprecision(4) << dt
+             << std::defaultfloat << endl;
+
+        if (use_turbulence_model && !inviscid_phase) {
             solveRungeKutta_Hydrosphere_Turb();
         } else {
             solveRungeKutta_Hydrosphere();
         }
 
-        if(iter_n % 2 == 0){
+        // Heavy block (pressure solver, salinity/thermo, turbulence update) runs every 2
+        // iterations in the viscous phase, but only every 10 iterations during the inviscid
+        // spin-up — dt_inviscid is 10× smaller so the physical-time cadence stays comparable.
+        int heavy_block_stride = inviscid_phase ? 10 : 2;
+        if(iter_n % heavy_block_stride == 0){
 
             PressureSolverHyd(*this).run();
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
@@ -326,13 +349,13 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             ThermoHyd(*this).runDataHyd();
             ThermoHyd(*this).forces();
 
-            if (use_turbulence_model) {
+            if (use_turbulence_model && !inviscid_phase) {
                 TurbulenceHyd(*this).run();
                 AtomUtils::damp_wiggles(tke, &i_bathymetry, true, true, true);
                 AtomUtils::damp_wiggles(dis, &i_bathymetry, true, true, true);
                 AtomUtils::damp_wiggles(nue, &i_bathymetry, true, true, true);
             }
-        }
+        }  // iter_n % heavy_block_stride == 0
 
         UtilsHyd(*this).valueLimitationHyd();
 
@@ -341,7 +364,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         BC_Hyd(*this).bcPhi();
         BC_Hyd(*this).bcSolidGround();
 
-        if (use_turbulence_model) {
+        if (use_turbulence_model && !inviscid_phase) {
             TurbulenceHyd(*this).apply_wall_bc();
         }
 
@@ -351,17 +374,11 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 
 //        print_min_max_hyd();
 
-        panorama_cnt++;
-
         if(iter_n % checkpoint == 0){
             print_min_max_hyd();
 
             UtilsHyd(*this).writeFile(bathymetry_name, output_path, true);
             cout << endl << "      OGCM: write_file in run_3D_loop ......................." << endl;
-        }
-
-        if((iter_n % 2 == 0)&&(panorama_cnt == panorama_print)){
-            panorama_cnt = 0;
         }
     }  // end iter_n
 

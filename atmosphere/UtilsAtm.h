@@ -270,7 +270,12 @@ public:
             m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.iter_n);
         }
 
-        if (m.paraview_panorama_vts_flag && m.panorama_cnt == m.panorama_print) {
+        // Panorama VTS fires whenever iter_n is a multiple of panorama_print.
+        // (The previous panorama_cnt counter was incremented at the end of each iter and
+        // could never reach panorama_print inside writeFile due to an off-by-one, and
+        // it also failed to align with heavy_block_stride during inviscid spin-up.)
+        if (m.paraview_panorama_vts_flag && m.panorama_print > 0
+            && m.iter_n > 0 && m.iter_n % m.panorama_print == 0) {
             m.paraview_panorama_vts(bathymetry_name, m.iter_n);
 //            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
         }

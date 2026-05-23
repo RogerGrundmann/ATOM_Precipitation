@@ -296,10 +296,13 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
     double coeff_MC_q     = L_atm / (u_0 * c_0);                        // 1428.57   s/(kg/kg)
     double coeff_MC_vel   = L_atm / (u_0 * u_0);                        // 6.25      s/(m/s)
 
-    double diff_t_re   = 1.0 / (re * pr);
-    double diff_vel_re = 1.0 / re;
-    double diff_prec_re_inv = 1.0 / (sc_WaterVapour * re);
-    double diff_co2_re_inv  = 1.0 / (sc_CO2 * re);
+    // Inviscid spin-up: diffusion_ramp = 0 during the Euler phase, ramped to 1 afterwards.
+    // Multiplying every diff_*_re coefficient by it preserves the RK4 structure — only the
+    // Laplacian contributions in the rhs assembly are scaled.
+    double diff_t_re   = diffusion_ramp * 1.0 / (re * pr);
+    double diff_vel_re = diffusion_ramp * 1.0 / re;
+    double diff_prec_re_inv = diffusion_ramp * 1.0 / (sc_WaterVapour * re);
+    double diff_co2_re_inv  = diffusion_ramp * 1.0 / (sc_CO2 * re);
 
     // ===== Transport terms (advection) =====
     // Precompute velocity * metric factors

@@ -4,7 +4,7 @@
         <BathymetrySuffix>Ma_smooth.xyz</BathymetrySuffix>  <!-- suffix of the timesteps Ma in million years(string) -->
         <config_xml_path>../python</config_xml_path>  <!-- directory where the configuration files are located(string) -->
         <verbose>false</verbose>  <!-- some description of the module(bool) -->
-        <paraview_panorama_vts_flag>false</paraview_panorama_vts_flag>  <!-- flag to control if create paraview panorama(bool) -->
+        <paraview_panorama_vts_flag>true</paraview_panorama_vts_flag>  <!-- flag to control if create paraview panorama(bool) -->
         <Coriolis>1</Coriolis>  <!-- Coriolis force(double) -->
         <centrifugal>1</centrifugal>  <!-- centrifugal force(double) -->
         <buoyancy>1</buoyancy>  <!-- buoyancy force(double) -->
@@ -42,6 +42,10 @@
         <sigma>5.67028e-08</sigma>  <!-- Stefan-Boltzmann constant W/(m²*K4)(double) -->
         <eps_residuum>0.0001</eps_residuum>  <!-- relative error, end of iterations reached, 1% error  allowed(double) -->
         <turb_model>k_omega_SST</turb_model>  <!-- turbulence model: none, k_epsilon, k_omega, k_omega_SST(string) -->
+        <inviscid_spinup_iters>300</inviscid_spinup_iters>  <!-- cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables(int) -->
+        <inviscid_ramp_iters>20</inviscid_ramp_iters>  <!-- iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase(int) -->
+        <dt_visc>0.001</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
+        <dt_inviscid>0.0001</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
     </common>
     <hydrosphere>
         <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->

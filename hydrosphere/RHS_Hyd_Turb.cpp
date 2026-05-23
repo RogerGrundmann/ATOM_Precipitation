@@ -275,10 +275,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
 
     // ===== Ocean physics: Coriolis, centrifugal, buoyancy =====
+    // Coriolis acceleration -2 Ω × v in (r, θ, φ) with θ = colatitude
+    // (the0 = 0 at N pole), v south-positive (= +ê_θ), w east-positive:
+    //   F_r = +2Ω sin(θ) w               (Eötvös: east → up at equator)
+    //   F_θ = +2Ω cos(θ) w
+    //   F_φ = -2Ω cos(θ) v - 2Ω sin(θ) u
     double two_omega_Lhyd_dt_over_u0 = 2.0 * omega * L_hyd / u_0 * dt;
-    double Coriolis_rad = -two_omega_Lhyd_dt_over_u0 * sinthe * w_ijk;
+    double Coriolis_rad =  two_omega_Lhyd_dt_over_u0 * sinthe * w_ijk;
     double Coriolis_the =  two_omega_Lhyd_dt_over_u0 * costhe * w_ijk;
-    double Coriolis_phi =  two_omega_Lhyd_dt_over_u0 * (-costhe * v_ijk + sinthe * u_ijk);
+    double Coriolis_phi = -two_omega_Lhyd_dt_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
 
     double rad_dist     = (double)i * L_hyd * exp_rm;
     double rad_Earth_m  = rad_dist + r_Earth * 1e3;
@@ -516,9 +521,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double transport_tke = u_exp * dtkedr + v_invrm * dtkedthe + w_invrs * dtkedphi;
     double transport_dis = u_exp * ddisdr + v_invrm * ddisdthe + w_invrs * ddisdphi;
 
-    double div_vel = dudr + dvdthe * inv_rm + dwdphi * inv_rmsinthe;
-    transport_tke += tke.x[i][j][k] * div_vel;
-    transport_dis += dis.x[i][j][k] * div_vel;
+    // Advective form only (v·∇k, v·∇ω) — matches the standard k-ε / k-ω derivations
+    // (Pope, Wilcox, Menter).  A previous version added the conservative-form
+    // correction `+tke·∇·v` and `+dis·∇·v`; in an incompressible flow ∇·v=0 and the
+    // two forms agree, but the sea-water solver here is not enforced divergence-free
+    // until the pressure projection completes, so the term produced spurious
+    // exponential growth of tke wherever the divergence persisted between projections.
+    // The atmosphere lost ~1e98 m²/s² at one cell to the same bug; removing the
+    // correction restores the standard derivation.  Y_w = β₀·dis² is quadratic and
+    // self-limiting, so dis was less affected.
 
 
     // ===== Diffusion =====
@@ -566,8 +577,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
     rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t;
 
+    // Boussinesq buoyancy with thermal + haline anomaly.  Only the anomaly
+    // relative to the reference state (t = 1, c = 1) drives radial motion;
+    // the hydrostatic reference is absorbed into the pressure split.
+    // Warm (t > 1) rises; salty (c > 1) sinks.  alpha_S ≈ (β_S·S_0)/(α_T·T_0)
+    // sets the haline / thermal weighting; see RHS_Hyd.cpp for derivation.
+    constexpr double alpha_S = 0.5;
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        - buoyancy * g * dt / u_0
+        + buoyancy * g * dt / u_0
+            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v

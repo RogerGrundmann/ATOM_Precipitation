@@ -222,6 +222,11 @@ private:
 
 public:
 
+    // Inviscid spin-up state (mirror of cAtmosphereModel — see RHS_Hyd.cpp and BC_Hyd.h).
+    int total_iter_count = 0;
+    double diffusion_ramp = 1.0;
+    bool inviscid_phase = false;
+
     Array_1D rad;                                                       // radial coordinate direction
     Array_1D the;                                                       // lateral coordinate direction
     Array_1D phi;                                                       // longitudinal coordinate direction

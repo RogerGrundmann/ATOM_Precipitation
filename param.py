@@ -23,8 +23,8 @@ def main():
 
             ('verbose', 'some description of the module', 'bool', False),
 
-            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', False),
-#            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', True),
+#            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', False),
+            ('paraview_panorama_vts_flag','flag to control if create paraview panorama', 'bool', True),
 
             ('Coriolis', 'Coriolis force', 'double', 1),
 #            ('Coriolis', 'Coriolis force', 'double', 0),
@@ -39,8 +39,6 @@ def main():
             ('omega', 'rotation rate of the earth in rad/s', 'double', 7.292e-5),
 
             ('g', 'gravitational acceleration of the earth in m/s²', 'double', 9.8066),
-
-
 
 
 
@@ -111,14 +109,25 @@ def main():
             ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_omega_SST'),
 #            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_omega'),
 #            ('turb_model', 'turbulence model: none, k_epsilon, k_omega, k_omega_SST', 'string', 'k_epsilon'),
+
+#            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 100),
+#            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 40),
+#            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 80),
+            ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 300),
+            ('inviscid_ramp_iters', 'iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase', 'int', 20),
+
+            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
+            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0001),
         ],
 
 
         'atmosphere': [
 
-            ('nm', 'the maximum number of iterations', 'int', 4),
-            ('checkpoint', "control when to write output files", 'int', 2),
-            ('panorama_print', "control when to write panorama files", 'int', 10),
+#            ('nm', 'the maximum number of iterations', 'int', 4),
+#            ('nm', 'the maximum number of iterations', 'int', 100),
+            ('nm', 'the maximum number of iterations', 'int', 400),
+            ('checkpoint', "control when to write output files", 'int', 10),
+            ('panorama_print', "control when to write panorama files", 'int', 100),
 
 
             ('coeff_Dalton', "diffusion coefficient in evaporation by Dalton", 'double', 0.7),

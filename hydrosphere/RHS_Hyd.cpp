@@ -247,10 +247,15 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
 
 
     // ===== Physics: Coriolis, centrifugal, coefficients =====
-    double two_omega_Latm_dt_over_u0 = 2.0 * omega * L_hyd / u_0 * dt;
-    double Coriolis_rad = -two_omega_Latm_dt_over_u0 * sinthe * w_ijk;
-    double Coriolis_the =  two_omega_Latm_dt_over_u0 * costhe * w_ijk;
-    double Coriolis_phi =  two_omega_Latm_dt_over_u0 * (-costhe * v_ijk + sinthe * u_ijk);
+    // Coriolis acceleration -2 Ω × v in (r, θ, φ) with θ = colatitude
+    // (the0 = 0 at N pole), v south-positive (= +ê_θ), w east-positive:
+    //   F_r = +2Ω sin(θ) w               (Eötvös: east → up at equator)
+    //   F_θ = +2Ω cos(θ) w
+    //   F_φ = -2Ω cos(θ) v - 2Ω sin(θ) u
+    double two_omega_Lhyd_dt_over_u0 = 2.0 * omega * L_hyd / u_0 * dt;
+    double Coriolis_rad =  two_omega_Lhyd_dt_over_u0 * sinthe * w_ijk;
+    double Coriolis_the =  two_omega_Lhyd_dt_over_u0 * costhe * w_ijk;
+    double Coriolis_phi = -two_omega_Lhyd_dt_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
 
     double rad_dist = (double)i * L_hyd * exp_rm;
     double rad_Earth_m = rad_dist + r_Earth * 1e3;
@@ -262,9 +267,10 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
 //    double coeff_energy   = L_hyd / (u_0 * cp_l * t_0);
     double coeff_energy_p = u_0 * u_0 / (cp_w * t_0);
 
-    double diff_t_re   = 1.0 / (re * pr);
-    double diff_vel_re = 1.0 / re;
-    double diff_prec_re_inv = 1.0 / (sc * re);
+    // Inviscid spin-up: diffusion_ramp = 0 during the Euler phase, ramped to 1 afterwards.
+    double diff_t_re   = diffusion_ramp * 1.0 / (re * pr);
+    double diff_vel_re = diffusion_ramp * 1.0 / re;
+    double diff_prec_re_inv = diffusion_ramp * 1.0 / (sc * re);
 
     // ===== Transport terms (advection) =====
     // Precompute velocity * metric factors
@@ -318,8 +324,23 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
 
     rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t;
 
+    // Boussinesq buoyancy with thermal + haline anomaly.  Only the anomaly
+    // relative to the reference state (t = 1, c = 1) drives radial motion;
+    // the hydrostatic reference is absorbed into the pressure split.
+    //
+    // Linearised EOS:  ρ/ρ_0 = 1 - α_T·T_0·(t-1) + β_S·S_0·(c-1)
+    // Buoyancy:        -g·(ρ-ρ_0)/ρ_0 = +g·α_T·T_0·(t-1) - g·β_S·S_0·(c-1)
+    //
+    // Warm  (t > 1) → less dense → rises  (positive contribution).
+    // Salty (c > 1) → denser     → sinks (negative contribution).
+    //
+    // alpha_S ≈ (β_S·S_0)/(α_T·T_0) ≈ (7.6e-4 × 35)/(2e-4 × 283) ≈ 0.5
+    // sets the relative weighting of haline vs. thermal forcing.  Adjust if
+    // the model uses different α_T, β_S, or reference T_0/S_0.
+    constexpr double alpha_S = 0.5;
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        - buoyancy * g * dt / u_0
+        + buoyancy * g * dt / u_0
+            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v

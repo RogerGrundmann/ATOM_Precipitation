@@ -53,6 +53,10 @@ cdef extern from "cHydrosphereModel.h":
         double sigma
         double eps_residuum
         string turb_model
+        int inviscid_spinup_iters
+        int inviscid_ramp_iters
+        double dt_visc
+        double dt_inviscid
         # hydrosphere section
         string input_path
         int nm

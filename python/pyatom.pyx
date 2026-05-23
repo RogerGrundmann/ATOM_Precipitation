@@ -488,6 +488,42 @@ cdef class Atmosphere:
             self._check_alive()
             self._thisptr.turb_model = <string> value
     
+    property inviscid_spinup_iters:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.inviscid_spinup_iters
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.inviscid_spinup_iters = <int> value
+    
+    property inviscid_ramp_iters:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.inviscid_ramp_iters
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.inviscid_ramp_iters = <int> value
+    
+    property dt_visc:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.dt_visc
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.dt_visc = <double> value
+    
+    property dt_inviscid:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.dt_inviscid
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.dt_inviscid = <double> value
+    
     # atmosphere section
     property nm:
         def __get__(Atmosphere self):
@@ -1393,6 +1429,42 @@ cdef class Hydrosphere:
         def __set__(Hydrosphere self, value):
             self._check_alive()
             self._thisptr.turb_model = <string> value
+    
+    property inviscid_spinup_iters:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.inviscid_spinup_iters
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.inviscid_spinup_iters = <int> value
+    
+    property inviscid_ramp_iters:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.inviscid_ramp_iters
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.inviscid_ramp_iters = <int> value
+    
+    property dt_visc:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.dt_visc
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.dt_visc = <double> value
+    
+    property dt_inviscid:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.dt_inviscid
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.dt_inviscid = <double> value
     
     # hydrosphere section
     property input_path:
