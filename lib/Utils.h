@@ -172,6 +172,67 @@ namespace AtomUtils{
                       double strength = 1.0,
                       int passes = 1);
 
+    // Latitude-dependent zonal (φ) Shapiro filter — the classic lat-lon "polar
+    // filter".  On a lat-lon grid the zonal cell width rm·sinθ·dφ shrinks toward
+    // the poles, so the explicit zonal CFL number ~ |w|/(rm·sinθ·dφ) diverges and
+    // short φ-wavelengths blow up at high latitude (root cause of the ATOM
+    // post-155 polar instability).  This applies the same periodic 1-2-1 zonal
+    // step as damp_wiggles along k only, but the number of passes grows toward the
+    // poles so the effective zonal resolution is held to that at the reference
+    // latitude.  Equatorward of lat_filter_start_deg nothing is touched.
+    //
+    //   passes(j) = clamp( round( (sinθ_ref/sinθ_j)² − 1 ), 0, max_passes )
+    //   sinθ_j = sin(colat[j]) = cos(lat_j);  sinθ_ref = cos(lat_filter_start_deg)
+    //
+    // The square is not arbitrary: a 1-2-1 filter applied n times smooths over
+    // ~√n grid cells, so holding the effective zonal resolution to the reference
+    // latitude needs n ∝ (Δx_ref/Δx)² = (sinθ_ref/sinθ_j)².  A linear law left the
+    // 60–72° band with 0 passes (round-down), which is where the residual 67°S
+    // near-surface Antarctic-coast seed lived.  With start=40° the quadratic law
+    // gives 67° ~3 passes and ramps to the cap by ~78°, while the storm-track band
+    // equatorward of ~53° still gets 0 (large-scale Southern-Ocean eddies preserved).
+    //
+    // colat: pointer to the per-row colatitude in radians (Array_1D::z, i.e. the.z).
+    //        Row count is taken from field.jm, so colat must have field.jm entries.
+    // i_surface / boundary conventions (periodic k, solid-cell skip) match
+    // damp_wiggles.  Pass nullptr for i_surface to filter all cells.
+    void polar_zonal_filter(Array& field,
+                            const double* colat,
+                            const std::vector<std::vector<int>>* i_surface,
+                            double lat_filter_start_deg = 40.0,
+                            int    max_passes = 12);
+
+    // Orographic Shapiro filter — companion to polar_zonal_filter for the OTHER lat-lon
+    // CFL hot-spot: steep topography at ANY latitude (Patagonian Andes 49°S/74°W, Atlas
+    // 36°N/2°E, NZ Alps 46°S/170°E). At a steep cliff the near-surface horizontal velocity
+    // develops a grid-scale (2Δ) oscillation that explicit advection amplifies into a CFL
+    // blow-up; the polar filter keys on latitude and these sites are mid-latitude, so it
+    // never reaches them. This applies `passes` 1-2-1 Shapiro sweeps along k (periodic)
+    // AND j to `field`, but ONLY at air cells within `n_layers_above` of the surface in
+    // columns whose surface index jumps by >= `steep_threshold` cells relative to a
+    // horizontal neighbour. Solid neighbours use no-flux (current-cell substitution),
+    // matching damp_wiggles / polar_zonal_filter. strength in [0,1] scales the coefficient
+    // (0.25 at 1). All parameters are tunable; defaults target the observed cliff blow-ups.
+    void orographic_shapiro_filter(Array& field,
+                                   const std::vector<std::vector<int>>& i_surface,
+                                   int    steep_threshold = 3,
+                                   int    n_layers_above  = 12,
+                                   int    passes          = 2,
+                                   double strength        = 1.0);
+
+    // Gentle global radial (i) Shapiro de-checkerboarding. The steep-orography velocity
+    // blow-up is a 2Δ grid-scale checkerboard whose purest component is on the RADIAL axis
+    // (wmode r=1.000), and it grows at near-surface cells that orographic_shapiro_filter's
+    // steep-column mask never flags — so NO other filter (polar=k, orographic=j+k+steep)
+    // reaches it. This applies `passes` 1-2-1 radial sweeps to ALL fluid cells: a single
+    // 1-2-1 (coeff 0.25·strength) annihilates a level-to-level 2Δ oscillation in one pass
+    // yet barely touches smooth vertical shear, so it is safe to run globally every iter.
+    // No-flux (current-cell substitution) at the solid surface below; i=0/i=im-1 left to BCs.
+    void radial_shapiro_filter(Array& field,
+                               const std::vector<std::vector<int>>& i_surface,
+                               int    passes   = 1,
+                               double strength = 1.0);
+
     // Extreme-peak removal filter for an Array field.
     //
     // Along each enabled axis the two direct neighbours of every cell define a

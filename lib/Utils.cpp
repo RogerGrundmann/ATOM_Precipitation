@@ -2,6 +2,8 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <cmath>
+#include <algorithm>
 
 #include <Utils.h>
 #include "cAtmosphereModel.h"
@@ -514,6 +516,238 @@ void AtomUtils::damp_wiggles(Array& field,
             }
         }
 
+    } // passes
+}
+
+
+
+// ============================================================================
+// Latitude-dependent zonal (φ) "polar filter"
+// ============================================================================
+// Periodic 1-2-1 Shapiro step along k only, with a per-row pass count that grows
+// toward the poles so the effective zonal resolution is held to that at the
+// reference latitude.  See the header for the rationale (lat-lon polar CFL).
+void AtomUtils::polar_zonal_filter(Array& field,
+                                   const double* colat,
+                                   const std::vector<std::vector<int>>* i_surface,
+                                   double lat_filter_start_deg,
+                                   int    max_passes)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (max_passes <= 0 || !colat) return;
+
+    // Reference metric factor sinθ_ref = cos(lat_filter_start) and a per-row pass
+    // count passes[j] = clamp( round(sinθ_ref/sinθ_j − 1), 0, max_passes ).
+    const double deg2rad = M_PI / 180.0;
+    const double sin_ref = std::cos(lat_filter_start_deg * deg2rad);   // = sinθ at the reference latitude
+
+    std::vector<int> passes(jm, 0);
+    int global_max = 0;
+    for (int j = 0; j < jm; ++j) {
+        const double sin_j = std::max(std::sin(colat[j]), 1.0e-6);     // guard the pole rows (sinθ→0)
+        if (sin_j >= sin_ref) continue;                                // equatorward of the reference latitude: untouched
+        const double ratio = sin_ref / sin_j;                          // >1 poleward of the reference latitude
+        int p = (int)std::lround(ratio * ratio - 1.0);                 // passes ∝ ratio² (√n smoothing length, see header)
+        if (p < 0) p = 0;
+        if (p > max_passes) p = max_passes;
+        passes[j] = p;
+        if (p > global_max) global_max = p;
+    }
+    if (global_max == 0) return;
+
+    auto in_fluid = [&](int i, int j, int k) -> bool {
+        if (!i_surface) return true;
+        return i >= std::max((*i_surface)[j][k], 0);
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+
+    const double coeff = 0.25;   // full 1-2-1 Shapiro step (strength = 1)
+
+    for (int pass = 0; pass < global_max; ++pass) {
+
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                if (passes[j] <= pass) continue;                        // this row has reached its pass quota
+                for (int k = 0; k < km; ++k) {
+                    if (!in_fluid(i, j, k)) continue;
+                    const int km1 = (k - 1 + km) % km;
+                    const int kp1 = (k + 1)      % km;
+                    // no-flux at solid neighbours: substitute current cell value
+                    const double v_km1 = in_fluid(i, j, km1) ? tmp[idx(i,j,km1)] : tmp[idx(i,j,k)];
+                    const double v_kp1 = in_fluid(i, j, kp1) ? tmp[idx(i,j,kp1)] : tmp[idx(i,j,k)];
+                    field.x[i][j][k] = tmp[idx(i,j,k)]
+                        + coeff * (v_km1 - 2.0 * tmp[idx(i,j,k)] + v_kp1);
+                }
+            }
+        }
+    } // passes
+}
+
+
+
+// ============================================================================
+// Orographic Shapiro filter (steep-terrain CFL damping at any latitude)
+// ============================================================================
+// See the header for rationale. Flags columns whose surface index jumps by
+// >= steep_threshold cells to a horizontal neighbour, then applies `passes`
+// periodic 1-2-1 Shapiro sweeps along k and j to the air cells within
+// n_layers_above of the surface there, with no-flux at solid neighbours.
+void AtomUtils::orographic_shapiro_filter(Array& field,
+                                          const std::vector<std::vector<int>>& i_surface,
+                                          int    steep_threshold,
+                                          int    n_layers_above,
+                                          int    passes,
+                                          double strength)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (passes <= 0 || strength <= 0.0) return;
+
+    // Flag steep columns: |Δ surface-index| to any of the 4 horizontal neighbours
+    // (k periodic, j clamped at the poles) >= steep_threshold cells.
+    std::vector<unsigned char> steep(jm * km, 0);
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            const int s   = std::max(i_surface[j][k], 0);
+            const int jm1 = (j > 0)      ? j - 1 : 0;
+            const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+            const int km1 = (k - 1 + km) % km;
+            const int kp1 = (k + 1)      % km;
+            int d = std::abs(s - std::max(i_surface[jm1][k], 0));
+            d = std::max(d, std::abs(s - std::max(i_surface[jp1][k], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][km1], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][kp1], 0)));
+            if (d >= steep_threshold) steep[j * km + k] = 1;
+        }
+    }
+
+    auto in_fluid = [&](int i, int j, int k) {
+        return i >= std::max(i_surface[j][k], 0);
+    };
+    // Cells we actually update: steep column, fluid, within n_layers_above of surface.
+    auto target = [&](int i, int j, int k) {
+        return steep[j * km + k] && in_fluid(i, j, k)
+            && i < std::max(i_surface[j][k], 0) + n_layers_above;
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+    const double coeff = 0.25 * strength;
+
+    for (int pass = 0; pass < passes; ++pass) {
+
+        // --- zonal (k, periodic) sweep ---
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!target(i, j, k)) continue;
+                    const int km1 = (k - 1 + km) % km;
+                    const int kp1 = (k + 1)      % km;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i, j, km1) ? tmp[idx(i,j,km1)] : c;
+                    const double vp = in_fluid(i, j, kp1) ? tmp[idx(i,j,kp1)] : c;
+                    field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
+
+        // --- meridional (j) sweep ---
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i) {
+            for (int j = 1; j < jm - 1; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!target(i, j, k)) continue;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i, j-1, k) ? tmp[idx(i,j-1,k)] : c;
+                    const double vp = in_fluid(i, j+1, k) ? tmp[idx(i,j+1,k)] : c;
+                    field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
+
+    } // passes
+}
+
+
+
+// ============================================================================
+// Gentle global radial (i) Shapiro de-checkerboarding
+// ============================================================================
+// The steep-orography velocity blow-up is a 2Δ grid-scale CHECKERBOARD whose purest
+// component is on the RADIAL axis (the wmode diagnostic measured r=1.000 in i at the
+// growing cell: the field is huge at one level and ~0/opposite-sign above and below).
+// No other filter touches i — polar_zonal_filter is k only, orographic_shapiro_filter is
+// j+k AND only at steep-flagged columns, which do NOT include the near-surface cell where
+// the checkerboard actually grows (51°N/11°E, north of the steep Alps). So the radial
+// component grows undamped → the iter-250 runaway. This applies `passes` 1-2-1 radial
+// sweeps to ALL fluid cells (not gated by steepness): a single 1-2-1 (coeff 0.25·strength)
+// annihilates a level-to-level 2Δ oscillation in one pass while barely touching smooth
+// vertical shear (large scales are reduced only ~(Δ/λ)² per pass), so it is safe to apply
+// globally every iteration. No-flux (current-cell substitution) at the solid surface
+// below; i=0 and i=im-1 are left to the radial BCs.
+void AtomUtils::radial_shapiro_filter(Array& field,
+                                      const std::vector<std::vector<int>>& i_surface,
+                                      int    passes,
+                                      double strength)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (passes <= 0 || strength <= 0.0 || im < 3) return;
+
+    auto in_fluid = [&](int i, int j, int k) {
+        return i >= std::max(i_surface[j][k], 0);
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+    const double coeff = 0.25 * strength;
+
+    for (int pass = 0; pass < passes; ++pass) {
+
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < im - 1; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!in_fluid(i, j, k)) continue;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i-1, j, k) ? tmp[idx(i-1,j,k)] : c;
+                    const double vp = in_fluid(i+1, j, k) ? tmp[idx(i+1,j,k)] : c;
+                    field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
     } // passes
 }
 
