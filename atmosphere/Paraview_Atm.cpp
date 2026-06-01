@@ -187,7 +187,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
 */
 //    dump_array("cloudiness", cloudiness, 1.0, Atmosphere_panorama_vts_File);
 
-//    dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
+    dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
     dump_array("PrecipitationRain", P_rain, 8.64e4, Atmosphere_panorama_vts_File);
     dump_array("PrecipitationSnow", P_snow, 8.64e4, Atmosphere_panorama_vts_File);
 //    dump_array("PrecipitationGraupel", P_graupel, 8.64e4, Atmosphere_panorama_vts_File);
@@ -693,7 +693,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     dump_zonal("Precipitation", Precipitation, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PrecipitationRain", P_rain, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PrecipitationSnow", P_snow, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
-//    dump_zonal("PrecipitationGraupel", P_graupel, 8.64e40, k_zonal, Atmosphere_vtk_zonal_File);
+//    dump_zonal("PrecipitationGraupel", P_graupel, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
 
     dump_zonal("S_v", S_v, 1e3, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("S_c", S_c, 1e3, k_zonal, Atmosphere_vtk_zonal_File);

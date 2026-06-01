@@ -8,6 +8,8 @@
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
+#include <cstring>
+#include <cstdint>
 
 using namespace AtomUtils;
 
@@ -46,6 +48,15 @@ namespace AtomMoistConvection {
     constexpr double q_v_u_add = 1.0e-4;                                // in [kg/kg]
     constexpr double coeff_recurr = 0.1; 
     constexpr double scale = 0.98;                                      // this value creates deep cloud initial values q_c_u because of t_add_u and t_add_u
+    constexpr double q_c_u_max  = 1.0e-2;                               // [kg/kg] physical ceiling on updraft cloud water (~10 g/kg); stops the q_c_u recurrence runaway
+    constexpr double w_conv_max = 50.0;                                 // [m/s] physical ceiling on |u_u| convective updraft velocity; stops the safe_r_humid 1/ρ amplification
+    // In-loop cap on |M_u|, |M_d| applied at every recurrence write inside the
+    // iter_prec loop (E_u contains eps_u·M_u, growth factor ≈ 1+eps_u·step ≈ 1.8
+    // per level → ×10⁸ over the column-deep updraft column). rhsForcing alone
+    // capped only the final value used in the RHS; the internal c_u, q_v_u,
+    // q_v_d, P_conv chain still saw the runaway. Same magnitude as the safe_cap
+    // M_max in rhsForcing (~10× any realistic value).
+    constexpr double M_max = 3.0;                                       // [kg/(m²s)] (also used in rhsForcing safe_cap)
 }
 /*
 *
@@ -134,6 +145,19 @@ private:
     // clamped to 0 by the limiter in UtilsAtm.
     static double safe_r_humid(double r_h) noexcept {
         return std::max(r_h, 1e-6);
+    }
+
+    // In-loop saturation cap on convective mass flux. Applied at every M_u/M_d
+    // recurrence write so the eps_u·M_u feedback in E_u (≈ ×1.8 per level)
+    // cannot drive c_u/q_v_u/q_v_d/P_conv into runaway before rhsForcing's
+    // safe_cap runs at the end of the iter_prec loop. Bit-level NaN/Inf reset
+    // (under -ffast-math std::min/max are unreliable on NaN).
+    static inline double clamp_M(double v) noexcept {
+        std::uint64_t bits;
+        std::memcpy(&bits, &v, sizeof(bits));
+        if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return 0.0;
+        const double M_max = AtomMoistConvection::M_max;
+        return (v < -M_max) ? -M_max : (v > M_max) ? M_max : v;
     }
 
 // ==================== ENTRAINMENT GRADIENTS (shared helper) ====================
@@ -399,8 +423,8 @@ private:
                 const double t_pert = delta_T_sfp[j][k];
                 const double q_pert = delta_q_sfp[j][k];
 
-                m.M_u.x[local_i_beg][j][k] = 
-                    m.r_humid.x[local_i_beg][j][k] * m.u.x[local_i_beg][j][k];
+                m.M_u.x[local_i_beg][j][k] = clamp_M(
+                    m.r_humid.x[local_i_beg][j][k] * m.u.x[local_i_beg][j][k]);
 
                 for(int i = local_i_beg+1; i <= local_i_end; i++){
 
@@ -440,7 +464,7 @@ private:
 
 
                     double d_Mu      = m.E_u.x[i][j][k] - m.D_u.x[i][j][k];// in [kg/(m³s)]   updraft mass flux based on the local moisture convergence
-                    m.M_u.x[i][j][k] = m.M_u.x[i-1][j][k] + d_Mu * step[i];// in [kg/(m³s)]
+                    m.M_u.x[i][j][k] = clamp_M(m.M_u.x[i-1][j][k] + d_Mu * step[i]);// in [kg/(m³s)]
                     if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
 
                     m.s.x[i][j][k]   = m.cp_l * t_u / m.s_0;
@@ -452,7 +476,7 @@ private:
 
                 }
 
-                M_d_LFS_local[j][k] = gam_d * m.M_u.x[local_i_beg][j][k];// downdraft mass flux based on the mass flux at cloud base
+                M_d_LFS_local[j][k] = clamp_M(gam_d * m.M_u.x[local_i_beg][j][k]);// downdraft mass flux based on the mass flux at cloud base
                 m.M_d.x[local_i_LFS][j][k] = M_d_LFS_local[j][k];
 
 
@@ -500,10 +524,12 @@ private:
 
 
                     double d_Mu = m.E_u.x[i][j][k] - m.D_u.x[i][j][k];  // in [kg/(m³s)]   updraft mass flux based on the local moisture convergence
-                    m.M_u.x[i][j][k] = m.M_u.x[i-1][j][k] + d_Mu * step[i];  // in [kg/(m²s)]
+                    m.M_u.x[i][j][k] = clamp_M(m.M_u.x[i-1][j][k] + d_Mu * step[i]);  // in [kg/(m²s)]
                     if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
 
                     m.u_u.x[i][j][k] = m.u.x[i][j][k] + m.M_u.x[i][j][k] * inv_a_u / safe_r_humid(r_h_i);
+                    const double u_u_cap_e = w_conv_max / m.u_0;
+                    m.u_u.x[i][j][k] = std::max(-u_u_cap_e, std::min(m.u_u.x[i][j][k], u_u_cap_e));
                     m.v_u.x[i][j][k] = m.v.x[i][j][k];
                     m.w_u.x[i][j][k] = m.w.x[i][j][k];
                 }
@@ -572,14 +598,25 @@ void findCloudBaseLFS() {
                     }
                 }
 
-                for (int i = m.im - 1; i >= 0; i--) {
-                    const double q_buoy_lfs =
-                        0.5 * (cloud.x[i][j][k] + scale * q_sat_col[i]) - m.c.x[i][j][k];
-
-                    if (q_buoy_lfs <= 0.0) {
-                        i_LFS_local[j][k] = std::min(i, m.im-2);        // guard: i+1 must stay in bounds
-                        m.LevelFreeSinking.x[i][j][k] = height_table[i];
-                        break;
+                // LFS = lowest level above i_base where the 50/50 cloud–environment
+                // mix becomes negatively buoyant (Tiedtke 1989). The previous scan
+                // ran top-down and triggered at i=im-1 (cold air: q_sat→0,
+                // c > 0.5·q_sat ⇒ q_buoy_lfs ≤ 0), pinning i_LFS at im-2 and
+                // inflating the updraft entrainment column to ~30 levels — the
+                // eps_u·M_u feedback then blew up. Scan upward from i_base+1
+                // instead, gated on a valid cloud base.
+                {
+                    const int i_base_col = i_Base_local[j][k];
+                    if (i_base_col > 0) {
+                        for (int i = i_base_col + 1; i < m.im; i++) {
+                            const double q_buoy_lfs =
+                                0.5 * (cloud.x[i][j][k] + scale * q_sat_col[i]) - m.c.x[i][j][k];
+                            if (q_buoy_lfs <= 0.0) {
+                                i_LFS_local[j][k] = std::min(i, m.im-2);    // guard: i+1 must stay in bounds
+                                m.LevelFreeSinking.x[i][j][k] = height_table[i];
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -638,8 +675,8 @@ void findCloudBaseLFS() {
                 for (int ii = 0; ii < i_base; ii++)
                     m.M_u.x[ii][j][k] = 0.0;
 
-                m.M_u.x[i_base][j][k] =
-                    m.r_humid.x[i_base][j][k] * m.u.x[i_base][j][k];    // [kg/(m²s)]
+                m.M_u.x[i_base][j][k] = clamp_M(
+                    m.r_humid.x[i_base][j][k] * m.u.x[i_base][j][k]);   // [kg/(m²s)]
                 if(is_land(m.h, i_base, j, k)) m.M_u.x[i_base][j][k] = 0.0;
 
                 // Causes #2 and #3: updraftRecurrence starts at i_base+1 and reads
@@ -653,7 +690,7 @@ void findCloudBaseLFS() {
                     m.q_v_u.x[i_base][j][k] = std::max(m.c.x[i_base][j][k] + q_pert, 0.0);
                 }
 
-                M_d_LFS_local[j][k] = gam_d * m.M_u.x[i_base][j][k];
+                M_d_LFS_local[j][k] = clamp_M(gam_d * m.M_u.x[i_base][j][k]);
 
                 for(int i = i_base+1; i <= i_lfs; i++){
 
@@ -696,7 +733,7 @@ void findCloudBaseLFS() {
 
 
                         double d_Mu = m.E_u.x[i][j][k] - m.D_u.x[i][j][k];// in [(kg/kg)/s]
-                        m.M_u.x[i][j][k] = m.M_u.x[i-1][j][k] + d_Mu * step[i];// in [(kg/kg)/s]
+                        m.M_u.x[i][j][k] = clamp_M(m.M_u.x[i-1][j][k] + d_Mu * step[i]);// in [(kg/kg)/s]
                         if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
 
 
@@ -765,7 +802,7 @@ void findCloudBaseLFS() {
                 double t_u = m.t.x[i_lfs][j][k] * m.t_0;
                 double p_u = m.p_stat.x[i_lfs][j][k];
 
-                m.M_d.x[i_lfs][j][k] = M_d_LFS_local[j][k];
+                m.M_d.x[i_lfs][j][k] = clamp_M(M_d_LFS_local[j][k]);
 
                 m.E_d.x[i_lfs][j][k] = eps_d * fabs(m.M_d.x[i_lfs][j][k]);
                 m.D_d.x[i_lfs][j][k] = del_d * fabs(m.M_d.x[i_lfs][j][k]);
@@ -817,7 +854,7 @@ void findCloudBaseLFS() {
                     m.D_d.x[i][j][k] = del_d * fabs(m.M_d.x[i][j][k]);
 
                     double d_Md      = m.E_d.x[i][j][k] - m.D_d.x[i][j][k];  // in [kg/(m³s)]
-                    m.M_d.x[i][j][k] = m.M_d.x[i+1][j][k] - d_Md * step[i];  // in [kg/(m²s)]
+                    m.M_d.x[i][j][k] = clamp_M(m.M_d.x[i+1][j][k] - d_Md * step[i]);  // in [kg/(m²s)]
                     if(is_land(m.h, i, j, k)) m.M_d.x[i][j][k] = 0.0;
 
                     double inv_a_d   = 1.0 / (a_d * m.u_0);
@@ -884,7 +921,7 @@ void findCloudBaseLFS() {
 
                     double d_Mu = m.E_u.x[i-1][j][k] - m.D_u.x[i-1][j][k];
 
-                    m.M_u.x[i][j][k] = m.M_u.x[i-1][j][k] + d_Mu * step_prev;
+                    m.M_u.x[i][j][k] = clamp_M(m.M_u.x[i-1][j][k] + d_Mu * step_prev);
                     if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
                     if(t_u <= t_00_minus2) m.M_u.x[i][j][k] = 0.0;
 
@@ -936,9 +973,12 @@ void findCloudBaseLFS() {
 
                     double inv_a_u = 1.0 / (a_u * m.u_0);
                     m.u_u.x[i][j][k] = m.u.x[i][j][k] + m.M_u.x[i][j][k] * inv_a_u / safe_r_humid(r_h_i);
+                    const double u_u_cap = w_conv_max / m.u_0;
+                    m.u_u.x[i][j][k] = std::max(-u_u_cap, std::min(m.u_u.x[i][j][k], u_u_cap));
 
                     if(m.q_v_u.x[i][j][k] <= 0.0) m.q_v_u.x[i][j][k] = 0.0;
                     if(m.q_c_u.x[i][j][k] <= 0.0) m.q_c_u.x[i][j][k] = 0.0;
+                    if(m.q_c_u.x[i][j][k] > q_c_u_max) m.q_c_u.x[i][j][k] = q_c_u_max;
                     if(m.s_u.x[i][j][k] <= 0.0)   m.s_u.x[i][j][k]   = 0.0;
 
                     if(is_land(m.h, i, j, k) || t_u <= t_00){
@@ -973,7 +1013,7 @@ void findCloudBaseLFS() {
                     double r_h_i    = m.r_humid.x[i][j][k];
 
                     double d_Md      = m.E_d.x[i][j][k] - m.D_d.x[i][j][k];
-                    m.M_d.x[i][j][k] = m.M_d.x[i+1][j][k] - d_Md * step_ip1;
+                    m.M_d.x[i][j][k] = clamp_M(m.M_d.x[i+1][j][k] - d_Md * step_ip1);
                     if(t_u <= t_00_minus2) m.M_d.x[i][j][k] = 0.0;
 
                     double L_latent = (t_u >= m.t_0) ? m.lv : m.ls;
@@ -1093,6 +1133,53 @@ void findCloudBaseLFS() {
 */
 // ==================== RHS FORCING ====================
     void rhsForcing() {
+        // Physical caps that break the convective feedback loop
+        //   v,w → E_u (∝ v·∇c) → M_u (recurrence) → MC_v,MC_w (∝ M_u·(v_u−v))
+        //        → coeff_MC_vel·MC in rhs_v/rhs_w → v,w …
+        // which runs away unbounded when moist physics first activates over steep
+        // orography (observed 49–51°S / 72–76°W, the Patagonian Andes, ~iter 309).
+        // M_u/M_d are rebuilt every MoistConvection call, so bounding them here each
+        // call — together with the tendencies that feed the prognostic fields — keeps
+        // the loop bounded across iterations.
+        //
+        // Healthy M_u/M_d are ~0.3 kg/m²s and the tendencies far below these caps, so
+        // realistic convection is untouched; the caps are ~3–10× above any physical
+        // value and only clip the runaway.  Tune down if convection still over-drives.
+        // Bit-level non-finite reset (NaN/Inf → 0): under -ffast-math std::min/max are
+        // unreliable on NaN, so use the same trick as BC_Atm.h Pass 5 / Paraview safe_val.
+        // Tightened 2026-05-31 (was 10/0.05/5e-4/0.05): the Gulf-of-Alaska 60°N/151°W
+        // near-surface cell pegged MC_t/MC_w at the previous caps every step (saturating
+        // u/v/w at ±100 m/s), so the old caps were the velocity forcing in disguise. New
+        // values are 3–5× physical, so realistic convection is still untouched.
+        constexpr double M_max   = 3.0;        // [kg/(m²s)]  up/downdraft mass flux  (was 10.0; healthy ~0.3)
+        constexpr double MCt_max = 0.01;       // [K/s]       convective heating      (was 0.05; ~36 K/hr, still 3× realistic)
+        constexpr double MCq_max = 2.0e-4;     // [(kg/kg)/s] convective moistening    (was 5.0e-4)
+        // Healthy convective momentum transport is M_u·(v_u−v)/(step·ρ) ≈ 0.3·3/(400·1)
+        // ≈ 2e-3 m/s². The old 0.5 cap (×coeff_MC_vel=6.25 → 3.125 non-dim RHS forcing)
+        // was pinned at the Patagonian Andes (49°S/74°W) and drove the pressure solver to
+        // p_dyn≈44000 hPa / t≈−1877°C at moist onset. 0.01 (~5× physical, 0.063 non-dim)
+        // clips the runaway while leaving realistic convection untouched.
+        constexpr double MCv_max = 0.01;       // [m/s²]      convective momentum transport  (was 0.05)
+
+        auto safe_cap = [](double v, double mag) -> double {
+            std::uint64_t bits;
+            std::memcpy(&bits, &v, sizeof(bits));
+            if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return 0.0;
+            return (v < -mag) ? -mag : (v > mag) ? mag : v;
+        };
+
+        // Bound the mass-flux arrays in place first, so the fluxes below — and u_u/v_u/
+        // w_u and the next call which also read M_u/M_d — all see physical values.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for(int j = 0; j < m.jm; j++){
+            for(int k = 0; k < m.km; k++){
+                for(int i = 0; i < m.im; i++){
+                    m.M_u.x[i][j][k] = safe_cap(m.M_u.x[i][j][k], M_max);
+                    m.M_d.x[i][j][k] = safe_cap(m.M_d.x[i][j][k], M_max);
+                }
+            }
+        }
+
         #pragma omp parallel for collapse(2)
         for(int j = 0; j < m.jm; j++){
             for(int k = 0; k < m.km; k++){
@@ -1112,8 +1199,9 @@ void findCloudBaseLFS() {
                     double conv_src = m.c_u.x[i][j][k] - m.e_d.x[i][j][k]                               // (kg/kg)/s
                                   - m.e_l.x[i][j][k] - m.e_p.x[i][j][k];
 
-                    m.MC_t.x[i][j][k] = -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0                  // K/s
-                        + (L_latent / m.cp_l) * conv_src* m.t_0;                                        // K/s
+                    m.MC_t.x[i][j][k] = safe_cap(
+                        -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0                                  // K/s
+                        + (L_latent / m.cp_l) * conv_src* m.t_0, MCt_max);                              // K/s
 
 
 
@@ -1122,8 +1210,9 @@ void findCloudBaseLFS() {
                     double flux_q_i   = m.M_u.x[i][j][k] * (m.q_v_u.x[i][j][k] - m.c.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.q_v_d.x[i][j][k] - m.c.x[i][j][k]);
 
-                    m.MC_q.x[i][j][k] = - (flux_q_ip1 - flux_q_i) * inv_step_rh                         // (kg/kg)/s
-                                        - conv_src;                                                     // (kg/kg)/s
+                    m.MC_q.x[i][j][k] = safe_cap(
+                                        - (flux_q_ip1 - flux_q_i) * inv_step_rh                         // (kg/kg)/s
+                                        - conv_src, MCq_max);                                           // (kg/kg)/s
 
 
 
@@ -1133,7 +1222,8 @@ void findCloudBaseLFS() {
                     double flux_v_i   = m.M_u.x[i][j][k] * (m.v_u.x[i][j][k] - m.v.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.v_d.x[i][j][k] - m.v.x[i][j][k]);
 
-                    m.MC_v.x[i][j][k] = -(flux_v_ip1 - flux_v_i) * inv_step_rh * m.u_0;                 // (m/s)(1/s)
+                    m.MC_v.x[i][j][k] = safe_cap(
+                        -(flux_v_ip1 - flux_v_i) * inv_step_rh * m.u_0, MCv_max);                       // (m/s)(1/s)
 
 
 
@@ -1142,7 +1232,8 @@ void findCloudBaseLFS() {
                     double flux_w_i   = m.M_u.x[i][j][k] * (m.w_u.x[i][j][k] - m.w.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.w_d.x[i][j][k] - m.w.x[i][j][k]);
 
-                    m.MC_w.x[i][j][k] = -(flux_w_ip1 - flux_w_i) * inv_step_rh * m.u_0;                 // (m/s)(1/s)
+                    m.MC_w.x[i][j][k] = safe_cap(
+                        -(flux_w_ip1 - flux_w_i) * inv_step_rh * m.u_0, MCv_max);                       // (m/s)(1/s)
                 }
             }
         }

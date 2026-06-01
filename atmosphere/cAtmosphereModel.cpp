@@ -359,7 +359,14 @@ void cAtmosphereModel::run_3D_loop(int Ma){
 
 cout << endl << endl << endl << "      AGCM: run_3D_loop atm ..........................." << endl;
 
-    for(iter_n = 1; iter_n <= nm; iter_n++){
+    // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
+    // state and resume from its total_iter_count (skips re-running the dry spin-up).
+    const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter);
+
+    // On a successful restart, start the loop counter at the restart point so the
+    // printed iter_n matches where the run actually resumed (not back at 1).
+    const int iter_start = restarted ? restart_from_iter : 1;
+    for(iter_n = iter_start; iter_n <= nm; iter_n++){
         print_loop_3D_headings();
 
         // Inviscid spin-up: zero diffusion for the first `inviscid_spinup_iters`
@@ -409,9 +416,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         //                     topographic walls are re-enforced before each RK4 cycle —
         //                     this is what lets the flow "see" the mountains and form
         //                     lee/windward circulations.
-        // In the viscous phase the two strides collapse back to 2, matching the original behaviour.
+        // In the viscous phase moist_stride collapses back to 2 (original behaviour).
+        // momentum_stride is kept at 1 in BOTH phases: with stride 2 the solid-ground
+        // wall BC was re-enforced only every other RK4 cycle, leaving a 2Δt computational
+        // mode pinned at steep high-latitude coasts (Antarctic, ×2.5 via 1/sinθ at 68°S)
+        // that grew to a near-surface NaN seed by ~iter 142. Re-enforcing the walls every
+        // step (the existing, tested BCs) suppresses it; cost is BCs running 2× as often.
         int moist_stride    = inviscid_phase ? 10  : 2;
-        int momentum_stride = inviscid_phase ? 1  : 2;
+        int momentum_stride = 1;
 
         if(iter_n % moist_stride == 0){
             // Multi-sweep Jacobi: the original single-sweep cadence (one sweep every
@@ -471,8 +483,45 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 AtomUtils::damp_wiggles(E_d,    &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(M_d,    &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(q_v_d,  &i_topography, true, true, true);
+                // The convective tendencies fed straight into rhs_t/rhs_v/rhs_w
+                // (coeff_MC_*·MC in RHS_Atm) enter spatially rough over steep orography;
+                // smooth them like the other MC fields so the momentum/heat source does
+                // not inject a jagged divergence the pressure solver amplifies (Andes seed).
+                AtomUtils::damp_wiggles(MC_t,   &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(MC_v,   &i_topography, true, true, true);
+                AtomUtils::damp_wiggles(MC_w,   &i_topography, true, true, true);
 
                 UtilsAtm(*this).precipitationSum();
+
+                // Physical caps on the microphysics source terms.
+                // The ice-scheme S-terms feed rhs_t (latent heat: S_c,S_r,S_i,S_s,S_g)
+                // and rhs_c (moisture: S_v) UNCAPPED. They depend on c/cloud/ice, so
+                // c,cloud,ice ↔ S_* ↔ rhs_t/rhs_c is a closed loop. Over the steep Andes
+                // (≈50°S, 1/sin²θ-amplified orographic ascent) the condensation↔latent-
+                // heat↔ascent feedback drives them to ~1e260 by iter ~309 — the leg of
+                // the moist runaway the MoistConvection caps (rhsForcing) don't cover.
+                // Capping S_* bounds rhs_{c,cloud,ice,t}, hence c/cloud/ice, hence S_*
+                // next call. Healthy |S| ≲ 1e-4 (kg/kg)/s (e.g. S_c_c, S_s diagnostics),
+                // so 1e-3 is ~10× headroom and clips only the runaway. NaN/Inf→0 via the
+                // bit-level is_finite_safe (std::min/max are unreliable under -ffast-math).
+                {
+                    constexpr double S_max = 1.0e-3;                     // [(kg/kg)/s]
+                    auto cap_S = [&](Array& S){
+                        #pragma omp parallel for collapse(2) schedule(static)
+                        for(int i = 0; i < im; i++){
+                            for(int j = 0; j < jm; j++){
+                                for(int k = 0; k < km; k++){
+                                    double v = S.x[i][j][k];
+                                    if(!AtomUtils::is_finite_safe(v)) S.x[i][j][k] = 0.0;
+                                    else if(v >  S_max)               S.x[i][j][k] =  S_max;
+                                    else if(v < -S_max)               S.x[i][j][k] = -S_max;
+                                }
+                            }
+                        }
+                    };
+                    cap_S(S_v); cap_S(S_c); cap_S(S_i); cap_S(S_r);
+                    cap_S(S_s); cap_S(S_g); cap_S(S_c_c);
+                }
             }  // moist_phys_active
 
             ThermoAtm(*this).densities();
@@ -516,11 +565,80 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
         else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations
 
+        // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up.
+        // Near the poles the zonal cell width rm·sinθ·dφ → 0, so the explicit zonal CFL
+        // diverges and short φ-waves in u,v,w explode within a single RK4 step (the clamp
+        // in bcSolidGround only bounds RK4 inputs, never the in-step growth). This damps
+        // those short zonal wavelengths with a latitude-dependent pass count; runs every
+        // iteration on the freshly-solved field, and the filtered values flow into
+        // un,vn,wn via storeIntermediateData3D below.
+        // start=30°, gain=3 strengthens the high-mid-latitude band (≈45–67°) where the
+        // dry near-surface w-mode grows (seed 52°N, explosion 60°N/150°W Gulf of Alaska);
+        // gives ~3 passes at 52°, ~6 at 60°, while ≤35° (subtropical jet) stays at 0.
+        AtomUtils::polar_zonal_filter(u, the.z, &i_topography, 30.0, 12, 3.0);
+        AtomUtils::polar_zonal_filter(v, the.z, &i_topography, 30.0, 12, 3.0);
+        AtomUtils::polar_zonal_filter(w, the.z, &i_topography, 30.0, 12, 3.0);
+
+        // Orographic Shapiro filter — same purpose as the polar filter, but for the
+        // steep-orography CFL hot-spots (Andes/Atlas/NZ Alps) the latitude-keyed polar
+        // filter doesn't reach. Damps the near-surface 2Δ velocity oscillation at cliffs
+        // that the bounded pressure projection alone could not contain. passes=3 (was 1)
+        // restores near-surface damping after n_layers_above was trimmed 12→3 to keep
+        // Tibet aloft; heavier configs (n_layers_above=5, passes=6) tested 2026-05-31
+        // SPREAD the Gulf-of-Alaska coastal blow-up across more cells (each pass averages
+        // the ±100 cap into neighbours) — wrong tool, the runaway is forcing-driven, not
+        // a 2Δ checkerboard. Use this gentle setting and attack the MC forcing instead.
+        AtomUtils::orographic_shapiro_filter(u, i_topography, 3, 3, 3);
+        AtomUtils::orographic_shapiro_filter(v, i_topography, 3, 3, 3);
+        AtomUtils::orographic_shapiro_filter(w, i_topography, 3, 3, 3);
+
+        // Gentle global radial (i) de-checkerboarding. The iter-250 blow-up was a 2Δ
+        // grid-scale checkerboard whose purest component is on the radial axis, growing at
+        // near-surface cells the polar (k) and orographic (j+k, steep-only) filters never
+        // reach — the radial axis had no other dissipation. A single 1-2-1 radial pass over
+        // all fluid cells removes the level-to-level 2Δ oscillation while preserving smooth
+        // vertical shear.
+        AtomUtils::radial_shapiro_filter(u, i_topography);
+        AtomUtils::radial_shapiro_filter(v, i_topography);
+        AtomUtils::radial_shapiro_filter(w, i_topography);
+
+        // (Upper-troposphere Rayleigh sponge tested 2026-06-01: did not help. The iter-359
+        // "first NaN at i=35, k=0, 10 km" reported by scanForNaN was the overflow location,
+        // not the cause — by iter 341 the Gulf-of-Alaska surface cell (60°N/151°W/298m)
+        // already had t=-14254°C, p_dyn=-10132 hPa, density=-117 kg/m³, with the coastal
+        // sponge pegging u/v/w at ±30 m/s every step. High-i cells overflow first because
+        // they're produced by RK4 from the corrupted surface dynamics. The fix belongs at
+        // the coastal cell, not aloft — see [[project-coastal-sponge-session]] continuation.)
+        // AtomUtils::upper_rayleigh_sponge(u, 25, 0.5);
+        // AtomUtils::upper_rayleigh_sponge(v, 25, 0.5);
+        // AtomUtils::upper_rayleigh_sponge(w, 25, 0.5);
+
+        // Near-surface coastal velocity HARD CAP — last-resort ceiling for the dry-seeded
+        // velocity runaway at steep coasts (Gulf-of-Alaska 60°N/151°W). The slope cap
+        // skips ocean↔land cliffs and bcVelSurfSur is init-only; without an in-loop RHS
+        // friction term, coastal pressure-gradient force drives a linear velocity growth
+        // that saturates at the ±100 m/s BC cap. At the bottom `layers` air cells of a
+        // coastal/sloped column, if |u_nondim| > 3.0 (=30 m/s), clamp to ±3.0. Rate=1.0
+        // selects the hard-clamp branch (Rayleigh form rounds 6-7 was too weak — per-step
+        // RHS forcing >> %-damping). layers=8: the runaway is at i≈5 (298 m) above the
+        // OCEAN side of the Cook Inlet coast, not at the land cliff itself — layers=3
+        // (round 8) only reached i=0..2 over ocean columns and missed the actual blow-up.
+        // 8 covers i_topo..i_topo+7 = 0..7 (≈440 m) above ocean / 298 m..1.5 km over land.
+        AtomUtils::coastal_velocity_sponge(u, i_topography, 3.0, 1.0, 8);
+        AtomUtils::coastal_velocity_sponge(v, i_topography, 3.0, 1.0, 8);
+        AtomUtils::coastal_velocity_sponge(w, i_topography, 3.0, 1.0, 8);
+
+        scanForNaN();                                                       // debug: report field/location/iter of the FIRST non-finite cell to localise the blow-up
+
         UtilsAtm(*this).findResiduumAtm();
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
 
         ThermoAtm(*this).printDataAtm();
+
+        // Checkpoint the full 3D state once total_iter_count reaches the requested iter.
+        if(checkpoint_save_iter >= 0 && total_iter_count == checkpoint_save_iter)
+            save_state(checkpoint_save_iter);
 
     }  // end iter_n
 

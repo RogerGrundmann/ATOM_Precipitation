@@ -531,13 +531,14 @@ void AtomUtils::polar_zonal_filter(Array& field,
                                    const double* colat,
                                    const std::vector<std::vector<int>>* i_surface,
                                    double lat_filter_start_deg,
-                                   int    max_passes)
+                                   int    max_passes,
+                                   double pass_gain)
 {
     const int im = field.im;
     const int jm = field.jm;
     const int km = field.km;
 
-    if (max_passes <= 0 || !colat) return;
+    if (max_passes <= 0 || !colat || pass_gain <= 0.0) return;
 
     // Reference metric factor sinθ_ref = cos(lat_filter_start) and a per-row pass
     // count passes[j] = clamp( round(sinθ_ref/sinθ_j − 1), 0, max_passes ).
@@ -550,7 +551,7 @@ void AtomUtils::polar_zonal_filter(Array& field,
         const double sin_j = std::max(std::sin(colat[j]), 1.0e-6);     // guard the pole rows (sinθ→0)
         if (sin_j >= sin_ref) continue;                                // equatorward of the reference latitude: untouched
         const double ratio = sin_ref / sin_j;                          // >1 poleward of the reference latitude
-        int p = (int)std::lround(ratio * ratio - 1.0);                 // passes ∝ ratio² (√n smoothing length, see header)
+        int p = (int)std::lround(pass_gain * (ratio * ratio - 1.0));   // passes ∝ ratio² (√n smoothing length, see header), scaled by pass_gain
         if (p < 0) p = 0;
         if (p > max_passes) p = max_passes;
         passes[j] = p;
@@ -751,6 +752,162 @@ void AtomUtils::radial_shapiro_filter(Array& field,
     } // passes
 }
 
+
+
+// ============================================================================
+// Near-surface coastal Rayleigh sponge
+// ============================================================================
+// Soft cap for the dry-seeded coastal velocity runaway (Gulf-of-Alaska mode).
+// Flags any column whose i_surface neighbour-step >= 1 (every coast + slope),
+// then at the lowest `layers` air cells, if |field| > threshold, multiplies by
+// (1 - rate). Below threshold: untouched (preserves real coastal circulation).
+void AtomUtils::coastal_velocity_sponge(Array& field,
+                                        const std::vector<std::vector<int>>& i_surface,
+                                        double threshold,
+                                        double rate,
+                                        int    layers)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (rate <= 0.0 || threshold < 0.0 || layers <= 0 || im < 2) return;
+
+    std::vector<char> coastal(jm * km, 0);
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            const int s   = std::max(i_surface[j][k], 0);
+            const int jm1 = std::max(j - 1, 0);
+            const int jp1 = std::min(j + 1, jm - 1);
+            const int km1 = (k == 0) ? km - 1 : k - 1;
+            const int kp1 = (k == km - 1) ? 0 : k + 1;
+            int d = std::abs(s - std::max(i_surface[jm1][k], 0));
+            d = std::max(d, std::abs(s - std::max(i_surface[jp1][k], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][km1], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][kp1], 0)));
+            if (d >= 1) coastal[j * km + k] = 1;
+        }
+    }
+
+    // rate >= 1.0 → hard clamp at threshold (the soft Rayleigh form is multiplicative
+    // and cannot bound the saturated coastal runaway where per-step RHS forcing >> cap;
+    // a hard clamp acts as an unbreakable ceiling). rate < 1.0 → Rayleigh: v *= (1-rate)
+    const bool hard_clamp = (rate >= 1.0);
+    const double keep = hard_clamp ? 0.0 : (1.0 - rate);
+
+    int n_coastal = 0;
+    for (int j = 0; j < jm; ++j) for (int k = 0; k < km; ++k) if (coastal[j*km+k]) n_coastal++;
+    long n_clamped = 0;
+    double max_pre = 0.0;
+
+    // Alaska diagnostic: 60°N/151°W ≈ (j=30, k=209) — but the print location varies
+    // with sign conventions, so sample a 5×5 area and report the cell with max |v|.
+    int j_ak_lo = 28, j_ak_hi = 32;
+    int k_ak_lo = 207, k_ak_hi = 211;
+    int alaska_flagged = 0;
+    for (int j = j_ak_lo; j <= j_ak_hi; ++j)
+        for (int k = k_ak_lo; k <= k_ak_hi; ++k)
+            if (coastal[j * km + k]) alaska_flagged++;
+    double alaska_max_pre = 0.0;
+    int alaska_jmax = -1, alaska_kmax = -1, alaska_imax = -1, alaska_topo = -1;
+    for (int j = j_ak_lo; j <= j_ak_hi; ++j) {
+        for (int k = k_ak_lo; k <= k_ak_hi; ++k) {
+            const int s = std::max(i_surface[j][k], 0);
+            for (int i = 0; i < im; ++i) {
+                const double v = std::abs(field.x[i][j][k]);
+                if (v > alaska_max_pre) {
+                    alaska_max_pre = v;
+                    alaska_jmax = j; alaska_kmax = k; alaska_imax = i;
+                    alaska_topo = s;
+                }
+            }
+        }
+    }
+
+    #pragma omp parallel for collapse(2) schedule(static) reduction(+:n_clamped) reduction(max:max_pre)
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            if (!coastal[j * km + k]) continue;
+            const int s = std::max(i_surface[j][k], 0);
+            const int i_end = std::min(im, s + layers);
+            for (int i = s; i < i_end; ++i) {
+                const double v = field.x[i][j][k];
+                const double av = std::abs(v);
+                if (av > max_pre) max_pre = av;
+                if (av > threshold) {
+                    ++n_clamped;
+                    if (hard_clamp) {
+                        field.x[i][j][k] = (v > 0.0) ? threshold : -threshold;
+                    } else {
+                        field.x[i][j][k] = v * keep;
+                    }
+                }
+            }
+        }
+    }
+    // GLOBAL scan for the cell with max |v| at i=5 (the print's "298m" level).
+    // Reports whether the global hot-cell is flagged by the coastal mask.
+    double i5_max = 0.0;
+    int    i5_j = -1, i5_k = -1, i5_topo = -1, i5_flag = -1;
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            const int s = std::max(i_surface[j][k], 0);
+            if (s > 5) continue;
+            const double v = std::abs(field.x[5][j][k]);
+            if (v > i5_max) {
+                i5_max = v;
+                i5_j = j; i5_k = k; i5_topo = s;
+                i5_flag = coastal[j * km + k];
+            }
+        }
+    }
+
+    std::cout << "[coastal_sponge] flagged=" << n_coastal
+              << " clamped=" << n_clamped
+              << " max_pre=" << max_pre
+              << " AK_max=" << alaska_max_pre
+              << " i5_max=" << i5_max
+              << " @(j=" << i5_j << ",k=" << i5_k << ",topo=" << i5_topo << ",flag=" << i5_flag << ")"
+              << std::endl;
+}
+
+
+
+// ============================================================================
+// Upper-troposphere Rayleigh sponge
+// ============================================================================
+// Damps zonal anomalies (departures from the zonal mean of `field` at each (i,j))
+// in the upper levels i ≥ i_start. Standard GCM upper-atmosphere remedy for the
+// lat-lon CFL near the meridian seam at high altitude.
+void AtomUtils::upper_rayleigh_sponge(Array& field, int i_start, double alpha_max)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (i_start >= im - 1 || alpha_max <= 0.0 || km <= 0) return;
+    const double i_span = static_cast<double>(im - 1 - i_start);
+    if (i_span <= 0.0) return;
+    const double inv_km = 1.0 / static_cast<double>(km);
+
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int i = i_start; i < im; i++) {
+        for (int j = 0; j < jm; j++) {
+            // Zonal mean at (i, j)
+            double sum = 0.0;
+            for (int k = 0; k < km; k++) sum += field.x[i][j][k];
+            const double zonal_mean = sum * inv_km;
+
+            // Linear ramp: alpha=0 at i_start, alpha=alpha_max at top
+            const double alpha = alpha_max * (i - i_start) / i_span;
+            const double keep  = 1.0 - alpha;
+
+            for (int k = 0; k < km; k++) {
+                field.x[i][j][k] = keep * field.x[i][j][k] + alpha * zonal_mean;
+            }
+        }
+    }
+}
 
 
 // ============================================================================

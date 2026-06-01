@@ -150,7 +150,13 @@ public:
         const double conv_factor  = 8.64e4;                             // [mm/s] -> [mm/d]
         const double hPa_to_mmHg  = 0.750062;                           // [mmHg/hPa]
         const double ms_to_kmh    = 3.6;                                // [(km/h)/(m/s)]
-        const double K_Meyer      = 0.36;                               // Meyer (1915) open-water coefficient [-]
+        // Meyer (1915): E[mm/month] = C·(1 + W/16)·(e_s − e_a), with the deficit in
+        // mmHg and C the open-water coefficient ≈ 11 (deep/large water, e.g. ocean) or
+        // 15 (shallow ponds).  C is unit-identical for E in mm/month & deficit in mmHg
+        // because inch→mm and inHg→mmHg share the 25.4 factor.  The previous value 0.36
+        // was ~30× too small, giving ~0.18 mm/d (≈66 mm/yr) instead of the realistic
+        // ~5 mm/d (≈1800 mm/yr) and far below the Dalton/Rohwer diagnostics.
+        const double K_Meyer      = 11.0;                               // Meyer (1915) deep open-water coefficient [mm/month/mmHg]
 
         // Vertical spread: distribute c_eq over n_spread+1 levels with exp(-i) weights,
         // normalised so that sum_{i=0}^{n_spread} exp(-i) = 1 (moisture conserved).
@@ -444,9 +450,11 @@ public:
 
                     // Diagnostic buoyancy force for ParaView/Results — must match the
                     // perturbation-form body force applied in RHS_Atm.cpp (rhs_u), i.e.
-                    // +g·ρ·(t − 1) [t=1 ↔ t_0]. Same convention used by RHS_Atm_Turb.cpp:375.
+                    // +g·ρ·(t − t̄(i)) referenced to the per-level mean t_ref_level[i].
+                    const double t_ref_b = ((int)m.t_ref_level.size() == m.im)
+                                           ? m.t_ref_level[i] : 1.0;
                     m.BuoyancyForce.x[i][j][k] = 1.0e-3 * m.buoyancy * m.r_humid.x[i][j][k] * m.g
-                                                 * (m.t.x[i][j][k] - 1.0);
+                                                 * (m.t.x[i][j][k] - t_ref_b);
 
                     double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k])
                                     * inv_2dr * exp_rm;
@@ -640,6 +648,35 @@ public:
         row(" precipitable water average", precipitablewater_average, " mm",
             " precipitation average per year", precip_mm_a, " mm/a",
             " precipitation average per day", precip_mm_a / 365.0, " mm/d");
+
+        // Per-component breakdown: which of P_rain / P_snow / P_graupel / P_conv
+        // is climbing? Same units as the total: mean × 365·86400 gives mm/a.
+        // Max scan reports the worst single cell with its (i,j,k) so a runaway
+        // can be localised geographically.
+        {
+            const double s_per_year = 365.0 * 8.64e4;
+            auto component = [&](const char* name, const Array& F){
+                double mean_v = AtomUtils::GetMean_3D(m.jm, m.km, const_cast<Array&>(F));
+                double mx = 0.0; int mi = 0, mj = 0, mk = 0;
+                for(int i = 0; i < m.im; i++)
+                    for(int j = 0; j < m.jm; j++)
+                        for(int k = 0; k < m.km; k++){
+                            double v = F.x[i][j][k];
+                            if(v > mx){ mx = v; mi = i; mj = j; mk = k; }
+                        }
+                cout << "    " << setw(8) << setfill(' ') << name
+                     << " mean = " << scientific << setprecision(3) << mean_v * s_per_year
+                     << " mm/a   max = " << mx * s_per_year
+                     << " mm/a  @(i=" << mi << ",j=" << mj
+                     << ",k=" << mk << ")" << fixed << endl;
+            };
+            cout << " precipitation by component (mm/a, surface-equivalent):" << endl;
+            component("Precip",    m.Precipitation);   // sanity check vs model total above
+            component("P_rain",    m.P_rain);
+            component("P_snow",    m.P_snow);
+            component("P_graupel", m.P_graupel);
+            component("P_conv",    m.P_conv);
+        }
 
         row(" precipitable water average", precipitablewater_average, " mm",
             " precipitation NASA average per year", precipitation_NASA_average, " mm/a",

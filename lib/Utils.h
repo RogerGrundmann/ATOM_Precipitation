@@ -196,11 +196,16 @@ namespace AtomUtils{
     //        Row count is taken from field.jm, so colat must have field.jm entries.
     // i_surface / boundary conventions (periodic k, solid-cell skip) match
     // damp_wiggles.  Pass nullptr for i_surface to filter all cells.
+    // pass_gain multiplies the per-row pass count: passes[j] =
+    // clamp(round(pass_gain*((sinθ_ref/sinθ_j)² − 1)), 0, max_passes). gain=1 is the
+    // pure resolution-equalising law; gain>1 strengthens the high-mid-latitude band
+    // (the quadratic is too flat at 50–60° to damp the high-lat near-surface mode there).
     void polar_zonal_filter(Array& field,
                             const double* colat,
                             const std::vector<std::vector<int>>* i_surface,
                             double lat_filter_start_deg = 40.0,
-                            int    max_passes = 12);
+                            int    max_passes = 12,
+                            double pass_gain = 1.0);
 
     // Orographic Shapiro filter — companion to polar_zonal_filter for the OTHER lat-lon
     // CFL hot-spot: steep topography at ANY latitude (Patagonian Andes 49°S/74°W, Atlas
@@ -212,12 +217,16 @@ namespace AtomUtils{
     // columns whose surface index jumps by >= `steep_threshold` cells relative to a
     // horizontal neighbour. Solid neighbours use no-flux (current-cell substitution),
     // matching damp_wiggles / polar_zonal_filter. strength in [0,1] scales the coefficient
-    // (0.25 at 1). All parameters are tunable; defaults target the observed cliff blow-ups.
+    // (0.25 at 1). All parameters are tunable. The cliff 2Δ mode lives in the lowest few
+    // air cells, so n_layers_above is deliberately SMALL: with im~41 a deeper reach smears
+    // ~12 of the 14 air levels above a high plateau (Tibet) and erases the orographic
+    // deflection itself. The orography slope cap in init_topography removes most cliff
+    // seeds at source, so this only needs a gentle near-surface touch.
     void orographic_shapiro_filter(Array& field,
                                    const std::vector<std::vector<int>>& i_surface,
                                    int    steep_threshold = 3,
-                                   int    n_layers_above  = 12,
-                                   int    passes          = 2,
+                                   int    n_layers_above  = 3,
+                                   int    passes          = 1,
                                    double strength        = 1.0);
 
     // Gentle global radial (i) Shapiro de-checkerboarding. The steep-orography velocity
@@ -232,6 +241,43 @@ namespace AtomUtils{
                                const std::vector<std::vector<int>>& i_surface,
                                int    passes   = 1,
                                double strength = 1.0);
+
+    // Near-surface coastal Rayleigh sponge — last-resort soft cap for the dry-seeded
+    // velocity runaway at steep coasts ([[project-bc-atm-mc-extrap-overshoot]] /
+    // [[project-orography-slope-cap]] Gulf-of-Alaska mode). The slope cap skips
+    // ocean↔land cliffs (cannot raise the ocean side) and bcVelSurfSur is init-only;
+    // without an in-loop friction term in RHS_Atm, coastal pressure-gradient force
+    // drives a linear velocity growth at i=0–1 that saturates at the ±100 m/s BC cap.
+    //
+    // Mask: any (j,k) whose i_surface differs from a horizontal neighbour by >= 1 cell
+    // (every coast plus any sloped column). Action: at the lowest `layers` air cells of
+    // each flagged column, if |field| exceeds `threshold` (non-dim), multiply by
+    // (1 − rate). Below threshold the cell is untouched, so normal coastal flow / sea
+    // breeze / katabatic flow at < threshold·u_0 m/s is preserved. Above threshold the
+    // value relaxes back exponentially with e-folding ≈ −1/ln(1−rate) iters.
+    void coastal_velocity_sponge(Array& field,
+                                 const std::vector<std::vector<int>>& i_surface,
+                                 double threshold = 2.0,   // non-dim, =20 m/s at u_0=10
+                                 double rate      = 0.05,
+                                 int    layers    = 3);
+
+    // Upper-troposphere Rayleigh sponge — relaxes zonal anomalies toward the zonal mean
+    // in the topmost levels. The standard GCM remedy for the lat-lon grid CFL near the
+    // poles AND the meridian seam at high altitude: as cell width rm·sinθ·dφ shrinks with
+    // latitude AND the explicit timestep becomes marginal in the upper troposphere, short
+    // zonal waves blow up. The polar zonal Shapiro filter handles the latitude axis at all
+    // altitudes; this targets the COMPLEMENTARY high-altitude band where the seam (k=0/360)
+    // mode reaches NaN first (observed 62°N / 10 km at iter 359).
+    //
+    // At each (i, j) compute the zonal mean of `field` (average over k), then relax each
+    // cell toward that mean with strength α(i) = α_max · (i − i_start) / (im − 1 − i_start),
+    // i.e. zero at i_start, full at the model top. Preserves the zonal mean exactly —
+    // damps only zonal anomalies (where the CFL mode lives). Apply per RK4 step on u, v, w
+    // after the other filters. α_max=0.2 gives ~5-iter e-folding of zonal anomalies at the
+    // top, decaying to 0 at i_start.
+    void upper_rayleigh_sponge(Array& field,
+                               int    i_start   = 30,
+                               double alpha_max = 0.2);
 
     // Extreme-peak removal filter for an Array field.
     //

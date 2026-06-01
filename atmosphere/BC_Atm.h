@@ -467,11 +467,28 @@ public:
         const double prod_max     = 1.0e4;            // [m²/s³] — generous; real prod ~ 1e0
         const double dis_max      = 1.0e6;            // [m²/s³] — generous for ω*
 
+        // Velocity ceiling — u,v,w had no NaN/clamp guard, yet the 1/sinθ metric
+        // drives the radial velocity u into a runaway downdraft at steep high-latitude
+        // coasts (~70°W: Baffin 66°N, Antarctic Peninsula 70°S), which then propagates
+        // to NaN. 100 m/s is generous (real winds ≲ 110 m/s, model w peaks ~30 m/s) so
+        // healthy flow is untouched; this is a stabiliser, not a root-cause cure.
+        const double vel_max_phys = 100.0;            // [m/s]
+        const double vel_max_nd   = vel_max_phys / m.u_0;
+
         auto safe_clamp = [](double v, double lo, double hi) -> double {
             std::uint64_t bits;
             std::memcpy(&bits, &v, sizeof(bits));
             if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return lo;
             return (v < lo) ? lo : (v > hi) ? hi : v;
+        };
+
+        // Symmetric variant for velocities: a non-finite cell relaxes to rest (0),
+        // not to the lower bound, and is clipped to ±mag.
+        auto safe_clamp_sym = [](double v, double mag) -> double {
+            std::uint64_t bits;
+            std::memcpy(&bits, &v, sizeof(bits));
+            if ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) return 0.0;
+            return (v < -mag) ? -mag : (v > mag) ? mag : v;
         };
 
         #pragma omp parallel for schedule(static)
@@ -486,6 +503,12 @@ public:
                     m.prod.x[i][j][k]       = safe_clamp(m.prod.x[i][j][k],       0.0,        prod_max);
                     m.tke_source.x[i][j][k] = safe_clamp(m.tke_source.x[i][j][k], -prod_max,  prod_max);
                     m.dis_source.x[i][j][k] = safe_clamp(m.dis_source.x[i][j][k], -prod_max,  prod_max);
+                    m.u.x[i][j][k]          = safe_clamp_sym(m.u.x[i][j][k],          vel_max_nd);
+                    m.un.x[i][j][k]         = safe_clamp_sym(m.un.x[i][j][k],         vel_max_nd);
+                    m.v.x[i][j][k]          = safe_clamp_sym(m.v.x[i][j][k],          vel_max_nd);
+                    m.vn.x[i][j][k]         = safe_clamp_sym(m.vn.x[i][j][k],         vel_max_nd);
+                    m.w.x[i][j][k]          = safe_clamp_sym(m.w.x[i][j][k],          vel_max_nd);
+                    m.wn.x[i][j][k]         = safe_clamp_sym(m.wn.x[i][j][k],         vel_max_nd);
                 }
             }
         }
@@ -502,6 +525,11 @@ public:
         // von Neumann:         x[a] = c43*x[a+d] - c13*x[a+2d]
 
         // Pattern A: cubic at both i=0 and i=im-1
+        // MC_t/MC_q/MC_v/MC_w are deliberately NOT extrapolated — MoistConvection
+        // rhsForcing already writes them (capped) at i=0..im-2, and the 3-point linear
+        // extrap x[0]=x[3]-3x[2]+3x[1] overshoots 7× when the capped values oscillate
+        // (e.g. +0.01,-0.01,+0.01 → 0.07 at i=0), reintroducing the unbounded MC forcing
+        // at the surface and driving the Gulf-of-Alaska coastal velocity runaway.
         Array* both_cubic[] = {
             &m.p_stat, &m.r_humid, &m.r_dry,
             &m.PrecipitableWaterLocal,
@@ -510,7 +538,6 @@ public:
             &m.S_c_c, &m.S_v, &m.S_c, &m.S_i, &m.S_r, &m.S_s, &m.S_g,
             &m.q_v_u, &m.q_c_u, &m.u_u, &m.v_u, &m.w_u,
             &m.s, &m.s_u, &m.s_d,
-            &m.MC_t, &m.MC_q, &m.MC_v, &m.MC_w,
             &m.M_u, &m.M_d
         };
         constexpr int n_both = sizeof(both_cubic) / sizeof(both_cubic[0]);
@@ -561,16 +588,37 @@ public:
                     xf[iml][j][k] = xf[iml-3][j][k] - 3.0 * xf[iml-2][j][k] + 3.0 * xf[iml-1][j][k];
                 }
 
-                // Inviscid spin-up: enforce a fully reflecting / free-slip wall at i=0.
-                // Wall-normal velocity u is set to zero (Dirichlet), tangential v, w keep
-                // the von Neumann (zero-gradient) values just assigned by Pattern B —
-                // that mirror across the wall is exactly the free-slip tangential BC.
-                // un is held in lockstep so the next-time-level field starts from the wall
-                // condition rather than drifting before the next storeIntermediateData3D copy.
-                if (m.inviscid_phase) {
-                    m.u.x[0][j][k]  = 0.0;
-                    m.un.x[0][j][k] = 0.0;
-                }
+                // Rigid lid on the VERTICAL velocity u at the model top (i=im-1).
+                // u is the radial component; air cannot flow through the lid, so the
+                // physical top BC is u = 0 — NOT the cubic extrapolation Pattern B just
+                // wrote (correct only for the HORIZONTAL v,w, which may have a tropopause
+                // jet). The cubic overshoots an increasing u-profile and feeds back via
+                // the i=im-2 ∂/∂r stencil, ratcheting upper-level vertical velocity up
+                // every step (observed: u at 30–45°N grows 0 → ~17 m/s by iter 300,
+                // accelerating, while the zonal jet w is unchanged). The rigid lid removes
+                // that feedback AND closes the column mass budget for the all-Neumann
+                // pressure Poisson, which otherwise leaves the column-mean vertical
+                // velocity an undetermined, drifting constant.
+                m.u.x[iml][j][k]  = 0.0;
+                m.un.x[iml][j][k] = 0.0;
+
+                // Surface no-penetration BC on the radial velocity u at i=0 (Dirichlet
+                // u=0), enforced ALWAYS — not just during the inviscid spin-up.
+                // u is the wall-normal component at i=0 (ocean surface above water, solid
+                // ground below land i_topography). Tangential v, w keep the Pattern B
+                // Neumann (zero-gradient) values — that mirror across the wall is the
+                // free-slip tangential BC. un is held in lockstep so the next-time-level
+                // field starts from the wall condition.
+                //
+                // The previous `if (m.inviscid_phase)` guard left u at i=0 unconstrained
+                // through the viscous phase. With inviscid_spinup_iters=0 that meant u
+                // at the ocean surface was only the Pattern B cubic extrapolation from
+                // u[1] and u[2] — no friction, no no-penetration. Coastal pressure
+                // gradients then drove u → ±100 m/s at the Gulf-of-Alaska / Tibet / Andes
+                // coastal cells (observed iter 240+ → catastrophic t/p/ρ at iter 341,
+                // overflow-cascade NaN at iter 359 in v3/v4/v5 runs).
+                m.u.x[0][j][k]  = 0.0;
+                m.un.x[0][j][k] = 0.0;
 
                 // Pattern C
                 for (int f = 0; f < n_cubic_vn; f++) {
@@ -684,9 +732,75 @@ public:
                 }
             }
         }
+
+        // ------------------------------------------------------------------
+        // Seam zonal (φ) damping.
+        //
+        // k=0 and k=km-1 are the SAME physical longitude (0°≡360°) and are NOT
+        // evolved by the RK4 (its φ-loop runs k=1..km-2); the reconstruction above
+        // pins them to 0.5·(x[1]+x[km-2]).  Because that slaves the seam value to its
+        // own neighbours, the discrete d²/dφ² self-damping at the seam-adjacent cells
+        // k=1 and k=km-2 drops from −2 to −1.5 — a 25% loss of numerical zonal
+        // diffusion exactly at the seam.  Combined with the 1/sin²θ metric and a
+        // coastline this leaves an under-damped zonal mode that runs the velocity
+        // away: observed at 50°N/1°E (k=1), the ocean cell next to the European coast
+        // (land at 2°E) and adjacent to the Greenwich seam.  Its exponential growth is
+        // then mirrored into k=0 by the average (k=0 ≈ 0.5·u[1]), which is why the
+        // blow-up *looks* like a k=0 problem.  The polar zonal filter does 0 passes at
+        // 50°N (sin_ref/sinθ ratio rounds to 0 there), so it cannot catch this.
+        //
+        // One explicit 1-2-1 Shapiro pass (coeff 0.25 fully removes the 2Δφ mode in a
+        // single step) across the three seam cells {km-2, 0≡km-1, 1} restores the lost
+        // damping locally, leaving the rest of the field untouched.  Periodic
+        // neighbours are used with no-flux at solid cells (a land neighbour relaxes the
+        // cell toward the seam instead of dragging it to zero).  Both the time-level-n
+        // state (un,vn,wn — what the next RK4 integrates from; storeIntermediateData3D
+        // copies u→un, so these hold the previous result) and the current field
+        // (u,v,w — what the RHS reads for φ-derivatives) are damped.
+        {
+            const double seam_coeff = 0.25;
+            const int km2 = m.km - 2;
+            const int km3 = m.km - 3;
+
+            auto smooth_seam = [&](Array& f, int i, int j) {
+                // Snapshot the three seam cells (k=0 and k=km-1 are one point).
+                const double f_km2 = f.x[i][j][km2];
+                const double f_0   = f.x[i][j][0];
+                const double f_1   = f.x[i][j][1];
+
+                const bool air_km2 = is_air(m.h, i, j, km2);
+                const bool air_0   = is_air(m.h, i, j, 0);
+                const bool air_1   = is_air(m.h, i, j, 1);
+
+                // Periodic neighbours, no-flux (substitute the cell value) at solid.
+                const double w_km2 = is_air(m.h, i, j, km3) ? f.x[i][j][km3] : f_km2;
+                const double e_km2 = air_0 ? f_0   : f_km2;   // east of km-2 is the seam
+                const double w_0   = air_km2 ? f_km2 : f_0;   // west of seam is km-2
+                const double e_0   = air_1 ? f_1   : f_0;     // east of seam is k=1
+                const double w_1   = air_0 ? f_0   : f_1;     // west of k=1 is the seam
+                const double e_1   = is_air(m.h, i, j, 2) ? f.x[i][j][2] : f_1;
+
+                if (air_km2)
+                    f.x[i][j][km2] = f_km2 + seam_coeff * (w_km2 - 2.0 * f_km2 + e_km2);
+                if (air_0)
+                    f.x[i][j][0] = f.x[i][j][m.km-1] =
+                        f_0 + seam_coeff * (w_0 - 2.0 * f_0 + e_0);
+                if (air_1)
+                    f.x[i][j][1] = f_1 + seam_coeff * (w_1 - 2.0 * f_1 + e_1);
+            };
+
+            #pragma omp parallel for schedule(static)
+            for (int i = 0; i < m.im; i++) {
+                for (int j = 0; j < m.jm; j++) {
+                    smooth_seam(m.u, i, j);   smooth_seam(m.un, i, j);
+                    smooth_seam(m.v, i, j);   smooth_seam(m.vn, i, j);
+                    smooth_seam(m.w, i, j);   smooth_seam(m.wn, i, j);
+                }
+            }
+        }
     }
 /*
-* 
+*
 */
     // ------------------------------------------------------------------
     void bcVelSurfSur()

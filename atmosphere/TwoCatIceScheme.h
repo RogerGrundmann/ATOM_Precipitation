@@ -182,6 +182,25 @@ private:
 
                     for(int i = m.im-2; i >= 0; i--){
 
+                        // Sub-terrain guard: cells with i < i_topography are inside the
+                        // mountain. Their t/p/r_humid/cloud/ice values are sub-terrain copies
+                        // (via subTerrainFill or similar paths) and produce unphysical S_c_au
+                        // + S_ac + … → dP_rain that drove the iter-323 P_rain runaway at
+                        // (i=6, j=30, k=209) — Gulf of Alaska / Cook Inlet inside-mountain
+                        // cell. Zero rain/snow flux here so the downward integration only
+                        // accumulates above the surface.
+                        if (i < m.i_topography[j][k]) {
+                            m.P_rain.x[i][j][k]        = 0.0;
+                            m.P_snow.x[i][j][k]        = 0.0;
+                            m.Precipitation.x[i][j][k] = 0.0;
+                            m.S_v.x[i][j][k] = 0.0;
+                            m.S_c.x[i][j][k] = 0.0;
+                            m.S_i.x[i][j][k] = 0.0;
+                            m.S_r.x[i][j][k] = 0.0;
+                            m.S_s.x[i][j][k] = 0.0;
+                            continue;
+                        }
+
                         double Rain = m.P_rain.x[i][j][k];
                         double Snow = m.P_snow.x[i][j][k];
 
@@ -405,6 +424,13 @@ private:
                                            + S_r_cri + S_r_frz
                                            - S_s_melt;
 
+                        // Per-cell precipitation cap. Physical max rain rate is ~30 mm/hr
+                        // (8e-6 mm/s); hurricane peak ~200 mm/hr (5e-5 mm/s). Cap at 0.1
+                        // mm/s = 8640 mm/day = ~3 m/day, ~3 orders of magnitude above any
+                        // real value. Backstop in case Fix-1 misses a path (e.g. surface
+                        // cell with unphysical S terms from an upstream anomaly).
+                        constexpr double P_max = 0.1;  // [kg/(m²s)] = [mm/s]
+
                         // rain flux integration (top-down)
                         // S_i_melt excluded: cloud ice melts to cloud water (S_c), not
                         // directly to the falling rain flux; adding it here double-counts
@@ -412,8 +438,8 @@ private:
                         double dP_rain = (S_c_au + S_ac + S_shed + S_s_melt
                             - S_ev - S_r_frz) * mass_layer;
 
-                        m.P_rain.x[i][j][k] =
-                            max(0.0, m.P_rain.x[i+1][j][k] + dP_rain);
+                        m.P_rain.x[i][j][k] = std::min(P_max,
+                            max(0.0, m.P_rain.x[i+1][j][k] + dP_rain));
 
                         // snow flux integration (top-down)
                         // S_i_melt excluded: suspended cloud ice and falling snow are
@@ -423,7 +449,7 @@ private:
                             + S_r_frz - S_s_melt) * mass_layer;
 
                         m.P_snow.x[i][j][k] = (t_u < m.t_0 && t_u >= m.t_000)
-                            ? max(0.0, m.P_snow.x[i+1][j][k] + dP_snow)
+                            ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
                             : 0.0;
 
                         m.Precipitation.x[i][j][k] =
