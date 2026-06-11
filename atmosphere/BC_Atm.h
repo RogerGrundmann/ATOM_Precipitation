@@ -542,8 +542,16 @@ public:
         };
         constexpr int n_both = sizeof(both_cubic) / sizeof(both_cubic[0]);
 
-        // Pattern B: von Neumann at i=0, cubic at i=im-1
-        Array* vn_bot_cubic_top[] = { 
+        // Pattern B: von Neumann at i=0, zero-gradient plain copy at i=im-1.
+        // The lid used to be the cubic (zero-third-difference) extrapolation
+        // x[iml]=x[iml-3]-3x[iml-2]+3x[iml-1]. That preserves the profile's
+        // curvature and projects it past the boundary, so a v/w field decaying
+        // toward zero at the top overshoots THROUGH zero — the opposite-sign
+        // top reflections seen by ~iter 20. The reflection then feeds back via
+        // the i=iml-1 radial stencil. A non-amplifying zero-gradient copy
+        // (free-slip, no vertical stress at the lid) removes it, mirroring the
+        // p_dyn lid fix in PressureSolverAtm.h.
+        Array* vn_bot_cubic_top[] = {
             &m.u, &m.v, &m.w, 
             &m.P_conv 
 //            &m.tke, &m.dis 
@@ -566,13 +574,22 @@ public:
 
         const int iml = m.im - 1;
 
+        // Pin t at the lid to its IC value when the snapshot is available;
+        // otherwise fall back to a zero-gradient copy (never the old cubic).
+        const bool pin_t_top = ((int)m.t_top_init.size() == m.jm);
+
         #pragma omp parallel for schedule(static)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
-                // t: no extrapolation at i=0, cubic at i=im-1
-                m.t.x[iml][j][k] = m.t.x[iml-3][j][k]
-                    - 3.0 * m.t.x[iml-2][j][k] + 3.0 * m.t.x[iml-1][j][k];
+                // t lid (i=im-1): pin to the IC isothermal-floor value. The old
+                // cubic extrapolation projected interior curvature onto the lid
+                // and amplified it (this stencil's condition number is ~7), so the
+                // constant stratospheric top drifted upward within ~20 iters and
+                // corrupted the otherwise-steady initial state. Pinning holds it
+                // fixed; the upper field then only evolves around orography.
+                m.t.x[iml][j][k] = pin_t_top ? m.t_top_init[j][k]
+                                             : m.t.x[iml-1][j][k];
 
                 // Pattern A
                 for (int f = 0; f < n_both; f++) {
@@ -581,12 +598,30 @@ public:
                     xf[iml][j][k] = xf[iml-3][j][k] - 3.0 * xf[iml-2][j][k] + 3.0 * xf[iml-1][j][k];
                 }
 
-                // Pattern B
+                // Pattern B — von Neumann at i=0, zero-gradient copy at the lid.
+                // (u is overwritten with the rigid-lid u=0 just below; P_conv keeps
+                // the lid copy; v,w get a taper-to-zero ceiling just after.)
                 for (int f = 0; f < n_vn_cubic; f++) {
                     double*** xf = vn_bot_cubic_top[f]->x;
-                    xf[0][j][k]   = m.c43 * xf[1][j][k]     - m.c13 * xf[2][j][k];
-                    xf[iml][j][k] = xf[iml-3][j][k] - 3.0 * xf[iml-2][j][k] + 3.0 * xf[iml-1][j][k];
+                    xf[0][j][k]   = m.c43 * xf[1][j][k] - m.c13 * xf[2][j][k];
+                    xf[iml][j][k] = xf[iml-1][j][k];
                 }
+
+                // Horizontal velocity (v,w) taper to a zero-velocity grid ceiling.
+                // The free-slip zero-gradient copy above carries the tropopause-jet
+                // value straight to i=im-1, so v,w stay finite ("stretched up") at the
+                // top; the IC instead ramps v,w to 0 above the tropopause. Restore that
+                // by ramping the top three layers smoothly to zero (factor 2/3, 1/3, 0)
+                // so the lid is quiet WITHOUT the one-cell shear shock a hard zero would
+                // make. This is the horizontal analogue of the u=0 rigid lid below.
+                // vn,wn are held in lockstep (as un is for u) so the next RK4 step
+                // starts from the tapered ceiling.
+                m.v.x[iml][j][k]    = 0.0;          m.w.x[iml][j][k]    = 0.0;
+                m.vn.x[iml][j][k]   = 0.0;          m.wn.x[iml][j][k]   = 0.0;
+                m.v.x[iml-1][j][k]  *= (1.0/3.0);   m.w.x[iml-1][j][k]  *= (1.0/3.0);
+                m.vn.x[iml-1][j][k] *= (1.0/3.0);   m.wn.x[iml-1][j][k] *= (1.0/3.0);
+                m.v.x[iml-2][j][k]  *= (2.0/3.0);   m.w.x[iml-2][j][k]  *= (2.0/3.0);
+                m.vn.x[iml-2][j][k] *= (2.0/3.0);   m.wn.x[iml-2][j][k] *= (2.0/3.0);
 
                 // Rigid lid on the VERTICAL velocity u at the model top (i=im-1).
                 // u is the radial component; air cannot flow through the lid, so the

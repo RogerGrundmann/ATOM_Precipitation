@@ -195,6 +195,14 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     initTemperatureData(Ma);                                            // initialization of temperature, hydrostatic pressure and density of dry air, reconstruction of potential surface values
     AtomUtils::damp_wiggles(t, &i_topography, true, true, true);
 
+    // Snapshot the lid temperature (i=im-1) from the IC. bcRadius pins t at the lid
+    // to this fixed reference so the isothermal stratospheric top stays constant
+    // instead of drifting up via the former cubic top extrapolation.
+    t_top_init.assign(jm, std::vector<double>(km, 0.0));
+    for(int j = 0; j < jm; j++)
+        for(int k = 0; k < km; k++)
+            t_top_init[j][k] = t.x[im-1][j][k];
+
     initWaterWapour();                                                  // initWaterWapour() and initCloudIce() belong together, init_vapour_cloud() stands alone
     initCloudIce();
 //    init_vapour_cloud();                                                // initialisation of water vapour and cloud/ice formation based on the temperature profile

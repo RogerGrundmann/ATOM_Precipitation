@@ -290,6 +290,12 @@ private:
 
     std::vector<float> m_layer_heights;
 
+    // Initial (non-dim) temperature at the model lid (i=im-1), snapshotted once
+    // from the IC. bcRadius pins t at the lid to this so the isothermal-floor top
+    // stays constant instead of drifting upward through the old cubic top
+    // extrapolation. Sized [jm][km]; empty until RunStart populates it.
+    std::vector<std::vector<double>> t_top_init;
+
     void SetDefaultConfig();
     void print_min_max_atm();
     void run_3D_loop(int Ma);
