@@ -132,10 +132,15 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + ku1   * half_dt;
                 v.x[i][j][k]     = vn_ijk   + kv1   * half_dt;
                 w.x[i][j][k]     = wn_ijk   + kw1   * half_dt;
-                c.x[i][j][k]     = cn_ijk   + kc1   * half_dt;
-                cloud.x[i][j][k] = cldn_ijk + kcl1  * half_dt;
-                ice.x[i][j][k]   = icen_ijk + ki1   * half_dt;
-                gr.x[i][j][k]    = grn_ijk  + kg1   * half_dt;
+                // Positivity clamp on the moisture scalars at every RK4 stage (as tke/dis
+                // below): mass mixing ratios are physically >= 0. The spherical-operator
+                // update can drive a near-zero cloud/c/ice cell slightly negative at sharp
+                // coastal gradients; clamping here guarantees the prognostic field is never
+                // negative (was previously only fixed downstream by storeIntermediateData3D).
+                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc1   * half_dt);
+                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl1  * half_dt);
+                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki1   * half_dt);
+                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg1   * half_dt);
                 co2.x[i][j][k]   = co2n_ijk + kco1  * half_dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke1 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + kdis1 * half_dt);
@@ -159,10 +164,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + ku2   * half_dt;
                 v.x[i][j][k]     = vn_ijk   + kv2   * half_dt;
                 w.x[i][j][k]     = wn_ijk   + kw2   * half_dt;
-                c.x[i][j][k]     = cn_ijk   + kc2   * half_dt;
-                cloud.x[i][j][k] = cldn_ijk + kcl2  * half_dt;
-                ice.x[i][j][k]   = icen_ijk + ki2   * half_dt;
-                gr.x[i][j][k]    = grn_ijk  + kg2   * half_dt;
+                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc2   * half_dt);
+                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl2  * half_dt);
+                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki2   * half_dt);
+                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg2   * half_dt);
                 co2.x[i][j][k]   = co2n_ijk + kco2  * half_dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke2 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis2 * half_dt);
@@ -186,10 +191,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + ku3   * dt;
                 v.x[i][j][k]     = vn_ijk   + kv3   * dt;
                 w.x[i][j][k]     = wn_ijk   + kw3   * dt;
-                c.x[i][j][k]     = cn_ijk   + kc3   * dt;
-                cloud.x[i][j][k] = cldn_ijk + kcl3  * dt;
-                ice.x[i][j][k]   = icen_ijk + ki3   * dt;
-                gr.x[i][j][k]    = grn_ijk  + kg3   * dt;
+                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc3   * dt);
+                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl3  * dt);
+                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki3   * dt);
+                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg3   * dt);
                 co2.x[i][j][k]   = co2n_ijk + kco3  * dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke3 * dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis3 * dt);
@@ -213,10 +218,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + (ku1   + 2.0*ku2   + 2.0*ku3   + ku4)   * dt_sixth;
                 v.x[i][j][k]     = vn_ijk   + (kv1   + 2.0*kv2   + 2.0*kv3   + kv4)   * dt_sixth;
                 w.x[i][j][k]     = wn_ijk   + (kw1   + 2.0*kw2   + 2.0*kw3   + kw4)   * dt_sixth;
-                c.x[i][j][k]     = cn_ijk   + (kc1   + 2.0*kc2   + 2.0*kc3   + kc4)   * dt_sixth;
-                cloud.x[i][j][k] = cldn_ijk + (kcl1  + 2.0*kcl2  + 2.0*kcl3  + kcl4)  * dt_sixth;
-                ice.x[i][j][k]   = icen_ijk + (ki1   + 2.0*ki2   + 2.0*ki3   + ki4)   * dt_sixth;
-                gr.x[i][j][k]    = grn_ijk  + (kg1   + 2.0*kg2   + 2.0*kg3   + kg4)   * dt_sixth;
+                c.x[i][j][k]     = std::max(0.0, cn_ijk   + (kc1   + 2.0*kc2   + 2.0*kc3   + kc4)   * dt_sixth);
+                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + (kcl1  + 2.0*kcl2  + 2.0*kcl3  + kcl4)  * dt_sixth);
+                ice.x[i][j][k]   = std::max(0.0, icen_ijk + (ki1   + 2.0*ki2   + 2.0*ki3   + ki4)   * dt_sixth);
+                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + (kg1   + 2.0*kg2   + 2.0*kg3   + kg4)   * dt_sixth);
                 co2.x[i][j][k]   = co2n_ijk + (kco1  + 2.0*kco2  + 2.0*kco3  + kco4)  * dt_sixth;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth, 0.0, tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth);
