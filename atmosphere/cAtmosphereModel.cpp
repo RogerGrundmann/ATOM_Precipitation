@@ -648,6 +648,29 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         if(checkpoint_save_iter >= 0 && total_iter_count == checkpoint_save_iter)
             save_state(checkpoint_save_iter);
 
+        // Periodic restart checkpoints every 100 iters, but ONLY once the run is clean
+        // (no non-finite cell in any serialized prognostic field) so we never write a
+        // NaN state that would later poison restart_from_iter. Files land at
+        // output_path/atm_restart_<total_iter_count>.bin (per-iter names, no clobber).
+        {
+            constexpr int restart_save_stride = 100;
+            if(restart_save_stride > 0 && total_iter_count > 0
+               && total_iter_count % restart_save_stride == 0){
+                bool clean = true;
+                for(Array* a : restart_arrays()){
+                    for(int i = 0; i < im && clean; i++)
+                        for(int j = 0; j < jm && clean; j++)
+                            for(int k = 0; k < km && clean; k++)
+                                if(!AtomUtils::is_finite_safe(a->x[i][j][k])) clean = false;
+                }
+                if(clean)
+                    save_state(total_iter_count);
+                else
+                    cout << "      AGCM: restart checkpoint SKIPPED at iter "
+                         << total_iter_count << " — non-finite cell present (not clean)" << endl;
+            }
+        }
+
     }  // end iter_n
 
 

@@ -16,6 +16,14 @@
 using namespace std;
 using namespace AtomUtils;
 
+// minmod slope limiter on two undivided differences. Returns 0 when a,b have
+// opposite signs (a local extremum) — the property that makes the limited
+// advective gradient positivity-preserving: at a local min/max the advection
+// term vanishes, so it cannot manufacture a new under/overshoot.
+static inline double minmod(double a, double b){
+    return (a * b <= 0.0) ? 0.0 : (std::fabs(a) < std::fabs(b) ? a : b);
+}
+
 
 void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeometry& geo){
 
@@ -662,9 +670,41 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double transport_u     = u_exp * dudr     + v_invrm * dudthe     + w_invrs * dudphi;
     double transport_v     = u_exp * dvdr     + v_invrm * dvdthe     + w_invrs * dvdphi;
     double transport_w     = u_exp * dwdr     + v_invrm * dwdthe     + w_invrs * dwdphi;
-    double transport_c     = u_exp * dcdr     + v_invrm * dcdthe     + w_invrs * dcdphi;
-    double transport_cloud = u_exp * dclouddr + v_invrm * dclouddthe + w_invrs * dclouddphi;
-    double transport_ice   = u_exp * dicedr   + v_invrm * dicedthe   + w_invrs * dicedphi;
+    // Positivity-preserving (minmod-limited) advective gradients for the moisture
+    // scalars c/cloud/ice. Used ONLY in transport_{c,cloud,ice}; diffusion and
+    // Q_Latent keep the centered stencil. Centered advection overshoots at the sharp
+    // coastal cloud/vapour gradient under the strong coastal jet, driving cloud/c
+    // negative (then silently clamped by storeIntermediateData3D — a mass leak + 2Δt
+    // sawtooth). minmod→0 at a local extremum, so advection can no longer create the
+    // undershoot. Only the interior central stencils are limited (!flag); the one-sided
+    // boundary/pole/seam stencils fall back to the centered value already computed.
+    const double inv_dr   = 2.0 * inv_2dr;
+    const double inv_dthe = 2.0 * inv_2dthe;
+    const double inv_dphi = 2.0 * inv_2dphi;
+
+    double dcdr_adv = dcdr, dclouddr_adv = dclouddr, dicedr_adv = dicedr;
+    double dcdthe_adv = dcdthe, dclouddthe_adv = dclouddthe, dicedthe_adv = dicedthe;
+    double dcdphi_adv = dcdphi, dclouddphi_adv = dclouddphi, dicedphi_adv = dicedphi;
+
+    if(!r_flag){
+        dcdr_adv     = minmod(c.x[i][j][k]     - c.x[i-1][j][k],     c.x[i+1][j][k]     - c.x[i][j][k])     * inv_dr;
+        dclouddr_adv = minmod(cloud.x[i][j][k] - cloud.x[i-1][j][k], cloud.x[i+1][j][k] - cloud.x[i][j][k]) * inv_dr;
+        dicedr_adv   = minmod(ice.x[i][j][k]   - ice.x[i-1][j][k],   ice.x[i+1][j][k]   - ice.x[i][j][k])   * inv_dr;
+    }
+    if(!the_flag){
+        dcdthe_adv     = minmod(c.x[i][j][k]     - c.x[i][j-1][k],     c.x[i][j+1][k]     - c.x[i][j][k])     * inv_dthe;
+        dclouddthe_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j-1][k], cloud.x[i][j+1][k] - cloud.x[i][j][k]) * inv_dthe;
+        dicedthe_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j-1][k],   ice.x[i][j+1][k]   - ice.x[i][j][k])   * inv_dthe;
+    }
+    if(!phi_flag){
+        dcdphi_adv     = minmod(c.x[i][j][k]     - c.x[i][j][k-1],     c.x[i][j][k+1]     - c.x[i][j][k])     * inv_dphi;
+        dclouddphi_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j][k-1], cloud.x[i][j][k+1] - cloud.x[i][j][k]) * inv_dphi;
+        dicedphi_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j][k-1],   ice.x[i][j][k+1]   - ice.x[i][j][k])   * inv_dphi;
+    }
+
+    double transport_c     = u_exp * dcdr_adv     + v_invrm * dcdthe_adv     + w_invrs * dcdphi_adv;
+    double transport_cloud = u_exp * dclouddr_adv + v_invrm * dclouddthe_adv + w_invrs * dclouddphi_adv;
+    double transport_ice   = u_exp * dicedr_adv   + v_invrm * dicedthe_adv   + w_invrs * dicedphi_adv;
     double transport_g     = u_exp * dgdr     + v_invrm * dgdthe     + w_invrs * dgdphi;
     double transport_co2   = u_exp * dcodr    + v_invrm * dcodthe    + w_invrs * dcodphi;
     double transport_tke   = u_exp * dtkedr   + v_invrm * dtkedthe   + w_invrs * dtkedphi;
