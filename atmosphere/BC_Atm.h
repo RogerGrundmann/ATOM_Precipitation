@@ -150,6 +150,14 @@ public:
                         m.wn.x[i][j][k] = 0.0;
 
                         m.t.x[i][j][k]     = 1.0;
+                        // Reset the time-level-n temperature too. The RK4 loop carries no
+                        // land mask: it integrates every cell i=1..im-1 from tn, so it
+                        // overwrites the t.x=1.0 reset above and reads tn instead. Without
+                        // resetting tn, solid cliff-face cells (adjacent to ocean in j/k)
+                        // accumulate an unbounded cold anomaly in tn each step (observed as a
+                        // growing sub-terrain cold pool at the steep BC/Alaska coast). Mirrors
+                        // the un/vn/wn and cn/cloudn/icen/grn resets elsewhere in this branch.
+                        m.tn.x[i][j][k]    = 1.0;
                         m.p_dyn.x[i][j][k] = 0.0;
 
                         // Density reset to dry-air reference; CO2 to background.
@@ -287,6 +295,14 @@ public:
                         }
 
                         m.t.x[i][j][k]     = 1.0;
+                        // Reset the time-level-n temperature too. The RK4 loop carries no
+                        // land mask: it integrates every cell i=1..im-1 from tn, so it
+                        // overwrites the t.x=1.0 reset above and reads tn instead. Without
+                        // resetting tn, solid cliff-face cells (adjacent to ocean in j/k)
+                        // accumulate an unbounded cold anomaly in tn each step (observed as a
+                        // growing sub-terrain cold pool at the steep BC/Alaska coast). Mirrors
+                        // the un/vn/wn and cn/cloudn/icen/grn resets elsewhere in this branch.
+                        m.tn.x[i][j][k]    = 1.0;
                         m.p_dyn.x[i][j][k] = 0.0;
 
                         // Density reset to dry-air reference; CO2 to background.

@@ -666,7 +666,6 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
 
     double pressure_t = coeff_energy_p * (u_exp * dpdr + v_invrm * dpdthe + w_invrs * dpdphi);
 
-    double transport_t     = u_exp * dtdr     + v_invrm * dtdthe     + w_invrs * dtdphi;
     double transport_u     = u_exp * dudr     + v_invrm * dudthe     + w_invrs * dudphi;
     double transport_v     = u_exp * dvdr     + v_invrm * dvdthe     + w_invrs * dvdphi;
     double transport_w     = u_exp * dwdr     + v_invrm * dwdthe     + w_invrs * dwdphi;
@@ -685,23 +684,35 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double dcdr_adv = dcdr, dclouddr_adv = dclouddr, dicedr_adv = dicedr;
     double dcdthe_adv = dcdthe, dclouddthe_adv = dclouddthe, dicedthe_adv = dicedthe;
     double dcdphi_adv = dcdphi, dclouddphi_adv = dclouddphi, dicedphi_adv = dicedphi;
+    // Temperature gets the same minmod-limited advective gradient as the moisture
+    // scalars. A term-by-term rhs_t budget at the steep BC/Alaska coast (57°N, the low
+    // ocean-air column at the foot of the cliff) showed the growing cold bubble is driven
+    // entirely by centered -transport_t (~ -11) running as a 2Δt odd/even checkerboard,
+    // with diffusion/latent/MC all negligible — the temperature analogue of the c/cloud
+    // overshoot. minmod→0 at the vertical local extremum (i=6 cold between warmer i=5/i=7)
+    // so advection can no longer deepen the cold pool. diffusion_t keeps its centered stencil.
+    double dtdr_adv = dtdr, dtdthe_adv = dtdthe, dtdphi_adv = dtdphi;
 
     if(!r_flag){
+        dtdr_adv     = minmod(t.x[i][j][k]     - t.x[i-1][j][k],     t.x[i+1][j][k]     - t.x[i][j][k])     * inv_dr;
         dcdr_adv     = minmod(c.x[i][j][k]     - c.x[i-1][j][k],     c.x[i+1][j][k]     - c.x[i][j][k])     * inv_dr;
         dclouddr_adv = minmod(cloud.x[i][j][k] - cloud.x[i-1][j][k], cloud.x[i+1][j][k] - cloud.x[i][j][k]) * inv_dr;
         dicedr_adv   = minmod(ice.x[i][j][k]   - ice.x[i-1][j][k],   ice.x[i+1][j][k]   - ice.x[i][j][k])   * inv_dr;
     }
     if(!the_flag){
+        dtdthe_adv     = minmod(t.x[i][j][k]     - t.x[i][j-1][k],     t.x[i][j+1][k]     - t.x[i][j][k])     * inv_dthe;
         dcdthe_adv     = minmod(c.x[i][j][k]     - c.x[i][j-1][k],     c.x[i][j+1][k]     - c.x[i][j][k])     * inv_dthe;
         dclouddthe_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j-1][k], cloud.x[i][j+1][k] - cloud.x[i][j][k]) * inv_dthe;
         dicedthe_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j-1][k],   ice.x[i][j+1][k]   - ice.x[i][j][k])   * inv_dthe;
     }
     if(!phi_flag){
+        dtdphi_adv     = minmod(t.x[i][j][k]     - t.x[i][j][k-1],     t.x[i][j][k+1]     - t.x[i][j][k])     * inv_dphi;
         dcdphi_adv     = minmod(c.x[i][j][k]     - c.x[i][j][k-1],     c.x[i][j][k+1]     - c.x[i][j][k])     * inv_dphi;
         dclouddphi_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j][k-1], cloud.x[i][j][k+1] - cloud.x[i][j][k]) * inv_dphi;
         dicedphi_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j][k-1],   ice.x[i][j][k+1]   - ice.x[i][j][k])   * inv_dphi;
     }
 
+    double transport_t     = u_exp * dtdr_adv     + v_invrm * dtdthe_adv     + w_invrs * dtdphi_adv;
     double transport_c     = u_exp * dcdr_adv     + v_invrm * dcdthe_adv     + w_invrs * dcdphi_adv;
     double transport_cloud = u_exp * dclouddr_adv + v_invrm * dclouddthe_adv + w_invrs * dclouddphi_adv;
     double transport_ice   = u_exp * dicedr_adv   + v_invrm * dicedthe_adv   + w_invrs * dicedphi_adv;
