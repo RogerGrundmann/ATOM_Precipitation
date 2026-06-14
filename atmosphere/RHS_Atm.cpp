@@ -319,9 +319,6 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
 
     double pressure_t = coeff_energy_p * (u_exp * dpdr + v_invrm * dpdthe + w_invrs * dpdphi);
 
-    double transport_u     = u_exp * dudr     + v_invrm * dudthe     + w_invrs * dudphi;
-    double transport_v     = u_exp * dvdr     + v_invrm * dvdthe     + w_invrs * dvdphi;
-    double transport_w     = u_exp * dwdr     + v_invrm * dwdthe     + w_invrs * dwdphi;
     // Positivity-preserving (minmod-limited) advective gradients for the moisture
     // scalars — see RHS_Atm_Turb.cpp for the rationale. Limits only the interior
     // central stencils; boundary/pole/seam one-sided stencils keep the centered value.
@@ -337,26 +334,44 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
     // bubble is driven by centered -transport_t as a 2Δt checkerboard. diffusion_t keeps
     // its centered stencil.
     double dtdr_adv = dtdr, dtdthe_adv = dtdthe, dtdphi_adv = dtdphi;
+    // Velocity gets the same minmod-limited advective gradient (transport_{u,v,w} only) —
+    // see RHS_Atm_Turb.cpp: a momentum budget at the Greenwich-seam blow-up cell showed a
+    // 2Δ grid-scale velocity checkerboard driven by centered zonal self-advection -w·∂w/∂φ.
+    double dudr_adv = dudr, dudthe_adv = dudthe, dudphi_adv = dudphi;
+    double dvdr_adv = dvdr, dvdthe_adv = dvdthe, dvdphi_adv = dvdphi;
+    double dwdr_adv = dwdr, dwdthe_adv = dwdthe, dwdphi_adv = dwdphi;
 
     if(!r_flag){
         dtdr_adv     = minmod(t.x[i][j][k]     - t.x[i-1][j][k],     t.x[i+1][j][k]     - t.x[i][j][k])     * inv_dr;
+        dudr_adv     = minmod(u.x[i][j][k]     - u.x[i-1][j][k],     u.x[i+1][j][k]     - u.x[i][j][k])     * inv_dr;
+        dvdr_adv     = minmod(v.x[i][j][k]     - v.x[i-1][j][k],     v.x[i+1][j][k]     - v.x[i][j][k])     * inv_dr;
+        dwdr_adv     = minmod(w.x[i][j][k]     - w.x[i-1][j][k],     w.x[i+1][j][k]     - w.x[i][j][k])     * inv_dr;
         dcdr_adv     = minmod(c.x[i][j][k]     - c.x[i-1][j][k],     c.x[i+1][j][k]     - c.x[i][j][k])     * inv_dr;
         dclouddr_adv = minmod(cloud.x[i][j][k] - cloud.x[i-1][j][k], cloud.x[i+1][j][k] - cloud.x[i][j][k]) * inv_dr;
         dicedr_adv   = minmod(ice.x[i][j][k]   - ice.x[i-1][j][k],   ice.x[i+1][j][k]   - ice.x[i][j][k])   * inv_dr;
     }
     if(!the_flag){
         dtdthe_adv     = minmod(t.x[i][j][k]     - t.x[i][j-1][k],     t.x[i][j+1][k]     - t.x[i][j][k])     * inv_dthe;
+        dudthe_adv     = minmod(u.x[i][j][k]     - u.x[i][j-1][k],     u.x[i][j+1][k]     - u.x[i][j][k])     * inv_dthe;
+        dvdthe_adv     = minmod(v.x[i][j][k]     - v.x[i][j-1][k],     v.x[i][j+1][k]     - v.x[i][j][k])     * inv_dthe;
+        dwdthe_adv     = minmod(w.x[i][j][k]     - w.x[i][j-1][k],     w.x[i][j+1][k]     - w.x[i][j][k])     * inv_dthe;
         dcdthe_adv     = minmod(c.x[i][j][k]     - c.x[i][j-1][k],     c.x[i][j+1][k]     - c.x[i][j][k])     * inv_dthe;
         dclouddthe_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j-1][k], cloud.x[i][j+1][k] - cloud.x[i][j][k]) * inv_dthe;
         dicedthe_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j-1][k],   ice.x[i][j+1][k]   - ice.x[i][j][k])   * inv_dthe;
     }
     if(!phi_flag){
         dtdphi_adv     = minmod(t.x[i][j][k]     - t.x[i][j][k-1],     t.x[i][j][k+1]     - t.x[i][j][k])     * inv_dphi;
+        dudphi_adv     = minmod(u.x[i][j][k]     - u.x[i][j][k-1],     u.x[i][j][k+1]     - u.x[i][j][k])     * inv_dphi;
+        dvdphi_adv     = minmod(v.x[i][j][k]     - v.x[i][j][k-1],     v.x[i][j][k+1]     - v.x[i][j][k])     * inv_dphi;
+        dwdphi_adv     = minmod(w.x[i][j][k]     - w.x[i][j][k-1],     w.x[i][j][k+1]     - w.x[i][j][k])     * inv_dphi;
         dcdphi_adv     = minmod(c.x[i][j][k]     - c.x[i][j][k-1],     c.x[i][j][k+1]     - c.x[i][j][k])     * inv_dphi;
         dclouddphi_adv = minmod(cloud.x[i][j][k] - cloud.x[i][j][k-1], cloud.x[i][j][k+1] - cloud.x[i][j][k]) * inv_dphi;
         dicedphi_adv   = minmod(ice.x[i][j][k]   - ice.x[i][j][k-1],   ice.x[i][j][k+1]   - ice.x[i][j][k])   * inv_dphi;
     }
 
+    double transport_u     = u_exp * dudr_adv     + v_invrm * dudthe_adv     + w_invrs * dudphi_adv;
+    double transport_v     = u_exp * dvdr_adv     + v_invrm * dvdthe_adv     + w_invrs * dvdphi_adv;
+    double transport_w     = u_exp * dwdr_adv     + v_invrm * dwdthe_adv     + w_invrs * dwdphi_adv;
     double transport_t     = u_exp * dtdr_adv     + v_invrm * dtdthe_adv     + w_invrs * dtdphi_adv;
     double transport_c     = u_exp * dcdr_adv     + v_invrm * dcdthe_adv     + w_invrs * dcdphi_adv;
     double transport_cloud = u_exp * dclouddr_adv + v_invrm * dclouddthe_adv + w_invrs * dclouddphi_adv;
