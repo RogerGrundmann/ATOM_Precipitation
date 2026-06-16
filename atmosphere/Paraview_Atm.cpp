@@ -267,7 +267,7 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
 
     using namespace ParaViewAtm;
 
-    string Atmosphere_panorama_vts_File_Name = output_path + "/" + Name_Bathymetry_File + "_Atm_shere_" + std::to_string(n) + ".vts";
+    string Atmosphere_panorama_vts_File_Name = output_path + "/" + Name_Bathymetry_File + "_Atm_sphere_" + std::to_string(n) + ".vts";
 
     ofstream Atmosphere_panorama_vts_File;
 

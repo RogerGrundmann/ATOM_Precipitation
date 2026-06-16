@@ -277,7 +277,7 @@ public:
         if (m.paraview_panorama_vts_flag && m.panorama_print > 0
             && m.iter_n > 0 && m.iter_n % m.panorama_print == 0) {
             m.paraview_panorama_vts(bathymetry_name, m.iter_n);
-//            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
+            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
         }
 
         m.AtmosphereDataTransfer(bathymetry_name);
