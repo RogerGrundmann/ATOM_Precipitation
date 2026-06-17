@@ -565,6 +565,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
             if(iter_n % checkpoint == 0){
                 print_min_max_atm();
+                write_meridional_streamfunction(iter_n);   // Hadley/Ferrel cell strength (zonal-mean v + Ψ) per vtk checkpoint
                 UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
                 cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
             }

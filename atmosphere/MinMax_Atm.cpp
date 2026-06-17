@@ -8,10 +8,13 @@
 
 #include <iostream>
 #include <iomanip>
+#include <sstream>
+#include <fstream>
 #include <cstring>
 #include <cfloat>
 #include <cmath>
 #include "cAtmosphereModel.h"
+#include "Utils.h"     // AtomUtils::is_finite_safe — bit-level NaN/Inf test that survives -ffast-math
 
 using namespace std;
 
@@ -151,5 +154,86 @@ void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string
         name_unitValue << setw(5)  << jmin_deg << setw(3) << deg_lat_min << setw(4) << kmin_deg << 
         setw(3) << deg_lon_min  << setw(6) << imin_level << setw(2) << level << endl;
     return;
+}
+
+/*
+* Zonal-mean meridional wind [v] and meridional mass streamfunction Ψ — the standard
+* diagnostic for the Hadley/Ferrel/Polar overturning cells. ATOM convention: v is the
+* meridional component, POSITIVE SOUTHWARD; v.x is non-dimensional, so ×u_0 → m/s. The
+* zonal mean is taken over FLUID cells only (longitudes where the cell sits above the
+* local terrain, i >= i_topography[j][k]).
+*
+*   Ψ(i,j) = 2π·a·cosφ·ρ0·∫_z^{z_top} [v]_phys dz'      [kg/s]
+*
+* integrated DOWNWARD from the model lid (Ψ = 0 at i = im-1). With v > 0 southward, the
+* cell STRENGTH is max|Ψ|; a tropical Ψ extremum is the Hadley cell. Writes a long-format
+* CSV (lat × height) per checkpoint and logs the strongest cells so collapse can be read
+* straight from the run log without ParaView. See [[project_vw_drag_cut_hadley]].
+*/
+void cAtmosphereModel::write_meridional_streamfunction(int iter){
+    const double a      = r_Earth * 1000.0;   // Earth radius [m] (r_Earth is in km)
+    const double rho    = r_air;              // Boussinesq reference density [kg/m³]
+    const double two_pi = 2.0 * M_PI;
+
+    // zonal-mean meridional wind [m/s] over fluid cells
+    vector<vector<double> > vbar(im, vector<double>(jm, 0.0));
+    for(int i = 0; i < im; i++){
+        for(int j = 0; j < jm; j++){
+            double sum = 0.0; int n = 0;
+            for(int k = 0; k < km; k++){
+                if(i < i_topography[j][k]) continue;            // inside terrain
+                double vv = v.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(vv)) continue;
+                sum += vv; n++;
+            }
+            vbar[i][j] = (n > 0) ? (sum / n) * u_0 : 0.0;
+        }
+    }
+
+    // meridional mass streamfunction, integrated downward from the lid (Ψ_top = 0)
+    vector<vector<double> > psi(im, vector<double>(jm, 0.0));
+    for(int j = 0; j < jm; j++){
+        const double cosphi = sin(the.z[j]);                    // cos(latitude) = sin(colatitude)
+        const double coeff  = two_pi * a * cosphi * rho;
+        for(int i = im - 2; i >= 0; i--){
+            const double dz   = get_layer_height(i + 1) - get_layer_height(i);   // [m] > 0
+            const double vmid = 0.5 * (vbar[i][j] + vbar[i + 1][j]);             // [m/s]
+            psi[i][j] = psi[i + 1][j] + coeff * vmid * dz;                       // [kg/s]
+        }
+    }
+
+    auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };  // °N positive
+
+    // long-format CSV: lat × height
+    ostringstream fname;
+    fname << output_path << "meridional_streamfunction_" << iter << ".csv";
+    ofstream f(fname.str().c_str());
+    if(f.is_open()){
+        f << "lat_deg,height_m,vbar_mps,psi_kg_per_s\n";
+        for(int j = 0; j < jm; j++){
+            const double lat = lat_of(j);
+            for(int i = 0; i < im; i++){
+                f << lat << "," << get_layer_height(i) << ","
+                  << vbar[i][j] << "," << psi[i][j] << "\n";
+            }
+        }
+        f.close();
+    }
+
+    // log the strongest overturning cells so the structure is readable from the run log
+    double psimax = -DBL_MAX, psimin = DBL_MAX;
+    int jmx = 0, imx = 0, jmn = 0, imn = 0;
+    for(int j = 0; j < jm; j++){
+        for(int i = 0; i < im; i++){
+            if(psi[i][j] > psimax){ psimax = psi[i][j]; jmx = j; imx = i; }
+            if(psi[i][j] < psimin){ psimin = psi[i][j]; jmn = j; imn = i; }
+        }
+    }
+    cout << "      [streamfn] iter=" << iter << fixed << setprecision(2)
+         << "  Psi_max=" << psimax / 1.0e9 << " (1e9 kg/s) @ lat=" << lat_of(jmx)
+         << " z=" << setprecision(0) << get_layer_height(imx) << "m"
+         << setprecision(2) << "   Psi_min=" << psimin / 1.0e9 << " @ lat=" << lat_of(jmn)
+         << " z=" << setprecision(0) << get_layer_height(imn) << "m"
+         << "   -> " << fname.str() << endl;
 }
 

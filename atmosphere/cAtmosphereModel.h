@@ -298,6 +298,7 @@ private:
 
     void SetDefaultConfig();
     void print_min_max_atm();
+    void write_meridional_streamfunction(int iter);   // zonal-mean v + meridional mass streamfunction Ψ (Hadley/Ferrel cell diagnostic)
     void run_3D_loop(int Ma);
     void load_global_temperature_curve();
     void load_equat_temperature_curve();
