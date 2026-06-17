@@ -755,6 +755,69 @@ void AtomUtils::radial_shapiro_filter(Array& field,
 
 
 // ============================================================================
+// Higher-order (4th-order Shapiro) radial de-checkerboarding
+// ============================================================================
+// Response 1 - sin^4(kΔ/2): removes the 2Δ grid mode completely while preserving
+// resolved vertical shear far better than the 1-2-1 (the 1-2-1 run every iter
+// homogenizes the jet's thermal-wind shear and the Hadley/Ferrel two-branch v
+// profile, spinning the circulation down despite steady baroclinic forcing).
+// Interior 5-point stencil  f - (1/16)(f_{i+2} -4 f_{i+1} +6 f_i -4 f_{i-1} + f_{i-2});
+// where i±2 is unavailable (next to the surface or the lid) it falls back to the
+// gentle 1-2-1. Solid cells below are substituted with the current value (no-flux).
+void AtomUtils::radial_shapiro_filter_ho(Array& field,
+                                         const std::vector<std::vector<int>>& i_surface,
+                                         int    passes,
+                                         double strength)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (passes <= 0 || strength <= 0.0 || im < 3) return;
+
+    auto in_fluid = [&](int i, int j, int k) {
+        return i >= std::max(i_surface[j][k], 0);
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+    const double c4 = strength / 16.0;   // 4th-order Shapiro coefficient
+    const double c2 = strength * 0.25;   // 1-2-1 fallback coefficient
+
+    for (int pass = 0; pass < passes; ++pass) {
+
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < im - 1; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!in_fluid(i, j, k)) continue;
+                    const double c = tmp[idx(i,j,k)];
+                    if (!in_fluid(i-1, j, k) || !in_fluid(i+1, j, k)) continue;  // 1-cell-thin: leave it
+                    const bool fm2 = (i - 2 >= 0)      && in_fluid(i-2, j, k);
+                    const bool fp2 = (i + 2 <= im - 1) && in_fluid(i+2, j, k);
+                    if (fm2 && fp2) {
+                        const double d4 = tmp[idx(i+2,j,k)] - 4.0 * tmp[idx(i+1,j,k)]
+                                        + 6.0 * c - 4.0 * tmp[idx(i-1,j,k)] + tmp[idx(i-2,j,k)];
+                        field.x[i][j][k] = c - c4 * d4;          // 4th-order: kills 2Δ, keeps shear
+                    } else {
+                        const double vm = tmp[idx(i-1,j,k)];
+                        const double vp = tmp[idx(i+1,j,k)];
+                        field.x[i][j][k] = c + c2 * (vm - 2.0 * c + vp);  // boundary fallback
+                    }
+                }
+            }
+        }
+    } // passes
+}
+
+
+
+// ============================================================================
 // Near-surface coastal Rayleigh sponge
 // ============================================================================
 // Soft cap for the dry-seeded coastal velocity runaway (Gulf-of-Alaska mode).

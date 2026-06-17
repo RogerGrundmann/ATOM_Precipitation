@@ -601,15 +601,18 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::orographic_shapiro_filter(v, i_topography, 3, 3, 3);
         AtomUtils::orographic_shapiro_filter(w, i_topography, 3, 3, 3);
 
-        // Gentle global radial (i) de-checkerboarding. The iter-250 blow-up was a 2Δ
-        // grid-scale checkerboard whose purest component is on the radial axis, growing at
-        // near-surface cells the polar (k) and orographic (j+k, steep-only) filters never
-        // reach — the radial axis had no other dissipation. A single 1-2-1 radial pass over
-        // all fluid cells removes the level-to-level 2Δ oscillation while preserving smooth
-        // vertical shear.
-        AtomUtils::radial_shapiro_filter(u, i_topography);
-        AtomUtils::radial_shapiro_filter(v, i_topography);
-        AtomUtils::radial_shapiro_filter(w, i_topography);
+        // Radial (i) de-checkerboarding. The 2Δ grid-scale checkerboard that seeds the
+        // near-surface CFL blow-up has its purest component on the radial axis, and no other
+        // filter (polar=k, orographic=j+k steep-only) reaches it. The vertical velocity u gets
+        // a plain 1-2-1 pass — it carries little resolved shear and this annihilates the i=1
+        // high-latitude 2Δ spike. For v and w a 4th-order Shapiro is used instead: it still
+        // removes the 2Δ mode completely (CFL guard) but preserves the resolved vertical shear.
+        // A 1-2-1 on v,w run EVERY iteration measurably erodes the jet's thermal-wind shear and
+        // the Hadley/Ferrel cells' two-branch v structure, spinning the circulation down despite
+        // a steady baroclinic (equator-pole) temperature gradient; the 4th-order filter does not.
+        AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2);
+        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2);
+        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2);
 
         // (Upper-troposphere Rayleigh sponge tested 2026-06-01: did not help. The iter-359
         // "first NaN at i=35, k=0, 10 km" reported by scanForNaN was the overflow location,

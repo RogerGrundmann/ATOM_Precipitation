@@ -242,6 +242,17 @@ namespace AtomUtils{
                                int    passes   = 1,
                                double strength = 1.0);
 
+    // Higher-order (4th-order Shapiro, n=2) radial de-checkerboarding. Response 1 - sin^4(kΔ/2):
+    // still annihilates the 2Δ grid mode completely (factor 0 at k=π) but leaves resolved
+    // vertical shear nearly intact (4Δ mode damped only 25% vs 50% for the 1-2-1) — so it can
+    // run globally every iter WITHOUT spinning the jet/Hadley-Ferrel cells down the way the
+    // 1-2-1 does. 5-point stencil; falls back to a gentle 1-2-1 adjacent to the surface/lid
+    // where i±2 is unavailable. No-flux (current-cell substitution) into solid cells below.
+    void radial_shapiro_filter_ho(Array& field,
+                                  const std::vector<std::vector<int>>& i_surface,
+                                  int    passes   = 1,
+                                  double strength = 1.0);
+
     // Near-surface coastal Rayleigh sponge — last-resort soft cap for the dry-seeded
     // velocity runaway at steep coasts ([[project-bc-atm-mc-extrap-overshoot]] /
     // [[project-orography-slope-cap]] Gulf-of-Alaska mode). The slope cap skips
