@@ -78,6 +78,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   sc_CO2 = 0.96;
   pr = 0.7179;
   pr_turb = 0.9;
+  abl_height = 1500.0;
   ep = 0.62198;
   hp = 6.1078;
   R_Air = 286.9;

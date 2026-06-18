@@ -206,13 +206,26 @@ private:
                 const double om_bg = pow(C_nue, -0.25) * sqrt(k_bg) / (Karman * m.L_atm); // [s⁻¹]
                 const double eps_bg = pow(C_nue, 0.75) * pow(k_bg, 1.5) / (Karman * m.L_atm); // [m²/s³]
 
+                // ABL is anchored to the LOCAL surface, not sea level: heights are
+                // measured above the terrain top, so the boundary layer rides on top
+                // of mountains (ABL top = mountain_height + abl_height) instead of
+                // being clipped away wherever the ground itself exceeds abl_height.
+                // Consistent with the terrain-relative wall distance used for ω/ε.
+                const double y_mount = m.get_layer_height(m.i_topography[j][k]); // surface height [m]
+
                 for (int i = 1; i < m.im - 1; i++) {
-                    const double z_i    = m.get_layer_height(i);        // [m]
+                    const double z_i    = m.get_layer_height(i) - y_mount; // height above local surface [m]
                     const double z_safe = std::max(z_i, 1.0e-6);
 
                     // Clamp z_frac to [0,1] so the parabolic profile never
-                    // exceeds 1 above the ABL height L_atm (prevents huge TKE aloft).
-                    const double z_frac = std::min(z_i, m.L_atm) / m.L_atm;
+                    // exceeds 1 above the physical ABL depth abl_height (prevents
+                    // huge TKE aloft). abl_height (~1.5 km, config-tunable) is the
+                    // meteorological boundary-layer top and is DELIBERATELY decoupled
+                    // from the grid length scale L_atm (=400 m): pinning it to L_atm
+                    // collapsed the surface-driven TKE profile to its background floor
+                    // by i≈8 (~400 m), so turbulence was seeded only in the lowest
+                    // ~400 m instead of the full boundary layer.
+                    const double z_frac = std::min(z_i, m.abl_height) / m.abl_height;
 
                     // Physical TKE [m²/s²]: ABL parabolic profile with background floor
                     const double k_abl  = vs * vs / sqrt(C_nue)
@@ -246,13 +259,39 @@ private:
     // Global nue clamp: enforce 0 ≤ nue* ≤ nue_max everywhere, including pole
     // rows (j=0, j=jm-1) that are not touched by compute_sources and may receive
     // negative values from cubic BC extrapolation in bcTheta.
+    //
+    // Eddy viscosity is ALSO confined to the boundary layer: above the ABL ceiling
+    // (abl_height) the free troposphere is treated as non-turbulent, so nue* is
+    // tapered to zero there and only the molecular 1/re_turb diffusion remains in
+    // the RHS. The background TKE/ω floors (k_bg, om_bg) keep nue=k/ω finite aloft,
+    // but that residual eddy viscosity homogenises the meridional momentum / vertical
+    // shear the Hadley–Ferrel cells live on — the same spin-down failure mode the
+    // radial-Shapiro fix addressed ([[project_radial_shapiro_spindown]]). The taper
+    // runs over ~one local grid layer above abl_height to avoid an abrupt
+    // diffusion-coefficient step at the interface.
     void clamp_nue() {
         const double nue_max = 1000.0 / (m.u_0 * m.L_atm);
+
+        // Taper depth = thickness of the (stretched) grid layer straddling the ABL top.
+        int i_abl = 0;
+        while (i_abl < m.im - 1 && m.get_layer_height(i_abl) <= m.abl_height) i_abl++;
+        const double taper_dz = std::max(1.0,
+            (double)m.get_layer_height(std::min(i_abl, m.im - 1))
+          - (double)m.get_layer_height(std::max(i_abl - 1, 0)));
+
         #pragma omp parallel for collapse(3) schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
                 for (int k = 0; k < m.km; k++) {
-                    m.nue.x[i][j][k] = std::clamp(m.nue.x[i][j][k], 0.0, nue_max);
+                    // Height above the LOCAL surface: the ABL ceiling rides on top of
+                    // terrain (cutoff at mountain_height + abl_height), matching the
+                    // terrain-relative seeding in init_fields.
+                    const double z_agl = (double)m.get_layer_height(i)
+                                       - (double)m.get_layer_height(m.i_topography[j][k]);
+                    // f = 1 at/below abl_height (above ground), ramps to 0 over taper_dz above.
+                    const double f = std::clamp(
+                        (m.abl_height + taper_dz - z_agl) / taper_dz, 0.0, 1.0);
+                    m.nue.x[i][j][k] = std::clamp(m.nue.x[i][j][k], 0.0, nue_max) * f;
                 }
             }
         }

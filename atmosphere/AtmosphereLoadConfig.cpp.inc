@@ -82,6 +82,7 @@
     Config::FillDoubleWithElement(elem_atmosphere, "sc_CO2", sc_CO2);
     Config::FillDoubleWithElement(elem_atmosphere, "pr", pr);
     Config::FillDoubleWithElement(elem_atmosphere, "pr_turb", pr_turb);
+    Config::FillDoubleWithElement(elem_atmosphere, "abl_height", abl_height);
     Config::FillDoubleWithElement(elem_atmosphere, "ep", ep);
     Config::FillDoubleWithElement(elem_atmosphere, "hp", hp);
     Config::FillDoubleWithElement(elem_atmosphere, "R_Air", R_Air);

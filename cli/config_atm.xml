@@ -72,6 +72,7 @@
         <sc_CO2>0.96</sc_CO2>  <!-- Schmidt number of CO2(double) -->
         <pr>0.7179</pr>  <!-- Prandtl number of air for laminar flows(double) -->
         <pr_turb>0.9</pr_turb>  <!-- turbulent Prandtl number for temperature transport in turbulent flows(double) -->
+        <abl_height>1500.0</abl_height>  <!-- physical depth of the atmospheric boundary layer in m, sets the top of the surface-driven turbulent TKE seeding profile (decoupled from the L_atm grid length scale)(double) -->
         <ep>0.62198</ep>  <!-- ratio of the gas constants of dry air to water vapour [kg_air/kg_vapour](double) -->
         <hp>6.1078</hp>  <!-- water vapour pressure at T = 0°C: E = 6.1 hPa(double) -->
         <R_Air>286.9</R_Air>  <!-- specific gas constant of air in J/(kg*K)(double) -->

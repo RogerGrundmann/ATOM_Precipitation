@@ -173,6 +173,7 @@ def main():
             ('sc_CO2', 'Schmidt number of CO2', 'double', 0.96),
             ('pr', 'Prandtl number of air for laminar flows', 'double', 0.7179),
             ('pr_turb', 'turbulent Prandtl number for temperature transport in turbulent flows', 'double', 0.9),
+            ('abl_height', 'physical depth of the atmospheric boundary layer in m, sets the top of the surface-driven turbulent TKE seeding profile (decoupled from the L_atm grid length scale)', 'double', 1500.0),
             ('ep', 'ratio of the gas constants of dry air to water vapour [kg_air/kg_vapour]', 'double', 0.62198),
             ('hp', 'water vapour pressure at T = 0°C: E = 6.1 hPa', 'double', 6.1078),
             ('R_Air', 'specific gas constant of air in J/(kg*K)', 'double', 286.9),

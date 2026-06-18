@@ -82,6 +82,7 @@ cdef extern from "cAtmosphereModel.h":
         double sc_CO2
         double pr
         double pr_turb
+        double abl_height
         double ep
         double hp
         double R_Air

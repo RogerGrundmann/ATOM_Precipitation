@@ -741,6 +741,15 @@ cdef class Atmosphere:
             self._check_alive()
             self._thisptr.pr_turb = <double> value
     
+    property abl_height:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.abl_height
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.abl_height = <double> value
+    
     property ep:
         def __get__(Atmosphere self):
             self._check_alive()
