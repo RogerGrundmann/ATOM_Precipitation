@@ -108,6 +108,134 @@ void cAtmosphereModel::searchMinMax_3D(const string &name_maxValue, const string
 /*
 *
 */
+// First-NaN detector. Scans the core prognostic and turbulence fields for the
+// first non-finite (NaN/Inf) cell and reports its field, grid index, latitude/
+// longitude and height. The detailed per-field origin banner prints exactly
+// once (the iteration the blow-up first appears); afterwards only a brief
+// one-line follow-up is emitted so the spread is visible without flooding the log.
+// searchMinMax silently skips non-finite cells, so without this the min/max
+// printout looks healthy while the field is already corrupted.
+void cAtmosphereModel::scanForNaN(){
+    struct FieldRef{ const char *name; Array *arr; };
+    FieldRef fields[] = {
+        {"u",     &u},     {"v",    &v},   {"w",     &w},
+        {"t",     &t},     {"c",    &c},   {"cloud", &cloud}, {"ice", &ice},
+        {"p_dyn", &p_dyn}, {"tke",  &tke}, {"dis",   &dis},
+        {"nue",   &nue},   {"prod", &prod}
+    };
+
+    bool any = false;
+    std::stringstream report;
+    report.precision(0);
+    report.setf(ios::fixed);
+
+    for(const auto &f : fields){
+        long long count = 0;
+        int fi = -1, fj = -1, fk = -1;
+        for(int i = 0; i < im; i++){
+            for(int j = 0; j < jm; j++){
+                for(int k = 0; k < km; k++){
+                    if(!AtomUtils::is_finite_safe(f.arr->x[i][j][k])){
+                        if(count == 0){ fi = i; fj = j; fk = k; }
+                        count++;
+                    }
+                }
+            }
+        }
+        if(count > 0){
+            any = true;
+            HemisphereCoords c = convert_coords(fk, fj);
+            report << "        " << setw(7) << left << setfill(' ') << f.name
+                   << " first non-finite at i=" << fi
+                   << "  j=" << fj << " (" << (int)c.lat << c.north_or_south << ")"
+                   << "  k=" << fk << " (" << (int)c.lon << c.east_or_west << ")"
+                   << "  height=" << get_layer_height(fi) << " m"
+                   << "   non-finite cells=" << count << "\n";
+        }
+    }
+
+    // Evaporation_Dalton is 2D — this is where the NaN was first noticed, so it is
+    // reported explicitly even though it is downstream of the velocity blow-up.
+    {
+        long long count = 0;
+        int fj = -1, fk = -1;
+        for(int j = 0; j < jm; j++){
+            for(int k = 0; k < km; k++){
+                if(!AtomUtils::is_finite_safe(Evaporation_Dalton.y[j][k])){
+                    if(count == 0){ fj = j; fk = k; }
+                    count++;
+                }
+            }
+        }
+        if(count > 0){
+            any = true;
+            HemisphereCoords c = convert_coords(fk, fj);
+            report << "        " << setw(7) << left << setfill(' ') << "Evap_D"
+                   << " first non-finite at i=0"
+                   << "  j=" << fj << " (" << (int)c.lat << c.north_or_south << ")"
+                   << "  k=" << fk << " (" << (int)c.lon << c.east_or_west << ")"
+                   << "  height=0 m"
+                   << "   non-finite cells=" << count << "\n";
+        }
+    }
+
+    if(!any) return;
+
+    if(!nan_first_reported){
+        nan_first_reported = true;
+        cout << endl
+             << "  *** FIRST NON-FINITE (NaN/Inf) VALUE DETECTED ***"
+             << "   iter_n = " << iter_n
+             << "   total_iter_count = " << total_iter_count << endl
+             << report.str() << endl;
+    }else{
+        cout << "  scanForNaN: non-finite values still present (iter_n = "
+             << iter_n << ")" << endl;
+    }
+    return;
+}
+/*
+*
+*/
+// Per-stage inf-trigger probe. Reports the FIRST non-finite cell (velocity fields and
+// their RHS checked first, since velocity goes inf before scalars) tagged with the
+// stage label, so bracketing the per-iter stages localises WHICH stage produces the
+// first inf during the deterministic 532->533 continuation crash — BEFORE the elliptic
+// pressure solve spreads one bad cell to ~42% of the grid. Hardcoded window keeps it
+// silent outside the crash. Diagnostic scaffolding — strip before commit.
+void cAtmosphereModel::scanStage(const char *label){
+    if(total_iter_count < 665 || total_iter_count > 671) return;
+    struct FieldRef{ const char *name; Array *arr; };
+    FieldRef fields[] = {
+        {"c", &c}, {"rhs_c", &rhs_c}, {"S_v", &S_v}, {"cloud", &cloud}, {"ice", &ice},
+        {"r_humid", &r_humid}, {"t", &t}, {"rhs_t", &rhs_t},
+        {"rhs_u", &rhs_u}, {"rhs_v", &rhs_v}, {"rhs_w", &rhs_w},
+        {"u", &u}, {"v", &v}, {"w", &w}, {"p_dyn", &p_dyn}
+    };
+    for(const auto &f : fields){
+        for(int i = 0; i < im; i++){
+            for(int j = 0; j < jm; j++){
+                for(int k = 0; k < km; k++){
+                    if(!AtomUtils::is_finite_safe(f.arr->x[i][j][k])){
+                        HemisphereCoords c = convert_coords(k, j);
+                        cout << "      [stageNaN] iter=" << total_iter_count
+                             << " stage='" << label << "' FIRST inf in " << f.name
+                             << " @(i=" << i << ",j=" << j << ",k=" << k << ") "
+                             << (int)c.lat << c.north_or_south << "/"
+                             << (int)c.lon << c.east_or_west
+                             << " h=" << get_layer_height(i) << "m" << endl;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    cout << "      [stageNaN] iter=" << total_iter_count
+         << " stage='" << label << "' clean" << endl;
+}
+/*
+*
+*/
 void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string &name_minValue,
     const string &name_unitValue, Array_2D &value, double coeff){
     double minValue = value.y[0][0];
@@ -145,13 +273,13 @@ void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string
     cout.precision(6);
     maxValue = maxValue * coeff;
     minValue = minValue * coeff;
-    cout << setiosflags(ios::left) << setw(26) << setfill('.') << name_maxValue << " = " << 
-        resetiosflags(ios::left) << setw(12) << fixed << setfill(' ') << maxValue << setw(6) << 
-        name_unitValue << setw(5) << jmax_deg << setw(3) << deg_lat_max << setw(4) << kmax_deg << 
-        setw(3) << deg_lon_max << setw(6) << imax_level << setw(2) << level << "          " << 
-        setiosflags(ios::left) << setw(26) << setfill('.') << name_minValue << " = "<< 
-        resetiosflags(ios::left) << setw(12) << fixed << setfill(' ') << minValue << setw(6) << 
-        name_unitValue << setw(5)  << jmin_deg << setw(3) << deg_lat_min << setw(4) << kmin_deg << 
+    cout << setiosflags(ios::left) << setw(26) << setfill('.') << name_maxValue << " = " <<
+        resetiosflags(ios::left) << setw(12) << fixed << setfill(' ') << maxValue << setw(6) <<
+        name_unitValue << setw(5) << jmax_deg << setw(3) << deg_lat_max << setw(4) << kmax_deg <<
+        setw(3) << deg_lon_max << setw(6) << imax_level << setw(2) << level << "          " <<
+        setiosflags(ios::left) << setw(26) << setfill('.') << name_minValue << " = "<<
+        resetiosflags(ios::left) << setw(12) << fixed << setfill(' ') << minValue << setw(6) <<
+        name_unitValue << setw(5)  << jmin_deg << setw(3) << deg_lat_min << setw(4) << kmin_deg <<
         setw(3) << deg_lon_min  << setw(6) << imin_level << setw(2) << level << endl;
     return;
 }
@@ -234,6 +362,109 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
          << " z=" << setprecision(0) << get_layer_height(imx) << "m"
          << setprecision(2) << "   Psi_min=" << psimin / 1.0e9 << " @ lat=" << lat_of(jmn)
          << " z=" << setprecision(0) << get_layer_height(imn) << "m"
+         << "   -> " << fname.str() << endl;
+}
+
+
+// Zonal-mean meridional wind vbar[i][j] in m/s, averaged over fluid cells only
+// (i >= i_topography, finite) — identical masking/units to write_meridional_streamfunction
+// so the two diagnostics are directly comparable.
+void cAtmosphereModel::zonal_mean_v(std::vector<std::vector<double> >& vbar){
+    for(int i = 0; i < im; i++){
+        for(int j = 0; j < jm; j++){
+            double sum = 0.0; int n = 0;
+            for(int k = 0; k < km; k++){
+                if(i < i_topography[j][k]) continue;            // inside terrain
+                double vv = v.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(vv)) continue;
+                sum += vv; n++;
+            }
+            vbar[i][j] = (n > 0) ? (sum / n) * u_0 : 0.0;
+        }
+    }
+}
+
+
+// Zonal-mean meridional-wind momentum budget: attribute the per-iteration change of
+// vbar to each algorithmic step. The four contributions are differenced from snapshots
+// of zonal-mean v taken in run_3D_loop and sum (to rounding) to the net Δvbar that iter:
+//   dv_dyn    — RK4 net of all rhs_v physics (PGF + Coriolis + advection + diffusion + drag + MC)
+//   dv_polar  — polar zonal (φ) filter
+//   dv_orog   — orographic Shapiro filter
+//   dv_radial — radial (vertical) Shapiro filter  [prime spin-down suspect]
+// Units: m/s per iteration. A term that is NEGATIVE where vbar<0 (or positive where
+// vbar>0) is ERODING the meridional flow / overturning at that (lat,z).
+void cAtmosphereModel::write_v_momentum_budget(int iter,
+    const std::vector<std::vector<double> >& dv_dyn,
+    const std::vector<std::vector<double> >& dv_polar,
+    const std::vector<std::vector<double> >& dv_orog,
+    const std::vector<std::vector<double> >& dv_radial){
+
+    std::vector<std::vector<double> > vbar(im, std::vector<double>(jm, 0.0));
+    zonal_mean_v(vbar);   // current (post-iteration) vbar
+
+    auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };
+
+    // RK4 term-split: zonal-mean of each rhs_v contribution captured in vbud_*, scaled
+    // from nondim tendency to m/s per iteration (× dt × u_0, the Euler-step contribution)
+    // so it is directly comparable to dv_dyn from the differencing budget. Same fluid-cell
+    // masking as zonal_mean_v. Their sum (pgf+cor+advv+advh+diff+other) ≈ dv_dyn.
+    const double term_scale = dt * u_0;
+    auto zmean = [&](const Array& A, std::vector<std::vector<double> >& out){
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++){
+                double sum = 0.0; int n = 0;
+                for(int k = 0; k < km; k++){
+                    if(i < i_topography[j][k]) continue;
+                    double a = A.x[i][j][k];
+                    if(!AtomUtils::is_finite_safe(a)) continue;
+                    sum += a; n++;
+                }
+                out[i][j] = (n > 0) ? (sum / n) * term_scale : 0.0;
+            }
+    };
+    std::vector<std::vector<double> > t_pgf(im, std::vector<double>(jm,0.0)), t_cor=t_pgf,
+        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf;
+    zmean(vbud_pgf, t_pgf);   zmean(vbud_cor, t_cor);     zmean(vbud_advv, t_advv);
+    zmean(vbud_advh, t_advh); zmean(vbud_diff, t_diff);   zmean(vbud_other, t_other);
+
+    // long-format CSV: lat × height × per-step contributions + RK4 term-split (m/s per iter)
+    ostringstream fname;
+    fname << output_path << "v_momentum_budget_" << iter << ".csv";
+    ofstream f(fname.str().c_str());
+    if(f.is_open()){
+        f << "lat_deg,height_m,vbar_mps,dv_dyn,dv_polar,dv_orog,dv_radial,dv_net,"
+          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_mc,dyn_sum\n";
+        for(int j = 0; j < jm; j++){
+            const double lat = lat_of(j);
+            for(int i = 0; i < im; i++){
+                const double net = dv_dyn[i][j] + dv_polar[i][j] + dv_orog[i][j] + dv_radial[i][j];
+                const double dyn_sum = t_pgf[i][j] + t_cor[i][j] + t_advv[i][j]
+                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j];
+                f << lat << "," << get_layer_height(i) << "," << vbar[i][j] << ","
+                  << dv_dyn[i][j] << "," << dv_polar[i][j] << "," << dv_orog[i][j] << ","
+                  << dv_radial[i][j] << "," << net << ","
+                  << t_pgf[i][j] << "," << t_cor[i][j] << "," << t_advv[i][j] << ","
+                  << t_advh[i][j] << "," << t_diff[i][j] << "," << t_other[i][j] << ","
+                  << dyn_sum << "\n";
+            }
+        }
+        f.close();
+    }
+
+    // Log the budget at the mid-latitude lower-troposphere return branch. Track a FIXED
+    // probe (lat ~44°, z ~500 m) where the negative-vbar surface layer decays, so the
+    // per-term time series is readable. Report the RK4 dynamical split there.
+    int jp = (int)round((90.0 - 44.0) * (jm - 1) / 180.0);   // ~lat 44°N
+    int ip = get_layer_index(500.0);                         // ~500 m AGL (sea level)
+    if(ip < 1) ip = 1;
+    cout << "      [vbudget] iter=" << iter << fixed << setprecision(5)
+         << "  @lat=" << setprecision(0) << lat_of(jp) << " z=" << get_layer_height(ip) << "m"
+         << setprecision(5) << "  vbar=" << vbar[ip][jp]
+         << "  | dv_dyn=" << dv_dyn[ip][jp] << " (radial=" << dv_radial[ip][jp] << ")"
+         << "  || split: pgf=" << t_pgf[ip][jp] << " cor=" << t_cor[ip][jp]
+         << " advV=" << t_advv[ip][jp] << " advH=" << t_advh[ip][jp]
+         << " diff=" << t_diff[ip][jp] << " drag/mc=" << t_other[ip][jp]
          << "   -> " << fname.str() << endl;
 }
 

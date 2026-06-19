@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <iostream>
+#include <iomanip>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -33,17 +34,29 @@ public:
         std::vector<double> sinthe_table(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_table[j] = sin(m.the.z[j]);
-            if (sinthe_table[j] < 0.4) sinthe_table[j] = 0.4;
+            if (sinthe_table[j] < 0.55) sinthe_table[j] = 0.55;   // metric floor ~57° — keep in sync with the RHS geometry floor (RungeKutta_Atm*.cpp)
         }
 
         // Precompute land mask — eliminates repeated function call overhead
-        // Allocate flat mask: 1 = land, 0 = air
+        // Allocate flat mask: 1 = land, 0 = air. Also enforce no-penetration on the
+        // provisional velocity: bcSolidGround masks u/v/w at land but NOT aux_u/v/w, and
+        // RHS_Atm writes aux unconditionally — so land cells carry stale aux (advection of
+        // the adjacent air jet + the blown-up p_dyn gradient). The fluid-cell divergence
+        // source uses central differences at cliff edges, differencing against that stale
+        // land aux. Zero it here so every sweep sees a clean solid wall.
         std::vector<int8_t> land(m.im * m.jm * m.km);
         #pragma omp parallel for collapse(3)
         for (int i = 0; i < m.im; i++)
             for (int j = 0; j < m.jm; j++)
-                for (int k = 0; k < m.km; k++)
-                    land[i*m.jm*m.km + j*m.km + k] = is_land(m.h, i, j, k) ? 1 : 0;
+                for (int k = 0; k < m.km; k++) {
+                    const bool isl = is_land(m.h, i, j, k);
+                    land[i*m.jm*m.km + j*m.km + k] = isl ? 1 : 0;
+                    if (isl) {
+                        m.aux_u.x[i][j][k] = 0.0;
+                        m.aux_v.x[i][j][k] = 0.0;
+                        m.aux_w.x[i][j][k] = 0.0;
+                    }
+                }
 
         #define LAND(i,j,k) land[(i)*m.jm*m.km + (j)*m.km + (k)]
 
@@ -69,6 +82,23 @@ public:
         const double inv_dphi2 = 1.0 / (m.dphi * m.dphi);
         const double inv_dthe  = 1.0 / m.dthe;
         const double inv_dphi  = 1.0 / m.dphi;
+
+        // Cap on the divergence source of the pressure Poisson update. Over steep
+        // orography (cliff faces: Patagonian Andes 49°S/74°W, Atlas 36°N/2°E) the
+        // central-difference divergence of the provisional velocity can spike, inject a
+        // huge Poisson source → runaway p_dyn → pressure-gradient force → velocity that
+        // pegs the ±100 m/s clamp → larger divergence (a closed dry instability,
+        // independent of moist physics). Bounding the per-cell source to denom·p_dyn_cap
+        // caps its contribution to p_dyn at p_dyn_cap (discrete max principle). p_dyn is
+        // non-dimensionalised by p_0=1013.25 hPa, so healthy dynamic pressure is ≪1
+        // non-dim (tens of hPa); the runaway reached 18–43 non-dim (≈18000–44000 hPa).
+        // p_dyn_cap is a GENEROUS backstop only. A tight value (1.0) under-removed the
+        // velocity divergence (the source IS the divergence the projection must cancel),
+        // breaking incompressibility and triggering a worse dry CFL blow-up at the NZ Alps
+        // (46°S/170°E, iter 288). 2.0 leaves the projection intact while still catching the
+        // gross Andes injection; the orographic Shapiro filter (post-solve, on u/v/w) is now
+        // the primary stabiliser for the steep-orography CFL mode, not this clamp.
+        constexpr double p_dyn_cap = 2.0;
 
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         #pragma omp parallel for collapse(2) schedule(dynamic, 4)
@@ -127,8 +157,30 @@ public:
                     bool the_flag = false;
                     bool phi_flag = false;
 
-                    // r direction
-                    if (i_in_range && lnd_ijk && !LAND(i+1,j,k)) {
+                    // EXPERIMENT 2 (2026-06-01): fluid-cell one-sided differences AWAY from
+                    // a land neighbour. Without this, the central-difference fallback below
+                    // samples aux_u/v/w at the zeroed land cell (line 54), producing a
+                    // ~3× overestimate of div_src at coastal fluid cells → spuriously large
+                    // negative p_dyn → −∂p/∂r drives u upward → divergence grows → loop.
+                    // Use one-sided 2nd-order forward/backward stencils that don't touch
+                    // the wall value at all.
+                    //
+                    // r direction (fluid above land or below overhang)
+                    if (!lnd_ijk && i >= 1 && i+2 < m.im) {
+                        if (LAND(i-1,j,k)) {
+                            du_dr = (-3.0 * m.aux_u.x[i][j][k] + 4.0 * m.aux_u.x[i+1][j][k]
+                                     - m.aux_u.x[i+2][j][k]) * inv_2dr;
+                            r_flag = true;
+                        } else if (i-2 >= 0 && LAND(i+1,j,k)) {
+                            du_dr = (3.0 * m.aux_u.x[i][j][k] - 4.0 * m.aux_u.x[i-1][j][k]
+                                     + m.aux_u.x[i-2][j][k]) * inv_2dr;
+                            r_flag = true;
+                        }
+                    }
+
+                    // r direction (land cell with air above — existing land-stencil case;
+                    // value gets discarded by the Neumann mean update at line 241)
+                    if (!r_flag && i_in_range && lnd_ijk && !LAND(i+1,j,k)) {
                         du_dr = (-3.0 * m.aux_u.x[i][j][k] + 4.0 * m.aux_u.x[i+1][j][k]
                                  - m.aux_u.x[i+2][j][k]) * inv_2dr;
                         r_flag = true;
@@ -138,6 +190,19 @@ public:
                     if (j_inner) {
                         const int8_t air_jp1 = !LAND(i,j+1,k);
                         const int8_t air_jm1 = !LAND(i,j-1,k);
+
+                        // Fluid cell with land neighbour in theta
+                        if (!the_flag && !lnd_ijk) {
+                            if (!air_jm1 && air_jp1 && !LAND(i,j+2,k)) {
+                                dv_dthe = (-3.0 * m.aux_v.x[i][j][k] + 4.0 * m.aux_v.x[i][j+1][k]
+                                           - m.aux_v.x[i][j+2][k]) * inv_2dthe;
+                                the_flag = true;
+                            } else if (!air_jp1 && air_jm1 && !LAND(i,j-2,k)) {
+                                dv_dthe = (3.0 * m.aux_v.x[i][j][k] - 4.0 * m.aux_v.x[i][j-1][k]
+                                           + m.aux_v.x[i][j-2][k]) * inv_2dthe;
+                                the_flag = true;
+                            }
+                        }
 
                         if (lnd_ijk && air_jp1 && !LAND(i,j+2,k)) {
                             dv_dthe = (-3.0 * m.aux_v.x[i][j][k] + 4.0 * m.aux_v.x[i][j+1][k]
@@ -167,6 +232,19 @@ public:
                         const int8_t air_kp1 = !lnd_kp1;
                         const int8_t air_km1 = !lnd_km1;
 
+                        // Fluid cell with land neighbour in phi
+                        if (!phi_flag && !lnd_ijk) {
+                            if (!air_km1 && air_kp1 && !lnd_kp2) {
+                                dw_dphi = (-3.0 * m.aux_w.x[i][j][k] + 4.0 * m.aux_w.x[i][j][k+1]
+                                           - m.aux_w.x[i][j][k+2]) * inv_2dphi;
+                                phi_flag = true;
+                            } else if (!air_kp1 && air_km1 && !lnd_km2) {
+                                dw_dphi = (3.0 * m.aux_w.x[i][j][k] - 4.0 * m.aux_w.x[i][j][k-1]
+                                           + m.aux_w.x[i][j][k-2]) * inv_2dphi;
+                                phi_flag = true;
+                            }
+                        }
+
                         if (lnd_ijk && air_kp1 && !lnd_kp2) {
                             dw_dphi = (-3.0*m.aux_w.x[i][j][k] + 4.0*m.aux_w.x[i][j][k+1]
                                        - m.aux_w.x[i][j][k+2]) * inv_2dphi;
@@ -189,7 +267,7 @@ public:
                         }
                     }
 
-                    // central-difference fallbacks
+                    // central-difference fallbacks (only for fluid cells fully surrounded by fluid)
                     if (!r_flag)
                         du_dr   = (m.aux_u.x[i+1][j][k] - m.aux_u.x[i-1][j][k]) * inv_2dr;
                     if (!the_flag)
@@ -197,14 +275,45 @@ public:
                     if (!phi_flag)
                         dw_dphi = (m.aux_w.x[i][j][k+1] - m.aux_w.x[i][j][k-1]) * inv_2dphi;
 
-                    // pressure update
-                    m.p_dyn.x[i][j][k] =
-                        ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
-                       + (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]) * num2
-                       + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
-                       - du_dr   * geo.exp_rm
-                       - dv_dthe * geo.inv_rm
-                       - dw_dphi * geo.inv_rmsinthe) * inv_denom;
+                    // Solid-wall treatment. A land cell must NOT act as a Poisson pressure
+                    // source: the one-sided divergence stencils above sample the adjacent
+                    // ocean velocity (e.g. the Drake jet), which injected a spurious high
+                    // +p_dyn onto coastal land cells, bled into the ocean pressure and
+                    // blocked the through-flow. The first attempt (zero the source ⇒ harmonic
+                    // mean of ALL neighbours) over-corrected: it pulled the gap pressure toward
+                    // the land average and flattened the venturi gradient, so the Drake flow
+                    // stagnated (−u/−w piled up upstream). Instead impose a TRUE Neumann
+                    // ∂p/∂n=0 wall — set the land cell to the mean of its FLUID neighbours
+                    // only. The fluid then develops its pressure (and the through-gap gradient)
+                    // freely; the wall mirrors it, with no spurious source and no cross-coast
+                    // force, so the passage flow is preserved. Buried cell (no fluid neighbour) → 0.
+                    if (lnd_ijk) {
+                        double psum = 0.0; int pn = 0;
+                        if (!LAND(i+1,j,k)) { psum += m.p_dyn.x[i+1][j][k]; pn++; }
+                        if (!LAND(i-1,j,k)) { psum += m.p_dyn.x[i-1][j][k]; pn++; }
+                        if (!LAND(i,j+1,k)) { psum += m.p_dyn.x[i][j+1][k]; pn++; }
+                        if (!LAND(i,j-1,k)) { psum += m.p_dyn.x[i][j-1][k]; pn++; }
+                        if (!lnd_kp1)       { psum += m.p_dyn.x[i][j][k+1]; pn++; }
+                        if (!lnd_km1)       { psum += m.p_dyn.x[i][j][k-1]; pn++; }
+                        m.p_dyn.x[i][j][k] = (pn > 0) ? psum / pn : 0.0;
+                    } else {
+                        // pressure update (fluid interior) — clamp the divergence source
+                        // so a steep-orography velocity spike cannot drive p_dyn unbounded.
+                        double div_src = du_dr   * geo.exp_rm
+                                       + dv_dthe * geo.inv_rm
+                                       + dw_dphi * geo.inv_rmsinthe;
+                        const double src_max = denom * p_dyn_cap;
+
+                        if (!is_finite_safe(div_src))   div_src = 0.0;
+                        else if (div_src >  src_max)    div_src =  src_max;
+                        else if (div_src < -src_max)    div_src = -src_max;
+
+                        m.p_dyn.x[i][j][k] =
+                            ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
+                           + (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]) * num2
+                           + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
+                           - div_src) * inv_denom;
+                    }
                 } // k
             } // j
         } // i
@@ -234,9 +343,18 @@ public:
                     m.p_dyn.x[0][j][k] = m.c43 * m.p_dyn.x[1][j][k]
                                        - m.c13 * m.p_dyn.x[2][j][k];
                 }
-                m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-4][j][k]
-                    - 3.0 * m.p_dyn.x[m.im-3][j][k]
-                    + 3.0 * m.p_dyn.x[m.im-2][j][k];
+                // Top (rigid lid): zero-gradient plain copy. The old cubic
+                // p[im-1] = p[im-4] − 3·p[im-3] + 3·p[im-2] is the SAME high-condition (~7,
+                // up to 3× amplification) stencil removed at i=0 above, and it has the same
+                // failure mode here: over high orography (user-observed Himalaya k=87 / j=62)
+                // the strong near-top vertical p_dyn gradient is amplified 3× into a spurious
+                // pressure MAXIMUM pegged at the |p_dyn| ceiling (+3 non-dim ≈ 3000 hPa) right
+                // at the lid, which then imprints on the orography-oriented velocities. The old
+                // "column is air so the cubic is fine" rationale was wrong — the amplification
+                // is independent of air/land. At a rigid lid ∂p_dyn/∂r ≈ 0 (no through-lid
+                // flow), so a non-amplifying zero-gradient copy is both physical and stable
+                // (amplification 1, matching the θ-pole plain-copy BC below). 2026-06-10.
+                m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-2][j][k];
             }
         }
 
@@ -263,6 +381,48 @@ public:
                 m.p_dyn.x[i][j][m.km-1] = m.c43 * m.p_dyn.x[i][j][m.km-2] - m.c13 * m.p_dyn.x[i][j][m.km-3];
                 m.p_dyn.x[i][j][0] = m.p_dyn.x[i][j][m.km-1]
                     = (m.p_dyn.x[i][j][0] + m.p_dyn.x[i][j][m.km-1]) / 2.0;
+            }
+        }
+
+        // Hard ceiling on |p_dyn| (applied after every sweep, incl. boundaries). The
+        // gradient of p_dyn is the dominant RHS force (presgrad ≫ buoyancy/Coriolis), so
+        // bounding p_dyn directly bounds the velocity forcing and breaks the dry steep-
+        // orography loop p_dyn → ∇p → w pegs ±100 m/s → divergence → p_dyn. The source
+        // clamp above limits injection, but p_dyn still accumulates across the cliff via
+        // the Laplacian terms (reached ~7.7 non-dim ≈ 7800 hPa with the source clamp
+        // alone); this caps the accumulated result. p_dyn is non-dim'd by p_0=1013.25 hPa
+        // p_dyn_ceiling is a NaN/extreme backstop only — NOT the primary control. A tight
+        // value (1.0) clipped p_dyn below the level the projection legitimately needs during
+        // the violent dry spin-up, leaving residual divergence that blew up at the NZ Alps
+        // (iter 288). 10.0 (≈10000 hPa) sits above the accumulated steep-orography value
+        // (~7.7 with p_dyn_cap=2) so it never clips normal operation, only the runaway and
+        // NaN/Inf (→0).
+        //
+        // PHASE-DEPENDENT TEST (2026-06-09): the iter-483 runaway is in the VISCOUS/moist
+        // phase, where p_dyn pegs −10 over the Tian Shan/Pamir and the −10→0 vertical gradient
+        // becomes a −16.8 pgr that drives the velocity (see [[project_upper_velocity_secular_growth]]).
+        // Bound the FORCE there by lowering the ceiling to 3.0 once past moist onset (iter 300),
+        // while KEEPING 10.0 through the dry spin-up so we don't re-trigger the NZ-Alps failure
+        // the tight uniform value caused. Risk: the divergence may legitimately need a larger
+        // p_dyn (converging the Poisson gave an even bigger gradient), so a too-tight cap can
+        // leave residual velocity divergence that blows up elsewhere — this run tests that.
+        // NOTE (2026-06-11): a SMOOTH tanh saturation p=C·tanh(p/C) was tried here in
+        // place of this hard clamp (hypothesis: the flat ±ceiling block's discontinuous
+        // edge feeds a spurious vertical pgr). FALSIFIED — from atm_restart_500.bin it
+        // still NaN'd at the SAME iter 532, merely RELOCATING the seed from i=10/44°N/128°E
+        // (near-surface) to i=26/42°N/68°E (Pamir, ~4 km, the documented secular-growth
+        // band). Symptom-only / whack-a-mole; the crash time is p_dyn-clip-independent.
+        // Reverted to the hard clamp. See [[project_upper_velocity_secular_growth]].
+        const double p_dyn_ceiling = (m.total_iter_count > 300) ? 3.0 : 10.0;
+        #pragma omp parallel for collapse(3)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    double p = m.p_dyn.x[i][j][k];
+                    if (!is_finite_safe(p))      m.p_dyn.x[i][j][k] = 0.0;
+                    else if (p >  p_dyn_ceiling) m.p_dyn.x[i][j][k] =  p_dyn_ceiling;
+                    else if (p < -p_dyn_ceiling) m.p_dyn.x[i][j][k] = -p_dyn_ceiling;
+                }
             }
         }
 
@@ -328,7 +488,7 @@ public:
         std::vector<double> sinthe_tab(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_tab[j] = sin(m.the.z[j]);
-            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;
+            if (sinthe_tab[j] < 0.55) sinthe_tab[j] = 0.55;   // metric floor ~57° — keep in sync with the RHS geometry floor (RungeKutta_Atm*.cpp)
         }
 
         #pragma omp parallel for collapse(2) schedule(static)

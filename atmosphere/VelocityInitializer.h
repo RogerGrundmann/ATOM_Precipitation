@@ -49,14 +49,17 @@ public:
         init_v_or_w(m.v, 135,  4.0, -1.5);                              // lat: -45   j=135
         // northern Hadley cell
         init_v_or_w(m.v,  60,  0.0,  0.5);                              // lat:  30   j=60
-        init_v_or_w(m.v,  75, -3.0,  3.0);                              // lat:  15   j=75
+//        init_v_or_w(m.v,  75, -3.0,  3.0);                              // lat:  15   j=75
+        init_v_or_w(m.v,  75, -3.0,  4.0);                              // lat:  15   j=75
         // southern Hadley cell
         init_v_or_w(m.v, 120,  0.0,  0.5);                              // lat: -30   j=120
+//        init_v_or_w(m.v, 105, -3.0,  4.0);                              // lat: -15   j=105
         init_v_or_w(m.v, 105, -3.0,  3.0);                              // lat: -15   j=105
 
         // initialise w: tropopause and surface values per latitude
         // equator
-        init_v_or_w(m.w,  90, -3.0, -5.4);                              // lat:   0   j=90
+//        init_v_or_w(m.w,  90, -3.0, -5.4);                              // lat:   0   j=90
+        init_v_or_w(m.w,  90, -3.0, -1.0);                              // lat:   0   j=90
         // northern polar cell
         init_v_or_w(m.w,   0,  0.0,  0.0);                              // lat:  90   j=0
         // southern polar cell
@@ -132,11 +135,13 @@ public:
             }
         }
 /*
-        // Surface taper on v and w: linearly damp from the local value at i=5
-        // down to zero at i=0, so the lowest five layers carry no horizontal
-        // wind at the ground reference and grow smoothly into the prescribed
-        // profile above. u is left alone (its zonal-jet profile already
-        // ramps to zero at the surface via init_u).
+        // Surface taper on v and w (the two HORIZONTAL components in this model's
+        // (r,θ,φ) convention: v = meridional, w = zonal): linearly damp from the
+        // local value at i=5 down to zero at i=0, so the lowest five layers carry no
+        // horizontal wind at the ground reference and grow smoothly into the
+        // prescribed profile above. u is left alone because u is the RADIAL/VERTICAL
+        // velocity here (NOT the zonal jet — that is w); init_u already gives it a
+        // small profile that ramps to zero at the surface.
         #pragma omp parallel for collapse(2) schedule(static)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {

@@ -29,7 +29,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   temperature_equat_file = "../data/scotese_etal_2021_equat_temp_1my.txt";
   temperature_pole_file = "../data/scotese_etal_2021_polar_temp_1my.txt";
   reconstruction_script_path = "../reconstruction/reconstruct_atom_data.py";
-  use_earthbyte_reconstruction = true;
+  use_earthbyte_reconstruction = false;
   use_NASA_velocity = false;
   use_NASA_temperature = true;
   Ma_switch = 100;
@@ -51,12 +51,14 @@ void cAtmosphereModel::SetDefaultConfig() {
   inviscid_spinup_iters = 0;
   inviscid_ramp_iters = 20;
   moist_phys_start_iter = 300;
+  checkpoint_save_iter = 300;
+  restart_from_iter = 300;
   dt_visc = 0.0005;
   dt_inviscid = 0.0001;
 
   // atmosphere section
   nm = 400;
-  checkpoint = 10;
+  checkpoint = 20;
   panorama_print = 100;
   coeff_Dalton = 0.7;
   convection_perturbation = 1;

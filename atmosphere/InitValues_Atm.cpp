@@ -509,14 +509,24 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
     // ========================================================================
     // Step 5: Calculate Temperature Increments (for non-first time slices)
     // ========================================================================
-    if (!is_first_time_slice()) {
+    // Current-Ma equatorial/polar temperatures from the Scotese curves. These
+    // ALONE define the parabolic paleo profile applied in Step 7 — there is no
+    // dependence on any foregoing Ma. Computed for every paleo slice, whether or
+    // not a preceding slice exists, so a single-Ma run (time_start == time_end)
+    // works without prior-slice reconstruction.
+    if (*get_current_time() > 0) {
         t_equat = get_temperatures_from_curve(*get_current_time(), m_equat_temperature_curve);
-        t_pole = get_temperatures_from_curve(*get_current_time(), m_pole_temperature_curve);
+        t_pole  = get_temperatures_from_curve(*get_current_time(), m_pole_temperature_curve);
+    }
 
+    // The inter-slice increments below feed ONLY the optional EarthByte
+    // reconstruction correction and need a preceding slice — get_previous_time()
+    // throws on the first slice — so keep them guarded by !is_first_time_slice().
+    if (!is_first_time_slice()) {
         // Temperature changes between time steps
         t_equat_add = get_temperatures_from_curve(*get_current_time(), m_equat_temperature_curve)
                     - get_temperatures_from_curve(*get_previous_time(), m_equat_temperature_curve);
-        
+
         t_pole_add = get_temperatures_from_curve(*get_current_time(), m_pole_temperature_curve)
                    - get_temperatures_from_curve(*get_previous_time(), m_pole_temperature_curve);
 
@@ -559,14 +569,22 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
     const double delta_t_eff = delta_pole_nd - delta_equat_nd;
     const double t_eff = t_pole - t_equat;
 
+    // Modern slice (Ma == 0) retains the observed NASA field assigned in Step 2;
+    // paleo slices (Ma > 0) get the Scotese pole→equator parabola.
+    const bool modern = (*get_current_time() == 0);
+
     #pragma omp parallel for collapse(2)
     for (int k = 0; k < km; k++) {
         for (int j = 0; j < jm; j++) {
             double ratio = (double)j / d_j_half;
 
             if (!use_earthbyte_reconstruction) {
-                // Standard parabolic pole-to-pole distribution
-                t.x[0][j][k] = t_eff * AtomUtils::parabola(ratio) + t_pole;
+                // Standard parabolic pole-to-pole distribution, built solely from
+                // the current Ma's Scotese equator/pole temperatures — no foregoing
+                // Ma required. Ma == 0 keeps the NASA field set in Step 2.
+                if (!modern) {
+                    t.x[0][j][k] = t_eff * AtomUtils::parabola(ratio) + t_pole;
+                }
             } else {
                 // EarthByte reconstruction active
                 if (*get_current_time() == 0) {
@@ -593,8 +611,32 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
             int i_mount = i_topography[j][k];
             double t_u_init = t.x[0][j][k] * t_0;                       // [K]
 
-            // Project to sea level using potential temperature
-            if (is_land(h, 0, j, k) || *get_current_time() == 0) {      // NASA temperature along mountain tops projected dry-adiabatically to the sea surface
+            // OPTION B: broad land-sea thermal contrast (stacks on top of Option A).
+            // The high-heat-capacity ocean stays near the zonal parabola; land equilibrates
+            // closer to radiative equilibrium -> WARMER than the zonal reference in low
+            // latitudes (subtropical/tropical continents -> thermal lows / monsoons) and
+            // COLDER at high latitudes (continental interiors). cos(2*lat) gives +amp at the
+            // equator, 0 near 45 deg, -amp at the poles. Applied to the SEA-LEVEL reference,
+            // so Option A's elevation cooling still stacks on top. Paleo land only; the modern
+            // NASA field and all ocean cells are untouched.
+            constexpr double LANDSEA_AMP = 8.0;                        // [K] land-sea contrast amplitude (prototype, tunable)
+            if (*get_current_time() != 0 && is_land(h, 0, j, k)) {
+                const double lat_rad = (90.0 - (double)j * 180.0 / (double)(jm - 1)) * M_PI / 180.0;
+                t_u_init += LANDSEA_AMP * cos(2.0 * lat_rad);
+            }
+
+            // Surface-temperature anchor.
+            // Modern (Ma==0): the NASA field is observed AT the terrain top, so project it
+            // dry-adiabatically to sea level; the COSMO column build below then reproduces it
+            // exactly at i_mount (legacy behaviour, unchanged).
+            // Paleo (Ma>0, OPTION A): the Scotese parabola is the SEA-LEVEL latitudinal
+            // reference, NOT the mountain-top value. Anchor it at i=0 WITHOUT projecting, so
+            // the COSMO vertical profile cools each column by its own DEM elevation:
+            //     t.x[i_mount] = sqrt(T_sl^2 - 2*beta*g*h_mount/R)      (~5.5 K/km)
+            // -> cold plateaus / warm lowlands -> zonal thermal structure that restores the
+            // topographically-anchored baroclinic eddies the zonally-constant profile killed.
+            // Ocean columns (i_mount=0) carry no elevation, so they stay at the parabola.
+            if (*get_current_time() == 0) {                             // modern: project mountain-top NASA value up to sea level
                 auto [t_pot, p_stat_0] = project_to_sea_level(
                     t_u_init,
                     get_layer_height(i_mount),
@@ -602,7 +644,7 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
                 );
                 t.x[0][j][k] = t_pot;
                 p_stat.x[0][j][k] = p_stat_0;
-            } else {
+            } else {                                                    // paleo OPTION A: parabola IS the sea-level reference (no projection)
                 p_stat.x[0][j][k] = 1e-2 * (r_air * R_Air * t_u_init);
                 t.x[0][j][k]      = t_u_init;
             }
@@ -695,6 +737,49 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
                 r_humid.x[0][j][k] = r_humid.x[i_mount][j][k];
             }
         }
+    }
+
+    // ========================================================================
+    // Step 9b (OPTION A): smooth the topography-draped surface temperature.
+    // The DEM enters the lapse through the INTEGER level i_topography, so the draped
+    // terrain-surface temperature has grid-scale steps (~one layer ~400 m ~2 K) at
+    // cliffs/coasts -- exactly where this model's 2dx coastal/pressure modes historically
+    // ignite. Apply a few light 1-2-1 passes (phi periodic, poles fixed) to the 2D surface
+    // field and write it back into the PROGNOSTIC surface cell t.x[i_mount]; bcSolidGround
+    // copies i_mount->0 every step, so smoothing i=0 alone would be undone on iteration 1.
+    // Paleo only -- the modern NASA field and ocean cells (i_mount=0) are left untouched.
+    if (*get_current_time() != 0) {
+        const int n_passes = 4;
+        std::vector<double> Tsurf(jm * km), Ttmp(jm * km);
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++)
+                Tsurf[j * km + k] = t.x[i_topography[j][k]][j][k];
+
+        for (int p = 0; p < n_passes; p++) {
+            for (int j = 0; j < jm; j++)                                // phi (k) pass, periodic
+                for (int k = 0; k < km; k++) {
+                    int km1 = (k - 1 + km) % km, kp1 = (k + 1) % km;
+                    Ttmp[j * km + k] = 0.25 * Tsurf[j * km + km1]
+                                     + 0.50 * Tsurf[j * km + k]
+                                     + 0.25 * Tsurf[j * km + kp1];
+                }
+            for (int k = 0; k < km; k++) {                              // theta (j) pass, poles held
+                Tsurf[k]              = Ttmp[k];
+                Tsurf[(jm - 1) * km + k] = Ttmp[(jm - 1) * km + k];
+                for (int j = 1; j < jm - 1; j++)
+                    Tsurf[j * km + k] = 0.25 * Ttmp[(j - 1) * km + k]
+                                      + 0.50 * Ttmp[j * km + k]
+                                      + 0.25 * Ttmp[(j + 1) * km + k];
+            }
+        }
+
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++) {
+                int i_mount = i_topography[j][k];
+                t.x[i_mount][j][k]     = Tsurf[j * km + k];             // prognostic surface cell
+                t.x[0][j][k]           = Tsurf[j * km + k];             // sea-level reference layer
+                temp_landscape.y[j][k] = Tsurf[j * km + k] * t_0 - t_0; // keep the diagnostic in sync [degC]
+            }
     }
 
 /*

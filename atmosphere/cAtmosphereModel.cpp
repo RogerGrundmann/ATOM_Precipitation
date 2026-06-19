@@ -367,6 +367,15 @@ void cAtmosphereModel::run_3D_loop(int Ma){
 
 cout << endl << endl << endl << "      AGCM: run_3D_loop atm ..........................." << endl;
 
+    // Held-Suarez relaxation target: snapshot the freshly-built initial temperature field as
+    // the radiative-equilibrium state t_eq BEFORE any restart overwrite, so rhs_t always
+    // relaxes back toward the intended (Scotese parabola + topography + land-sea) profile
+    // rather than toward a restarted/evolved state.
+    for (int i = 0; i < im; i++)
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++)
+                t_eq.x[i][j][k] = t.x[i][j][k];
+
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
     const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter);
@@ -374,6 +383,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // On a successful restart, start the loop counter at the restart point so the
     // printed iter_n matches where the run actually resumed (not back at 1).
     const int iter_start = restarted ? restart_from_iter : 1;
+
     for(iter_n = iter_start; iter_n <= nm; iter_n++){
         print_loop_3D_headings();
 
@@ -411,6 +421,30 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
              << "  dt = " << std::scientific << std::setprecision(4) << dt
              << std::defaultfloat << endl;
 
+
+
+        // Pressure-solve cadence. EXPERIMENT (2026-06-10, user hypothesis): widen the stride
+        // 2→4 so p_dyn is held fixed for 3 of every 4 global iterations while the velocity
+        // evolves under that frozen pressure-gradient force. Rationale: the residual coastal
+        // p_dyn oscillation (visible at i=0 over h=1 cells: large +/− jumps between adjacent
+        // coastal columns) looks like a 2Δt ping-pong between the projection and the velocity
+        // update; subcycling the projection breaks that resonance and lets the velocity
+        // components "come to rest" between solves, while leaving the emergent i=0 vortices
+        // (which we want to keep) intact. Trade-off: divergence accumulates over the 3 frozen
+        // steps and is cleaned only on the 4th — watch whether the Pamir runaway worsens.
+        // NOTE (2026-06-09): re-enabling 20-sweep Jacobi here was TESTED and made things WORSE
+        // — converging the Poisson more faithfully drove pgr at the Tian Shan column from −2.6
+        // to −5.2 and pegged p_dyn at its −10 ceiling sooner, proving the PRESSURE faithfully
+        // balances a pathological DIVERGENCE SOURCE (pgr→u→divergence→pgr), not the root cause.
+        // Single sweep retained. See [[project-upper-velocity-secular-growth]].
+        constexpr int pressure_stride = 4;   // was 2
+        if(iter_n % pressure_stride == 0){
+            PressureSolverAtm(*this).run();
+        }
+        scanStage("after_pressure");
+
+
+
         // Two cadences during inviscid spin-up:
         //   moist_stride    — PressureSolverAtm, SaturationAdjustment, ice scheme,
         //                     MoistConvection, ThermoAtm, turbulence sources. Throttled
@@ -434,6 +468,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         int momentum_stride = 1;
 
         if(iter_n % moist_stride == 0){
+/*
             // Multi-sweep Jacobi: the original single-sweep cadence (one sweep every
             // moist_stride iters) couldn't keep up with the divergence accumulated by
             // a fully-spun-up global circulation, letting p_dyn drift to ±750 hPa by
@@ -442,13 +477,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             // Poisson before the next time step, so dpdr/dpdthe/dpdphi in the RHS
             // reflect the real pressure each iter.  Verbose only on the first sweep.
             {
-                constexpr int n_pressure_sweeps = 20;
+//                constexpr int n_pressure_sweeps = 20;
+                constexpr int n_pressure_sweeps = 2;
                 PressureSolverAtm solver(*this);
                 for(int s = 0; s < n_pressure_sweeps; s++){
                     solver.run(s == 0);
                 }
             }
-
+*/
             // Moist-physics gate: the implicit microphysics (SaturationAdjustment,
             // ice scheme, MoistConvection) is too stiff during the initial velocity
             // transient — a single tropical maritime column repeatedly drove q_c, q_i
@@ -460,6 +496,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
             if(moist_phys_active){
                 SaturationAdjustment(*this).run();                      // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
+                // Temperature 2Δt de-checkerboard. c/cloud/ice receive the same stride-2 moist
+                // forcing AND damp_wiggles and stay stable; t got the forcing but NO damping —
+                // the only prognostic without it — letting an undamped 2Δt computational mode
+                // at the steep Pamir surface (t[0] sampled by densities() on its diverging odd
+                // branch) run away to 53 K and crash the barometric formula. Mirror the scalar
+                // treatment on t to close the asymmetry. See [[project_upper_velocity_secular_growth]].
+                AtomUtils::damp_wiggles(t,     &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
@@ -530,6 +573,45 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     cap_S(S_v); cap_S(S_c); cap_S(S_i); cap_S(S_r);
                     cap_S(S_s); cap_S(S_g); cap_S(S_c_c);
                 }
+
+                // Microphysics state clamp.  ThermoAtm::densities computes
+                // r_humid = scale·p_i / ((1 + 0.608·c − cloud − ice)·t_u);
+                // if cloud + ice exceeds ~1 the denominator factor flips sign and
+                // r_humid goes negative, inverting -∇p/ρ in the momentum equations
+                // and producing the iter-356 NaN cascade at 62°N (Cook Inlet).
+                // RK4 central-difference advection of a sharp surface cloud peak
+                // also drives undershoots (negative cloud) at i=5,6 in the same
+                // column.  Defensive clamp: c, cloud, ice ≥ 0 and cloud+ice ≤
+                // CLOUD_ICE_MAX, applied EVERY moist iter before densities reads
+                // them.  See [[project-cloud-runaway-cook-inlet]].
+                {
+                    constexpr double CLOUD_ICE_MAX = 0.05;                  // [kg/kg] ~50 g/kg, 5× any real value
+                    #pragma omp parallel for collapse(2) schedule(static)
+                    for (int i = 0; i < im; i++) {
+                        for (int j = 0; j < jm; j++) {
+                            for (int k = 0; k < km; k++) {
+                                double cv  = c.x[i][j][k];
+                                double cld = cloud.x[i][j][k];
+                                double ic  = ice.x[i][j][k];
+                                if (!AtomUtils::is_finite_safe(cv))  cv  = 0.0;
+                                if (!AtomUtils::is_finite_safe(cld)) cld = 0.0;
+                                if (!AtomUtils::is_finite_safe(ic))  ic  = 0.0;
+                                if (cv  < 0.0) cv  = 0.0;
+                                if (cld < 0.0) cld = 0.0;
+                                if (ic  < 0.0) ic  = 0.0;
+                                const double sum = cld + ic;
+                                if (sum > CLOUD_ICE_MAX) {
+                                    const double scale = CLOUD_ICE_MAX / sum;
+                                    cld *= scale;
+                                    ic  *= scale;
+                                }
+                                c.x[i][j][k]     = cv;
+                                cloud.x[i][j][k] = cld;
+                                ice.x[i][j][k]   = ic;
+                            }
+                        }
+                    }
+                }
             }  // moist_phys_active
 
             ThermoAtm(*this).densities();
@@ -553,6 +635,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
 //            UtilsAtm(*this).valueLimitationAtm();                       // value limitation prevents local formation of NANs
         }  // iter_n % moist_stride == 0
+        scanStage("after_moist");
 
         if(iter_n % momentum_stride == 0){
             BC_Atm(*this).bcRadius();                                   // extrapolation in i-direction alomg grid boundaries
@@ -570,9 +653,34 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
             }
         }  // iter_n % momentum_stride == 0
+        scanStage("after_BC");
 
+        // ---- zonal-mean v momentum budget: snapshot vbar before RK4, then difference
+        // it across each step (RK4 physics, polar filter, orographic Shapiro, radial
+        // Shapiro) to attribute the Hadley/Ferrel spin-down. Checkpoint iters only.
+        const bool do_vbudget = (iter_n % checkpoint == 0);
+        std::vector<std::vector<double> > vb_dyn, vb_polar, vb_orog, vb_radial, vb_stage, vb_prev;
+        auto vb_diff = [&](std::vector<std::vector<double> >& dst){
+            zonal_mean_v(vb_stage);
+            for(int i = 0; i < im; i++)
+                for(int j = 0; j < jm; j++){ dst[i][j] = vb_stage[i][j] - vb_prev[i][j]; vb_prev[i][j] = vb_stage[i][j]; }
+        };
+        if(do_vbudget){
+            vb_stage.assign(im, std::vector<double>(jm, 0.0));
+            vb_prev .assign(im, std::vector<double>(jm, 0.0));
+            vb_dyn  .assign(im, std::vector<double>(jm, 0.0));
+            vb_polar.assign(im, std::vector<double>(jm, 0.0));
+            vb_orog .assign(im, std::vector<double>(jm, 0.0));
+            vb_radial.assign(im, std::vector<double>(jm, 0.0));
+            zonal_mean_v(vb_prev);   // vbar before RK4
+        }
+
+        vbudget_capture = do_vbudget;     // have rhs_v store its per-term split this RK4 (turbulent path)
         if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
         else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations
+        vbudget_capture = false;
+        scanStage("after_RK4");
+        if(do_vbudget) vb_diff(vb_dyn);   // RK4 net (PGF+Coriolis+advection+diffusion+drag+MC)
 
         // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up.
         // Near the poles the zonal cell width rm·sinθ·dφ → 0, so the explicit zonal CFL
@@ -587,6 +695,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::polar_zonal_filter(u, the.z, &i_topography, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(v, the.z, &i_topography, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(w, the.z, &i_topography, 30.0, 12, 3.0);
+        if(do_vbudget) vb_diff(vb_polar);   // polar zonal (φ) filter
 
         // Orographic Shapiro filter — same purpose as the polar filter, but for the
         // steep-orography CFL hot-spots (Andes/Atlas/NZ Alps) the latitude-keyed polar
@@ -597,9 +706,21 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // SPREAD the Gulf-of-Alaska coastal blow-up across more cells (each pass averages
         // the ±100 cap into neighbours) — wrong tool, the runaway is forcing-driven, not
         // a 2Δ checkerboard. Use this gentle setting and attack the MC forcing instead.
-        AtomUtils::orographic_shapiro_filter(u, i_topography, 3, 3, 3);
-        AtomUtils::orographic_shapiro_filter(v, i_topography, 3, 3, 3);
-        AtomUtils::orographic_shapiro_filter(w, i_topography, 3, 3, 3);
+        AtomUtils::orographic_shapiro_filter(u, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
+        AtomUtils::orographic_shapiro_filter(v, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
+        AtomUtils::orographic_shapiro_filter(w, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
+        if(do_vbudget) vb_diff(vb_orog);   // orographic Shapiro filter
+
+        // NOTE (2026-06-08): an orographic Shapiro filter on the SCALAR fields was
+        // tested here and REVERTED. Energy-budget tracing of the cliff cell (5,28,209,
+        // Cook Inlet, i_topography=5) showed its iter-357 cooling is a real zonal-advection
+        // 2Δ checkerboard (−w·∂t/∂φ), and filtering t DID hold that cell (t≈0.999 vs
+        // crashing to 0.56). BUT the cliff is NOT the first-to-fail cell: the first NaN is
+        // a u-velocity blow-up at the 62°N / k=0 upper-troposphere meridian seam (i≈36,
+        // ~11 km), reached at iter 357 while the cliff is still only t≈0.75. The t-filter
+        // perturbed the global field enough to tip that seam ~12 iters EARLIER (357→343/345
+        // for passes 3/1), a net regression. The cliff is a secondary mode; the seam is the
+        // real target. See [[project-cook-inlet-moist-runaway]].
 
         // Radial (i) de-checkerboarding. The 2Δ grid-scale checkerboard that seeds the
         // near-surface CFL blow-up has its purest component on the radial axis, and no other
@@ -613,17 +734,46 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2);
         AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2);
         AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2);
+        if(do_vbudget){ vb_diff(vb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
+            write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
+        }
+        // ==============================================================================================
 
-        // (Upper-troposphere Rayleigh sponge tested 2026-06-01: did not help. The iter-359
-        // "first NaN at i=35, k=0, 10 km" reported by scanForNaN was the overflow location,
-        // not the cause — by iter 341 the Gulf-of-Alaska surface cell (60°N/151°W/298m)
-        // already had t=-14254°C, p_dyn=-10132 hPa, density=-117 kg/m³, with the coastal
-        // sponge pegging u/v/w at ±30 m/s every step. High-i cells overflow first because
-        // they're produced by RK4 from the corrupted surface dynamics. The fix belongs at
-        // the coastal cell, not aloft — see [[project-coastal-sponge-session]] continuation.)
-        // AtomUtils::upper_rayleigh_sponge(u, 25, 0.5);
-        // AtomUtils::upper_rayleigh_sponge(v, 25, 0.5);
-        // AtomUtils::upper_rayleigh_sponge(w, 25, 0.5);
+        // Soft steep-massif field smoothing (2026-06-10, user request). The init-time terrain
+        // massif smoothing fixed the SURVIVAL (steep ramparts were the runaway driver), but the
+        // residual steepest columns keep a locally unphysical field aloft (user: saturated p_dyn
+        // block + bad u/v/w above the Himalaya, while smooth-contour South Pole behaves well).
+        // Gently smooth u,v,w,p_dyn ONLY over the HIGH+STEEP contour columns (same narrow mask
+        // as the terrain smoothing), reaching deep up the troposphere — so the near-orography
+        // field is cleaned WITHOUT touching the broad real flow, plains/coasts, or the i=0
+        // ocean vortices. Single gentle pass. See [[project-upper-velocity-secular-growth]].
+        AtomUtils::steep_massif_field_smoothing(u,     i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
+        AtomUtils::steep_massif_field_smoothing(v,     i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
+        AtomUtils::steep_massif_field_smoothing(w,     i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
+        AtomUtils::steep_massif_field_smoothing(p_dyn, i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
+        scanStage("after_filters");
+
+        // NOTE (2026-06-09): a meridional (j/θ) Shapiro filter was added here and REMOVED.
+        // It bought only +8 iters against the iter-483 NaN (a symptom-only palliative — the
+        // real cause is the pressure/divergence loop at the Tian Shan, see
+        // [[project-upper-velocity-secular-growth]]) AND it smoothed away the emergent i=0
+        // vortices that are a healthy-run validation signal ([[project-emergence-validation]]).
+        // Net negative; do not re-add. Radial (i) + polar zonal (k) filtering is retained.
+
+        // (Upper-troposphere Rayleigh sponge re-tested 2026-06-09 with i_start=30,
+        // alpha_max=0.2 against the iter-483 upper-level velocity blow-up — REVERTED, net
+        // negative. It did NOT touch the secular growth (diag62N max|u| peaks at i=25,
+        // BELOW i_start=30, and was identical with/without the sponge: 0.230 vs 0.231 at
+        // iter 320), and relaxing the zonal anomaly aloft perturbed the sensitive k=0 seam
+        // mode → crash moved 483→479 and the seed RELOCATED from the 40°N/62°E Pamir column
+        // to the 55°N/0°E meridian seam at i=36 (10.9 km). Confirms the rupture point is
+        // whack-a-mole: the energy source is the secular velocity growth in the 55–62°N
+        // band centred at i≈25; the seam is just the weakest point where it erupts. The
+        // existing bcPhi 2-pass seam Shapiro (BC_Atm.h) already covers the seam and is not
+        // enough. Attack the growth source, not the rupture point.)
+        // AtomUtils::upper_rayleigh_sponge(u, 30, 0.2);
+        // AtomUtils::upper_rayleigh_sponge(v, 30, 0.2);
+        // AtomUtils::upper_rayleigh_sponge(w, 30, 0.2);
 
         // Near-surface coastal velocity HARD CAP — last-resort ceiling for the dry-seeded
         // velocity runaway at steep coasts (Gulf-of-Alaska 60°N/151°W). The slope cap
@@ -636,13 +786,169 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // OCEAN side of the Cook Inlet coast, not at the land cliff itself — layers=3
         // (round 8) only reached i=0..2 over ocean columns and missed the actual blow-up.
         // 8 covers i_topo..i_topo+7 = 0..7 (≈440 m) above ocean / 298 m..1.5 km over land.
-        AtomUtils::coastal_velocity_sponge(u, i_topography, 3.0, 1.0, 8);
-        AtomUtils::coastal_velocity_sponge(v, i_topography, 3.0, 1.0, 8);
-        AtomUtils::coastal_velocity_sponge(w, i_topography, 3.0, 1.0, 8);
+        AtomUtils::coastal_velocity_sponge(u, i_topography, 3.0, 1.0, 12);
+        AtomUtils::coastal_velocity_sponge(v, i_topography, 3.0, 1.0, 12);
+        AtomUtils::coastal_velocity_sponge(w, i_topography, 3.0, 1.0, 12);
 
         scanForNaN();                                                       // debug: report field/location/iter of the FIRST non-finite cell to localise the blow-up
 
         UtilsAtm(*this).findResiduumAtm();
+
+        // Targeted diagnostic for the iter-358 NaN seed at 62°N upper-troposphere.
+        // See [[project_iter358_62n_dry_nan]]: the mode lives at j≈28, i≈25-40, distributed
+        // across k. Track max |u|,|v|,|w|,|p_dyn|,|t-1| in this slab per iter so the LEADING
+        // runaway field + axis becomes visible before iter 358 overflow.
+        {
+            const int j_lo = 25, j_hi = 35;
+            const int i_lo = 25, i_hi = std::min(40, im - 1);
+            double max_u = 0, max_v = 0, max_w = 0, max_p = 0, max_td = 0;
+            int u_i=0,u_j=0,u_k=0, v_i=0,v_j=0,v_k=0, w_i=0,w_j=0,w_k=0;
+            int p_i=0,p_j=0,p_k=0, t_i=0,t_j=0,t_k=0;
+            for (int i = i_lo; i <= i_hi; i++) {
+                for (int j = j_lo; j <= std::min(j_hi, jm - 1); j++) {
+                    for (int k = 0; k < km; k++) {
+                        const double au = std::fabs(u.x[i][j][k]);
+                        const double av = std::fabs(v.x[i][j][k]);
+                        const double aw = std::fabs(w.x[i][j][k]);
+                        const double ap = std::fabs(p_dyn.x[i][j][k]);
+                        const double at = std::fabs(t.x[i][j][k] - 1.0);
+                        if (AtomUtils::is_finite_safe(au) && au > max_u) { max_u = au; u_i=i; u_j=j; u_k=k; }
+                        if (AtomUtils::is_finite_safe(av) && av > max_v) { max_v = av; v_i=i; v_j=j; v_k=k; }
+                        if (AtomUtils::is_finite_safe(aw) && aw > max_w) { max_w = aw; w_i=i; w_j=j; w_k=k; }
+                        if (AtomUtils::is_finite_safe(ap) && ap > max_p) { max_p = ap; p_i=i; p_j=j; p_k=k; }
+                        if (AtomUtils::is_finite_safe(at) && at > max_td) { max_td = at; t_i=i; t_j=j; t_k=k; }
+                    }
+                }
+            }
+            cout << "      [diag62N] iter=" << total_iter_count
+                 << " max|u|=" << max_u << "@(" << u_i << "," << u_j << "," << u_k << ")"
+                 << " max|v|=" << max_v << "@(" << v_i << "," << v_j << "," << v_k << ")"
+                 << " max|w|=" << max_w << "@(" << w_i << "," << w_j << "," << w_k << ")"
+                 << " max|p_dyn|=" << max_p << "@(" << p_i << "," << p_j << "," << p_k << ")"
+                 << " max|t-1|=" << max_td << "@(" << t_i << "," << t_j << "," << t_k << ")"
+                 << endl;
+        }
+
+        // [tcol] Pamir surface-temperature runaway monitor at (j=49,k=64). The iter-533
+        // crash root is t.x[0][49][64] (=copy of the surface cell t.x[i_mount], BC_Atm.h:401)
+        // collapsing 230->53 K, which drives ThermoAtm::densities()'s unguarded sqrt negative.
+        // Print the column temperature (deg C) around the surface each iter so the onset iter
+        // and the leading cell (surface vs aloft vs sub-terrain) become visible. STRIP before commit.
+        if(total_iter_count >= 515 && total_iter_count <= 720){
+            const int jc = 49, kc = 64, im0 = i_topography[jc][kc];
+            cout << "      [tcol] iter=" << total_iter_count << " i_mount=" << im0
+                 << " t[0]=" << t.x[0][jc][kc]*t_0 - t_0;
+            for(int i = std::max(0, im0 - 1); i <= std::min(im - 1, im0 + 5); i++)
+                cout << " t[" << i << "]=" << t.x[i][jc][kc]*t_0 - t_0;
+            cout << " | rhs_t[im]=" << rhs_t.x[im0][jc][kc]
+                 << " c[im]=" << c.x[im0][jc][kc]
+                 << " cloud[im]=" << cloud.x[im0][jc][kc]
+                 << endl;
+        }
+
+        // [diagAsia] near-surface NE-Asian orography monitor. The deterministic iter-533
+        // continuation crash (from atm_restart_500.bin) seeds velocity FIRST at (i=10,j=46,
+        // k=128) = 44°N/128°E 613 m, scalars at (i=12,j=49,k=64) = 41°N/64°E Pamir — NOT the
+        // 55°N band diag62N watches (which drifts benignly THROUGH the crash). The eruption is
+        // single-step (clean -> whole-field NaN), the CFL-violation signature. Track the two
+        // seed cells' velocities AND the slab-max + local horizontal grid-divergence
+        // D=½(v[j+1]-v[j-1])+½(w[k+1]-w[k-1]) so the precursor (the cell quietly approaching
+        // CFL / the divergence that pumps it) becomes visible BEFORE the overflow.
+        {
+            auto Dgrid = [&](int i,int j,int k)->double {
+                return 0.5*(v.x[i][j+1][k]-v.x[i][j-1][k])
+                     + 0.5*(w.x[i][j][k+1]-w.x[i][j][k-1]);
+            };
+            const int i_lo = 5, i_hi = 15, j_lo = 44, j_hi = 52;
+            double m_u=0,m_v=0,m_w=0,m_D=0; int ui=0,uj=0,uk=0,Di=0,Dj=0,Dk=0;
+            for (int i=i_lo;i<=i_hi;i++) for (int j=j_lo;j<=j_hi;j++) for (int k=1;k<km-1;k++){
+                const double au=std::fabs(u.x[i][j][k]);
+                const double av=std::fabs(v.x[i][j][k]);
+                const double aw=std::fabs(w.x[i][j][k]);
+                const double aD=std::fabs(Dgrid(i,j,k));
+                if (AtomUtils::is_finite_safe(au)&&au>m_u){m_u=au;ui=i;uj=j;uk=k;}
+                if (AtomUtils::is_finite_safe(av)&&av>m_v) m_v=av;
+                if (AtomUtils::is_finite_safe(aw)&&aw>m_w) m_w=aw;
+                if (AtomUtils::is_finite_safe(aD)&&aD>m_D){m_D=aD;Di=i;Dj=j;Dk=k;}
+            }
+            // [diagPamirUp] UPPER-Pamir monitor — the TRUE crash origin revealed by the
+            // half-dt test: with the dt-spurious near-surface pumping removed, velocity seeds
+            // at (i=34,j=48,k=68)=42°N/68°E 9 km, scalars one level up at i=36 (10.9 km). This
+            // is the documented upper secular band. diag62N (55–65°N) and diagAsia (i=5–15)
+            // both miss it. Track the slab max + the seed cell + local p_dyn (the pgr driver).
+            double pm_u=0,pm_v=0,pm_w=0,pm_p=0; int pi=0,pj=0,pk=0;
+            for (int i=28;i<=38;i++) for (int j=46;j<=50;j++) for (int k=58;k<=74;k++){
+                const double au=std::fabs(u.x[i][j][k]);
+                const double ap=std::fabs(p_dyn.x[i][j][k]);
+                if (AtomUtils::is_finite_safe(au)&&au>pm_u){pm_u=au;pi=i;pj=j;pk=k;}
+                if (AtomUtils::is_finite_safe(std::fabs(v.x[i][j][k]))&&std::fabs(v.x[i][j][k])>pm_v) pm_v=std::fabs(v.x[i][j][k]);
+                if (AtomUtils::is_finite_safe(std::fabs(w.x[i][j][k]))&&std::fabs(w.x[i][j][k])>pm_w) pm_w=std::fabs(w.x[i][j][k]);
+                if (AtomUtils::is_finite_safe(ap)&&ap>pm_p) pm_p=ap;
+            }
+            cout << "      [diagPamirUp] iter=" << total_iter_count
+                 << " cell(34,48,68) u=" << u.x[34][48][68]*u_0
+                 << " w=" << w.x[34][48][68]*u_0
+                 << " p_dyn=" << p_dyn.x[34][48][68]
+                 << " | slabmax|u|=" << pm_u*u_0 << "@(" << pi << "," << pj << "," << pk << ")"
+                 << " |v|=" << pm_v*u_0 << " |w|=" << pm_w*u_0
+                 << " max|p_dyn|=" << pm_p
+                 << endl;
+            cout << "      [diagAsia] iter=" << total_iter_count
+                 << " seed(10,46,128) u=" << u.x[10][46][128]*u_0
+                 << " v=" << v.x[10][46][128]*u_0
+                 << " w=" << w.x[10][46][128]*u_0
+                 << " D=" << Dgrid(10,46,128)*u_0
+                 << " | slabmax|u|=" << m_u*u_0 << "@(" << ui << "," << uj << "," << uk << ")"
+                 << " |v|=" << m_v*u_0 << " |w|=" << m_w*u_0
+                 << " maxD=" << m_D*u_0 << "@(" << Di << "," << Dj << "," << Dk << ")"
+                 << endl;
+        }
+
+        // Fixed precip<->velocity coupling probe at (j=37,k=229) = 53°N/131°W, the NE-Pacific
+        // column where P_rain was reported to grow exponentially from ~iter 440. The latent
+        // heat of the precip source terms (S_c+S_r) enters rhs_t (RHS_Atm.cpp:397) -> buoyancy
+        // -> u, so this prints, for the i-level with peak P_rain in the column, the temperature
+        // (C), the latent-heat driver (S_c+S_r), P_rain (mm/day) and u,v,w (m/s). If t/u here
+        // kink at iter 440 in step with P_rain, the precip is locally seeding the velocity;
+        // if they ramp smoothly through 440 (like diag62N), the two are decoupled.
+        {
+            const int jp = 37, kp = 229;
+            // (a) peak-P_rain level (the column rain-accumulation point, usually the surface)
+            int ip = 0; double pr_max = -1.0;
+            for (int i = 0; i < im; i++) {
+                const double pr = P_rain.x[i][jp][kp];
+                if (AtomUtils::is_finite_safe(pr) && pr > pr_max) { pr_max = pr; ip = i; }
+            }
+            // (b) peak latent-heat level ABOVE the surface (i>=1): the cell where condensation
+            // actually heats the air via rhs_t. The surface (i=0) temperature is BC-pinned, so
+            // coupling can only show up aloft — sample |S_c+S_r| there to catch it.
+            int ih = 1; double sl_max = -1.0;
+            for (int i = 1; i < im; i++) {
+                const double sl = std::fabs(S_c.x[i][jp][kp] + S_r.x[i][jp][kp]);
+                if (AtomUtils::is_finite_safe(sl) && sl > sl_max) { sl_max = sl; ih = i; }
+            }
+            const double t_C   = t.x[ip][jp][kp] * t_0 - t_0;                // K -> deg C
+            const double S_lat = S_c.x[ip][jp][kp] + S_r.x[ip][jp][kp];      // latent-heat driver, kg/(kg*s)
+            const double t_Ch  = t.x[ih][jp][kp] * t_0 - t_0;
+            const double S_lath= S_c.x[ih][jp][kp] + S_r.x[ih][jp][kp];
+            cout << "      [probePrecip] iter=" << total_iter_count
+                 << " @(i=" << ip << ",j=" << jp << ",k=" << kp << ")"
+                 << " P_rain=" << P_rain.x[ip][jp][kp] * 8.64e4 << "mm/d"
+                 << " t=" << t_C << "C"
+                 << " S_c+S_r=" << S_lat
+                 << " cloud=" << cloud.x[ip][jp][kp]
+                 << " u=" << u.x[ip][jp][kp] * u_0
+                 << " v=" << v.x[ip][jp][kp] * u_0
+                 << " w=" << w.x[ip][jp][kp] * u_0
+                 << " || aloft i=" << ih
+                 << " t=" << t_Ch << "C"
+                 << " S_c+S_r=" << S_lath
+                 << " cloud=" << cloud.x[ih][jp][kp]
+                 << " u=" << u.x[ih][jp][kp] * u_0
+                 << " w=" << w.x[ih][jp][kp] * u_0
+                 << endl;
+        }
+
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
 

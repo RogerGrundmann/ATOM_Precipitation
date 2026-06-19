@@ -62,8 +62,27 @@ private:
         const double lv_over_cp   = m.lv / m.cp_l;
         const double ls_over_cp   = m.ls / m.cp_l;
 
+        // Surface row is skipped below, but its condensation source must still be
+        // cleared every call: S_c_c.x[0] feeds the ice schemes' cloud-water source,
+        // and over ocean (i_mount == 0) they copy S_c_c.x[0] onto itself, so a stale
+        // nonzero value would silently re-condense surface cloud and defeat the skip.
         #pragma omp parallel for collapse(2) schedule(static)
-        for (int i = 0; i < m.im - 1; i++) {
+        for (int j = 0; j < m.jm; j++)
+            for (int k = 0; k < m.km; k++)
+                m.S_c_c.x[0][j][k] = 0.0;
+
+        // Start at i = 1: the surface row (i = 0) is a vapour SOURCE only and must
+        // never be saturation-adjusted in place. waterVapourEvaporation injects c[0]
+        // from the warm ocean toward c_eq ~ q_sat every moist iter; if adjustSaturation
+        // then condenses that just-injected vapour into cloud at the same cell, cloud
+        // water doubles every ~3-4 iters (Cook Inlet runaway: cloud 5e-13 -> 32 over
+        // iters 315-363). Once cloud + ice > 1 the r_humid denominator
+        // (1 + 0.608*c - cloud - ice) flips negative, -grad(p)/rho inverts, NaN cascade.
+        // Physically, condensation only happens once a parcel has risen, cooled
+        // adiabatically and reached its LCL aloft; the warm ocean surface is below
+        // saturation by definition. So cloud forms from i = 1 up, not at i = 0.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im - 1; i++) {
             for (int j = 0; j < m.jm; j++) {
                 double *S_c_c_row = m.S_c_c.x[i][j];
                 double *c_row     = m.c.x[i][j];

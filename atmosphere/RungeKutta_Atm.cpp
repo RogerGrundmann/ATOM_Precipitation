@@ -12,10 +12,39 @@
 using namespace std;
 
 
+// Boussinesq buoyancy base state: the area-weighted (sin θ, θ = colatitude)
+// horizontal mean of the non-dim temperature at each radial level i, taken over
+// air cells only. Buoyancy is then driven by (t − t_ref_level[i]) so the body
+// force has zero mean at every height and only horizontal temperature contrasts
+// accelerate the flow — instead of (t − 1), which referenced a global 273.15 K
+// isothermal state inconsistent with the lapse-rate hydrostatic p_stat and left a
+// large standing column force for p_dyn to fight. Refilled once per RK4 step.
+void cAtmosphereModel::computeLevelMeanTemperature(){
+    if((int)t_ref_level.size() != im) t_ref_level.assign(im, 1.0);
+
+    #pragma omp parallel for schedule(static)
+    for(int i = 0; i < im; i++){
+        double sum = 0.0, wsum = 0.0;
+        for(int j = 0; j < jm; j++){
+            const double w = sin(the.z[j]);                 // spherical area weight
+            for(int k = 0; k < km; k++){
+                if(AtomUtils::is_air(h, i, j, k)){
+                    sum  += w * t.x[i][j][k];
+                    wsum += w;
+                }
+            }
+        }
+        t_ref_level[i] = (wsum > 0.0) ? sum / wsum : 1.0;   // all-land level → neutral
+    }
+}
+
+
 void cAtmosphereModel::solveRungeKutta_Atmosphere(){
     cout << endl << " .................... solveRungeKutta_Atmosphere begin" << endl;
 
     auto begin = std::chrono::high_resolution_clock::now();
+
+    computeLevelMeanTemperature();   // refresh buoyancy base state t_ref_level[i]
 
     const double half_dt = 0.5 * dt;
     const double dt_sixth = dt / 6.0;
@@ -39,7 +68,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere(){
 
     for(int j = 0; j < jm; j++){
         sinthe_tbl[j] = sin(the.z[j]);
-        if(sinthe_tbl[j] < 0.4) sinthe_tbl[j] = 0.4;
+        if(sinthe_tbl[j] < 0.55) sinthe_tbl[j] = 0.55;   // metric floor ~57° (was 0.4/~66°): caps the 1/sinθ amplification of the high-lat coastal pressure-gradient force that blows up at i=1
         costhe_tbl[j] = cos(the.z[j]);
     }
 

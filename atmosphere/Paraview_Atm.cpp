@@ -179,12 +179,15 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("CloudWater", cloud, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudIce", ice, 1e3, Atmosphere_panorama_vts_File);
 //    dump_array("CloudGraupel", gr, 1e3, Atmosphere_panorama_vts_File);
-/*
+    // Moist source/sink terms. S_c and S_r are the rhs_t latent-heat drivers
+    // (RHS_Atm.cpp:397, coeff_energy*lv*(S_c+S_r)) that couple precip -> temperature
+    // -> buoyancy -> velocity; dump them so the NE-Pacific (j=37,k=229) precip<->u
+    // coupling is inspectable in ParaView. Were previously commented out AND all three
+    // mistakenly dumped S_r — fixed to S_v/S_c/S_r.
     dump_array("S_c_c", S_c_c, 1e3, Atmosphere_panorama_vts_File);
-    dump_array("S_v", S_r, 1e3, Atmosphere_panorama_vts_File);
-    dump_array("S_c", S_r, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("S_v", S_v, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("S_c", S_c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_r", S_r, 1e3, Atmosphere_panorama_vts_File);
-*/
 //    dump_array("cloudiness", cloudiness, 1.0, Atmosphere_panorama_vts_File);
 
     dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
@@ -330,6 +333,22 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
     buf.clear();
 
 
+    buf << "    <DataArray type=\"Float32\" Name=\"Temperature\" format=\"ascii\">\n\n";
+    for(int k = 0; k < km; k++){
+        for(int j = 0; j < jm; j++){
+            for(int i = 0; i < im; i++){
+                buf << safe_val(t.x[i][j][k] * t_0 - t_0) << '\n';
+            }
+            buf << "\n\n";
+        }
+        buf << "\n\n";
+    }
+    buf << "\n\n    </DataArray>\n\n";
+    Atmosphere_panorama_vts_File << buf.str();
+    buf.str("");
+    buf.clear();
+
+
 
     dump_array("Bathymetry", h, 1.0, Atmosphere_panorama_vts_File);
 
@@ -337,8 +356,16 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
     dump_array("v-component", aux_v, u_0, Atmosphere_panorama_vts_File);
     dump_array("w-component", aux_w, u_0, Atmosphere_panorama_vts_File);
 
-    dump_array("Temperature", t, 1.0, Atmosphere_panorama_vts_File);
     dump_array("PressureDynamic", p_dyn, p_0, Atmosphere_panorama_vts_File);
+
+    dump_array("WaterVapour", c, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("CloudWater", cloud, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("CloudIce", ice, 1e3, Atmosphere_panorama_vts_File);
+
+    dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
+    dump_array("PrecipitationRain", P_rain, 8.64e4, Atmosphere_panorama_vts_File);
+    dump_array("PrecipitationSnow", P_snow, 8.64e4, Atmosphere_panorama_vts_File);
+//    dump_array("PrecipitationGraupel", P_graupel, 8.64e4, Atmosphere_panorama_vts_File);
 
 
     buf << "   </PointData>\n\n"
@@ -562,7 +589,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     dump_radial("q_v_u", q_v_u, 1e3, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("q_c_u", q_c_u, 1e3, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("q_v_d", q_v_d, 1e3, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("u_u", u_u, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("u_u", u_u, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("v_u", v_u, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("w_u", w_u, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("u_d", u_d, 1.0, i_radial, Atmosphere_vtk_radial_File);

@@ -9,6 +9,7 @@
 */
 
 #include <iostream>
+#include <iomanip>
 #include <cmath>
 #include "cAtmosphereModel.h"
 #include "Utils.h"
@@ -371,16 +372,38 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // Coriolis
     double coriolis = 1.0;
     double coeff_Coriolis = r_air * u_0 * omega;
-    double coriolis_rad =  2.0 * costhe * w_ijk;
-    double coriolis_the = -2.0 * sinthe * w_ijk;
-    double coriolis_phi =  2.0 * (sinthe * v_ijk - costhe * u_ijk);
+    // Coriolis acceleration -2 Ω × v in (r, θ, φ) with θ = colatitude (the0 = 0
+    // at N pole), v south-positive (= +ê_θ), w east-positive. TRADITIONAL
+    // APPROXIMATION: keep only Ω_r = Ω cosθ; drop the non-traditional ("Eötvös")
+    // terms from Ω_θ = -Ω sinθ:
+    //   F_r = 0                          (was +2Ω sinθ w — dropped)
+    //   F_θ = +2Ω cos(θ) w
+    //   F_φ = -2Ω cos(θ) v               (the -2Ω sinθ u part dropped)
+    // (coefficient 2 ≡ 2Ω in this file's Ω-based non-dim time.) The earlier form
+    // had sin↔cos swapped + wrong signs (the active k_omega_SST bug); after the
+    // sign fix the kept +2Ω sinθ w drove the eastward jets steadily upward under
+    // the lagging pressure projection, so it is dropped here.
+    double coriolis_rad =  0.0;
+    double coriolis_the =  2.0 * costhe * w_ijk;
+    double coriolis_phi = -2.0 * costhe * v_ijk;
+
+    // NONDIM-CONVENTION FIX (2026-06-19). This turbulent path had written its forcing
+    // terms (Coriolis "2"=2Ω, surf_drag/HS as k/omega, buoyancy g/(omega*L_atm)) in an
+    // "Ω-based time" convention that is INCONSISTENT with its pressure/advection terms,
+    // which carry NO dt (advective-time, identical to the laminar RHS_Atm.cpp). That made
+    // the forcing ~5e5× too "hot" per step → polar vertical-velocity runaway once the
+    // buoyancy was strong. The laminar path (turb_model="none") is the calibrated, STABLE
+    // reference (proper closed cells, w~23 m/s, u settling). force_nd converts the clean
+    // Ω-time coefficients to the laminar advective-time scaling so the WHOLE turbulent RHS
+    // is consistent: turbulent path = laminar dynamics + eddy viscosity (in diffusion_vel_re).
+    const double force_nd = omega * L_atm / u_0 * dt;   // = laminar 2ωL/u0·dt factor / 2
 
     // Acting forces
     CoriolisForce.x[i][j][k] = coriolis * coeff_Coriolis
         * sqrt((pow(coriolis_rad, 2)
         + pow(coriolis_the, 2)
         + pow(coriolis_phi, 2)) / 3.0);
-    BuoyancyForce.x[i][j][k] = buoyancy * coeff_buoy * (t.x[i][j][k] - 1.0);
+    BuoyancyForce.x[i][j][k] = buoyancy * coeff_buoy * (t.x[i][j][k] - t_ref_level[i]);
     PressureGradientForce.x[i][j][k] = -coeff_u_p
         * sqrt((pow(dpdr, 2)
         + pow(dpdthe * inv_rm, 2)
@@ -751,10 +774,22 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // bounded only because Y_w = β₀·dis² is quadratic and self-limiting.
 
 
+    // NOTE (2026-06-09): a background velocity-diffusion floor (nue_floor=1e-3) was tested
+    // here and REVERTED. It gave negligible benefit against the iter-491 NaN (dif only rose
+    // 0.001→0.009, crash unchanged — the cause is the pressure/divergence loop, not a
+    // diffusion deficit) AND it adds 1e-3 isotropic diffusion wherever turbulent nue<1e-3
+    // (i.e. most of the domain, including i=0), which smooths the emergent i=0 vortices that
+    // are a healthy-run validation signal ([[project_emergence_validation]]). Net negative.
+    // See [[project_upper_velocity_secular_growth]].
+
     // ===== Diffusion terms =====
     double two_over_rm_exp  = 2.0 * inv_rm * exp_rm;
     double cos_rm2sin       = costhe_inv_rm2sinthe;
-    double v_metric         = (1.0 + costhe / sinthe2) * inv_rm2;
+    // v_metric = (1/sin²θ)/r² = (1 + cot²θ)/r² = (1 + cos²θ/sin²θ)/r². 2026-06-19: the
+    // turbulent path had costhe (not costhe²), the pre-fix form of the
+    // project_vmetric_antidiffusion bug that was corrected in RHS_Atm.cpp/RHS_Hyd.cpp but
+    // missed here — it over-damped v,w in the NH and anti-diffused poleward of ~38°S.
+    double v_metric         = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
     double diffusion_t = (d2tdr2 * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
@@ -810,23 +845,116 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double dpdthe_invrm  = dpdthe * inv_rm;
     double dpdphi_invrs  = dpdphi * inv_rmsinthe;
 
+    // Latent heating: signed microphysical mass-exchange × specific latent heat ×
+    // density.  S_c+S_r (vapour↔liquid, factor lv), S_i+S_s+S_g (vapour↔ice/solid,
+    // factor ls).  The laminar path (RHS_Atm.cpp) uses the same form.
+    //
+    // A previous version added `+ Q_Latent.x[i][j][k] / coeff_L` here; that was
+    // an unsigned *diagnostic* magnitude written by ThermoAtm.latentSensibleHeat()
+    // for ParaView output (= lv·|∇q_sat|, always positive).  Because ThermoAtm
+    // runs only every other iter (moist_stride=2) while RHS reads Q_Latent every
+    // iter, it produced a 2Δt sawtooth heating source — huge on iters where
+    // ThermoAtm had just overwritten the field, near-zero on alternate iters —
+    // that drove the iter-358 NaN at 62°N upper-troposphere
+    // (see [[project-iter358-62n-dry-nan]]).  The signed S_*·lv/ls terms above
+    // already account for the latent heat; the diagnostic term was a duplicate.
     rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t
         + coeff_MC_t * MC_t.x[i][j][k]
         + coeff_energy * (S_c.x[i][j][k] + S_r.x[i][j][k]) * lv * r_humid.x[i][j][k]
-        + coeff_energy * (S_i.x[i][j][k] + S_s.x[i][j][k] + S_g.x[i][j][k]) * ls * r_humid.x[i][j][k]
-        + Q_Latent.x[i][j][k] / coeff_L;
+        + coeff_energy * (S_i.x[i][j][k] + S_s.x[i][j][k] + S_g.x[i][j][k]) * ls * r_humid.x[i][j][k];
 
+    // ----- Held-Suarez Newtonian thermal relaxation (PROTOTYPE, turbulent path) -----
+    // Supplies the maintained APE the general circulation otherwise lacks (rhs_t had no
+    // radiative forcing, so a forced-equilibrium IC like the Grotjahn mean cells spins down).
+    // Relax T toward the radiative-equilibrium target t_eq (snapshot of the initial Scotese+
+    // topography+land-sea field). Held-Suarez (1994) rate k_T = k_a + (k_s-k_a)*
+    // max(0,(sigma-sigma_b)/(1-sigma_b))*cos^4(lat); sigma = p/p_surf, cos(lat)=sinthe.
+    // Non-dimensionalised in advective time (k*L_atm/u_0*dt) to match the laminar RHS_Atm.cpp
+    // and the rest of this path's forcing — see the force_nd note above (2026-06-19 fix).
+    constexpr bool HELD_SUAREZ_RELAX = true;          // prototype toggle (keep in sync with RHS_Atm.cpp)
+    if (HELD_SUAREZ_RELAX) {
+        constexpr double k_a     = 1.0 / ( 4.0 * 86400.0);   // free-atmosphere relax rate [1/s] (10x H-S: matches ATOM's 10x friction scaling)
+        constexpr double k_s     = 1.0 / ( 0.4 * 86400.0);   // near-surface relax rate   [1/s] (10x H-S)
+        constexpr double sigma_b = 0.7;
+        const double p_surf = p_stat.x[i_topography[j][k]][j][k];
+        const double sigma  = (p_surf > 0.0) ? p_stat.x[i][j][k] / p_surf : 0.0;
+        double bl = (sigma - sigma_b) / (1.0 - sigma_b);
+        if (bl < 0.0) bl = 0.0;
+        const double cos4lat = sinthe2 * sinthe2;            // cos^4(lat) = sin^4(colatitude)
+        const double k_T = k_a + (k_s - k_a) * bl * cos4lat; // [1/s]
+        rhs_t.x[i][j][k] -= (k_T * L_atm / u_0 * dt) * (t.x[i][j][k] - t_eq.x[i][j][k]);
+    }
+
+
+    // Boussinesq buoyancy body force, in the laminar RHS_Atm.cpp advective-time form
+    // g*dt/u_0 (the calibrated, STABLE reference). The turbulent path originally had the
+    // bare anomaly (coeff 1.0). An intermediate "fix" used g/(omega*L_atm)≈336 to match the
+    // buoyancy/Coriolis RATIO, but that combined with this path's over-hot Ω-time Coriolis to
+    // drive a polar vertical runaway — see the force_nd note above. Using g*dt/u_0 (and
+    // force_nd on Coriolis) makes the whole RHS share the laminar scaling.
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoyancy_ramp * buoyancy * (t.x[i][j][k] - 1.0)
-        + coriolis * coriolis_rad;
+        + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - t_ref_level[i])
+        + coriolis * force_nd * coriolis_rad;
+
+    // [rhsuTrace] inf-trigger probe at the deterministic crash cell (12,49,64)=41°N/64°E.
+    // The pointwise RK4 (RungeKutta_Atm_Turb.cpp) calls this 4×/iter with the unclamped
+    // intermediate u growing across stages; print each evaluation's rhs_u terms + the
+    // input u_ijk so the within-step advective (transport_u ~ u²) blow-up is visible.
+    // STRIP before commit.
+    if(i == 30 && j == 49 && k == 64 && total_iter_count >= 532 && total_iter_count <= 533){
+        cout << "      [rhstTrace] iter=" << total_iter_count
+             << " t=" << t.x[i][j][k] << " rhs_t=" << rhs_t.x[i][j][k]
+             << " | pressure_t=" << pressure_t
+             << " -transport_t=" << -transport_t
+             << " diffusion_t=" << diffusion_t
+             << " MC_t=" << (coeff_MC_t * MC_t.x[i][j][k])
+             << " latL=" << (coeff_energy*(S_c.x[i][j][k]+S_r.x[i][j][k])*lv*r_humid.x[i][j][k])
+             << " latI=" << (coeff_energy*(S_i.x[i][j][k]+S_s.x[i][j][k]+S_g.x[i][j][k])*ls*r_humid.x[i][j][k])
+             << " | S_c=" << S_c.x[i][j][k] << " S_r=" << S_r.x[i][j][k]
+             << " S_i=" << S_i.x[i][j][k] << " S_s=" << S_s.x[i][j][k]
+             << " r_humid=" << r_humid.x[i][j][k] << " MC_t_raw=" << MC_t.x[i][j][k]
+             << endl;
+    }
+
+    // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----
+    // See RHS_Atm.cpp for the rationale: the free-slip wall (bcSolidGround) + init-only
+    // bcVelSurfSur leave the near-surface tangential wind with NO momentum sink, so the
+    // coastal-jet v,w accelerate unopposed → the recurring i=1 CFL blow-up at steep
+    // coasts (Antarctic Peninsula / Baffin / Norway / Sea of Okhotsk). Held-Suarez-style
+    // linear drag on v,w only (NOT radial u), full strength at the first air cell above
+    // the LOCAL surface (i_topography[j][k]) and ramping to zero over the boundary layer.
+    // Scaled in advective time (k_f*L_atm/u_0*dt) to match the laminar RHS_Atm.cpp and the
+    // rest of this path's forcing — see the force_nd note above (2026-06-19 fix).
+    constexpr double rayleigh_kf   = 1.0 / 86400.0;   // [EXPERIMENT 2026-06-16: cut 10x to ~1/day H-S to relieve momentum over-damping (T->wind decoupling); orig 1/8640]  surface drag rate ≈ Ekman strength [1/s], 10× the old ≈1/day Held-Suarez baseline. Tuned 2026-06-13: baseline 1/day gave ~34 m/s eastward w off W-coast S-America; 10× cut the surface to ~28 m/s and 20× gained nothing (the jet max sits at ~1 km, above the drag layer), so 10× is the settled strength.
+    constexpr double drag_n_layers = 5.0;             // boundary-layer depth [air cells]. Tried 10 (2026-06-13) to reach the ~1 km coastal-jet max — no effect (that ~27 m/s max at 27°S/71°W is an Andes orographic/pressure-gradient feature, immune to friction), so kept at the physical 5.
+    double drag_profile = 1.0 - (double)(i - i_topography[j][k]) / drag_n_layers;
+    if(drag_profile < 0.0) drag_profile = 0.0;
+    if(drag_profile > 1.0) drag_profile = 1.0;
+    double surf_drag = (rayleigh_kf * L_atm / u_0 * dt) * drag_profile;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
-        + coriolis * coriolis_the
-        + coeff_MC_vel * MC_v.x[i][j][k];
+        + coriolis * force_nd * coriolis_the
+        + coeff_MC_vel * MC_v.x[i][j][k]
+        - surf_drag * v_ijk;
+
+    // ---- zonal-mean v momentum-budget term capture (checkpoint iters only) ----
+    // Store each rhs_v contribution (nondim dv*/dt*) so write_v_momentum_budget can
+    // attribute the meridional-cell spin-down. transport_v splits into vertical
+    // (-u·∂v/∂r) and horizontal advection. The four RK4 stages overwrite the same
+    // cell; the last (stage 4) wins, which differs from stage 1 only by O(dt)~0.05%.
+    if(vbudget_capture){
+        vbud_pgf.x[i][j][k]   = -dpdthe_invrm;
+        vbud_cor.x[i][j][k]   =  coriolis * force_nd * coriolis_the;
+        vbud_advv.x[i][j][k]  = -(u_exp * dvdr_adv);
+        vbud_advh.x[i][j][k]  = -(v_invrm * dvdthe_adv + w_invrs * dvdphi_adv);
+        vbud_diff.x[i][j][k]  =  diffusion_v;
+        vbud_other.x[i][j][k] =  coeff_MC_vel * MC_v.x[i][j][k] - surf_drag * v_ijk;
+    }
 
     rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
-        + coriolis * coriolis_phi
-        + coeff_MC_vel * MC_w.x[i][j][k];
+        + coriolis * force_nd * coriolis_phi
+        + coeff_MC_vel * MC_w.x[i][j][k]
+        - surf_drag * w_ijk;
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c
         + coeff_trans * S_v.x[i][j][k] * r_humid.x[i][j][k]

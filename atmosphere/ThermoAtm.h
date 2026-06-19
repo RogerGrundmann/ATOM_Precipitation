@@ -41,7 +41,6 @@ public:
         const double inv_2dr    = 1.0 / (2.0 * m.dr);
         const double inv_2dthe  = 1.0 / (2.0 * m.dthe);
         const double inv_2dphi  = 1.0 / (2.0 * m.dphi);
-        const double R_WV_1e2   = 1e-2 * m.R_WaterVapour;
         const double inv_sqrt3  = 1.0 / sqrt(3.0);
 
         std::vector<double> sinthe_table(m.jm);
@@ -77,46 +76,17 @@ public:
                     double exp_rm       = 1.0 / (rm + 1.0);
                     double inv_rm       = 1.0 / rm;
                     double inv_rmsinthe = 1.0 / (rm * sinthe);
-                    double p_stat_ijk   = m.p_stat.x[i][j][k];
 
-                    // --- latent heat: r-direction ---
-                    double e1r = R_WV_1e2
-                        * (m.r_dry.x[i+1][j][k] - m.r_humid.x[i+1][j][k])
-                        * m.t.x[i+1][j][k] * m.t_0;
-                    double e2r = R_WV_1e2
-                        * (m.r_dry.x[i-1][j][k] - m.r_humid.x[i-1][j][k])
-                        * m.t.x[i-1][j][k] * m.t_0;
-
-                    double s1r  = m.ep * e1r / (p_stat_ijk - 0.378 * e1r);
-                    double s2r  = m.ep * e2r / (p_stat_ijk - 0.378 * e2r);
-                    double dsdr = (s1r - s2r) * inv_2dr * exp_rm;
-
-                    // --- latent heat: theta-direction ---
-                    double e1t = R_WV_1e2
-                        * (m.r_dry.x[i][j+1][k] - m.r_humid.x[i][j+1][k])
-                        * m.t.x[i][j+1][k] * m.t_0;
-                    double e2t = R_WV_1e2
-                        * (m.r_dry.x[i][j-1][k] - m.r_humid.x[i][j-1][k])
-                        * m.t.x[i][j-1][k] * m.t_0;
-
-                    double s1t    = m.ep * e1t / (p_stat_ijk - 0.378 * e1t);
-                    double s2t    = m.ep * e2t / (p_stat_ijk - 0.378 * e2t);
-                    double dsdthe = (s1t - s2t) * inv_2dthe * inv_rm;
-
-                    // --- latent heat: phi-direction ---
-                    double e1p = R_WV_1e2
-                        * (m.r_dry.x[i][j][k+1] - m.r_humid.x[i][j][k+1])
-                        * m.t.x[i][j][k+1] * m.t_0;
-                    double e2p = R_WV_1e2
-                        * (m.r_dry.x[i][j][k-1] - m.r_humid.x[i][j][k-1])
-                        * m.t.x[i][j][k-1] * m.t_0;
-
-                    double s1p    = m.ep * e1p / (p_stat_ijk - 0.378 * e1p);
-                    double s2p    = m.ep * e2p / (p_stat_ijk - 0.378 * e2p);
-                    double dsdphi = (s1p - s2p) * inv_2dphi * inv_rmsinthe;
-
-                    m.Q_Latent.x[i][j][k] = m.lv * inv_sqrt3
-                        * sqrt(dsdr*dsdr + dsdthe*dsdthe + dsdphi*dsdphi);
+                    // Q_Latent is owned by RHS_Atm_Turb (the signed advective
+                    // tendency × coeff_L written at every saturated cell). The
+                    // earlier ThermoAtm path here wrote an unsigned magnitude
+                    // diagnostic (lv · |∇q_sat|) every "moist" iter, racing the
+                    // RHS writer on alternate iters and producing a 2Δt sawtooth
+                    // in the field that confused diagnostics and (combined with
+                    // the now-removed RHS_Atm_Turb.cpp:758 source term) drove the
+                    // iter-358 NaN at 62°N upper-tropo.  See
+                    // [[project-iter358-62n-dry-nan]] and
+                    // [[project-precip-chain-fixes]].
 
                     // --- sensible heat ---
                     double dtdr   = (m.t.x[i+1][j][k] - m.t.x[i-1][j][k])
@@ -189,7 +159,12 @@ public:
                 double c_Dalton    = AtomUtils::C_Dalton(0, j, k, m.coeff_Dalton, m.u_0, m.u, m.v, m.w);
                                                                         // [mm/(h*hPa)]
                 double p_stat_0jk  = m.p_stat.x[0][j][k];               // [hPa]
-                double t_u_base    = m.t.x[0][j][k] * m.t_0;            // [K]
+                // Floor the surface temperature at 180 K (below Earth's coldest-ever ~184 K, so
+                // it never touches real physics) to backstop the marginal Gulf-of-Alaska crash:
+                // an undamped i=0 coastal-surface T oscillation drove t.x[0] to ~160 K, making
+                // E_sat/c_eq in the evaporation formula singular → c NaN. See
+                // [[project_upper_velocity_secular_growth]].
+                double t_u_base    = std::max(180.0, m.t.x[0][j][k] * m.t_0);  // [K], floored
                 double precip_term = conv_factor * m.Precipitation.x[0][j][k]; // [mm/d]
 
                 double vel_ms = sqrt((m.u.x[0][j][k] * m.u.x[0][j][k]
@@ -258,6 +233,22 @@ public:
                 // c update: distribute c_eq across surface + n_spread levels above,
                 // conserving total moisture (weights sum to 1).
                 m.c.x[0][j][k] = m.c_fix.y[j][k] + (c_eq - m.c_fix.y[j][k]) * w_norm;  // i=0: weight = exp(0)*w_norm
+
+                // [evapTrace] surface-c inf-trigger probe at the Gulf-of-Alaska crash cell
+                // (0,36,220)=54°N/140°W. The recurring iter-~633-669 crash is c (water vapour)
+                // + Evaporation_Dalton going non-finite here. Print the evaporation-formula
+                // inputs/intermediates to find which factor (E_sat/c_Dalton/coeff_D/precip/
+                // p_stat/t) blows up. STRIP before commit.
+                if (j == 36 && k == 220
+                    && m.total_iter_count >= 660 && m.total_iter_count <= 671) {
+                    std::cout << "      [evapTrace] iter=" << m.total_iter_count
+                              << " c[0]=" << m.c.x[0][j][k] << " c_fix=" << m.c_fix.y[j][k]
+                              << " c_eq=" << c_eq << " c_sat=" << c_sat
+                              << " E_sat=" << E_sat << " t_u_base=" << t_u_base
+                              << " p_stat=" << p_stat_0jk << " c_Dalton=" << c_Dalton
+                              << " coeff_D=" << coeff_D << " precip_term=" << precip_term
+                              << " EvapD=" << m.Evaporation_Dalton.y[j][k] << std::endl;
+                }
                 if (c_eq > 0.0) {
                     for (int i = 1; i <= n_spread; i++) {
                         double weight  = std::pow(r, i) * w_norm;
@@ -724,7 +715,10 @@ public:
 
         double t_paleo_add = 0.0;
 
-        if (!m.use_NASA_temperature || *m.get_current_time() > 0)
+        // The paleo CO2 increment is defined relative to the preceding slice. On a
+        // single-Ma run there is no foregoing slice to difference against (and
+        // get_previous_time() would throw), so leave t_paleo_add = 0 in that case.
+        if ((!m.use_NASA_temperature || *m.get_current_time() > 0) && !m.is_first_time_slice())
             t_paleo_add =
                 m.get_temperatures_from_curve(*m.get_current_time(),  m.m_global_temperature_curve)
               - m.get_temperatures_from_curve(*m.get_previous_time(), m.m_global_temperature_curve);
@@ -820,7 +814,11 @@ public:
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
-                const double t_u_0        = m.t.x[0][j][k] * m.t_0;
+                // Floor surface T at 180 K (below Earth's coldest-ever ~184 K): coeff ∝ 1/T²,
+                // so an unphysical cold surface (the coastal/Pamir T oscillation) blows coeff up
+                // and drives the barometric sqrt negative. Backstops the sqrt guard at the
+                // source. See [[project_upper_velocity_secular_growth]].
+                const double t_u_0        = std::max(180.0, m.t.x[0][j][k] * m.t_0);
                 const double p_sl         = p_sl_factor * t_u_0;
                 const double t_0_inv_beta = t_u_0 * inv_beta;
                 const double coeff        = two_beta_g_inv_R / (t_u_0 * t_u_0);
@@ -828,14 +826,37 @@ public:
                 for (int i = 0; i < m.im; i++) {
                     const double h_i = height_table[i];
                     const double t_u = m.t.x[i][j][k] * m.t_0;
+                    // Guard the COSMO barometric sqrt: coeff = 2βg/(R_Air·t_u_0²) ∝ 1/T², so an
+                    // anomalously cold surface column drives (1 - coeff·h_i) negative aloft →
+                    // sqrt(NaN) → p_i/r_humid NaN → whole-field blow-up. The init-time copy of
+                    // this formula (InitValues_Atm.cpp:644) already clamps with max(0,…); this
+                    // in-loop version had dropped it. See [[project_upper_velocity_secular_growth]].
                     const double p_i = p_sl * exp(-t_0_inv_beta
-                        * (1.0 - sqrt(1.0 - coeff * h_i)));             // COSMO barometric formula
+                        * (1.0 - sqrt(std::max(0.0, 1.0 - coeff * h_i))));  // COSMO barometric formula
 
                     m.p_stat.x[i][j][k]  = p_i;
                     m.r_dry.x[i][j][k]   = scale * p_i / t_u;
                     m.r_humid.x[i][j][k] = scale * p_i
                         / ((1.0 + R_W_R_A_m1 * m.c.x[i][j][k]
                             - m.cloud.x[i][j][k] - m.ice.x[i][j][k]) * t_u);
+
+                    // [densTrace] r_humid inf-trigger probe at the crash cell (30,49,64).
+                    // sqrt(1-coeff*h_i) at line 802 has NO max(0,...) guard (init version
+                    // InitValues_Atm.cpp:644 does) — print the sqrt arg, the denom bracket and
+                    // t_u to see which factor goes NaN/zero. STRIP before commit.
+                    if(i == 30 && j == 49 && k == 64
+                       && m.total_iter_count >= 531 && m.total_iter_count <= 720){
+                        const double sqrt_arg = 1.0 - coeff * h_i;
+                        const double bracket  = 1.0 + R_W_R_A_m1 * m.c.x[i][j][k]
+                                              - m.cloud.x[i][j][k] - m.ice.x[i][j][k];
+                        std::cout << "      [densTrace] iter=" << m.total_iter_count
+                                  << " t_u_0=" << t_u_0 << " coeff=" << coeff << " h_i=" << h_i
+                                  << " sqrt_arg=" << sqrt_arg << " p_i=" << p_i << " t_u=" << t_u
+                                  << " bracket=" << bracket
+                                  << " c=" << m.c.x[i][j][k] << " cloud=" << m.cloud.x[i][j][k]
+                                  << " ice=" << m.ice.x[i][j][k]
+                                  << " r_humid=" << m.r_humid.x[i][j][k] << std::endl;
+                    }
                 }
 
                 const int    i_m = m.i_topography[j][k];

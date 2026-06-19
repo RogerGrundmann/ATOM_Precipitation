@@ -1,7 +1,11 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
 #include <sys/stat.h>
 
 #include "cAtmosphereModel.h"
@@ -122,24 +126,22 @@ cout << endl << endl << endl << "      AGCM: read_Atmosphere_Surface_Data ......
 *
 */
 void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File){
-    cout << endl << "      AGCM: AtmosphereDataTransfer" << endl;
+    cout << endl << "      AGCM: AtmosphereDataTransfer   iter_n = " << iter_n << endl;
 
     string stem_t = Name_Bathymetry_File;
     { auto dot = stem_t.rfind('.'); if(dot != string::npos) stem_t = stem_t.substr(0, dot); }
     string base_t = output_path;
     if(!base_t.empty() && base_t.back() == '/') base_t.pop_back();
     string Name_Transfer_File = base_t + "/" + stem_t + "_Transfer_Atm.vwtp";
-    ofstream Transfer_File(Name_Transfer_File);
 
-    if(!Transfer_File.is_open()){
-        cerr << "ERROR: could not open transfer file: " << Name_Transfer_File << "\n";
-        abort();
-    }
-
-    // prepare buffer for parallel line formatting
+    // Build the buffer BEFORE touching the file, while checking every value that
+    // would be written for NaN/Inf (is_finite_safe, since -ffast-math defeats
+    // std::isfinite). If any is non-finite the file is NOT overwritten further
+    // below, so the last clean version stays on disk for the hydrosphere to use.
     std::vector<std::string> line_buffer(jm * km);
+    bool has_nonfinite = false;
 
-    #pragma omp parallel for collapse(2) schedule(static)
+    #pragma omp parallel for collapse(2) schedule(static) reduction(||: has_nonfinite)
     for(int j = 0; j < jm; j++){
         for(int k = 0; k < km; k++){
             std::stringstream ss;
@@ -149,18 +151,43 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
             if(is_land(h, 0, j, k)){
                 ss << "0.0000 0.0000 0.0000 0.0000 0.0000 0.0000";
             }else{
-                ss << v.x[0][j][k] << " "                               //non-dimensional
-                   << w.x[0][j][k] << " "                               //non-dimensional
-                   << t.x[0][j][k] << " "                               //non-dimensional
-                   << p_dyn.x[0][j][k] << " "                           //non-dimensional
-                   << Evaporation.y[j][k] << " "                        //dimensional in [mm/d]
-                   << Precipitation.x[0][j][k] * 86400.0;               //dimensional in [mm/d]
+                double vv = v.x[0][j][k];                               //non-dimensional
+                double wv = w.x[0][j][k];                               //non-dimensional
+                double tv = t.x[0][j][k];                               //non-dimensional
+                double pv = p_dyn.x[0][j][k];                           //non-dimensional
+                double ev = Evaporation.y[j][k];                        //dimensional in [mm/d]
+                double pr = Precipitation.x[0][j][k] * 86400.0;         //dimensional in [mm/d]
+
+                if(!is_finite_safe(vv) || !is_finite_safe(wv) || !is_finite_safe(tv)
+                || !is_finite_safe(pv) || !is_finite_safe(ev) || !is_finite_safe(pr))
+                    has_nonfinite = true;
+
+                ss << vv << " " << wv << " " << tv << " "
+                   << pv << " " << ev << " " << pr;
             }
 
             // write to buffer (index must be unique per thread)
             line_buffer[j * km + k] = ss.str();
         }
     }
+
+    // Guard: a NaN/Inf in the surface fields means this transfer would corrupt the
+    // file the hydrosphere reads. Skip the write and keep the previous clean file.
+    if(has_nonfinite){
+        cout << "      AGCM: AtmosphereDataTransfer SKIPPED at iter_n = " << iter_n
+             << " — non-finite (NaN/Inf) surface values present; previous transfer file left intact" << endl;
+        return;
+    }
+
+    ofstream Transfer_File(Name_Transfer_File);
+    if(!Transfer_File.is_open()){
+        cerr << "ERROR: could not open transfer file: " << Name_Transfer_File << "\n";
+        abort();
+    }
+
+    // headline carrying the iteration this transfer corresponds to; the hydrosphere
+    // reader (HydrosphereDataTransfer) consumes this single line before the data rows.
+    Transfer_File << "# iter_n = " << iter_n << "\n";
 
     // serial write of finished buffer to file
     for(int i = 0; i < jm * km; i++){
@@ -174,7 +201,7 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
 *
 */
 void cAtmosphereModel::AtmospherePlotData(const string &Name_Bathymetry_File){
-    cout << endl << "      AGCM: AtmospherePlotData" << endl;
+    cout << endl << "      AGCM: AtmospherePlotData   iter_n = " << iter_n << endl;
 
     string stem = Name_Bathymetry_File;
     { auto dot = stem.rfind('.'); if(dot != string::npos) stem = stem.substr(0, dot); }
@@ -191,11 +218,14 @@ void cAtmosphereModel::AtmospherePlotData(const string &Name_Bathymetry_File){
     PlotData_File.precision(4);
     PlotData_File.setf(ios::fixed);
 
-    // Header schreiben
+    // Header schreiben (single line, kept on one line so parsers using
+    // skiprows=1 / skip_header=1 stay correct). The actual iteration number
+    // iter_n is appended for later inspection of which iteration produced this file.
     PlotData_File << "lons(deg), lats(deg), topography(m), v-velocity(m/s), w-velocity(m/s), "
                   << "velocity-mag(m/s), temperature(Celsius), water_vapour(g/kg), "
                   << "precipitation(mm/d), precipitable water(mm), pressure-static (hPa), "
-                  << "temp_landscape (Celsius), p_stat_landscape (hPa)" << endl;
+                  << "temp_landscape (Celsius), p_stat_landscape (hPa)"
+                  << "   ## iter_n = " << iter_n << endl;
 
     // Puffer für alle Zeilen (km * jm)
     std::vector<std::string> buffer(km * jm);
@@ -285,8 +315,9 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
                     << lat << " " << tmp << std::endl;
             }   
 
-        }   
+        }
     }
+
 //  reduction and smoothing of peaks and needles in the topography
     #pragma omp parallel for collapse(2) schedule(static)
     for(int i = 0; i < im; i++){
@@ -308,6 +339,26 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
         }
     }
 
+    // Reset i_topography (and derived height arrays) to the OCEAN default BEFORE the
+    // recompute below, so the index is authoritatively re-derived from the (now peak-
+    // smoothed) h mask. Without this, a column whose land was FULLY cleared by the peak/
+    // needle smoothing above keeps the stale surface index it got at read time — there is
+    // no land→air transition left for the recompute to overwrite it — producing a "phantom
+    // mountain" (i_topography>=1 over open water). Those phantom columns are treated as
+    // fluid by the pressure solver (which keys on h) yet as terrain by the RHS/BCs (which
+    // key on i_topography), injecting an anomalous coastal Poisson pressure that drove the
+    // westerly-coast v/w velocity overshoot and the iter-357 NaN
+    // ([[project-coastal-pgrad-pathology]]). A phase-by-phase scan measured 2881 such
+    // columns appearing at the peak-smooth step and 353 surviving the recompute without
+    // this reset; with it, 0 remain.
+    #pragma omp parallel for collapse(2) schedule(static)
+    for(int k = 0; k < km; k++){
+        for(int j = 0; j < jm; j++){
+            i_topography[j][k] = 0;
+            i_landscape[j][k]  = get_layer_height(0);
+            Landscape.y[j][k]  = get_layer_height(0);
+        }
+    }
 
     #pragma omp parallel for collapse(2) schedule(static)
     for(int i = 1; i < im; i++){
@@ -318,6 +369,130 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
                     i_landscape[j][k] = get_layer_height(i);
                     Landscape.y[j][k] = get_layer_height(i);
                 }
+            }
+        }
+    }
+
+//  Orographic slope cap: limit the surface-index step between neighbouring LAND
+//  columns to at most max_surface_jump cells. A near-vertical topographic wall
+//  (the Himalaya/Tibet rampart jumps ~9 cells over one grid step) is the seed of the
+//  cliff-driven pressure-divergence runaway — the Poisson solver spreads that step's
+//  divergence source up the column and it blows up aloft (first NaN seen at ~12 km over
+//  Tibet). Capping the slope removes the seed while PRESERVING peak height (we only
+//  RAISE the low side, never cut peaks) and never converting ocean to land (ocean
+//  columns have i_topography==0 and are skipped, so coastlines are untouched). The cliff
+//  gets a broader, grid-resolvable apron so the flow deflects around a real mountain
+//  instead of an unresolved wall. Pure-raise relaxation converges to a slope-<=cap cone
+//  around each peak that stops where it meets terrain already within the cap.
+    {
+        const int max_surface_jump = 4;                      // max land-land surface-index step (tuning knob). NOTE (2026-06-09): tightening 4→2 was TESTED and made things WORSE — from-scratch it crashed at iter 338 (vs 483) and relocated the NaN to the Rockies (34°N/115°W). Global apron-broadening raises more land and seeds NEW steep edges elsewhere — too blunt a lever for the orographic-convergence seed. Reverted to 4. See [[project_upper_velocity_secular_growth]].
+        std::vector<std::vector<int>> surf = i_topography;   // working copy: first-air index (0 over ocean)
+        bool changed = true;
+        for(int guard = 0; changed && guard < im; ++guard){
+            changed = false;
+            std::vector<std::vector<int>> prev = surf;
+            for(int j = 0; j < jm; ++j){
+                const int jm1 = (j > 0)      ? j - 1 : 0;
+                const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+                for(int k = 0; k < km; ++k){
+                    if(prev[j][k] == 0) continue;            // ocean column: never raise (keep coastline)
+                    const int km1 = (k - 1 + km) % km;
+                    const int kp1 = (k + 1)      % km;
+                    int ns = prev[j][k];                     // ocean neighbours (==0) give 0-cap < ns, so no-op
+                    ns = std::max(ns, prev[jm1][k] - max_surface_jump);
+                    ns = std::max(ns, prev[jp1][k] - max_surface_jump);
+                    ns = std::max(ns, prev[j][km1] - max_surface_jump);
+                    ns = std::max(ns, prev[j][kp1] - max_surface_jump);
+                    if(ns > prev[j][k]){ surf[j][k] = ns; changed = true; }
+                }
+            }
+        }
+        // Rebuild the land mask and derived surface arrays for every raised column.
+        for(int j = 0; j < jm; ++j){
+            for(int k = 0; k < km; ++k){
+                const int ns = surf[j][k];
+                if(ns > i_topography[j][k]){
+                    for(int i = i_topography[j][k]; i < ns; ++i) h.x[i][j][k] = 1.0;
+                    i_topography[j][k] = ns;
+                    i_landscape[j][k]  = get_layer_height(ns);
+                    Landscape.y[j][k]  = get_layer_height(ns);
+                    if(Topography.y[j][k] < get_layer_height(ns))
+                        Topography.y[j][k] = get_layer_height(ns);
+                }
+            }
+        }
+    }
+
+//  Targeted massif smoothing (2026-06-10, user-chosen root fix). The pure-raise slope cap
+//  above PRESERVES peak height, so the steep HIGH massifs (Himalaya/Tibet/Tian-Shan/Pamir)
+//  keep a near-vertical rampart even at slope==max_surface_jump. The base horizontal
+//  convergence at that rampart is the divergence source that saturates p_dyn at the ±ceiling
+//  (user saw an "equally high" p_dyn block + unnatural upwelling + awful v,w over the
+//  Himalaya, while the broad-but-not-steep South Pole stays clean) and drives the upper-
+//  troposphere velocity runaway / iter-493 NaN at the Pamir column
+//  ([[project-upper-velocity-secular-growth]]). Here we additionally SMOOTH i_topography
+//  (gentle 5-point 1-2-1, a few passes) ONLY over columns that are BOTH high AND steep —
+//  this LOWERS the peak and broadens the apron, cutting the slope (hence the convergence)
+//  below what the pure-raise cap alone can. Confined to the steep-high massif so plains,
+//  coasts, broad high terrain and the ocean are untouched. h.x is rebuilt consistently for
+//  BOTH raised and lowered columns to avoid the i_topography/h desync phantom-mountain bug
+//  ([[project-coastal-pgrad-pathology]]).
+    {
+        const int massif_high_thresh  = 6;   // only high orography (Pamir≈7; Tibet/Himalaya higher)
+        const int massif_steep_thresh = 3;   // only steep columns (|Δ surface-index| to a neighbour)
+        const int smooth_passes       = 2;   // gentle
+
+        std::vector<std::vector<char>> massif(jm, std::vector<char>(km, 0));
+        for(int j = 0; j < jm; ++j){
+            const int jm1 = (j > 0)      ? j - 1 : 0;
+            const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+            for(int k = 0; k < km; ++k){
+                const int s = i_topography[j][k];
+                if(s < massif_high_thresh) continue;
+                const int km1 = (k - 1 + km) % km;
+                const int kp1 = (k + 1)      % km;
+                int d = std::abs(s - i_topography[jm1][k]);
+                d = std::max(d, std::abs(s - i_topography[jp1][k]));
+                d = std::max(d, std::abs(s - i_topography[j][km1]));
+                d = std::max(d, std::abs(s - i_topography[j][kp1]));
+                if(d >= massif_steep_thresh) massif[j][k] = 1;
+            }
+        }
+
+        std::vector<std::vector<int>> surf = i_topography;
+        for(int pass = 0; pass < smooth_passes; ++pass){
+            std::vector<std::vector<int>> prev = surf;
+            for(int j = 0; j < jm; ++j){
+                const int jm1 = (j > 0)      ? j - 1 : 0;
+                const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+                for(int k = 0; k < km; ++k){
+                    if(!massif[j][k]) continue;
+                    const int km1 = (k - 1 + km) % km;
+                    const int kp1 = (k + 1)      % km;
+                    const int sum = 4 * prev[j][k]
+                                  + prev[jm1][k] + prev[jp1][k]
+                                  + prev[j][km1] + prev[j][kp1];
+                    surf[j][k] = (sum + 4) / 8;   // rounded 1-2-1 average (centre weight 1/2)
+                }
+            }
+        }
+
+        // Rebuild h.x and derived surface arrays consistently (raise OR lower).
+        for(int j = 0; j < jm; ++j){
+            for(int k = 0; k < km; ++k){
+                if(!massif[j][k]) continue;
+                int ns = surf[j][k];
+                if(ns < 1) ns = 1;                 // never clear an interior massif column to ocean
+                const int old_s = i_topography[j][k];
+                if(ns == old_s) continue;
+                if(ns > old_s)
+                    for(int i = old_s; i < ns; ++i) h.x[i][j][k] = 1.0;   // raise: add land
+                else
+                    for(int i = ns; i < old_s; ++i) h.x[i][j][k] = 0.0;   // lower: remove land
+                i_topography[j][k] = ns;
+                i_landscape[j][k]  = get_layer_height(ns);
+                Landscape.y[j][k]  = get_layer_height(ns);
+                Topography.y[j][k] = get_layer_height(ns);
             }
         }
     }
@@ -354,4 +529,72 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
     }
 
     cout << "      AGCM: init_topography ended" << endl;
+}
+
+// ==================== FULL-3D-STATE CHECKPOINT / RESTART ====================
+// Binary dump of the prognostic fields so a debug run can resume at a chosen iter
+// instead of re-spinning the dry circulation from scratch. Only the genuinely
+// prognostic arrays are stored; densities, forces and all moist-convection
+// diagnostics (S_*, M_*, MC_*, q_*_u, …) are recomputed each iteration from these.
+std::vector<Array*> cAtmosphereModel::restart_arrays(){
+    return { &t, &u, &v, &w, &c, &cloud, &ice, &gr, &co2,
+             &tn, &un, &vn, &wn, &cn, &cloudn, &icen, &grn, &co2n,
+             &p_dyn, &p_stat,
+             &tke, &dis, &tken, &disn, &nue,
+             &P_rain, &P_snow, &P_rainn, &P_snown };
+}
+
+void cAtmosphereModel::save_state(int iter){
+    const string fn = output_path + "/atm_restart_" + std::to_string(iter) + ".bin";
+    std::ofstream f(fn, std::ios::binary);
+    if(!f){
+        cout << "      AGCM: save_state FAILED to open " << fn << endl;
+        return;
+    }
+    // Header: magic, dimensions, and the iter to resume at.
+    const int32_t hdr[5] = { 0x41544D31 /*"ATM1"*/, im, jm, km, total_iter_count };
+    f.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+
+    std::vector<Array*> arrs = restart_arrays();
+    for(Array* a : arrs)
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++)
+                f.write(reinterpret_cast<const char*>(a->x[i][j]), km * sizeof(double));
+
+    cout << "      AGCM: save_state wrote " << arrs.size() << " arrays to "
+         << fn << " (total_iter_count " << total_iter_count << ")" << endl;
+}
+
+bool cAtmosphereModel::load_state(int iter){
+    const string fn = output_path + "/atm_restart_" + std::to_string(iter) + ".bin";
+    std::ifstream f(fn, std::ios::binary);
+    if(!f){
+        cout << "      AGCM: load_state: no file " << fn
+             << " — running from scratch" << endl;
+        return false;
+    }
+    int32_t hdr[5];
+    f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+    if(!f || hdr[0] != 0x41544D31 || hdr[1] != im || hdr[2] != jm || hdr[3] != km){
+        cout << "      AGCM: load_state: bad header / grid mismatch in " << fn
+             << " — running from scratch" << endl;
+        return false;
+    }
+
+    std::vector<Array*> arrs = restart_arrays();
+    for(Array* a : arrs)
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++){
+                f.read(reinterpret_cast<char*>(a->x[i][j]), km * sizeof(double));
+                if(!f){
+                    cout << "      AGCM: load_state: truncated file " << fn
+                         << " — running from scratch" << endl;
+                    return false;
+                }
+            }
+
+    total_iter_count = hdr[4];
+    cout << "      AGCM: load_state restored " << arrs.size() << " arrays from "
+         << fn << " (resuming at total_iter_count " << total_iter_count << ")" << endl;
+    return true;
 }

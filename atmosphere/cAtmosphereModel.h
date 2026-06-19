@@ -215,21 +215,28 @@ private:
 
     int panorama_cnt, iter_n;
 
+    // Set true once scanForNaN() has reported the first non-finite cell, so the
+    // detailed per-field origin banner prints exactly once (subsequent iterations
+    // only emit a brief follow-up). See scanForNaN() in MinMax_Atm.cpp.
+    bool nan_first_reported = false;
+
     // Inviscid spin-up state.
     // total_iter_count accumulates across time slices so the inviscid window is global, not per-slice.
     // diffusion_ramp ∈ [0,1] multiplies every diff_*_re coefficient in RHS_Atm and the no-slip flag.
     int total_iter_count = 0;
     double diffusion_ramp = 1.0;
     bool inviscid_phase = false;
+    bool vbudget_capture = false;   // when true, rhs_v stores its per-term split into vbud_* (set on checkpoint iters)
 
     // Buoyancy ramp ∈ [0,1] — linearly increases the Boussinesq body force in rhs_u
     // from 0 at iter 0 to 1 at iter buoyancy_ramp_iters.  Set ramp_iters = 0 to
-    // disable (buoyancy_ramp stays 1.0).  A 500-iter ramp starved the system of
-    // thermal forcing during the spin-up window when it needed to set up a real
-    // pressure gradient; combined with the multi-sweep pressure solver, full-strength
-    // buoyancy from iter 1 reaches the healthy iter-100 Hadley state.
+    // disable (buoyancy_ramp stays 1.0).  The earlier "500-iter ramp starved the
+    // system" note applied to the OLD ~336× too-weak buoyancy; with the 2026-06-19
+    // g/(omega*L_atm) scaling fix the body force is now ~336× stronger, so switching
+    // it on cold CFL-blows up. Ramp it in over a few hundred iters so the pressure
+    // field and circulation adjust gradually to the corrected forcing.
     double buoyancy_ramp = 1.0;
-    static constexpr int buoyancy_ramp_iters = 0;
+    static constexpr int buoyancy_ramp_iters = 300;
 
     double t_paleo_total = 0.0;
     double t_pole_total = 0.0;
@@ -290,6 +297,13 @@ private:
 
     std::vector<float> m_layer_heights;
 
+    // Per-level horizontal-mean (non-dim) temperature, used as the Boussinesq
+    // buoyancy base state so the body force has zero mean at every height and
+    // does not fight the hydrostatic p_stat/p_dyn split. Refilled once per
+    // RK4 step by computeLevelMeanTemperature().
+    std::vector<double> t_ref_level;
+    void computeLevelMeanTemperature();
+
     // Initial (non-dim) temperature at the model lid (i=im-1), snapshotted once
     // from the IC. bcRadius pins t at the lid to this so the isothermal-floor top
     // stays constant instead of drifting upward through the old cubic top
@@ -299,6 +313,15 @@ private:
     void SetDefaultConfig();
     void print_min_max_atm();
     void write_meridional_streamfunction(int iter);   // zonal-mean v + meridional mass streamfunction Ψ (Hadley/Ferrel cell diagnostic)
+    // Zonal-mean meridional-wind momentum budget (Hadley/Ferrel spin-down attribution):
+    // zonal_mean_v fills vbar[i][j] in m/s; write_v_momentum_budget writes the per-step
+    // Δv̄ contributions (RK4 dynamics + each post-RK4 filter) differenced across one iteration.
+    void zonal_mean_v(std::vector<std::vector<double> >& vbar);
+    void write_v_momentum_budget(int iter,
+        const std::vector<std::vector<double> >& dv_dyn,
+        const std::vector<std::vector<double> >& dv_polar,
+        const std::vector<std::vector<double> >& dv_orog,
+        const std::vector<std::vector<double> >& dv_radial);
     void run_3D_loop(int Ma);
     void load_global_temperature_curve();
     void load_equat_temperature_curve();
@@ -334,6 +357,9 @@ private:
     void init_topography(const string &topo_filename);
     void save_data();
     void save_array(const string& fn, const Array& a);
+    std::vector<Array*> restart_arrays();   // the prognostic 3D fields a checkpoint serializes
+    void save_state(int iter);              // dump restart_arrays() + total_iter_count to a binary file
+    bool load_state(int iter);              // restore them; returns false (and runs from scratch) if absent/mismatched
     void BC_pole();
     void print_welcome_msg();
     void print_final_remarks();
@@ -353,6 +379,20 @@ private:
         const string &, Array &, double coeff = 1.0,
         std::function< double(double) > lambda = [](double i) -> double{return i;},
         bool print_heading = false);
+
+    // First-NaN detector: scans the core prognostic/turbulence fields (and the 2D
+    // Evaporation_Dalton) for the first non-finite (NaN/Inf) cell and prints its
+    // field, grid index, latitude/longitude and height the first time one appears.
+    // Used to localise the origin of the post-spin-up blow-up. See MinMax_Atm.cpp.
+    void scanForNaN();
+
+    // Per-stage inf-trigger probe: scans the prognostic + RHS arrays and reports the
+    // FIRST non-finite cell with a stage label, BEFORE the pressure solver/filters can
+    // spread a localised inf across the field. Active only in a hardcoded window around
+    // the deterministic iter-533 continuation crash (see [[project_upper_velocity_secular_growth]]).
+    // Bracket the per-iter stages with scanStage("...") to localise which stage produces
+    // the first inf during the 532->533 step. Diagnostic scaffolding — strip before commit.
+    void scanStage(const char *label);
 
 public:
     Array_1D rad;                                                       // radial coordinate direction
@@ -401,6 +441,7 @@ public:
     Array gr;                                                           // cloud graupel
     Array co2;                                                          // CO2
     Array tn;                                                           // temperature new
+    Array t_eq;                                                         // Held-Suarez radiative-equilibrium temperature target (snapshot of the initial field)
     Array un;                                                           // u-velocity component in r-direction new
     Array vn;                                                           // v-velocity component in theta-direction new
     Array wn;                                                           // w-velocity component in phi-direction new
@@ -433,6 +474,15 @@ public:
     Array CoriolisForce;                                                // Coriolis force terms
     Array CentrifugalForce;                                             // centrifugal force terms
     Array PresGradForce;                                                // Force caused by normal pressure gradient
+    // Zonal-mean v momentum-budget term capture (diagnostic): per-cell rhs_v
+    // contributions, stored when vbudget_capture is set so write_v_momentum_budget
+    // can attribute the Hadley/Ferrel spin-down to a specific dynamical term.
+    Array vbud_pgf;                                                     // -∂p/∂θ /rm (meridional pressure gradient)
+    Array vbud_cor;                                                     // Coriolis term (2·cosθ·w coupling to zonal wind)
+    Array vbud_advv;                                                    // vertical advection  -u·∂v/∂r
+    Array vbud_advh;                                                    // horizontal advection -(v/rm)∂v/∂θ -(w/rmsinθ)∂v/∂φ
+    Array vbud_diff;                                                    // diffusion (molecular + turbulent, + metric terms)
+    Array vbud_other;                                                   // surface drag + moist-convection momentum
     Array epsilon;                                                      // emissivity/ absorptivity
     Array radiation;                                                    // radiation
     Array P_rain;                                                       // rain precipitation mass rate

@@ -840,12 +840,18 @@ public:
                     f.x[i][j][1] = f_1 + seam_coeff * (w_1 - 2.0 * f_1 + e_1);
             };
 
+            // 2 passes — one 1-2-1 fully damps a 2Δφ mode in steady state, but the
+            // upper-troposphere storm-track jet crossing the seam at 62°N (i~34, the
+            // iter-349 dry-NaN seed) regenerates seam energy each step faster than a
+            // single pass can absorb. A second pass extends the damping reach to ~4Δ.
             #pragma omp parallel for schedule(static)
             for (int i = 0; i < m.im; i++) {
                 for (int j = 0; j < m.jm; j++) {
-                    smooth_seam(m.u, i, j);   smooth_seam(m.un, i, j);
-                    smooth_seam(m.v, i, j);   smooth_seam(m.vn, i, j);
-                    smooth_seam(m.w, i, j);   smooth_seam(m.wn, i, j);
+                    for (int p = 0; p < 2; p++) {
+                        smooth_seam(m.u, i, j);   smooth_seam(m.un, i, j);
+                        smooth_seam(m.v, i, j);   smooth_seam(m.vn, i, j);
+                        smooth_seam(m.w, i, j);   smooth_seam(m.wn, i, j);
+                    }
                 }
             }
         }

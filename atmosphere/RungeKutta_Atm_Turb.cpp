@@ -20,6 +20,8 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
 
     auto begin = std::chrono::high_resolution_clock::now();
 
+    computeLevelMeanTemperature();   // refresh buoyancy base state t_ref_level[i]
+
     const double half_dt  = 0.5 * dt;
     const double dt_sixth = dt / 6.0;
 
@@ -64,7 +66,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
     std::vector<double> sinthe_tbl(jm), costhe_tbl(jm);
     for(int j = 0; j < jm; j++){
         sinthe_tbl[j] = sin(the.z[j]);
-        if(sinthe_tbl[j] < 0.4) sinthe_tbl[j] = 0.4;
+        if(sinthe_tbl[j] < 0.55) sinthe_tbl[j] = 0.55;   // metric floor ~57° (was 0.4/~66°): caps the 1/sinθ amplification of the high-lat coastal pressure-gradient force that blows up at i=1
         costhe_tbl[j] = cos(the.z[j]);
     }
 
@@ -225,6 +227,29 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 co2.x[i][j][k]   = co2n_ijk + (kco1  + 2.0*kco2  + 2.0*kco3  + kco4)  * dt_sixth;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth, 0.0, tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth);
+
+                // [genNaN] generation detector — the FIRST cells whose velocity becomes
+                // non-finite from a finite time-level-n value during this RK4 sweep: the TRUE
+                // origin, before the stencil (dudr/diffusion) imports it to neighbours. Prints
+                // the 4 RK-stage rhs_u values so the responsible stage is visible. STRIP before commit.
+                if(total_iter_count >= 532 && total_iter_count <= 533){
+                    static int gen_prints = 0;
+                    const bool un_fin = AtomUtils::is_finite_safe(un_ijk)
+                                     && AtomUtils::is_finite_safe(vn_ijk)
+                                     && AtomUtils::is_finite_safe(wn_ijk);
+                    const bool now_bad = !AtomUtils::is_finite_safe(u.x[i][j][k])
+                                      || !AtomUtils::is_finite_safe(v.x[i][j][k])
+                                      || !AtomUtils::is_finite_safe(w.x[i][j][k]);
+                    if(un_fin && now_bad && gen_prints < 12){
+                        gen_prints++;
+                        cout << "      [genNaN] iter=" << total_iter_count
+                             << " GEN at (i=" << i << ",j=" << j << ",k=" << k << ")"
+                             << " un=" << un_ijk << " -> u=" << u.x[i][j][k]
+                             << " ku1=" << ku1 << " ku2=" << ku2 << " ku3=" << ku3 << " ku4=" << ku4
+                             << " | wn=" << wn_ijk << " -> w=" << w.x[i][j][k]
+                             << " kw1=" << kw1 << " kw4=" << kw4 << endl;
+                    }
+                }
             }
         }
     }

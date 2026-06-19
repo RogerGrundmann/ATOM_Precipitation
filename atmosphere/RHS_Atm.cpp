@@ -283,10 +283,22 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
 
 
     // ===== Physics: Coriolis, centrifugal, coefficients =====
+    // Coriolis acceleration -2 Ω × v in (r, θ, φ) with θ = colatitude (the0 = 0
+    // at N pole), v south-positive (= +ê_θ), w east-positive. TRADITIONAL
+    // APPROXIMATION: keep only the locally-vertical rotation Ω_r = Ω cosθ; drop
+    // the non-traditional ("Eötvös") terms from the horizontal Ω_θ = -Ω sinθ:
+    //   F_r = 0                          (was +2Ω sinθ w — dropped)
+    //   F_θ = +2Ω cos(θ) w
+    //   F_φ = -2Ω cos(θ) v               (the -2Ω sinθ u part dropped)
+    // The kept sign on F_φ's cosθ v term still matters (it gave the N/S symmetry
+    // and removed the iter-234 blow-up). The non-traditional terms are tiny in
+    // reality but, in this non-hydrostatic explicit solver with a periodically-
+    // fired pressure projection, +2Ω sinθ w drove a persistent unbalanced upward
+    // force on the eastward jets → the jet pattern slowly advected up the column.
     double two_omega_Latm_dt_over_u0 = 2.0 * omega * L_atm / u_0 * dt;
-    double Coriolis_rad = -two_omega_Latm_dt_over_u0 * sinthe * w_ijk;
+    double Coriolis_rad =  0.0;
     double Coriolis_the =  two_omega_Latm_dt_over_u0 * costhe * w_ijk;
-    double Coriolis_phi =  two_omega_Latm_dt_over_u0 * (-costhe * v_ijk + sinthe * u_ijk);
+    double Coriolis_phi = -two_omega_Latm_dt_over_u0 * costhe * v_ijk;
 
     double rad_dist = (double)i * L_atm * exp_rm;
     double rad_Earth_m = rad_dist + r_Earth * 1e3;
@@ -383,7 +395,14 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
     // Precompute shared sub-expressions
     double two_over_rm_exp = 2.0 * inv_rm * exp_rm;
     double cos_rm2sin = costhe_inv_rm2sinthe;
-    double v_metric = (1.0 + costhe / sinthe2) * inv_rm2;
+    // Curvature term on v_θ / v_φ in the spherical vector Laplacian: −v/(r²sin²θ),
+    // i.e. v_metric = (1/sin²θ)/r² = (1 + cot²θ)/r² = (1 + cos²θ/sin²θ)/r².  The
+    // cosine MUST be squared — with a bare costhe the bracket goes negative where
+    // cosθ < −sin²θ (poleward of ~38° in the SOUTHERN hemisphere, where costhe<0),
+    // turning −v_metric·v from damping into anti-diffusion → exponential growth of
+    // v,w. That was the persistent southern-hemisphere (≈68°S) near-surface seed;
+    // the sign flips only in the south (costhe<0), explaining the N/S asymmetry.
+    double v_metric = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
     double diffusion_t = (d2tdr2 * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
@@ -436,23 +455,67 @@ void cAtmosphereModel::RHS_Atmosphere(int i, int j, int k, const CellGeometry& g
         + coeff_energy * ls * (S_i.x[i][j][k] + S_s.x[i][j][k] + S_g.x[i][j][k])
         + coeff_MC_t * MC_t.x[i][j][k];
 
+    // ----- Held-Suarez Newtonian thermal relaxation (PROTOTYPE) -----
+    // The general circulation has no maintained energy source in ATOM: rhs_t had no
+    // radiative forcing, so the imposed APE is consumed and the flow spins down (a
+    // forced-equilibrium IC like the Grotjahn mean cells cannot survive). Add a Newtonian
+    // relaxation that nudges T back toward the radiative-equilibrium target t_eq (the
+    // snapshot of the initial Scotese+topography+land-sea field), continuously regenerating
+    // APE. Held-Suarez (1994) rate: k_T = k_a + (k_s-k_a)*max(0,(sigma-sigma_b)/(1-sigma_b))
+    // *cos^4(lat), with sigma = p/p_surf, cos(lat)=sin(colatitude)=sinthe. Faster near the
+    // surface (k_s, ~4 day) than in the free atmosphere (k_a, ~40 day). Non-dimensionalised
+    // exactly like surf_drag/Coriolis (k * L_atm/u_0 * dt).
+    constexpr bool   HELD_SUAREZ_RELAX = true;        // prototype toggle
+    if (HELD_SUAREZ_RELAX) {
+        constexpr double k_a     = 1.0 / ( 4.0 * 86400.0);   // free-atmosphere relax rate [1/s] (10x H-S: matches ATOM's 10x friction scaling)
+        constexpr double k_s     = 1.0 / ( 0.4 * 86400.0);   // near-surface relax rate   [1/s] (10x H-S)
+        constexpr double sigma_b = 0.7;                       // boundary-layer top in sigma
+        const double p_surf = p_stat.x[i_topography[j][k]][j][k];
+        const double sigma  = (p_surf > 0.0) ? p_stat.x[i][j][k] / p_surf : 0.0;
+        double bl = (sigma - sigma_b) / (1.0 - sigma_b);     // 0 at sigma_b -> 1 at surface
+        if (bl < 0.0) bl = 0.0;
+        const double cos4lat = sinthe2 * sinthe2;             // cos^4(lat) = sin^4(colatitude)
+        const double k_T = k_a + (k_s - k_a) * bl * cos4lat;  // [1/s]
+        rhs_t.x[i][j][k] -= (k_T * L_atm / u_0 * dt) * (t.x[i][j][k] - t_eq.x[i][j][k]);
+    }
+
+    // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----
+    // The free-slip wall (bcSolidGround) and the init-only bcVelSurfSur leave the
+    // near-surface tangential wind with NO momentum sink, and molecular diffusion is
+    // ~1e-6·v at re≈1000. Without surface friction the coastal-jet v,w accelerate
+    // unopposed → the i=1 CFL blow-up that recurs at steep coasts (Antarctic
+    // Peninsula / Baffin / Norway / Sea of Okhotsk). Add Held-Suarez-style linear drag
+    // on v,w (NOT radial u): full strength at the first air cell above the LOCAL
+    // surface (i_topography[j][k]), ramping linearly to zero over the boundary layer.
+    // Smooth volumetric sink — no coastal discontinuity (unlike bcVelSurfSur's
+    // 0.01/0.9 sawtooth). Non-dimensionalised exactly like the Coriolis term.
+    constexpr double rayleigh_kf   = 1.0 / 86400.0;   // [EXPERIMENT 2026-06-16: cut 10x to ~1/day H-S to relieve momentum over-damping (T->wind decoupling); orig 1/8640]  surface drag rate ≈ Ekman strength [1/s], 10× the old ≈1/day Held-Suarez baseline. Tuned 2026-06-13: baseline 1/day gave ~34 m/s eastward w off W-coast S-America; 10× cut the surface to ~28 m/s and 20× gained nothing (the jet max sits at ~1 km, above the drag layer), so 10× is the settled strength.
+    constexpr double drag_n_layers = 5.0;             // boundary-layer depth [air cells]. Tried 10 (2026-06-13) to reach the ~1 km coastal-jet max — no effect (that ~27 m/s max at 27°S/71°W is an Andes orographic/pressure-gradient feature, immune to friction), so kept at the physical 5.
+    double drag_profile = 1.0 - (double)(i - i_topography[j][k]) / drag_n_layers;
+    if(drag_profile < 0.0) drag_profile = 0.0;
+    if(drag_profile > 1.0) drag_profile = 1.0;
+    double surf_drag = rayleigh_kf * L_atm / u_0 * dt * drag_profile;
+
     // Boussinesq buoyancy in perturbation-pressure form: the radial body force is the
-    // density-anomaly contribution, +g·(t − 1) [t is non-dim, t=1 ↔ t_0]. The hydrostatic
-    // -g·ρ_0 is absorbed into p_stat and does not appear here. A constant -g (no anomaly
-    // factor) accumulated u_radial drift every step until the pressure solver caught up;
-    // with (t-1) the force vanishes at the reference state and grows smoothly with the
-    // thermal anomaly — same convention ASTIM uses.
+    // density-anomaly contribution, +g·(t − t̄(i)), referenced to the per-level horizontal
+    // mean temperature t_ref_level[i] (NOT a global t_0=273.15 K). The hydrostatic part is
+    // absorbed into p_stat; referencing to the level mean makes the body force zero in the
+    // horizontal mean at every height, so it no longer fights the lapse-rate p_stat/p_dyn
+    // split — only horizontal thermal contrasts drive vertical motion. Earlier (t − 1) left
+    // a large standing column force (≈ −0.08 at 5.5 km) that loaded the pressure solver.
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - 1.0)
+        + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - t_ref_level[i])
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
         + Coriolis * Coriolis_the - centrifugal * centrifugal_the
-        + coeff_MC_vel * MC_v.x[i][j][k];
+        + coeff_MC_vel * MC_v.x[i][j][k]
+        - surf_drag * v_ijk;
 
     rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
-        + Coriolis * Coriolis_phi 
-        + coeff_MC_vel * MC_w.x[i][j][k];
+        + Coriolis * Coriolis_phi
+        + coeff_MC_vel * MC_w.x[i][j][k]
+        - surf_drag * w_ijk;
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c
         + coeff_trans * S_v.x[i][j][k] 

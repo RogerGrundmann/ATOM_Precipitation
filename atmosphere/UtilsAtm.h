@@ -78,12 +78,16 @@ public:
         ErrorState global_max = {0.0, 0, 0, 0};
         double global_sum = 0.0;
         long   global_cnt = 0;
+        ErrorState global_first_nan = {0.0, -1, -1, -1};
+        long   global_nan_cnt = 0;
 
         #pragma omp parallel
         {
             ErrorState local_max = {0.0, 0, 0, 0};
             double local_sum = 0.0;
             long   local_cnt = 0;
+            ErrorState local_first_nan = {0.0, -1, -1, -1};
+            long   local_nan_cnt = 0;
 
             #pragma omp for collapse(2) schedule(static)
 //            for (int j = 45; j <= 140; j++) {
@@ -91,7 +95,7 @@ public:
             for (int j = 1; j < m.jm - 1; j++) {
                 for (int k = 1; k < m.km - 1; k++) {
 
-                    double sinthe = std::max(0.4, sin(m.the.z[j]));
+                    double sinthe = std::max(0.55, sin(m.the.z[j]));   // metric floor ~57°, in sync with RHS/pressure-solver (residuum diagnostic only)
 
                     for (int i = 10; i <= 30; i++) {
                         double rm       = m.rad.z[i];
@@ -108,6 +112,14 @@ public:
                         double res = sqrt((dudr * dudr
                                         + dvdthe * dvdthe
                                         + dwdphi * dwdphi) / 3.0);
+
+                        // Keep non-finite residuals out of the running sum so the
+                        // grid-average error stays meaningful; record the first cell.
+                        if(!is_finite_safe(res)){
+                            if(local_nan_cnt == 0) local_first_nan = {res, i, j, k};
+                            local_nan_cnt++;
+                            continue;
+                        }
 
                         local_sum += res;
                         local_cnt++;
@@ -126,6 +138,10 @@ public:
                     global_max = local_max;
                 global_sum += local_sum;
                 global_cnt += local_cnt;
+                if (local_nan_cnt > 0){
+                    if (global_nan_cnt == 0) global_first_nan = local_first_nan;
+                    global_nan_cnt += local_nan_cnt;
+                }
             }
         }
 
@@ -157,6 +173,17 @@ public:
              << "   (" << global_cnt << " cells)" << endl
              << "      grid average relative error = " << avg_rel
              << "   (avg/max)" << endl << endl;
+
+        if(global_nan_cnt > 0){
+            cout << "      AGCM: find_residuum_atm WARNING — " << global_nan_cnt
+                 << " non-finite residual cell(s) in scan band i=10..30; first at"
+                 << " i=" << global_first_nan.i
+                 << "  j=" << global_first_nan.j << " (lat " << (90 - global_first_nan.j) << " N)"
+                 << "  k=" << global_first_nan.k << " (lon " << global_first_nan.k << " E)"
+                 << "  height=" << global_first_nan.i * 400 << " m"
+                 << "  (excluded from the average; scanForNaN reports the true origin field)"
+                 << endl << endl;
+        }
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
@@ -327,6 +354,7 @@ public:
             &m.aux_u, &m.aux_v, &m.aux_w, &m.aux_t,
             &m.Q_Latent, &m.Q_Sensible,
             &m.BuoyancyForce, &m.CoriolisForce, &m.CentrifugalForce, &m.PresGradForce,
+            &m.vbud_pgf, &m.vbud_cor, &m.vbud_advv, &m.vbud_advh, &m.vbud_diff, &m.vbud_other,
             &m.epsilon, &m.radiation,
             &m.P_rain, &m.P_snow, &m.P_rainn, &m.P_snown, &m.P_graupel,
             &m.P_conv,
@@ -352,7 +380,7 @@ public:
             arrays_3d_zero[n]->initArray(m.im, m.jm, m.km, 0.0);
 
         // 3D arrays initialized to 1.0
-        Array* arrays_3d_one[] = { &m.t, &m.tn, &m.co2n, &m.s, &m.s_u, &m.s_d };
+        Array* arrays_3d_one[] = { &m.t, &m.tn, &m.t_eq, &m.co2n, &m.s, &m.s_u, &m.s_d };
 
         #pragma omp parallel for schedule(static)
         for (size_t n = 0; n < sizeof(arrays_3d_one) / sizeof(arrays_3d_one[0]); n++)
