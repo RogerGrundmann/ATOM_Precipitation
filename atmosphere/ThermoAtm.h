@@ -234,21 +234,6 @@ public:
                 // conserving total moisture (weights sum to 1).
                 m.c.x[0][j][k] = m.c_fix.y[j][k] + (c_eq - m.c_fix.y[j][k]) * w_norm;  // i=0: weight = exp(0)*w_norm
 
-                // [evapTrace] surface-c inf-trigger probe at the Gulf-of-Alaska crash cell
-                // (0,36,220)=54°N/140°W. The recurring iter-~633-669 crash is c (water vapour)
-                // + Evaporation_Dalton going non-finite here. Print the evaporation-formula
-                // inputs/intermediates to find which factor (E_sat/c_Dalton/coeff_D/precip/
-                // p_stat/t) blows up. STRIP before commit.
-                if (j == 36 && k == 220
-                    && m.total_iter_count >= 660 && m.total_iter_count <= 671) {
-                    std::cout << "      [evapTrace] iter=" << m.total_iter_count
-                              << " c[0]=" << m.c.x[0][j][k] << " c_fix=" << m.c_fix.y[j][k]
-                              << " c_eq=" << c_eq << " c_sat=" << c_sat
-                              << " E_sat=" << E_sat << " t_u_base=" << t_u_base
-                              << " p_stat=" << p_stat_0jk << " c_Dalton=" << c_Dalton
-                              << " coeff_D=" << coeff_D << " precip_term=" << precip_term
-                              << " EvapD=" << m.Evaporation_Dalton.y[j][k] << std::endl;
-                }
                 if (c_eq > 0.0) {
                     for (int i = 1; i <= n_spread; i++) {
                         double weight  = std::pow(r, i) * w_norm;
@@ -839,24 +824,6 @@ public:
                     m.r_humid.x[i][j][k] = scale * p_i
                         / ((1.0 + R_W_R_A_m1 * m.c.x[i][j][k]
                             - m.cloud.x[i][j][k] - m.ice.x[i][j][k]) * t_u);
-
-                    // [densTrace] r_humid inf-trigger probe at the crash cell (30,49,64).
-                    // sqrt(1-coeff*h_i) at line 802 has NO max(0,...) guard (init version
-                    // InitValues_Atm.cpp:644 does) — print the sqrt arg, the denom bracket and
-                    // t_u to see which factor goes NaN/zero. STRIP before commit.
-                    if(i == 30 && j == 49 && k == 64
-                       && m.total_iter_count >= 531 && m.total_iter_count <= 720){
-                        const double sqrt_arg = 1.0 - coeff * h_i;
-                        const double bracket  = 1.0 + R_W_R_A_m1 * m.c.x[i][j][k]
-                                              - m.cloud.x[i][j][k] - m.ice.x[i][j][k];
-                        std::cout << "      [densTrace] iter=" << m.total_iter_count
-                                  << " t_u_0=" << t_u_0 << " coeff=" << coeff << " h_i=" << h_i
-                                  << " sqrt_arg=" << sqrt_arg << " p_i=" << p_i << " t_u=" << t_u
-                                  << " bracket=" << bracket
-                                  << " c=" << m.c.x[i][j][k] << " cloud=" << m.cloud.x[i][j][k]
-                                  << " ice=" << m.ice.x[i][j][k]
-                                  << " r_humid=" << m.r_humid.x[i][j][k] << std::endl;
-                    }
                 }
 
                 const int    i_m = m.i_topography[j][k];

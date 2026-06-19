@@ -181,7 +181,7 @@ public:
                  << "  j=" << global_first_nan.j << " (lat " << (90 - global_first_nan.j) << " N)"
                  << "  k=" << global_first_nan.k << " (lon " << global_first_nan.k << " E)"
                  << "  height=" << global_first_nan.i * 400 << " m"
-                 << "  (excluded from the average; scanForNaN reports the true origin field)"
+                 << "  (excluded from the average)"
                  << endl << endl;
         }
 

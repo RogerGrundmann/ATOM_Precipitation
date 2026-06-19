@@ -441,7 +441,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         if(iter_n % pressure_stride == 0){
             PressureSolverAtm(*this).run();
         }
-        scanStage("after_pressure");
 
 
 
@@ -635,7 +634,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
 //            UtilsAtm(*this).valueLimitationAtm();                       // value limitation prevents local formation of NANs
         }  // iter_n % moist_stride == 0
-        scanStage("after_moist");
 
         if(iter_n % momentum_stride == 0){
             BC_Atm(*this).bcRadius();                                   // extrapolation in i-direction alomg grid boundaries
@@ -653,7 +651,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
             }
         }  // iter_n % momentum_stride == 0
-        scanStage("after_BC");
 
         // ---- zonal-mean v momentum budget: snapshot vbar before RK4, then difference
         // it across each step (RK4 physics, polar filter, orographic Shapiro, radial
@@ -679,7 +676,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
         else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations
         vbudget_capture = false;
-        scanStage("after_RK4");
         if(do_vbudget) vb_diff(vb_dyn);   // RK4 net (PGF+Coriolis+advection+diffusion+drag+MC)
 
         // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up.
@@ -751,7 +747,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::steep_massif_field_smoothing(v,     i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
         AtomUtils::steep_massif_field_smoothing(w,     i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
         AtomUtils::steep_massif_field_smoothing(p_dyn, i_topography, 6, 3, /*deep=*/30, /*passes=*/1);
-        scanStage("after_filters");
 
         // NOTE (2026-06-09): a meridional (j/θ) Shapiro filter was added here and REMOVED.
         // It bought only +8 iters against the iter-483 NaN (a symptom-only palliative — the
@@ -790,165 +785,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::coastal_velocity_sponge(v, i_topography, 3.0, 1.0, 12);
         AtomUtils::coastal_velocity_sponge(w, i_topography, 3.0, 1.0, 12);
 
-        scanForNaN();                                                       // debug: report field/location/iter of the FIRST non-finite cell to localise the blow-up
-
         UtilsAtm(*this).findResiduumAtm();
-
-        // Targeted diagnostic for the iter-358 NaN seed at 62°N upper-troposphere.
-        // See [[project_iter358_62n_dry_nan]]: the mode lives at j≈28, i≈25-40, distributed
-        // across k. Track max |u|,|v|,|w|,|p_dyn|,|t-1| in this slab per iter so the LEADING
-        // runaway field + axis becomes visible before iter 358 overflow.
-        {
-            const int j_lo = 25, j_hi = 35;
-            const int i_lo = 25, i_hi = std::min(40, im - 1);
-            double max_u = 0, max_v = 0, max_w = 0, max_p = 0, max_td = 0;
-            int u_i=0,u_j=0,u_k=0, v_i=0,v_j=0,v_k=0, w_i=0,w_j=0,w_k=0;
-            int p_i=0,p_j=0,p_k=0, t_i=0,t_j=0,t_k=0;
-            for (int i = i_lo; i <= i_hi; i++) {
-                for (int j = j_lo; j <= std::min(j_hi, jm - 1); j++) {
-                    for (int k = 0; k < km; k++) {
-                        const double au = std::fabs(u.x[i][j][k]);
-                        const double av = std::fabs(v.x[i][j][k]);
-                        const double aw = std::fabs(w.x[i][j][k]);
-                        const double ap = std::fabs(p_dyn.x[i][j][k]);
-                        const double at = std::fabs(t.x[i][j][k] - 1.0);
-                        if (AtomUtils::is_finite_safe(au) && au > max_u) { max_u = au; u_i=i; u_j=j; u_k=k; }
-                        if (AtomUtils::is_finite_safe(av) && av > max_v) { max_v = av; v_i=i; v_j=j; v_k=k; }
-                        if (AtomUtils::is_finite_safe(aw) && aw > max_w) { max_w = aw; w_i=i; w_j=j; w_k=k; }
-                        if (AtomUtils::is_finite_safe(ap) && ap > max_p) { max_p = ap; p_i=i; p_j=j; p_k=k; }
-                        if (AtomUtils::is_finite_safe(at) && at > max_td) { max_td = at; t_i=i; t_j=j; t_k=k; }
-                    }
-                }
-            }
-            cout << "      [diag62N] iter=" << total_iter_count
-                 << " max|u|=" << max_u << "@(" << u_i << "," << u_j << "," << u_k << ")"
-                 << " max|v|=" << max_v << "@(" << v_i << "," << v_j << "," << v_k << ")"
-                 << " max|w|=" << max_w << "@(" << w_i << "," << w_j << "," << w_k << ")"
-                 << " max|p_dyn|=" << max_p << "@(" << p_i << "," << p_j << "," << p_k << ")"
-                 << " max|t-1|=" << max_td << "@(" << t_i << "," << t_j << "," << t_k << ")"
-                 << endl;
-        }
-
-        // [tcol] Pamir surface-temperature runaway monitor at (j=49,k=64). The iter-533
-        // crash root is t.x[0][49][64] (=copy of the surface cell t.x[i_mount], BC_Atm.h:401)
-        // collapsing 230->53 K, which drives ThermoAtm::densities()'s unguarded sqrt negative.
-        // Print the column temperature (deg C) around the surface each iter so the onset iter
-        // and the leading cell (surface vs aloft vs sub-terrain) become visible. STRIP before commit.
-        if(total_iter_count >= 515 && total_iter_count <= 720){
-            const int jc = 49, kc = 64, im0 = i_topography[jc][kc];
-            cout << "      [tcol] iter=" << total_iter_count << " i_mount=" << im0
-                 << " t[0]=" << t.x[0][jc][kc]*t_0 - t_0;
-            for(int i = std::max(0, im0 - 1); i <= std::min(im - 1, im0 + 5); i++)
-                cout << " t[" << i << "]=" << t.x[i][jc][kc]*t_0 - t_0;
-            cout << " | rhs_t[im]=" << rhs_t.x[im0][jc][kc]
-                 << " c[im]=" << c.x[im0][jc][kc]
-                 << " cloud[im]=" << cloud.x[im0][jc][kc]
-                 << endl;
-        }
-
-        // [diagAsia] near-surface NE-Asian orography monitor. The deterministic iter-533
-        // continuation crash (from atm_restart_500.bin) seeds velocity FIRST at (i=10,j=46,
-        // k=128) = 44°N/128°E 613 m, scalars at (i=12,j=49,k=64) = 41°N/64°E Pamir — NOT the
-        // 55°N band diag62N watches (which drifts benignly THROUGH the crash). The eruption is
-        // single-step (clean -> whole-field NaN), the CFL-violation signature. Track the two
-        // seed cells' velocities AND the slab-max + local horizontal grid-divergence
-        // D=½(v[j+1]-v[j-1])+½(w[k+1]-w[k-1]) so the precursor (the cell quietly approaching
-        // CFL / the divergence that pumps it) becomes visible BEFORE the overflow.
-        {
-            auto Dgrid = [&](int i,int j,int k)->double {
-                return 0.5*(v.x[i][j+1][k]-v.x[i][j-1][k])
-                     + 0.5*(w.x[i][j][k+1]-w.x[i][j][k-1]);
-            };
-            const int i_lo = 5, i_hi = 15, j_lo = 44, j_hi = 52;
-            double m_u=0,m_v=0,m_w=0,m_D=0; int ui=0,uj=0,uk=0,Di=0,Dj=0,Dk=0;
-            for (int i=i_lo;i<=i_hi;i++) for (int j=j_lo;j<=j_hi;j++) for (int k=1;k<km-1;k++){
-                const double au=std::fabs(u.x[i][j][k]);
-                const double av=std::fabs(v.x[i][j][k]);
-                const double aw=std::fabs(w.x[i][j][k]);
-                const double aD=std::fabs(Dgrid(i,j,k));
-                if (AtomUtils::is_finite_safe(au)&&au>m_u){m_u=au;ui=i;uj=j;uk=k;}
-                if (AtomUtils::is_finite_safe(av)&&av>m_v) m_v=av;
-                if (AtomUtils::is_finite_safe(aw)&&aw>m_w) m_w=aw;
-                if (AtomUtils::is_finite_safe(aD)&&aD>m_D){m_D=aD;Di=i;Dj=j;Dk=k;}
-            }
-            // [diagPamirUp] UPPER-Pamir monitor — the TRUE crash origin revealed by the
-            // half-dt test: with the dt-spurious near-surface pumping removed, velocity seeds
-            // at (i=34,j=48,k=68)=42°N/68°E 9 km, scalars one level up at i=36 (10.9 km). This
-            // is the documented upper secular band. diag62N (55–65°N) and diagAsia (i=5–15)
-            // both miss it. Track the slab max + the seed cell + local p_dyn (the pgr driver).
-            double pm_u=0,pm_v=0,pm_w=0,pm_p=0; int pi=0,pj=0,pk=0;
-            for (int i=28;i<=38;i++) for (int j=46;j<=50;j++) for (int k=58;k<=74;k++){
-                const double au=std::fabs(u.x[i][j][k]);
-                const double ap=std::fabs(p_dyn.x[i][j][k]);
-                if (AtomUtils::is_finite_safe(au)&&au>pm_u){pm_u=au;pi=i;pj=j;pk=k;}
-                if (AtomUtils::is_finite_safe(std::fabs(v.x[i][j][k]))&&std::fabs(v.x[i][j][k])>pm_v) pm_v=std::fabs(v.x[i][j][k]);
-                if (AtomUtils::is_finite_safe(std::fabs(w.x[i][j][k]))&&std::fabs(w.x[i][j][k])>pm_w) pm_w=std::fabs(w.x[i][j][k]);
-                if (AtomUtils::is_finite_safe(ap)&&ap>pm_p) pm_p=ap;
-            }
-            cout << "      [diagPamirUp] iter=" << total_iter_count
-                 << " cell(34,48,68) u=" << u.x[34][48][68]*u_0
-                 << " w=" << w.x[34][48][68]*u_0
-                 << " p_dyn=" << p_dyn.x[34][48][68]
-                 << " | slabmax|u|=" << pm_u*u_0 << "@(" << pi << "," << pj << "," << pk << ")"
-                 << " |v|=" << pm_v*u_0 << " |w|=" << pm_w*u_0
-                 << " max|p_dyn|=" << pm_p
-                 << endl;
-            cout << "      [diagAsia] iter=" << total_iter_count
-                 << " seed(10,46,128) u=" << u.x[10][46][128]*u_0
-                 << " v=" << v.x[10][46][128]*u_0
-                 << " w=" << w.x[10][46][128]*u_0
-                 << " D=" << Dgrid(10,46,128)*u_0
-                 << " | slabmax|u|=" << m_u*u_0 << "@(" << ui << "," << uj << "," << uk << ")"
-                 << " |v|=" << m_v*u_0 << " |w|=" << m_w*u_0
-                 << " maxD=" << m_D*u_0 << "@(" << Di << "," << Dj << "," << Dk << ")"
-                 << endl;
-        }
-
-        // Fixed precip<->velocity coupling probe at (j=37,k=229) = 53°N/131°W, the NE-Pacific
-        // column where P_rain was reported to grow exponentially from ~iter 440. The latent
-        // heat of the precip source terms (S_c+S_r) enters rhs_t (RHS_Atm.cpp:397) -> buoyancy
-        // -> u, so this prints, for the i-level with peak P_rain in the column, the temperature
-        // (C), the latent-heat driver (S_c+S_r), P_rain (mm/day) and u,v,w (m/s). If t/u here
-        // kink at iter 440 in step with P_rain, the precip is locally seeding the velocity;
-        // if they ramp smoothly through 440 (like diag62N), the two are decoupled.
-        {
-            const int jp = 37, kp = 229;
-            // (a) peak-P_rain level (the column rain-accumulation point, usually the surface)
-            int ip = 0; double pr_max = -1.0;
-            for (int i = 0; i < im; i++) {
-                const double pr = P_rain.x[i][jp][kp];
-                if (AtomUtils::is_finite_safe(pr) && pr > pr_max) { pr_max = pr; ip = i; }
-            }
-            // (b) peak latent-heat level ABOVE the surface (i>=1): the cell where condensation
-            // actually heats the air via rhs_t. The surface (i=0) temperature is BC-pinned, so
-            // coupling can only show up aloft — sample |S_c+S_r| there to catch it.
-            int ih = 1; double sl_max = -1.0;
-            for (int i = 1; i < im; i++) {
-                const double sl = std::fabs(S_c.x[i][jp][kp] + S_r.x[i][jp][kp]);
-                if (AtomUtils::is_finite_safe(sl) && sl > sl_max) { sl_max = sl; ih = i; }
-            }
-            const double t_C   = t.x[ip][jp][kp] * t_0 - t_0;                // K -> deg C
-            const double S_lat = S_c.x[ip][jp][kp] + S_r.x[ip][jp][kp];      // latent-heat driver, kg/(kg*s)
-            const double t_Ch  = t.x[ih][jp][kp] * t_0 - t_0;
-            const double S_lath= S_c.x[ih][jp][kp] + S_r.x[ih][jp][kp];
-            cout << "      [probePrecip] iter=" << total_iter_count
-                 << " @(i=" << ip << ",j=" << jp << ",k=" << kp << ")"
-                 << " P_rain=" << P_rain.x[ip][jp][kp] * 8.64e4 << "mm/d"
-                 << " t=" << t_C << "C"
-                 << " S_c+S_r=" << S_lat
-                 << " cloud=" << cloud.x[ip][jp][kp]
-                 << " u=" << u.x[ip][jp][kp] * u_0
-                 << " v=" << v.x[ip][jp][kp] * u_0
-                 << " w=" << w.x[ip][jp][kp] * u_0
-                 << " || aloft i=" << ih
-                 << " t=" << t_Ch << "C"
-                 << " S_c+S_r=" << S_lath
-                 << " cloud=" << cloud.x[ih][jp][kp]
-                 << " u=" << u.x[ih][jp][kp] * u_0
-                 << " w=" << w.x[ih][jp][kp] * u_0
-                 << endl;
-        }
-
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
 

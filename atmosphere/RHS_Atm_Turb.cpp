@@ -896,26 +896,6 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - t_ref_level[i])
         + coriolis * force_nd * coriolis_rad;
 
-    // [rhsuTrace] inf-trigger probe at the deterministic crash cell (12,49,64)=41°N/64°E.
-    // The pointwise RK4 (RungeKutta_Atm_Turb.cpp) calls this 4×/iter with the unclamped
-    // intermediate u growing across stages; print each evaluation's rhs_u terms + the
-    // input u_ijk so the within-step advective (transport_u ~ u²) blow-up is visible.
-    // STRIP before commit.
-    if(i == 30 && j == 49 && k == 64 && total_iter_count >= 532 && total_iter_count <= 533){
-        cout << "      [rhstTrace] iter=" << total_iter_count
-             << " t=" << t.x[i][j][k] << " rhs_t=" << rhs_t.x[i][j][k]
-             << " | pressure_t=" << pressure_t
-             << " -transport_t=" << -transport_t
-             << " diffusion_t=" << diffusion_t
-             << " MC_t=" << (coeff_MC_t * MC_t.x[i][j][k])
-             << " latL=" << (coeff_energy*(S_c.x[i][j][k]+S_r.x[i][j][k])*lv*r_humid.x[i][j][k])
-             << " latI=" << (coeff_energy*(S_i.x[i][j][k]+S_s.x[i][j][k]+S_g.x[i][j][k])*ls*r_humid.x[i][j][k])
-             << " | S_c=" << S_c.x[i][j][k] << " S_r=" << S_r.x[i][j][k]
-             << " S_i=" << S_i.x[i][j][k] << " S_s=" << S_s.x[i][j][k]
-             << " r_humid=" << r_humid.x[i][j][k] << " MC_t_raw=" << MC_t.x[i][j][k]
-             << endl;
-    }
-
     // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----
     // See RHS_Atm.cpp for the rationale: the free-slip wall (bcSolidGround) + init-only
     // bcVelSurfSur leave the near-surface tangential wind with NO momentum sink, so the

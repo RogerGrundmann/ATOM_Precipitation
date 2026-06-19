@@ -215,11 +215,6 @@ private:
 
     int panorama_cnt, iter_n;
 
-    // Set true once scanForNaN() has reported the first non-finite cell, so the
-    // detailed per-field origin banner prints exactly once (subsequent iterations
-    // only emit a brief follow-up). See scanForNaN() in MinMax_Atm.cpp.
-    bool nan_first_reported = false;
-
     // Inviscid spin-up state.
     // total_iter_count accumulates across time slices so the inviscid window is global, not per-slice.
     // diffusion_ramp ∈ [0,1] multiplies every diff_*_re coefficient in RHS_Atm and the no-slip flag.
@@ -379,20 +374,6 @@ private:
         const string &, Array &, double coeff = 1.0,
         std::function< double(double) > lambda = [](double i) -> double{return i;},
         bool print_heading = false);
-
-    // First-NaN detector: scans the core prognostic/turbulence fields (and the 2D
-    // Evaporation_Dalton) for the first non-finite (NaN/Inf) cell and prints its
-    // field, grid index, latitude/longitude and height the first time one appears.
-    // Used to localise the origin of the post-spin-up blow-up. See MinMax_Atm.cpp.
-    void scanForNaN();
-
-    // Per-stage inf-trigger probe: scans the prognostic + RHS arrays and reports the
-    // FIRST non-finite cell with a stage label, BEFORE the pressure solver/filters can
-    // spread a localised inf across the field. Active only in a hardcoded window around
-    // the deterministic iter-533 continuation crash (see [[project_upper_velocity_secular_growth]]).
-    // Bracket the per-iter stages with scanStage("...") to localise which stage produces
-    // the first inf during the 532->533 step. Diagnostic scaffolding — strip before commit.
-    void scanStage(const char *label);
 
 public:
     Array_1D rad;                                                       // radial coordinate direction
