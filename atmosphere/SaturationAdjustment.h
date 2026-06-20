@@ -216,6 +216,15 @@ private:
     }
 
     void clampAndFade() {
+        const double inv_t_0    = 1.0 / m.t_0;
+        const double lv_over_cp = m.lv / m.cp_l;
+        const double ls_over_cp = m.ls / m.cp_l;
+        // Defensive physical bounds. T_max mirrors the Magnus-validity cap used in
+        // adjustSaturation; cloud_cap is ~50× the largest physical cloud/ice mixing
+        // ratio (a few g/kg), so it never clips a real cloud — it only stops a runaway.
+        constexpr double T_max     = 333.15;   // 60 °C
+        constexpr double cloud_cap = 0.05;     // kg/kg condensate ceiling
+
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
@@ -223,13 +232,54 @@ private:
                 double *cloud_row = m.cloud.x[i][j];
                 double *ice_row   = m.ice.x[i][j];
                 double *t_row_nd  = m.t.x[i][j];
+                double *p_row     = m.p_stat.x[i][j];
 
                 for (int k = 0; k < m.km; k++) {
                     if (c_row[k]     < 0.0) c_row[k]     = 0.0;
                     if (cloud_row[k] < 0.0) cloud_row[k] = 0.0;
                     if (ice_row[k]   < 0.0) ice_row[k]   = 0.0;
 
-                    const double T_dim = t_row_nd[k] * m.t_0;
+                    double T_dim = t_row_nd[k] * m.t_0;
+                    // Upper temperature bound first (no air parcel exceeds ~60 °C); keeps
+                    // q_sat below finite and bounds the latent-heat release that follows.
+                    if (T_dim > T_max) { T_dim = T_max; t_row_nd[k] = T_max * inv_t_0; }
+
+                    // ---- Always-on supersaturation removal (ROOT FIX) ----
+                    // adjustSaturation scales its condensation by alpha_entry, so in cold
+                    // air (alpha ≪ 1) it leaves q_v ≫ q_sat — and cells colder than
+                    // ~−60 °C (alpha ≤ 0.01) it skips entirely. With no upper bound on q_v
+                    // anywhere, that residual supersaturation accumulated unbounded at the
+                    // orographic saturation level in the cold fade zone (NZ Southern Alps,
+                    // i≈12, T≈−40 °C → q_v→6, cloud→129, t→1e5 °C, then buoyancy drove a
+                    // vertical-velocity runaway). Remove supersaturation here for EVERY
+                    // cell, independent of the alpha fade, conserving water (excess → cloud
+                    // above freezing, → ice below) and energy (latent heat → T). In a clean
+                    // run the per-call excess is small (physical); the T_max recap below is
+                    // the backstop if a transient ever drives a large excess.
+                    const double p_local = p_row[k];
+                    const double E_sat = m.hp * exp_func(T_dim, 17.2694, 35.86);
+                    const double q_sat = (p_local > E_sat)
+                        ? m.ep * E_sat / (p_local - E_sat)
+                        : m.ep * 1e-5;
+                    if (c_row[k] > q_sat) {
+                        const double excess = c_row[k] - q_sat;
+                        c_row[k] = q_sat;
+                        if (T_dim >= m.t_00) {
+                            cloud_row[k] += excess;
+                            T_dim        += lv_over_cp * excess;
+                        } else {
+                            ice_row[k]   += excess;
+                            T_dim        += ls_over_cp * excess;
+                        }
+                        if (T_dim > T_max) T_dim = T_max;   // backstop on the latent release
+                        t_row_nd[k] = T_dim * inv_t_0;
+                    }
+
+                    // ---- Condensate upper bounds (CAP SAFETY NET) ----
+                    if (cloud_row[k] > cloud_cap) cloud_row[k] = cloud_cap;
+                    if (ice_row[k]   > cloud_cap) ice_row[k]   = cloud_cap;
+
+                    // Existing cold fade: smoothly dry moisture toward 0 below t_00.
                     const double alpha = 1.0 / (1.0 + std::exp(-(T_dim - m.t_00) / fade_K));
                     c_row[k]     *= alpha;
                     cloud_row[k] *= alpha;
