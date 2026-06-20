@@ -733,6 +733,19 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         if(do_vbudget){ vb_diff(vb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
             write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
         }
+
+        // Radial de-checkerboarding for the SCALARS at orographic columns. The earlier
+        // velocity radial filters do nothing for t/c/cloud/ice, which carry their own
+        // single-cell 2Δz vertical checkerboard at the orographic condensation level — the
+        // dry seed of the NZ-Alps blow-up (cold cell ~surface+7 over the steep Alps,
+        // [[project_nz_alps_t_checkerboard]]). Extremum-gated + steep-column-confined so it
+        // touches only the actual checkerboard cells and leaves the (healthy) bulk scalar
+        // field bit-unchanged — avoiding the global perturbation that reverted the 2026-06-08
+        // horizontal scalar filter. n_layers_above=10 reaches the surf+7 mode at NZ (surf=6).
+        AtomUtils::orographic_radial_shapiro_filter(t,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
         // ==============================================================================================
 
         // Soft steep-massif field smoothing (2026-06-10, user request). The init-time terrain

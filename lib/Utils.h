@@ -253,6 +253,25 @@ namespace AtomUtils{
                                   int    passes   = 1,
                                   double strength = 1.0);
 
+    // Radial (i) de-checkerboarding for SCALAR fields, confined to orographic columns and
+    // gated to vertical local extrema. Unlike radial_shapiro_filter_ho (global, every fluid
+    // cell), this kills the single-cell 2Δz t/moisture checkerboard that seeds the NZ-Alps
+    // blow-up (cold cell ~surface+7 over the steep slope-capped Alps;
+    // [[project_nz_alps_t_checkerboard]]) WITHOUT touching the smooth bulk scalar field:
+    //   (1) only steep/sloped columns (|Δ surface-index| ≥ steep_threshold to a neighbour),
+    //   (2) only the first n_layers_above fluid cells of those columns,
+    //   (3) only where the cell is a vertical local extremum ((vm−c)(vp−c) > 0) — the
+    //       de-checkerboarding analogue of the minmod advection limiter, so a monotonic
+    //       lapse rate / inversion is left bit-unchanged.
+    // Deliberately UNLIKE the reverted 2026-06-08 *horizontal* scalar orographic_shapiro_filter
+    // (which perturbed the global field and tipped the 62°N seam): radial axis + extremum gate
+    // confine the action to actual checkerboard cells. No-flux (current-cell) into solid below.
+    void orographic_radial_shapiro_filter(Array& field,
+                                          const std::vector<std::vector<int>>& i_surface,
+                                          int    steep_threshold = 2,
+                                          int    n_layers_above  = 10,
+                                          int    passes          = 2,
+                                          double strength        = 1.0);
     // Near-surface coastal Rayleigh sponge — last-resort soft cap for the dry-seeded
     // velocity runaway at steep coasts ([[project-bc-atm-mc-extrap-overshoot]] /
     // [[project-orography-slope-cap]] Gulf-of-Alaska mode). The slope cap skips

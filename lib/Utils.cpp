@@ -818,6 +818,90 @@ void AtomUtils::radial_shapiro_filter_ho(Array& field,
 
 
 // ============================================================================
+// Orographic radial (i) scalar de-checkerboarding (extremum-gated)
+// ============================================================================
+// The NZ-Alps late blow-up is seeded by a single-cell 2Δz vertical TEMPERATURE
+// checkerboard at the orographic condensation level (cold cell at i_surface+7 ≈ 937 m
+// over the steep slope-capped Alps, 44°S/169°E), present from the dry phase
+// (~iter150) long before moist physics; it later drives a moisture + vertical-velocity
+// runaway via latent heat + buoyancy ([[project_nz_alps_t_checkerboard]]). minmod limits
+// only ADVECTION, and the global radial Shapiro is applied to velocity only — nothing
+// damps a radial 2Δz mode in the SCALAR fields. This applies a radial 1-2-1 to scalars
+// but, to avoid the global-field perturbation that got the 2026-06-08 horizontal scalar
+// orographic_shapiro_filter reverted (it tipped the 62°N seam), it acts ONLY at:
+//   (1) steep/sloped columns (|Δ surface-index| ≥ steep_threshold), the orographic hot-spots,
+//   (2) the first n_layers_above fluid cells, where the orographic mode lives, and
+//   (3) cells that are a vertical local extremum ((vm−c)(vp−c) > 0) — the de-checkerboarding
+//       analogue of minmod, so a monotonic lapse rate / inversion gets ZERO smoothing and
+//       smooth columns are left bit-unchanged.
+// No-flux (current-cell substitution) into solid cells below; i=0/i=im−1 left to the BCs.
+void AtomUtils::orographic_radial_shapiro_filter(Array& field,
+                                                 const std::vector<std::vector<int>>& i_surface,
+                                                 int    steep_threshold,
+                                                 int    n_layers_above,
+                                                 int    passes,
+                                                 double strength)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (passes <= 0 || strength <= 0.0 || im < 3) return;
+
+    // Flag steep columns: |Δ surface-index| to any of the 4 horizontal neighbours >= threshold.
+    std::vector<unsigned char> steep(jm * km, 0);
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            const int s   = std::max(i_surface[j][k], 0);
+            const int jm1 = (j > 0)      ? j - 1 : 0;
+            const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+            const int km1 = (k - 1 + km) % km;
+            const int kp1 = (k + 1)      % km;
+            int d = std::abs(s - std::max(i_surface[jm1][k], 0));
+            d = std::max(d, std::abs(s - std::max(i_surface[jp1][k], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][km1], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][kp1], 0)));
+            if (d >= steep_threshold) steep[j * km + k] = 1;
+        }
+    }
+
+    auto in_fluid = [&](int i, int j, int k) {
+        return i >= std::max(i_surface[j][k], 0);
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+    const double coeff = 0.25 * strength;
+
+    for (int pass = 0; pass < passes; ++pass) {
+
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < im - 1; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!steep[j * km + k]) continue;
+                    const int s = std::max(i_surface[j][k], 0);
+                    if (i < s || i >= s + n_layers_above) continue;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i-1, j, k) ? tmp[idx(i-1,j,k)] : c;
+                    const double vp = in_fluid(i+1, j, k) ? tmp[idx(i+1,j,k)] : c;
+                    if ((vm - c) * (vp - c) > 0.0)   // vertical local extremum → 2Δz checkerboard
+                        field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
+    } // passes
+}
+
+
+
+// ============================================================================
 // Near-surface coastal Rayleigh sponge
 // ============================================================================
 // Soft cap for the dry-seeded coastal velocity runaway (Gulf-of-Alaska mode).
