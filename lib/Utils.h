@@ -272,6 +272,21 @@ namespace AtomUtils{
                                           int    n_layers_above  = 10,
                                           int    passes          = 2,
                                           double strength        = 1.0);
+
+    // Soft steep-massif field smoothing — gentle horizontal (k then j) 1-2-1 Shapiro applied
+    // to a field (u,v,w,p_dyn) ONLY over HIGH+STEEP contour columns (same mask as the init-
+    // time terrain massif smoothing: i_surface ≥ high_thresh AND |Δi_surface|≥steep_thresh),
+    // reaching n_layers_deep cells up the column. Cleans the locally unphysical field above
+    // steep mountains (Himalaya) without touching plains/coasts/broad terrain/ocean or the
+    // expected real flow. No-flux centre substitution at land/sub-surface neighbours.
+    void steep_massif_field_smoothing(Array& field,
+                                      const std::vector<std::vector<int>>& i_surface,
+                                      int    high_thresh    = 6,
+                                      int    steep_thresh   = 3,
+                                      int    n_layers_deep  = 30,
+                                      int    passes         = 1,
+                                      double strength       = 1.0);
+
     // Near-surface coastal Rayleigh sponge — last-resort soft cap for the dry-seeded
     // velocity runaway at steep coasts ([[project-bc-atm-mc-extrap-overshoot]] /
     // [[project-orography-slope-cap]] Gulf-of-Alaska mode). The slope cap skips

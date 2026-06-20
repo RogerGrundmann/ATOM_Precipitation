@@ -697,6 +697,111 @@ void AtomUtils::orographic_shapiro_filter(Array& field,
 
 
 // ============================================================================
+// Soft steep-massif field smoothing (velocity + pressure over steep contours)
+// ============================================================================
+// Companion to the init-time massif TERRAIN smoothing: even with the steep ramparts cut,
+// the residual steepest columns keep a locally unphysical field aloft (user-observed over
+// the Himalaya: saturated p_dyn block + bad u/v/w), while smooth-contour terrain like the
+// South Pole behaves well. This applies a GENTLE horizontal (k then j) 1-2-1 Shapiro to a
+// field ONLY over HIGH+STEEP contour columns (same mask as the terrain smoothing:
+// i_surface ≥ high_thresh AND |Δi_surface to a neighbour| ≥ steep_thresh), reaching
+// n_layers_deep cells up the column so it covers the troposphere above the steep mountain —
+// NOT just the boundary layer. The mask is narrow (steep mountain interiors only), so plains,
+// coasts, broad high terrain (South Pole) and the open ocean / i=0 vortices are untouched:
+// it smooths the unphysical near-orography field without touching the expected real flow.
+// Apply to u,v,w and p_dyn. No-flux (centre substitution) at land/sub-surface neighbours.
+void AtomUtils::steep_massif_field_smoothing(Array& field,
+                                             const std::vector<std::vector<int>>& i_surface,
+                                             int    high_thresh,
+                                             int    steep_thresh,
+                                             int    n_layers_deep,
+                                             int    passes,
+                                             double strength)
+{
+    const int im = field.im;
+    const int jm = field.jm;
+    const int km = field.km;
+
+    if (passes <= 0 || strength <= 0.0 || n_layers_deep <= 0 || jm < 3 || km < 3) return;
+
+    // High+steep contour mask (identical to the init-time terrain massif smoothing).
+    std::vector<unsigned char> mask(jm * km, 0);
+    #pragma omp parallel for collapse(2) schedule(static)
+    for (int j = 0; j < jm; ++j) {
+        for (int k = 0; k < km; ++k) {
+            const int s = std::max(i_surface[j][k], 0);
+            if (s < high_thresh) continue;
+            const int jm1 = (j > 0)      ? j - 1 : 0;
+            const int jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+            const int km1 = (k - 1 + km) % km;
+            const int kp1 = (k + 1)      % km;
+            int d = std::abs(s - std::max(i_surface[jm1][k], 0));
+            d = std::max(d, std::abs(s - std::max(i_surface[jp1][k], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][km1], 0)));
+            d = std::max(d, std::abs(s - std::max(i_surface[j][kp1], 0)));
+            if (d >= steep_thresh) mask[j * km + k] = 1;
+        }
+    }
+
+    auto in_fluid = [&](int i, int j, int k) {
+        return i >= std::max(i_surface[j][k], 0);
+    };
+    auto target = [&](int i, int j, int k) {
+        return mask[j * km + k] && in_fluid(i, j, k)
+            && i < std::max(i_surface[j][k], 0) + n_layers_deep;
+    };
+
+    std::vector<double> tmp(im * jm * km);
+    auto idx = [&](int i, int j, int k) { return i * jm * km + j * km + k; };
+    const double coeff = 0.25 * strength;
+
+    for (int pass = 0; pass < passes; ++pass) {
+
+        // --- zonal (k, periodic) sweep ---
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i) {
+            for (int j = 0; j < jm; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!target(i, j, k)) continue;
+                    const int km1 = (k - 1 + km) % km;
+                    const int kp1 = (k + 1)      % km;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i, j, km1) ? tmp[idx(i,j,km1)] : c;
+                    const double vp = in_fluid(i, j, kp1) ? tmp[idx(i,j,kp1)] : c;
+                    field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
+
+        // --- meridional (j) sweep ---
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k)
+                    tmp[idx(i,j,k)] = field.x[i][j][k];
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i) {
+            for (int j = 1; j < jm - 1; ++j) {
+                for (int k = 0; k < km; ++k) {
+                    if (!target(i, j, k)) continue;
+                    const double c  = tmp[idx(i,j,k)];
+                    const double vm = in_fluid(i, j-1, k) ? tmp[idx(i,j-1,k)] : c;
+                    const double vp = in_fluid(i, j+1, k) ? tmp[idx(i,j+1,k)] : c;
+                    field.x[i][j][k] = c + coeff * (vm - 2.0 * c + vp);
+                }
+            }
+        }
+    } // passes
+}
+
+
+
+// ============================================================================
 // Gentle global radial (i) Shapiro de-checkerboarding
 // ============================================================================
 // The steep-orography velocity blow-up is a 2Δ grid-scale CHECKERBOARD whose purest
