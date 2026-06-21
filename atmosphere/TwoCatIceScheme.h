@@ -21,6 +21,7 @@ namespace TwoCatIce {
     // microphysical rate coefficients
     constexpr double c_i_dep  = 1.3e-5;                                 // m3/(s*kg^(1/3))  [formula: c_i_dep * N_i[1/m3] * m_i^(1/3)[kg^(1/3)] * supersaturation -> 1/s]
     constexpr double c_c_au   = 4.0e-4;                                 // 1/s COSMO
+    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
     constexpr double c_i_au   = 1.0e-3;                                 // 1/s COSMO
     constexpr double c_ac     = 0.24;                                   // m2/kg
     constexpr double c_rim    = 18.6;                                   // m2/kg
@@ -276,9 +277,13 @@ private:
                                 ((m.c.x[i][j][k] - q_Ice)/dt_snow_dim));// subsaturation, < III > in kg/(kg*s)
 
 
-                        // autoconversion of cloud water to form rain
-                        if(m.cloud.x[i][j][k] > 0.0)                    // c_c_au = 4.0e-4, in 1/s
-                            S_c_au = max(c_c_au * m.cloud.x[i][j][k], 0.0); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
+                        // autoconversion of cloud water to form rain (Kessler with threshold):
+                        // cloud must exceed q_c_crit (~0.5 g/kg) before any rain forms. Without
+                        // the threshold ANY cloud autoconverted instantly at c_c_au, so saturated
+                        // columns rained out the moment they condensed (cloud~0 yet huge P_rain)
+                        // -> gross precip ~30x NASA. See project_overprecip_saturation_injection.
+                        if(m.cloud.x[i][j][k] > q_c_crit)               // c_c_au = 4.0e-4, in 1/s
+                            S_c_au = c_c_au * (m.cloud.x[i][j][k] - q_c_crit); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
                         else  S_c_au = 0.0;
 
 
