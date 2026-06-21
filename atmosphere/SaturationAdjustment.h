@@ -165,7 +165,23 @@ private:
                                 ? (q_c_b * q_sat + q_i_b * q_Ice) / q_sum
                                 : ((T >= m.t_0) ? q_sat : q_Ice);
 
-                            q_v_hyp = 0.5 * (q_v_target + q_v_b);
+                            // Adaptive Newton-damped update. The previous fixed 0.5 under-
+                            // relaxation is UNSTABLE when the latent-heat gain
+                            // G = (L/cp)*dq_sat/dT exceeds 3 — i.e. warm cells (T>~25C,
+                            // q_sat>~20 g/kg) where dq_sat/dT is steep: the fixed-point map
+                            // derivative 0.5*(1-G) then has magnitude >1, so the loop
+                            // OSCILLATES and never converges, leaving RH stuck at 120-139%
+                            // with cloud present (thermodynamically impossible) and feeding
+                            // the coastal precip runaway. omega = 1/(1+G) drives the map
+                            // derivative 1-omega*(1+G) to 0 (stable, ~Newton-optimal) at all T.
+                            // dq_sat/dT from Clausius-Clapeyron: q_sat*L/(Rv*T^2).
+                            // project_overprecip_saturation_injection.
+                            const double Rv = 461.5;                    // [J/(kg K)] water-vapour gas constant
+                            const double inv_RvT2 = 1.0 / (Rv * T * T);
+                            const double Gain = CND * lv_over_cp * (q_sat * m.lv * inv_RvT2)
+                                              + DEP * ls_over_cp * (q_Ice * m.ls * inv_RvT2);
+                            const double omega = 1.0 / (1.0 + Gain);
+                            q_v_hyp = q_v_b + omega * (q_v_target - q_v_b);
 
                             if (fabs(q_v_b / q_v_hyp - 1.0) <= 1.0e-6)
                                 break;
