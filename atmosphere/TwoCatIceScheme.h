@@ -437,12 +437,17 @@ private:
                                            + S_r_cri + S_r_frz
                                            - S_s_melt;
 
-                        // Per-cell precipitation cap. Physical max rain rate is ~30 mm/hr
-                        // (8e-6 mm/s); hurricane peak ~200 mm/hr (5e-5 mm/s). Cap at 0.1
-                        // mm/s = 8640 mm/day = ~3 m/day, ~3 orders of magnitude above any
-                        // real value. Backstop in case Fix-1 misses a path (e.g. surface
-                        // cell with unphysical S terms from an upstream anomaly).
-                        constexpr double P_max = 0.1;  // [kg/(m²s)] = [mm/s]
+                        // Per-cell precipitation cap (pragmatic bound on the gross-recirculation
+                        // bursts). The stratiform condense<->recool recirculation produces a GROSS
+                        // P_rain flux decoupled from the (few mm/d) net column water budget —
+                        // Arabian/Scandinavia bursts ran to ~900-1024 mm/d and pulled the domain
+                        // mean to ~10 mm/d (clean build). The old 0.1 mm/s (8640 mm/d) cap was ~3
+                        // orders too loose to bind. Cap the rain & snow FLUX at every level to
+                        // 50 mm/d so the accretion-amplified flux cannot accumulate beyond a
+                        // physical ceiling; the total surface precip is additionally capped to
+                        // 50 mm/d below. Band-aid (does not cure the recirculation) but bounds it
+                        // deterministically. project_arabian_coast_precip_spike (option C).
+                        constexpr double P_max = 50.0 / 86400.0;  // [kg/(m²s)] = [mm/s]  (= 50 mm/d)
 
                         // rain flux integration (top-down)
                         // S_i_melt excluded: cloud ice melts to cloud water (S_c), not
@@ -465,8 +470,8 @@ private:
                             ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
                             : 0.0;
 
-                        m.Precipitation.x[i][j][k] =
-                            m.P_rain.x[i][j][k] + m.P_snow.x[i][j][k];  // in mm/s
+                        m.Precipitation.x[i][j][k] = std::min(P_max,
+                            m.P_rain.x[i][j][k] + m.P_snow.x[i][j][k]);  // in mm/s, total capped at 50 mm/d
 
                     }  // end i
 
