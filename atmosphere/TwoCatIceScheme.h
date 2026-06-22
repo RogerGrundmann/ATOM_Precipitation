@@ -300,9 +300,17 @@ private:
                         else  S_d_au = 0.0;
 
 
-                        // accretion of cloud water by raindrops
-                        if((t_u >= m.t_0)&&(m.cloud.x[i][j][k] > 0.0))
-                            S_ac = c_ac * m.cloud.x[i][j][k]            // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
+                        // accretion of cloud water by raindrops (Kessler with the same
+                        // q_c_crit threshold as autoconversion above): only the cloud water
+                        // in excess of q_c_crit is collected into falling rain. Without the
+                        // threshold accretion (c_ac=0.24, ~0.35x autoconv per unit cloud at
+                        // 6 mm/d, growing with Rain) scavenged tenuous clouds the moment any
+                        // rain advected/fell through them -> the broad ~2x over-precipitation
+                        // that remained after the autoconversion fix. Keeping a q_c_crit cloud
+                        // reservoir un-rainable makes accretion consistent with autoconversion.
+                        // See project_overprecip_saturation_injection.
+                        if((t_u >= m.t_0)&&(m.cloud.x[i][j][k] > q_c_crit))
+                            S_ac = c_ac * (m.cloud.x[i][j][k] - q_c_crit) // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
                                    * Rain_pow_7_9;                      // in kg/(m² * s)
                         else  S_ac = 0.0;
 
