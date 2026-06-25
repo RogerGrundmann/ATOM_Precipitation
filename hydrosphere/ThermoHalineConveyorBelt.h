@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <iostream>
+#include <algorithm>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -121,24 +122,24 @@ public:
 
                 if ((h.x[i_max][j][k] == 0.) && (k_water == 0)) {       // if water is closest to coast, change of velocity components begins
                     for (int l = 0; l < k_grad; l++) {                  // extension of change, sign change in v-velocity and distribution of u-velocity with depth
-                        v.x[i_max][j][k + l] = - v.x[i_max][j][k + l];  // existing velocity changes sign
+                        v.x[i_max][j][std::max(0, std::min(k + l, m.km - 1))] = - v.x[i_max][j][std::max(0, std::min(k + l, m.km - 1))];  // existing velocity changes sign
 
                         for (int i = i_middle; i <= i_half; i++) {      // loop in radial direction, extension for u -velocity component, downwelling here
                             mi = i_half - i;
                             d_i = static_cast<double>(i);
                             c.x[i][j][k] = ca_max;
-                            u.x[i][j][k + l] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1));  // increase with depth, decrease with distance from coast
-                            u.x[mi][j][k + l] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1));  // decrease with depth, decrease with distance from coast
+                            u.x[i][j][std::max(0, std::min(k + l, m.km - 1))] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1));  // increase with depth, decrease with distance from coast
+                            u.x[mi][j][std::max(0, std::min(k + l, m.km - 1))] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1));  // decrease with depth, decrease with distance from coast
                         }
                     }
 
 /*
-                    for (int l = (k + k_grad - k_a); l < (k + k_grad + k_b + 1); l++) {  // starting at local longitude + max extension - begin of smoothing k_a  until ending at  + k_b
-                        v.x[i_max][j][l] = (v.x[i_max][j][k + k_grad + k_b] - v.x[i_max][j][k + k_grad - k_a]) / static_cast<double>((k + k_grad + k_b) -  (k + k_grad - k_a)) * static_cast<double>(l -  (k + k_grad - k_a)) + v.x[i_max][j][k + k_grad - k_a]; // extension of v-velocity, smoothing algorithm by a linear equation
+                    for (int l = (k + k_grad - k_a); l < (k + k_grad + k_b + 1) && l >= 0 && l < m.km; l++) {  // starting at local longitude + max extension - begin of smoothing k_a  until ending at  + k_b
+                        v.x[i_max][j][l] = (v.x[i_max][j][std::max(0, std::min(k + k_grad + k_b, m.km - 1))] - v.x[i_max][j][std::max(0, std::min(k + k_grad - k_a, m.km - 1))]) / static_cast<double>((k + k_grad + k_b) -  (k + k_grad - k_a)) * static_cast<double>(l -  (k + k_grad - k_a)) + v.x[i_max][j][std::max(0, std::min(k + k_grad - k_a, m.km - 1))]; // extension of v-velocity, smoothing algorithm by a linear equation
                     }
 
-                    for (int l = k; l < (k + k_grad + k_b + 1); l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
-                        w.x[i_max][j][l] = w.x[i_max][j][k + k_grad + k_b]  / static_cast<double>((k + k_grad + k_b) -  k) * static_cast<double>(l - k); // extension of v-velocity
+                    for (int l = k; l < (k + k_grad + k_b + 1) && l >= 0 && l < m.km; l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
+                        w.x[i_max][j][l] = w.x[i_max][j][std::max(0, std::min(k + k_grad + k_b, m.km - 1))]  / static_cast<double>((k + k_grad + k_b) -  k) * static_cast<double>(l - k); // extension of v-velocity
                     }
 */
                     k_sequel = 1;                                       // looking for another east coast
@@ -161,23 +162,23 @@ public:
 
                 if ((h.x[i_max][j][k] == 0.) && (k_water == 0)) {
                     for (int l = 0; l < k_grad; l++) {
-                        v.x[i_max][j][k + l] = - v.x[i_max][j][k + l];
+                        v.x[i_max][j][std::max(0, std::min(k + l, m.km - 1))] = - v.x[i_max][j][std::max(0, std::min(k + l, m.km - 1))];
 
                         for (int i = i_middle; i <= i_half; i++) {
                             mi = i_half - i;
                             d_i = static_cast<double>(i);
                             c.x[i][j][k] = ca_max;
-                            u.x[i][j][k + l] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1)); // increase with depth, decrease with distance from coast
-                            u.x[mi][j][k + l] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1)); // decrease with depth, decrease with distance from coast
+                            u.x[i][j][std::max(0, std::min(k + l, m.km - 1))] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1)); // increase with depth, decrease with distance from coast
+                            u.x[mi][j][std::max(0, std::min(k + l, m.km - 1))] = - 10. * d_i / d_i_half * IC_water / (static_cast<double>(l + 1)); // decrease with depth, decrease with distance from coast
                         }
                     }
 /*
-                    for (int l = (k + k_grad - k_a); l < (k + k_grad + k_b + 1); l++) {
-                        v.x[i_max][j][l] = (v.x[i_max][j][k + k_grad + k_b] - v.x[i_max][j][k + k_grad - k_a]) / static_cast<double>((k + k_grad + k_b) -  (k + k_grad - k_a)) * static_cast<double>(l -  (k + k_grad - k_a)) + v.x[i_max][j][k + k_grad - k_a];
+                    for (int l = (k + k_grad - k_a); l < (k + k_grad + k_b + 1) && l >= 0 && l < m.km; l++) {
+                        v.x[i_max][j][l] = (v.x[i_max][j][std::max(0, std::min(k + k_grad + k_b, m.km - 1))] - v.x[i_max][j][std::max(0, std::min(k + k_grad - k_a, m.km - 1))]) / static_cast<double>((k + k_grad + k_b) -  (k + k_grad - k_a)) * static_cast<double>(l -  (k + k_grad - k_a)) + v.x[i_max][j][std::max(0, std::min(k + k_grad - k_a, m.km - 1))];
                     }
 
-                    for (int l = k; l < (k + k_grad + k_b + 1); l++) {
-                        w.x[i_max][j][l] = w.x[i_max][j][k + k_grad + k_b]  / static_cast<double>((k + k_grad + k_b) -  k) * static_cast<double>(l - k);
+                    for (int l = k; l < (k + k_grad + k_b + 1) && l >= 0 && l < m.km; l++) {
+                        w.x[i_max][j][l] = w.x[i_max][j][std::max(0, std::min(k + k_grad + k_b, m.km - 1))]  / static_cast<double>((k + k_grad + k_b) -  k) * static_cast<double>(l - k);
                     }
 */
                     k_sequel = 1;
@@ -207,7 +208,7 @@ public:
                 else k_water = 1;                                       // first time on land
 
                 if ((flip == 0) && (k_water == 1)) {  // on water closest to land
-                    for (int l = k; l > (k - k_grad - 1); l--) {        // backward extention of velocity change: nothing changes
+                    for (int l = k; l > (k - k_grad - 1) && l >= 0 && l < m.km; l--) {        // backward extention of velocity change: nothing changes
                         w.x[i_max][j][l] = - w.x[i_max][j][l];
 
                         for (int i = i_middle; i <= i_half; i++) {      // loop in radial direction, extension for u -velocity component, upwelling here
@@ -219,12 +220,12 @@ public:
                         }
                     }
 /*
-                    for (int l = k; l > (k - k_grad - k_a + 1); l--) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
-                        v.x[i_max][j][l] = v.x[i_max][j][k - k_grad - k_a] / static_cast<double>((k - k_grad - k_a) - k) * static_cast<double>(l - k); // extension of v-velocity
+                    for (int l = k; l > (k - k_grad - k_a + 1) && l >= 0 && l < m.km; l--) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
+                        v.x[i_max][j][l] = v.x[i_max][j][std::max(0, std::min(k - k_grad - k_a, m.km - 1))] / static_cast<double>((k - k_grad - k_a) - k) * static_cast<double>(l - k); // extension of v-velocity
                     }
 
-                    for (int l = (k - k_grad - 3); l < (k - k_grad + 3); l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
-                        w.x[i_max][j][l] = (- w.x[i_max][j][k - k_grad - 3] + w.x[i_max][j][k - k_grad + 3]) * static_cast<double>(l - (k - k_grad - 3)) / static_cast<double>((k - k_grad + 3) - (k - k_grad - 3)) - w.x[i_max][j][k - k_grad + 3];
+                    for (int l = (k - k_grad - 3); l < (k - k_grad + 3) && l >= 0 && l < m.km; l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
+                        w.x[i_max][j][l] = (- w.x[i_max][j][std::max(0, std::min(k - k_grad - 3, m.km - 1))] + w.x[i_max][j][std::max(0, std::min(k - k_grad + 3, m.km - 1))]) * static_cast<double>(l - (k - k_grad - 3)) / static_cast<double>((k - k_grad + 3) - (k - k_grad - 3)) - w.x[i_max][j][std::max(0, std::min(k - k_grad + 3, m.km - 1))];
                     }
 */
                     flip = 1;
@@ -248,7 +249,7 @@ public:
                 else k_water = 1;
 
                 if ((flip == 0) && (k_water == 1)) {
-                    for (int l = k; l > (k - k_grad + 1); l--) {
+                    for (int l = k; l > (k - k_grad + 1) && l >= 0 && l < m.km; l--) {
                         w.x[i_max][j][l] = - w.x[i_max][j][l];
 
                         for (int i = i_middle; i <= i_half; i++) {
@@ -260,12 +261,12 @@ public:
                         }
                     }
 /*
-                    for (int l = k; l > (k - k_grad - k_a - 1); l--) {
-                        v.x[i_max][j][l] = v.x[i_max][j][k - k_grad - k_a] / static_cast<double>((k - k_grad - k_a) - k) * static_cast<double>(l - k);
+                    for (int l = k; l > (k - k_grad - k_a - 1) && l >= 0 && l < m.km; l--) {
+                        v.x[i_max][j][l] = v.x[i_max][j][std::max(0, std::min(k - k_grad - k_a, m.km - 1))] / static_cast<double>((k - k_grad - k_a) - k) * static_cast<double>(l - k);
                     }
 
-                    for (int l = (k - k_grad - 3); l < (k - k_grad + 3); l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
-                        w.x[i_max][j][l] = (- w.x[i_max][j][k - k_grad - 3] + w.x[i_max][j][k - k_grad + 3]) * static_cast<double>(l - (k - k_grad - 3)) / static_cast<double>((k - k_grad + 3) - (k - k_grad - 3)) - w.x[i_max][j][k - k_grad + 3];
+                    for (int l = (k - k_grad - 3); l < (k - k_grad + 3) && l >= 0 && l < m.km; l++) {  // smoothing algorithm by a linear equation, starting at local longitude until ending at max extension + k_b
+                        w.x[i_max][j][l] = (- w.x[i_max][j][std::max(0, std::min(k - k_grad - 3, m.km - 1))] + w.x[i_max][j][std::max(0, std::min(k - k_grad + 3, m.km - 1))]) * static_cast<double>(l - (k - k_grad - 3)) / static_cast<double>((k - k_grad + 3) - (k - k_grad - 3)) - w.x[i_max][j][std::max(0, std::min(k - k_grad + 3, m.km - 1))];
                     }
 */
                     flip = 1;
@@ -295,8 +296,8 @@ public:
         k_step = 10;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run + k_step) <= (k_end + k_step)) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
                             v.x[i][j][k] = - IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -323,15 +324,15 @@ public:
         k_exp = 10;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run - k_exp) <= (k_end - k_exp)) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = (k_beg + k_run - k_exp); k < (k_beg + k_run); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = (k_beg + k_run - k_exp); k < (k_beg + k_run) && k < m.km && k >= 0; k++) {
                     k_z = k - (k_beg + k_run - k_exp);
                     k_n = (k_beg + k_run) - (k_beg + k_run - k_exp);
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run] - v.x[i][j][k_beg + k_run - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run - k_exp];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run] - w.x[i][j][k_beg + k_run - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run - k_exp];
+                            v.x[i][j][k] = (v.x[i][j][std::min(k_beg + k_run, m.km - 1)] - v.x[i][j][std::max(k_beg + k_run - k_exp, 0)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::max(k_beg + k_run - k_exp, 0)];
+                            w.x[i][j][k] = (w.x[i][j][std::min(k_beg + k_run, m.km - 1)] - w.x[i][j][std::max(k_beg + k_run - k_exp, 0)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::max(k_beg + k_run - k_exp, 0)];
                         }
                     }
                 }
@@ -354,16 +355,16 @@ public:
         k_exp = 3;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run + k_step + k_exp) <= (k_end + k_exp)) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp) && k < m.km && k >= 0; k++) {
                     if (k >= k_end) break;
                     k_z = k - (k_beg + k_run + k_step);
                     k_n = (k_beg + k_run + k_step + k_exp) - (k_beg + k_run + k_step) ;
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run + k_step + k_exp] - v.x[i][j][k_beg + k_run + k_step]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run + k_step];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run + k_step + k_exp] - w.x[i][j][k_beg + k_run + k_step]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run + k_step];
+                            v.x[i][j][k] = (v.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - v.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)];
+                            w.x[i][j][k] = (w.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - w.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)];
                         }
                     }
                 }
@@ -388,8 +389,8 @@ public:
         k_step = 10;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run) <= k_end) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     if (k >= k_end) break;
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
@@ -417,16 +418,16 @@ public:
         k_exp = 10;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run - k_exp) <= (k_end - k_exp)) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = (k_beg + k_run - k_exp); k < (k_beg + k_run); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = (k_beg + k_run - k_exp); k < (k_beg + k_run) && k < m.km && k >= 0; k++) {
                     if (k >= k_end) break;
                     k_z = k - (k_beg + k_run - k_exp);
                     k_n = (k_beg + k_run) - (k_beg + k_run - k_exp);
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run] - v.x[i][j][k_beg + k_run - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run - k_exp];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run] - w.x[i][j][k_beg + k_run - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run - k_exp];
+                            v.x[i][j][k] = (v.x[i][j][std::min(k_beg + k_run, m.km - 1)] - v.x[i][j][std::max(k_beg + k_run - k_exp, 0)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::max(k_beg + k_run - k_exp, 0)];
+                            w.x[i][j][k] = (w.x[i][j][std::min(k_beg + k_run, m.km - 1)] - w.x[i][j][std::max(k_beg + k_run - k_exp, 0)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::max(k_beg + k_run - k_exp, 0)];
                         }
                     }
                 }
@@ -449,16 +450,16 @@ public:
         k_exp = 6;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run + k_step + k_exp) <= (k_end + k_exp)) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
-                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp); k++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
+                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp) && k < m.km && k >= 0; k++) {
                     if (k >= k_end) break;
                     k_z = k - (k_beg + k_run + k_step);
                     k_n = (k_beg + k_run + k_step + k_exp) - (k_beg + k_run + k_step) ;
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run + k_step + k_exp] - v.x[i][j][k_beg + k_run + k_step]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run + k_step];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run + k_step + k_exp] - w.x[i][j][k_beg + k_run + k_step]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run + k_step];
+                            v.x[i][j][k] = (v.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - v.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)];
+                            w.x[i][j][k] = (w.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - w.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::min(k_beg + k_run + k_step, m.km - 1)];
                         }
                     }
                 }
@@ -486,7 +487,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -496,7 +497,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -508,7 +509,7 @@ public:
             }
 
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -519,10 +520,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 8; k < (k_b + k_step); k++) {
+            for (int k = k_b + 8; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 8]) * static_cast<double>(k - (k_b + 8)) / static_cast<double>((k_b + k_step -1) - (k_b + 8)) + v.x[i][j][k_b + 8];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 8]) * static_cast<double>(k - (k_b + 8)) / static_cast<double>((k_b + k_step -1) - (k_b + 8)) + w.x[i][j][k_b + 8];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 8, m.km - 1))]) * static_cast<double>(k - (k_b + 8)) / static_cast<double>((k_b + k_step -1) - (k_b + 8)) + v.x[i][j][std::max(0, std::min(k_b + 8, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 8, m.km - 1))]) * static_cast<double>(k - (k_b + 8)) / static_cast<double>((k_b + k_step -1) - (k_b + 8)) + w.x[i][j][std::max(0, std::min(k_b + 8, m.km - 1))];
                 }
             }
         }
@@ -650,7 +651,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -661,7 +662,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -672,7 +673,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -683,10 +684,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
 
@@ -752,8 +753,8 @@ public:
         k_step = 50;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
                             v.x[i][j][k] = - IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -808,8 +809,8 @@ public:
         k_step = 50;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
                             v.x[i][j][k] = - IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -917,7 +918,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -928,10 +929,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -977,7 +978,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -988,10 +989,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -1061,7 +1062,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1072,7 +1073,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1083,7 +1084,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg-3; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
 //                        u.x[i][j][k] = - IC_water;
@@ -1095,10 +1096,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + k_w; k < (k_b + k_step); k++) {
+            for (int k = k_b + k_w; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step] - v.x[i][j][k_b + k_w]) * static_cast<double>(k - (k_b + k_w)) / static_cast<double>((k_b + k_step) - (k_b + k_w)) + v.x[i][j][k_b + k_w];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step] - w.x[i][j][k_b + k_w]) * static_cast<double>(k - (k_b + k_w)) / static_cast<double>((k_b + k_step) - (k_b + k_w)) + w.x[i][j][k_b + k_w];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + k_w, m.km - 1))]) * static_cast<double>(k - (k_b + k_w)) / static_cast<double>((k_b + k_step) - (k_b + k_w)) + v.x[i][j][std::max(0, std::min(k_b + k_w, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + k_w, m.km - 1))]) * static_cast<double>(k - (k_b + k_w)) / static_cast<double>((k_b + k_step) - (k_b + k_w)) + w.x[i][j][std::max(0, std::min(k_b + k_w, m.km - 1))];
                 }
             }
 
@@ -1243,7 +1244,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1254,7 +1255,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1265,7 +1266,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1274,10 +1275,10 @@ public:
                 }
             }
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
             k_a = k_b;
@@ -1302,7 +1303,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1313,7 +1314,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1324,7 +1325,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1335,10 +1336,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -1408,7 +1409,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1419,10 +1420,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -1468,7 +1469,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1479,10 +1480,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -1588,8 +1589,8 @@ public:
 
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
                             v.x[i][j][k] = IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1617,15 +1618,15 @@ public:
         k_exp = 30;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run + k_step - k_exp) <= (k_end - k_exp)) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run + k_step - k_exp); k < (k_beg + k_run + k_step); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run + k_step - k_exp); k < (k_beg + k_run + k_step) && k < m.km && k >= 0; k++) {
                     k_z = k - (k_beg + k_run + k_step - k_exp);
                     k_n = (k_beg + k_run + k_step) - (k_beg + k_run + k_step - k_exp) ;
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run + k_step - 1] - v.x[i][j][k_beg + k_run + k_step - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run + k_step - k_exp];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run + k_step - 1] - w.x[i][j][k_beg + k_run + k_step - k_exp]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run + k_step - k_exp];
+                            v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - 1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - k_exp, m.km - 1))]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - k_exp, m.km - 1))];
+                            w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - 1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - k_exp, m.km - 1))]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - k_exp, m.km - 1))];
                         }
                     }
                 }
@@ -1649,15 +1650,15 @@ public:
         k_exp = 30;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run + k_step + k_exp) <= (k_end + k_exp)) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run + k_step); k < (k_beg + k_run + k_step + k_exp) && k < m.km && k >= 0; k++) {
                     k_z = k - (k_beg + k_run + k_step);
                     k_n = (k_beg + k_run + k_step + k_exp) - (k_beg + k_run + k_step) ;
 
                     for (int i = i_beg; i < m.im; i++) {
                         if (h.x[i][j][k] == 0.) {
-                            v.x[i][j][k] = (v.x[i][j][k_beg + k_run + k_step + k_exp] - v.x[i][j][k_beg + k_run + k_step  - 1]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][k_beg + k_run + k_step - 1];
-                            w.x[i][j][k] = (w.x[i][j][k_beg + k_run + k_step + k_exp] - w.x[i][j][k_beg + k_run + k_step  - 1]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][k_beg + k_run + k_step - 1];
+                            v.x[i][j][k] = (v.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - v.x[i][j][std::max(0, std::min(k_beg + k_run + k_step  - 1, m.km - 1))]) * static_cast<double>(k_z) / static_cast<double>(k_n) + v.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - 1, m.km - 1))];
+                            w.x[i][j][k] = (w.x[i][j][std::min(k_beg + k_run + k_step + k_exp, m.km - 1)] - w.x[i][j][std::max(0, std::min(k_beg + k_run + k_step  - 1, m.km - 1))]) * static_cast<double>(k_z) / static_cast<double>(k_n) + w.x[i][j][std::max(0, std::min(k_beg + k_run + k_step - 1, m.km - 1))];
                         }
                     }
                 }
@@ -1684,7 +1685,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1695,7 +1696,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1706,7 +1707,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1717,10 +1718,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -1743,7 +1744,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1754,7 +1755,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1765,7 +1766,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1776,10 +1777,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -1891,7 +1892,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -1902,7 +1903,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -1913,7 +1914,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -1924,10 +1925,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -2000,7 +2001,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2011,10 +2012,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -2061,7 +2062,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2072,10 +2073,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -2123,7 +2124,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2438,7 +2439,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2488,7 +2489,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2542,7 +2543,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k > (k_b - k_step); k--) {
+            for (int k = k_b; k > (k_b - k_step) && k >= 0; k--) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2553,10 +2554,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b - k_step - k_exp; k < (k_b - k_w); k++) {
+            for (int k = k_b - k_step - k_exp; k < (k_b - k_w) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b - k_w] - v.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][k_b - k_step - k_exp];
-                    w.x[i][j][k] = (w.x[i][j][k_b - k_w] - w.x[i][j][k_b - k_step - k_exp]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][k_b - k_step - k_exp];
+                    v.x[i][j][k] = (v.x[i][j][std::max(k_b - k_w, 0)] - v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + v.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(k_b - k_w, 0)] - w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))]) * static_cast<double>(k - (k_b - k_step - k_exp)) / static_cast<double>((k_b - k_w) - (k_b - k_step - k_exp)) + w.x[i][j][std::max(0, std::min(k_b - k_step - k_exp, m.km - 1))];
                 }
             }
         }
@@ -2604,7 +2605,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -2615,7 +2616,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -2626,7 +2627,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + 0.5 * v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2635,10 +2636,10 @@ public:
                 }
             }
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
             k_a = k_b;
@@ -2663,7 +2664,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -2674,7 +2675,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -2685,7 +2686,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2694,10 +2695,10 @@ public:
                 }
             }
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
             k_a = k_b;
@@ -2721,7 +2722,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -2732,7 +2733,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -2744,7 +2745,7 @@ public:
             }
 
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -2755,10 +2756,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -2922,7 +2923,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -2933,7 +2934,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -2944,7 +2945,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -3093,7 +3094,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -3104,7 +3105,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -3115,7 +3116,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = - v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -3126,10 +3127,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -3152,7 +3153,7 @@ public:
 
         flip = 0;
 
-        for (int k = k_end; k > k_beg; k--) {
+        for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
             if (h.x[i_max][j_beg][k] == 1.) {
                 k_a = k;
                 flip = 1;
@@ -3163,7 +3164,7 @@ public:
         flip = 0;
 
         for (int j = j_beg+1; j < j_end; j++) {
-            for (int k = k_end; k > k_beg; k--) {
+            for (int k = std::min(k_end, m.km - 1); k > k_beg; k--) {
                 if (h.x[i_max][j][k] == 1.) {
                     k_b = k;
                     k_grad = k_a - k_b;
@@ -3174,7 +3175,7 @@ public:
             if (flip == 1) break;
             }
 
-            for (int k = k_b; k < (k_b + k_step); k++) {
+            for (int k = k_b; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
                     if (h.x[i][j][k] == 0.) {
                         v.x[i][j][k] = + v_grad * IC_water * static_cast<double>(i - i_beg) / static_cast<double>(i_max - i_beg);
@@ -3185,10 +3186,10 @@ public:
             k_a = k_b;
             flip = 0;
 
-            for (int k = k_b + 4; k < (k_b + k_step); k++) {
+            for (int k = k_b + 4; k < (k_b + k_step) && k >= 0 && k < m.km; k++) {
                 for (int i = i_beg; i < m.im; i++) {
-                    v.x[i][j][k] = (v.x[i][j][k_b + k_step +1] - v.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][k_b + 4];
-                    w.x[i][j][k] = (w.x[i][j][k_b + k_step +1] - w.x[i][j][k_b + 4]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][k_b + 4];
+                    v.x[i][j][k] = (v.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + v.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
+                    w.x[i][j][k] = (w.x[i][j][std::max(0, std::min(k_b + k_step +1, m.km - 1))] - w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))]) * static_cast<double>(k - (k_b + 4)) / static_cast<double>((k_b + k_step -1) - (k_b + 4)) + w.x[i][j][std::max(0, std::min(k_b + 4, m.km - 1))];
                 }
             }
         }
@@ -3543,8 +3544,8 @@ public:
 
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <=  k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = 10; i < m.im-2; i++) {
                         if (h.x[i][j][k] == 0.) {
                             c.x[i][j][k] = ca_max;
@@ -3662,8 +3663,8 @@ public:
         k_step = 90;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = 10; i < m.im-2; i++) {
                         if (h.x[i][j][k] == 0.) {
                             c.x[i][j][k] = ca_max;
@@ -3802,8 +3803,8 @@ public:
         k_step = 110;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = 10; i < m.im-2; i++) {
                         if (h.x[i][j][k] == 0.) {
                             c.x[i][j][k] = ca_max;
@@ -4658,13 +4659,13 @@ public:
         k_step = 11;
 
         while ((j_end - j_run) >= j_beg && (k_beg + k_run) <= k_end) {
-            for (int j = (j_end - j_run); j > (j_end - j_step - j_run); j--) {
+            for (int j = std::min(j_end - j_run, m.jm - 1); j > (j_end - j_step - j_run); j--) {
                 k1 = k_beg + k_run;
                 k3 = k_beg + k_step + k_run;
                 k2 = (k3 - k1) / 2 + k1;
                 kd = (k1 - k2) * (k1 - k2);
 
-                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run); k++) {
+                for (int k = (k_beg + k_run); k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_bottom; i < i_deep + 1; i++) {
                         if (h.x[i][j][k] == 0.) {
                             kn = k * k - 2 * k2 * k - k1 * k1 + 2 * k1 * k2;
@@ -4719,13 +4720,13 @@ public:
         k_step = 13;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run) <= k_end) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
                 k1 = k_beg + k_run;
                 k3 = k_beg + k_step + k_run;
                 k2 = (k3 - k1) / 2 + k1;
                 kd = (k1 - k2) * (k1 - k2);
 
-                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run); k++) {
+                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_bottom; i < i_deep + 1; i++) {
                         if (h.x[i][j][k] == 0.) {
                             kn = k * k - 2 * k2 * k - k1 * k1 + 2 * k1 * k2;
@@ -4869,13 +4870,13 @@ public:
         k_step = 10;
 
         while ((j_beg + j_run) <= j_end && (k_beg + k_run) <= k_end) {
-            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run); j++) {
+            for (int j = j_beg + j_run; j < (j_beg + j_step + j_run) && j < m.jm; j++) {
                 k1 = k_beg + k_run;
                 k3 = k_beg + k_step + k_run;
                 k2 = (k3 - k1) / 2 + k1;
                 kd = (k1 - k2) * (k1 - k2);
 
-                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run); k++) {
+                for (int k = k_beg + k_run; k < (k_beg + k_step + k_run) && k < m.km && k >= 0; k++) {
                     for (int i = i_bottom; i < i_deep + 1; i++) {
                         if (h.x[i][j][k] == 0.) {
                             kn = k * k - 2 * k2 * k - k1 * k1 + 2 * k1 * k2;

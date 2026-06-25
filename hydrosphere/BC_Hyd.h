@@ -412,7 +412,8 @@ public:
                     }
 
                     // k-direction: damp w near zonal land walls
-                    if (k >= 0 && k < m.km-1) {
+                    // need k-2 >= 0 and k+2 <= m.km-1 for the two-cell reach below
+                    if (k >= 2 && k < m.km-2) {
                         if (is_land(m.h, i, j, k) && is_water(m.h, i, j, k+1) && is_water(m.h, i, j, k+2)) {
                             #pragma omp atomic
                             m.w.x[i][j][k+1] *= coeff;
