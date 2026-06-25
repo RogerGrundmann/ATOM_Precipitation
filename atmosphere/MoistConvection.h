@@ -57,6 +57,16 @@ namespace AtomMoistConvection {
     // q_v_d, P_conv chain still saw the runaway. Same magnitude as the safe_cap
     // M_max in rhsForcing (~10× any realistic value).
     constexpr double M_max = 3.0;                                       // [kg/(m²s)] (also used in rhsForcing safe_cap)
+
+    // Cloud-base mass-flux coefficient (fix #3, 2026-06-23). The old seed M_u,base = ρ·u
+    // used the RESOLVED vertical velocity (~cm/s at the LCL) → M_u≈0.03 kg/m²s, below
+    // coeff_recurr(0.1) in 100% of columns → the updraft branch never activated → P_conv≡0
+    // ([[project_convective_precip_zero]]). Convective updrafts are SUB-GRID: seed from the
+    // parcel buoyancy instead — M_u,base = ρ·c_mb·√(2·CAPE) (convective velocity scale
+    // w_b = c_mb·√(2·CAPE)). c_mb≈0.03 gives w_b~0.4–1.3 m/s and M_u~0.4–1.3 kg/m²s for
+    // CAPE~100–1000 J/kg (healthy ~0.3, clamp_M ceiling 3.0), and activates the branch for
+    // any CAPE≳6 J/kg. Cf. the CAPE-seed prototype in [[project_arabian_coast_precip_spike]].
+    constexpr double c_mb = 0.003;                                      // [·] cloud-base mass-flux coefficient (0.03 over-drove: M_u pegged clamp, maxT→57C, stratiform→16mm/d; 10x down → M_u~0.3 healthy)
 }
 /*
 *
@@ -130,6 +140,7 @@ private:
     std::vector<std::vector<int>> i_deep_beg_local;
     std::vector<std::vector<int>> i_deep_end_local;
     std::vector<std::vector<double>> M_d_LFS_local;
+    std::vector<std::vector<double>> cape_col;        // parcel CAPE per column [m²/s²]  (fix #3, seeds M_u)
     std::vector<std::vector<double>> delta_T_sfp;    // surface-flux T perturbation per column [K]      (Bechtold 2008)
     std::vector<std::vector<double>> delta_q_sfp;    // surface-flux q perturbation per column [kg/kg]  (Bechtold 2008)
 
@@ -264,6 +275,7 @@ private:
         i_deep_beg_local.assign(m.jm, std::vector<int>(m.km, -1));
         i_deep_end_local.assign(m.jm, std::vector<int>(m.km, -1));
         M_d_LFS_local.assign(m.jm, std::vector<double>(m.km, 0));
+        cape_col.assign(m.jm, std::vector<double>(m.km, 0.0));
         delta_T_sfp.assign(m.jm, std::vector<double>(m.km, 0.0));
         delta_q_sfp.assign(m.jm, std::vector<double>(m.km, 0.0));
 
@@ -423,8 +435,10 @@ private:
                 const double t_pert = delta_T_sfp[j][k];
                 const double q_pert = delta_q_sfp[j][k];
 
+                // Cloud-base mass-flux seed from parcel buoyancy (fix #3): M_u = ρ·c_mb·√(2·CAPE).
+                // Replaces the old ρ·u (resolved w) seed that left M_u below coeff_recurr everywhere.
                 m.M_u.x[local_i_beg][j][k] = clamp_M(
-                    m.r_humid.x[local_i_beg][j][k] * m.u.x[local_i_beg][j][k]);
+                    m.r_humid.x[local_i_beg][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]));
 
                 for(int i = local_i_beg+1; i <= local_i_end; i++){
 
@@ -598,25 +612,57 @@ void findCloudBaseLFS() {
                     }
                 }
 
-                // LFS = lowest level above i_base where the 50/50 cloud–environment
-                // mix becomes negatively buoyant (Tiedtke 1989). The previous scan
-                // ran top-down and triggered at i=im-1 (cold air: q_sat→0,
-                // c > 0.5·q_sat ⇒ q_buoy_lfs ≤ 0), pinning i_LFS at im-2 and
-                // inflating the updraft entrainment column to ~30 levels — the
-                // eps_u·M_u feedback then blew up. Scan upward from i_base+1
-                // instead, gated on a valid cloud base.
+                // LFS / cloud top = level of neutral buoyancy (LNB) of a parcel lifted
+                // from cloud base conserving equivalent potential temperature θe.
+                // History: the old top-down 50/50-mix scan pinned i_LFS at the model top
+                // (im-2) → ~30-level entrainment column → eps_u·M_u blow-up; the replacement
+                // upward 50/50-mix scan over-corrected, tripping at i_base+1 in 100% of
+                // columns (measured 2026-06-23: depth ~15 hPa, zero deep clouds) → E_u and
+                // the precip coefficient K_p forced to 0 → P_conv identically 0. Both compared
+                // a water-CONTENT mixture, never the lifted parcel's buoyancy. Here: the parcel
+                // θe (conserved from base) vs the environment saturation θes(i); the parcel is
+                // buoyant where θe_parcel > θes_env. i_LFS = highest contiguous buoyant level
+                // = the LNB (physical cloud top): deep where conditionally unstable, shallow
+                // otherwise. M_max-clamped M_u (clamp_M) guards the deep entrainment column,
+                // so the LNB ceiling does not reintroduce the old top-of-model blow-up.
                 {
                     const int i_base_col = i_Base_local[j][k];
                     if (i_base_col > 0) {
+                        const double p0    = 1000.0;                          // reference pressure [hPa]
+                        const double kappa = m.R_Air / m.cp_l;                // R/cp  (Poisson exponent)
+                        const double T_b   = m.t.x[i_base_col][j][k] * m.t_0 + t_add_u;
+                        const double p_b   = m.p_stat.x[i_base_col][j][k];
+                        const double qsb   = q_sat_col[i_base_col];
+                        const double L_b   = (T_b >= m.t_0) ? m.lv : m.ls;
+                        const double thetae_parcel =
+                            T_b * std::pow(p0 / p_b, kappa)
+                                * std::exp(L_b * qsb / (m.cp_l * T_b));
+
+                        bool became_buoyant = false;
+                        int  i_top = i_base_col;                              // never buoyant → shallow
+                        double cape = 0.0;                                    // ∫ buoyancy dz over the buoyant ascent [m²/s²]
                         for (int i = i_base_col + 1; i < m.im; i++) {
-                            const double q_buoy_lfs =
-                                0.5 * (cloud.x[i][j][k] + scale * q_sat_col[i]) - m.c.x[i][j][k];
-                            if (q_buoy_lfs <= 0.0) {
-                                i_LFS_local[j][k] = std::min(i, m.im-2);    // guard: i+1 must stay in bounds
-                                m.LevelFreeSinking.x[i][j][k] = height_table[i];
-                                break;
+                            const double T_e = m.t.x[i][j][k] * m.t_0;
+                            const double p_e = m.p_stat.x[i][j][k];
+                            const double qse = q_sat_col[i];
+                            const double L_e = (T_e >= m.t_0) ? m.lv : m.ls;
+                            const double thetaes_env =
+                                T_e * std::pow(p0 / p_e, kappa)
+                                    * std::exp(L_e * qse / (m.cp_l * T_e));
+                            if (thetae_parcel - thetaes_env > 0.0) {
+                                became_buoyant = true;
+                                i_top = i;                                    // raise the LNB
+                                // buoyancy b = g·(θe_parcel − θes_env)/θes_env [m/s²]; CAPE = ∫ b dz
+                                const double dz = height_table[i] - height_table[i-1];
+                                cape += m.g * (thetae_parcel - thetaes_env) / thetaes_env * dz;
+                            } else if (became_buoyant) {
+                                break;                                        // lost buoyancy after LFC → LNB reached
                             }
                         }
+                        const int i_lnb = std::min(std::max(i_top, i_base_col + 1), m.im - 2);
+                        i_LFS_local[j][k]                 = i_lnb;
+                        cape_col[j][k]                    = std::max(0.0, cape);
+                        m.LevelFreeSinking.x[i_lnb][j][k] = height_table[i_lnb];
                     }
                 }
             }
@@ -636,9 +682,7 @@ void findCloudBaseLFS() {
         }
     }
 }
-/*
-*
-*/
+
 // ==================== UPDRAFT ENTRAINMENT ====================
     void updraftEntrainment(int iter_prec) {
         using namespace AtomMoistConvection;
@@ -675,8 +719,8 @@ void findCloudBaseLFS() {
                 for (int ii = 0; ii < i_base; ii++)
                     m.M_u.x[ii][j][k] = 0.0;
 
-                m.M_u.x[i_base][j][k] = clamp_M(
-                    m.r_humid.x[i_base][j][k] * m.u.x[i_base][j][k]);   // [kg/(m²s)]
+                m.M_u.x[i_base][j][k] = clamp_M(                        // fix #3: CAPE-based seed (was ρ·u)
+                    m.r_humid.x[i_base][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]));  // [kg/(m²s)]
                 if(is_land(m.h, i_base, j, k)) m.M_u.x[i_base][j][k] = 0.0;
 
                 // Causes #2 and #3: updraftRecurrence starts at i_base+1 and reads
@@ -737,22 +781,10 @@ void findCloudBaseLFS() {
                         if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
 
 
-                        // Condensation
-                        if(iter_prec == 1)
-                            m.c_u.x[i][j][k] = 0.0;
-                        else{
-                            // Cause #4: dividing by r_humid at high altitude (where
-                            // r_humid → 0) amplifies c_u by up to 1/safe_r_humid = 1e6.
-                            // Floor at 0.01 kg/m³ (≈ air density at 50 hPa) so the
-                            // result stays physical for all tropospheric levels.
-                            const double r_h_floor = std::max(r_h_i, 0.01);
-                            // Units: q_c_u [kg/kg] * M_u [kg/(m²s)] / r_h [kg/m³] / step [m]
-                            //      = (kg/kg)/s  ✓
-                            m.c_u.x[i][j][k] = m.q_c_u.x[i][j][k]
-                                * m.M_u.x[i][j][k] / (r_h_floor * step[i]);                      // in [(kg/kg)/s]
-                            if(m.c_u.x[i][j][k] <= 0.0 || m.q_c_u.x[i][j][k] <= 0.0)
-                                m.c_u.x[i][j][k] = 0.0;
-                        }
+                        // Condensation rate c_u is now set in updraftRecurrence (fix #2) as the
+                        // ACTUAL parcel condensation increment, replacing the old circular
+                        // c_u = q_c_u·M_u/(r_h·step) that double-counted latent heating. Zero here.
+                        m.c_u.x[i][j][k] = 0.0;
 
                         // Evaporation of detrained cloud water in updraft
                         if(iter_prec == 1)
@@ -927,14 +959,15 @@ void findCloudBaseLFS() {
 
                     double M_u_prev = m.M_u.x[i-1][j][k];
 
+                    // Condensation thermodynamics (vapour removal AND latent heating) are now
+                    // handled entirely by the parcel saturation adjustment (fix #2) below, using
+                    // the ACTUAL condensation increment. The old c_u-based terms here used the
+                    // circular c_u = q_c_u·M_u/(r_h·step) and double-counted the heating, driving
+                    // a slow low-level thermal runaway (maxT→48-57°C). Transport only here:
                     double dummy_q_v_u = M_u_prev * m.q_v_u.x[i-1][j][k]
                         + step_prev * (m.E_u.x[i-1][j][k] * m.c.x[i-1][j][k]
-                        - m.D_u.x[i-1][j][k] * m.q_v_u.x[i-1][j][k]
-                        - r_h_prev * m.c_u.x[i-1][j][k]);
+                        - m.D_u.x[i-1][j][k] * m.q_v_u.x[i-1][j][k]);
 
-                    // c_u is already included in the q_c_u seed via updraftEntrainment;
-                    // adding r_h * c_u here again would double-count condensation and
-                    // create a runaway positive feedback (amplification ~step[m] per level).
                     double dummy_q_c_u = M_u_prev * m.q_c_u.x[i-1][j][k]
                         + step_prev * (-m.D_u.x[i-1][j][k] * cloud.x[i-1][j][k]
                         - r_h_prev * m.g_p.x[i-1][j][k]);
@@ -944,12 +977,9 @@ void findCloudBaseLFS() {
                     double dummy_vel_w_u = M_u_prev * m.w_u.x[i-1][j][k]
                         + step_prev * m.E_u.x[i-1][j][k] * m.w.x[i-1][j][k];
 
-                    double L_latent = (t_u >= m.t_0) ? m.lv : m.ls;
-
                     double dummy_s_u = (M_u_prev * m.s_u.x[i-1][j][k]
                         + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
-                        - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k]
-                        + L_latent * r_h_prev * m.c_u.x[i-1][j][k])) / m.s_0;
+                        - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k])) / m.s_0;
 
                     double M_u_i = m.M_u.x[i][j][k];
                     if(fabs(M_u_i) > coeff_recurr){
@@ -969,6 +999,44 @@ void findCloudBaseLFS() {
                         m.q_c_u.x[i][j][k] = 0.0;
                         m.v_u.x[i][j][k]   = m.v.x[i][j][k];
                         m.w_u.x[i][j][k]   = m.w.x[i][j][k];
+                    }
+
+                    // Updraft condensation source (fix #2, 2026-06-23). The q_c_u recurrence
+                    // above only CARRIES and LOSES condensate (detrainment, precip) — it has
+                    // NO in-ascent source, because the c_u term that used to feed it is
+                    // circularly defined (c_u = q_c_u·M_u/(r_h·step)), so removing it for the
+                    // "double-count" left q_c_u seeded only at cloud base and depleting upward
+                    // → q_c_u≈0 at the K_p precip levels → P_conv≡0 ([[project_convective_precip_zero]]).
+                    // Genuine source = the rising parcel condensing as it cools: saturation-
+                    // adjust the parcel here, moving q_v_u in excess of q_sat(T_u,p) into q_c_u
+                    // and releasing latent heat into s_u. Adaptive 1/(1+G) damping (G = latent
+                    // gain L/cp·dq_sat/dT) stops the warm-cell overshoot (cf. SaturationAdjustment).
+                    m.c_u.x[i][j][k] = 0.0;
+                    if(fabs(m.M_u.x[i][j][k]) > coeff_recurr){
+                        double T_u       = m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
+                        const double p_u = m.p_stat.x[i][j][k];
+                        double dcond_tot = 0.0;
+                        for(int it = 0; it < 2; ++it){
+                            const double E_s     = m.hp * AtomUtils::exp_func(T_u, 17.2694, 35.86);
+                            const double q_sat_u = safe_q_sat(m.ep, E_s, p_u);
+                            const double dq      = m.q_v_u.x[i][j][k] - q_sat_u;
+                            if(dq <= 0.0) break;
+                            const double L_u   = (T_u >= m.t_0) ? m.lv : m.ls;
+                            const double dqsdT = q_sat_u * 17.2694 * (273.15 - 35.86)
+                                                 / ((T_u - 35.86) * (T_u - 35.86));
+                            const double G     = (L_u / m.cp_l) * dqsdT;        // latent gain
+                            const double dcond = dq / (1.0 + G);               // damped condensation
+                            m.q_v_u.x[i][j][k] -= dcond;
+                            m.q_c_u.x[i][j][k] += dcond;
+                            T_u                += (L_u / m.cp_l) * dcond;       // latent heating (sole source)
+                            dcond_tot          += dcond;
+                        }
+                        m.s_u.x[i][j][k] = m.cp_l * T_u / m.s_0;
+                        // c_u = the ACTUAL condensation rate [(kg/kg)/s] (was the circular
+                        // q_c_u·M_u/(r_h·step)); feeds only the environment forcing conv_src
+                        // (MC_t heating / MC_q drying) in rhsForcing — no longer the s_u/q_v_u budgets.
+                        m.c_u.x[i][j][k] = dcond_tot * m.M_u.x[i][j][k]
+                                           / (std::max(r_h_i, 0.01) * step[i]);
                     }
 
                     double inv_a_u = 1.0 / (a_u * m.u_0);
@@ -1153,7 +1221,15 @@ void findCloudBaseLFS() {
         // values are 3–5× physical, so realistic convection is still untouched.
         constexpr double M_max   = 3.0;        // [kg/(m²s)]  up/downdraft mass flux  (was 10.0; healthy ~0.3)
         constexpr double MCt_max = 0.01;       // [K/s]       convective heating      (was 0.05; ~36 K/hr, still 3× realistic)
-        constexpr double MCq_max = 2.0e-4;     // [(kg/kg)/s] convective moistening    (was 5.0e-4)
+        // 2026-06-25: 2.0e-4 (=0.2 g/kg/s) let the convective moisture pump flood the
+        // near-surface layer over high tropical orography (Ethiopian highlands 9°N/37°E,
+        // cloud base ≈ surface at ~2500 m) — SaturationAdjustment then condensed it
+        // explosively each moist step (+8→+32 K latent heat, ratcheting against the
+        // Held-Suarez recool into a condense↔recool limit cycle, surface T→48 °C). A
+        // physical convective environmental-moistening rate is ~0.02 g/kg/s, so 10× down
+        // throttles the SatAdjust fuel while leaving realistic convection (P_conv,
+        // detrainment aloft) untouched.  See project_convective_precip_zero.
+        constexpr double MCq_max = 2.0e-5;     // [(kg/kg)/s] convective moistening    (was 2.0e-4; flooded surface → SatAdjust runaway)
         // Healthy convective momentum transport is M_u·(v_u−v)/(step·ρ) ≈ 0.3·3/(400·1)
         // ≈ 2e-3 m/s². The old 0.5 cap (×coeff_MC_vel=6.25 → 3.125 non-dim RHS forcing)
         // was pinned at the Patagonian Andes (49°S/74°W) and drove the pressure solver to
