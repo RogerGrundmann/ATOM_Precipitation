@@ -698,3 +698,72 @@ void cHydrosphereModel::init_bathymetry(const string &bathymetry_file){
 /*
 *
 */
+// Binary dump of the prognostic ocean fields so a spin-up can resume at a chosen
+// iter instead of re-running from the IC.  Mirrors the atmosphere
+// (cAtmosphereModel::save_state/load_state, FileIO_Atm.cpp).  Only the genuinely
+// prognostic arrays are stored; densities, forces and all diagnostics are
+// recomputed each iteration from these.
+std::vector<Array*> cHydrosphereModel::restart_arrays(){
+    return { &t, &u, &v, &w, &c,
+             &tn, &un, &vn, &wn, &cn,
+             &p_dyn, &p_hydro,
+             &tke, &dis, &tken, &disn, &nue };
+}
+
+void cHydrosphereModel::save_state(int iter){
+    const string fn = output_path + "/hyd_restart_" + std::to_string(iter) + ".bin";
+    std::ofstream f(fn, std::ios::binary);
+    if(!f){
+        cout << "      OGCM: save_state FAILED to open " << fn << endl;
+        return;
+    }
+    // Header: magic, dimensions, and the iter to resume at.
+    const int32_t hdr[5] = { 0x4F434D31 /*"OCM1"*/, im, jm, km, total_iter_count };
+    f.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+
+    std::vector<Array*> arrs = restart_arrays();
+    for(Array* a : arrs)
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++)
+                f.write(reinterpret_cast<const char*>(a->x[i][j]), km * sizeof(double));
+
+    cout << "      OGCM: save_state wrote " << arrs.size() << " arrays to "
+         << fn << " (total_iter_count " << total_iter_count << ")" << endl;
+}
+
+bool cHydrosphereModel::load_state(int iter){
+    const string fn = output_path + "/hyd_restart_" + std::to_string(iter) + ".bin";
+    std::ifstream f(fn, std::ios::binary);
+    if(!f){
+        cout << "      OGCM: load_state: no file " << fn
+             << " — running from scratch" << endl;
+        return false;
+    }
+    int32_t hdr[5];
+    f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+    if(!f || hdr[0] != 0x4F434D31 || hdr[1] != im || hdr[2] != jm || hdr[3] != km){
+        cout << "      OGCM: load_state: bad header / grid mismatch in " << fn
+             << " — running from scratch" << endl;
+        return false;
+    }
+
+    std::vector<Array*> arrs = restart_arrays();
+    for(Array* a : arrs)
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++){
+                f.read(reinterpret_cast<char*>(a->x[i][j]), km * sizeof(double));
+                if(!f){
+                    cout << "      OGCM: load_state: truncated file " << fn
+                         << " — running from scratch" << endl;
+                    return false;
+                }
+            }
+
+    total_iter_count = hdr[4];
+    cout << "      OGCM: load_state restored " << arrs.size() << " arrays from "
+         << fn << " (resuming at total_iter_count " << total_iter_count << ")" << endl;
+    return true;
+}
+/*
+*
+*/

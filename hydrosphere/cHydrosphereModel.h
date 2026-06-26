@@ -209,6 +209,9 @@ private:
     void HydrospherePlotData(const string &Name_Bathymetry_File);
     void HydrosphereDataTransfer(const string &Name_Bathymetry_File);
     void run_3D_loop();
+    std::vector<Array*> restart_arrays();
+    void save_state(int iter);
+    bool load_state(int iter);
     void searchMinMax_2D(string, string, 
         string, Array_2D &, double coeff=1.);
     void searchMinMax_3D(string, string, 

@@ -301,6 +301,13 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         use_k_omega_SST_turbulence_model = (turb_model == "k_omega_SST");
     }
 
+    // Resume from a binary checkpoint if requested (mirror of cAtmosphereModel).
+    // load_state restores total_iter_count so the inviscid-phase schedule below
+    // continues from where the saved run left off; a missing/mismatched file is a
+    // no-op and the run proceeds from the IC.
+    if(restart_from_iter >= 0)
+        load_state(restart_from_iter);
+
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
         print_loop_3D_headings();
@@ -368,6 +375,18 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             TurbulenceHyd(*this).apply_wall_bc();
         }
 
+        // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up,
+        // ported from the atmosphere (cAtmosphereModel.cpp). The ocean grid has the same
+        // lat-lon polar singularity (zonal cell width rm·sinθ·dφ → 0 at the pole), but the
+        // hydrosphere had no filter, so a long spin-up diverged at the North Pole (90°N
+        // velocities → NaN ~iter 1500-1700, see project_hydro_polar_blowup). Damp the short
+        // zonal wavelengths in u,v,w with a latitude-dependent pass count, every iteration
+        // on the freshly-solved + BC'd field; filtered values flow into un,vn,wn via
+        // storeIntermediateData3D below. Same params as the atmosphere (start=30°, gain=3).
+        AtomUtils::polar_zonal_filter(u, the.z, &i_bathymetry, 30.0, 12, 3.0);
+        AtomUtils::polar_zonal_filter(v, the.z, &i_bathymetry, 30.0, 12, 3.0);
+        AtomUtils::polar_zonal_filter(w, the.z, &i_bathymetry, 30.0, 12, 3.0);
+
 //        UtilsHyd(*this).findResiduumHyd();
 
         UtilsHyd(*this).storeIntermediateData3D(1.0);
@@ -379,6 +398,10 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 
             UtilsHyd(*this).writeFile(bathymetry_name, output_path, true);
             cout << endl << "      OGCM: write_file in run_3D_loop ......................." << endl;
+
+            // Binary restart checkpoint alongside the vtk/vts output, every
+            // `checkpoint` iters, so a long spin-up can be resumed.
+            save_state(total_iter_count);
         }
     }  // end iter_n
 

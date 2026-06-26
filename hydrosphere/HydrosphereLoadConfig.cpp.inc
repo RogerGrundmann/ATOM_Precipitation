@@ -52,6 +52,8 @@
     Config::FillIntWithElement(elem_common, "inviscid_spinup_iters", inviscid_spinup_iters);
     Config::FillIntWithElement(elem_common, "inviscid_ramp_iters", inviscid_ramp_iters);
     Config::FillIntWithElement(elem_common, "moist_phys_start_iter", moist_phys_start_iter);
+    Config::FillIntWithElement(elem_common, "checkpoint_save_iter", checkpoint_save_iter);
+    Config::FillIntWithElement(elem_common, "restart_from_iter", restart_from_iter);
     Config::FillDoubleWithElement(elem_common, "dt_visc", dt_visc);
     Config::FillDoubleWithElement(elem_common, "dt_inviscid", dt_inviscid);
   }

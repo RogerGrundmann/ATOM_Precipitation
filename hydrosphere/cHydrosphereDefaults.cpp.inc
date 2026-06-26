@@ -51,6 +51,8 @@ void cHydrosphereModel::SetDefaultConfig() {
   inviscid_spinup_iters = 0;
   inviscid_ramp_iters = 20;
   moist_phys_start_iter = 300;
+  checkpoint_save_iter = 300;
+  restart_from_iter = 300;
   dt_visc = 0.0005;
   dt_inviscid = 0.0001;
 

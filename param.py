@@ -121,6 +121,11 @@ def main():
 
             ('moist_phys_start_iter', 'cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)', 'int', 300),
 
+            ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 300),
+#            ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 200),
+#            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', -1),
+            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', 300),
+
 #            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
             ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0005),
             ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0001),
