@@ -208,10 +208,12 @@ public:
                 return sum * inv;
             };
 
-            // Turbulence scalars (non-negative).
-            m.tke.x[i][j][k] = std::max(0.0, avg(m.tke));
-            m.dis.x[i][j][k] = std::max(0.0, avg(m.dis));
-            m.nue.x[i][j][k] = std::max(0.0, avg(m.nue));
+            // Turbulence scalars (tke, dis, nue) are deliberately NOT averaged
+            // into land cells: doing so leaked non-zero eddy-viscosity / TKE /
+            // dissipation into seamount flanks and continental slopes (lateral
+            // land-water interfaces that apply_wall_bc does not re-zero), so the
+            // ParaView output showed turbulence inside solid ground. They stay at
+            // the Step-1 zero in every land cell.
 
             // Thermodynamic / dynamic scalars.
             m.t.x[i][j][k]            = avg(m.t);
@@ -245,6 +247,15 @@ public:
                         m.p_hydro.x[i][j][k]          = 0.0;
                         m.r_water.x[i][j][k]          = m.r_0_water;
                         m.r_salt_water.x[i][j][k]     = m.r_0_saltwater;
+                        // Reset temperature in solid ground (mirror of the
+                        // atmosphere, BC_Atm.h). bcRadius applies an unconditional
+                        // cubic at i=0 (t[0]=t[3]-3t[2]+3t[1]) to every column; where
+                        // i=0..3 straddle the seafloor that high-condition stencil
+                        // overshoots to garbage (observed t≈-400°C at i=0,j=140), and
+                        // without this reset a fully-buried bottom cell (no water
+                        // neighbour for the Step-2 average) keeps it. 1.0 = 0°C in the
+                        // non-dim T/t_0 convention.
+                        m.t.x[i][j][k]                = 1.0;
 //                        m.c.x[i][j][k]                = 0.0;
                         m.BuoyancyForce.x[i][j][k]    = m.r_0_saltwater * m.g;
                         m.CoriolisForce.x[i][j][k]    = 0.0;
