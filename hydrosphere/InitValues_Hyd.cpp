@@ -83,149 +83,78 @@ void cHydrosphereModel::EkmanSpiral() {
     }
 
     // ========================================================================
-    // Step 2: Main Ekman computation — one thread per k-column
+    // Step 2: Surface Ekman current + vertical spiral (vector form).
+    //
+    // Ekman (1905): the wind-driven surface current is deflected Ekman_angle
+    // (45 deg) cum sole - to the RIGHT of the wind in the northern hemisphere,
+    // to the LEFT in the southern - then rotates further the same way and
+    // decays exponentially with depth: magnitude V_0*exp(-a*z), direction
+    // turning by a*z over the Ekman scale a = sqrt(f/2Az).
+    //
+    // This replaces an earlier per-latitude quadrant lookup that (a) left the
+    // surface-current `angle` UNINITIALISED whenever the (w,v) wind sign pair
+    // fell outside the three hard-coded cases per hemisphere - the missing case
+    // being the easterly-trade quadrant, i.e. exactly the subtropics - and (b)
+    // treated the two hemispheres inconsistently. The result was a spurious,
+    // hemisphere-asymmetric surface current and no Southern-Hemisphere
+    // subtropical gyre. The vector form below is symmetric by construction and
+    // has no uninitialised path. Model frame: w = east(+), v = south(+), so the
+    // northward wind/current component is -v.
     // ========================================================================
+    const int j_eq = (jm - 1) / 2;
+
     #pragma omp parallel for
     for (int k = 1; k < km - 1; k++) {
         for (int j = 1; j < jm - 1; j++) {
 
-            // Thread-local scalars — declared inside loop, no private() clause needed
-            double alfa, angle, sinthe;
-            double a, a_z, exp_a_z, sin_a_z, cos_a_z;
-            double U_10, V_0, T_yz, f, Az, DE, DE_180;
-
-            v_wind.y[90][k] = 0.0;
-
-            // Guard against zero zonal wind component
-            if (w_wind.y[j][k] == 0.0)  w_wind.y[j][k] = WIND_EPS;
-
-            alfa   = atan(fabs(v_wind.y[j][k] / w_wind.y[j][k]));
-            sinthe = sin(the.z[j]);
-            if (sinthe == 0.0)  sinthe = SINTHE_EPS;
-
-            // Wind speed and derived Ekman parameters
-            U_10  = sqrt(v_wind.y[j][k] * v_wind.y[j][k]
-                       + w_wind.y[j][k] * w_wind.y[j][k]);              // [m/s]
-            V_0   = V0_COEFF * U_10 / sqrt(fabs(sinthe));               // [m/s] eq. 9.16 Stewart
-            T_yz  = r_air * CD * U_10 * U_10;                           // [kg/(m·s²)]
-            f     = 2.0 * omega * fabs(sinthe);                         // [1/s]
-            Az    = pow((T_yz / (r_0_water * V_0)), 2) / f;             // [m²/s]
-            a     = sqrt(f / (2.0 * Az));                               // [1/m]
-            DE    = sqrt(2.0 * M_PI * M_PI * Az / f) * U_10;            // [m] Ekman depth
-            DE_180 = M_PI / a;                                          // [m] depth of reversed current
-
-            // ----------------------------------------------------------------
-            // Angle of surface current (hemisphere-aware quadrant logic)
-            // ----------------------------------------------------------------
-            if (j < (jm - 1) / 2) {                                     // Northern hemisphere
-
-                if ((w_wind.y[j][k] <= 0.0) && (v_wind.y[j][k] >= 0.0)) {
-                    // Sections I & II: 0°N – 14°N
-                    if ((alfa >= 0.0) && (alfa <= 45.0 / pi180))
-                        angle = 180.0 / pi180 - (alfa - Ekman_angle);
-                    if ((alfa > 45.0 / pi180) && (alfa <= 90.0 / pi180))
-                        angle = 180.0 / pi180 - (alfa - Ekman_angle);
-                }
-
-                if ((w_wind.y[j][k] >= 0.0) && (v_wind.y[j][k] >= 0.0)) {
-                    // Sections III & IV: 14°N – 41°N
-                    if ((alfa <= 90.0 / pi180) && (alfa >= 45.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                    if ((alfa < 45.0 / pi180) && (alfa >= 0.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                }
-
-                if ((w_wind.y[j][k] >= 0.0) && (v_wind.y[j][k] <= 0.0)) {
-                    // Section V: 41°N – 57°N
-                    if ((alfa >= 0.0) && (alfa <= 45.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                }
-
-                // ------------------------------------------------------------
-                // Vertical Ekman profile — northern hemisphere
-                // Stewart, Physical Oceanography, eq. 9.9a/b, 9.11a/b
-                // ------------------------------------------------------------
-                for (int i = im - 1; i >= 0; i--) {
-
-                    a_z     = -a * radius[i] * L_hyd;                   // [.]
-                    exp_a_z = exp(a_z);
-                    sin_a_z = sin(angle + a_z);
-                    cos_a_z = cos(angle + a_z);
-
-                    v.x[i][j][k] = V_0 * exp_a_z * sin_a_z;             // [m/s]
-                    w.x[i][j][k] = V_0 * exp_a_z * cos_a_z;
-
-                    if (DE < DE_180) {
-                        u.x[i][j][k] = 0.0;
-                        v.x[i][j][k] = 0.0;
-                        w.x[i][j][k] = 0.0;
-                    }
-                    if (is_land(h, i, j, k)) {
-                        u.x[i][j][k] = 0.0;
-                        v.x[i][j][k] = 0.0;
-                        w.x[i][j][k] = 0.0;
-                    }
-                }  // i — north
-            }  // northern hemisphere
-
-
-            if (j > (jm - 1) / 2) {                                     // Southern hemisphere
-
-                if ((w_wind.y[j][k] <= 0.0) && (v_wind.y[j][k] <= 0.0)) {
-                    // Sections I & II: 0°S – 14°S
-                    if ((alfa >= 0.0) && (alfa <= 45.0 / pi180))
-                        angle = 180.0 / pi180 - (alfa - Ekman_angle);
-                    if ((alfa > 45.0 / pi180) && (alfa <= 90.0 / pi180))
-                        angle = 180.0 / pi180 - (alfa - Ekman_angle);
-                }
-
-                if ((w_wind.y[j][k] >= 0.0) && (v_wind.y[j][k] <= 0.0)) {
-                    // Sections III & IV: 14°S – 41°S
-                    if ((alfa > 45.0 / pi180) && (alfa <= 90.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                    if ((alfa >= 0.0) && (alfa <= 45.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                }
-
-                if ((w_wind.y[j][k] >= 0.0) && (v_wind.y[j][k] >= 0.0)) {
-                    // Section V: 41°S – 57°S
-                    if ((alfa < 45.0 / pi180) && (alfa >= 0.0 / pi180))
-                        angle = alfa + Ekman_angle;
-                }
-
-                // ------------------------------------------------------------
-                // Vertical Ekman profile — southern hemisphere
-                // Stewart, Physical Oceanography, eq. 9.9a/b, 9.11a/b
-                // ------------------------------------------------------------
+            // Equator: Coriolis -> 0 makes the Ekman balance singular. Keep the
+            // historical treatment: no meridional flow, zonal current copied
+            // from the adjacent (already-computed) cell toward the equator.
+            if (j == j_eq) {
                 for (int i = 0; i < im; i++) {
-
-                    a_z     = -a * radius[i] * L_hyd;                   // [.]
-                    exp_a_z = exp(a_z);
-                    sin_a_z = -sin(angle + a_z);                        // sign reversal south
-                    cos_a_z =  cos(angle + a_z);
-
-                    v.x[i][j][k] = V_0 * exp_a_z * sin_a_z;             // [m/s]
-                    w.x[i][j][k] = V_0 * exp_a_z * cos_a_z;
-
-                    if (DE < DE_180) {
-                        u.x[i][j][k] = 0.0;
-                        v.x[i][j][k] = 0.0;
-                        w.x[i][j][k] = 0.0;
-                    }
-                    if (is_land(h, i, j, k)) {
-                        u.x[i][j][k] = 0.0;
-                        v.x[i][j][k] = 0.0;
-                        w.x[i][j][k] = 0.0;
-                    }
-                }  // i — south
-            }  // southern hemisphere
-
-
-            if (j == (jm - 1) / 2) {                                    // Equator
-                for (int i = 0; i < im; i++) {
-                    v.x[i][90][k] = 0.0;
-                    w.x[i][90][k] = w.x[i][89][k];
+                    v.x[i][j][k] = 0.0;
+                    w.x[i][j][k] = w.x[i][j-1][k];
                 }
+                continue;
+            }
+
+            double sinthe = sin(the.z[j]);
+            if (sinthe == 0.0) sinthe = SINTHE_EPS;
+
+            const double We   = w_wind.y[j][k];                            // east  [m/s]
+            const double Wn   = -v_wind.y[j][k];                           // north [m/s]
+            const double U_10 = sqrt(We * We + Wn * Wn);                   // [m/s]
+
+            // Physical Ekman scales (hemisphere-symmetric via |sin(theta)|).
+            const double V_0    = V0_COEFF * U_10 / sqrt(fabs(sinthe));    // [m/s] Stewart eq. 9.16
+            const double T_yz   = r_air * CD * U_10 * U_10;                // [kg/(m s^2)]
+            const double f      = 2.0 * omega * fabs(sinthe);             // [1/s]
+            const double Az     = pow(T_yz / (r_0_water * (V_0 > 0.0 ? V_0 : 1.0)), 2) / f; // [m^2/s]
+            const double a      = sqrt(f / (2.0 * Az));                    // [1/m]
+            const double DE     = sqrt(2.0 * M_PI * M_PI * Az / f) * U_10; // [m] Ekman depth
+            const double DE_180 = M_PI / a;                               // [m] depth of reversed current
+
+            // Hemisphere handedness: +1 north (deflect/rotate right = clockwise
+            // = decreasing math-angle), -1 south.
+            const double hsign = (j < j_eq) ? 1.0 : -1.0;
+
+            // Surface current direction = wind direction deflected by Ekman_angle.
+            const double phi0 = atan2(Wn, We) - hsign * Ekman_angle;
+
+            const bool kill = (U_10 < WIND_EPS) || (DE < DE_180);
+
+            for (int i = 0; i < im; i++) {
+                if (kill || is_land(h, i, j, k)) {
+                    u.x[i][j][k] = 0.0;
+                    v.x[i][j][k] = 0.0;
+                    w.x[i][j][k] = 0.0;
+                    continue;
+                }
+                const double depth = radius[i] * L_hyd;                   // [m] >= 0 below surface
+                const double mag   = V_0 * exp(-a * depth);               // [m/s]
+                const double ang   = phi0 - hsign * a * depth;            // spiral turning with depth
+                w.x[i][j][k] =  mag * cos(ang);                           // east
+                v.x[i][j][k] = -mag * sin(ang);                           // south = -north
             }
         }  // j
     }  // k
