@@ -185,3 +185,98 @@ void cHydrosphereModel::searchMinMax_2D(string name_maxValue, string name_minVal
 *
 */
 
+
+// ============================================================================
+// Zonal-mean zonal-velocity (w) momentum budget.
+//
+// Diagnoses why the Southern-Hemisphere surface circulation spins down and
+// accelerates westward over a spin-up (the prescribed eastward gyre return /
+// West Wind Drift reverses; see project_hydro_ekman_sh_gyre). The zonal-mean
+// zonal-momentum equation has (to rounding) no net pressure-gradient term —
+// -dp/dphi integrates out over a periodic longitude circle — so a sustained
+// zonal-mean acceleration must come from Coriolis (-2*Omega*(cos*v+sin*u)),
+// advection, or diffusion. The per-term split (captured in wbud_* during the
+// RK4) is compared per latitude/depth, alongside the net per-iteration change
+// of wbar from the wbar_before snapshot (which also includes the pressure
+// projection and the polar zonal filter applied after the RHS).
+//
+// Units: cm/s for wbar; cm/s per iteration for the term contributions
+// (rhs_w term * dt * u_0, the Euler-step increment, since the RK4 advances
+// w_nd by rhs_w * dt). A term NEGATIVE where wbar<0 is ERODING / reversing the
+// (eastward) flow toward westward at that (lat, depth).
+// ----------------------------------------------------------------------------
+void cHydrosphereModel::zonal_mean_w(std::vector<std::vector<double> >& wbar){
+    for(int i = 0; i < im; i++)
+        for(int j = 0; j < jm; j++){
+            double sum = 0.0; int n = 0;
+            for(int k = 0; k < km; k++){
+                if(!AtomUtils::is_water(h, i, j, k)) continue;
+                double a = w.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(a)) continue;
+                sum += a; n++;
+            }
+            wbar[i][j] = (n > 0) ? sum / n * u_0 * 100.0 : 0.0;   // cm/s, East+
+        }
+}
+
+void cHydrosphereModel::write_w_momentum_budget(int iter){
+    std::vector<std::vector<double> > wbar(im, std::vector<double>(jm, 0.0));
+    zonal_mean_w(wbar);   // post-iteration zonal-mean w [cm/s]
+
+    auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };
+    const double term_scale = dt * u_0 * 100.0;   // nondim rhs_w term -> cm/s per iter
+
+    auto zmean = [&](const Array& A, std::vector<std::vector<double> >& out){
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++){
+                double s = 0.0; int n = 0;
+                for(int k = 0; k < km; k++){
+                    if(!AtomUtils::is_water(h, i, j, k)) continue;
+                    double a = A.x[i][j][k];
+                    if(!AtomUtils::is_finite_safe(a)) continue;
+                    s += a; n++;
+                }
+                out[i][j] = (n > 0) ? s / n * term_scale : 0.0;
+            }
+    };
+    std::vector<std::vector<double> > t_pgf(im, std::vector<double>(jm, 0.0)),
+        t_cor = t_pgf, t_adv = t_pgf, t_diff = t_pgf;
+    zmean(wbud_pgf, t_pgf);  zmean(wbud_cor, t_cor);
+    zmean(wbud_adv, t_adv);  zmean(wbud_diff, t_diff);
+
+    const bool have_before = ((int)wbar_before.size() == im);
+
+    std::ostringstream fname;
+    fname << output_path << "/w_momentum_budget_" << iter << ".csv";
+    std::ofstream f(fname.str().c_str());
+    if(f.is_open()){
+        f << "lat_deg,level_i,depth_m,wbar_cms,dwbar_net_cms,"
+          << "pgf,coriolis,advection,diffusion,dyn_sum_cms\n";
+        for(int j = 0; j < jm; j++){
+            const double lat = lat_of(j);
+            for(int i = 0; i < im; i++){
+                const double depth   = (rad.z[im-1] - rad.z[i]) * L_hyd;
+                const double dyn_sum = t_pgf[i][j] + t_cor[i][j] + t_adv[i][j] + t_diff[i][j];
+                const double dnet    = have_before ? (wbar[i][j] - wbar_before[i][j]) : 0.0;
+                f << lat << "," << i << "," << depth << "," << wbar[i][j] << ","
+                  << dnet << "," << t_pgf[i][j] << "," << t_cor[i][j] << ","
+                  << t_adv[i][j] << "," << t_diff[i][j] << "," << dyn_sum << "\n";
+            }
+        }
+        f.close();
+        cout << "      OGCM: wrote " << fname.str() << endl;
+    }
+
+    // Console summary at the SH spin-down band (~40 S, near-surface interior).
+    // i=im-1 is the sea-surface BC row (no RHS terms), so probe the layer below.
+    const int jp = (int)round((90.0 + 40.0) * (jm - 1) / 180.0);   // ~40 S
+    const int ip = im - 2;                                          // near-surface interior
+    const double dyn_sum = t_pgf[ip][jp] + t_cor[ip][jp] + t_adv[ip][jp] + t_diff[ip][jp];
+    cout << "      [wbudget] iter=" << iter << fixed << setprecision(4)
+         << "  @lat=" << setprecision(0) << lat_of(jp) << " near-surf" << setprecision(4)
+         << "  wbar=" << wbar[ip][jp] << "cm/s"
+         << "  pgf=" << t_pgf[ip][jp] << " cor=" << t_cor[ip][jp]
+         << " adv=" << t_adv[ip][jp] << " diff=" << t_diff[ip][jp]
+         << "  dyn_sum=" << dyn_sum
+         << "  dnet=" << (have_before ? wbar[ip][jp] - wbar_before[ip][jp] : 0.0) << endl;
+}

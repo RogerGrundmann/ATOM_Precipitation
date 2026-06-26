@@ -58,7 +58,9 @@ public:
             // Turbulence fields — zero-initialised (inactive until TurbulenceHyd::init())
             &m.tke, &m.tken, &m.dis, &m.disn,
             &m.nue, &m.prod, &m.tke_source, &m.dis_source,
-            &m.rhs_tke, &m.rhs_dis
+            &m.rhs_tke, &m.rhs_dis,
+            // w-momentum-budget diagnostic fields (zero-initialised)
+            &m.wbud_pgf, &m.wbud_cor, &m.wbud_adv, &m.wbud_diff
         };
         constexpr int n_3d_zero = sizeof(arrays_3d_zero) / sizeof(arrays_3d_zero[0]);
 

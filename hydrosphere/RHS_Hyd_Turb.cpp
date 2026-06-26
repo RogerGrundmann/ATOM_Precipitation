@@ -594,6 +594,17 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
         + Coriolis * Coriolis_phi;
 
+    // w-momentum-budget capture (turbulent path = active path; mirror of
+    // RHS_Hyd.cpp). Stores the four rhs_w contributions on checkpoint iters so
+    // write_w_momentum_budget can attribute the zonal-mean zonal-velocity
+    // tendency by latitude/depth. diffusion_w here carries the eddy viscosity.
+    if (wbudget_capture) {
+        wbud_pgf.x[i][j][k]  = -dpdphi_invrs;
+        wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
+        wbud_adv.x[i][j][k]  = -transport_w;
+        wbud_diff.x[i][j][k] =  diffusion_w;
+    }
+
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;
 
     rhs_tke.x[i][j][k] = -transport_tke + diffusion_tke + tke_source.x[i][j][k];

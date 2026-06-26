@@ -212,6 +212,8 @@ private:
     std::vector<Array*> restart_arrays();
     void save_state(int iter);
     bool load_state(int iter);
+    void zonal_mean_w(std::vector<std::vector<double> >& wbar);
+    void write_w_momentum_budget(int iter);
     void searchMinMax_2D(string, string, 
         string, Array_2D &, double coeff=1.);
     void searchMinMax_3D(string, string, 
@@ -229,6 +231,14 @@ public:
     int total_iter_count = 0;
     double diffusion_ramp = 1.0;
     bool inviscid_phase = false;
+
+    // Zonal-mean zonal-velocity (w) momentum-budget diagnostic — attributes the
+    // SH surface westward spin-down. When wbudget_capture is set (checkpoint
+    // iters), RHS_Hyd stores each rhs_w contribution into wbud_*; the run loop
+    // snapshots wbar_before and write_w_momentum_budget emits the per-latitude
+    // CSV. See project_hydro_ekman_sh_gyre.
+    bool wbudget_capture = false;
+    std::vector<std::vector<double> > wbar_before;
 
     Array_1D rad;                                                       // radial coordinate direction
     Array_1D the;                                                       // lateral coordinate direction
@@ -305,6 +315,11 @@ public:
     Array dis_source;                                                   // RHS source term for ε/ω equation
     Array rhs_tke;                                                      // auxiliary RHS field for tke
     Array rhs_dis;                                                      // auxiliary RHS field for dis
+
+    Array wbud_pgf;                                                     // w-budget: -dp/dphi /(rm*sinthe)  zonal pressure gradient (~0 in zonal mean)
+    Array wbud_cor;                                                     // w-budget: Coriolis  -2*Omega*(costhe*v + sinthe*u)
+    Array wbud_adv;                                                     // w-budget: advection -transport_w
+    Array wbud_diff;                                                    // w-budget: diffusion (incl. curvature/metric)
     Array_2D vel_star;                                                  // friction velocity u_τ per (j,k) column [m/s]
 };
 #endif

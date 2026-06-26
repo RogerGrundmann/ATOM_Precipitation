@@ -349,6 +349,17 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
     rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
         + Coriolis * Coriolis_phi;
 
+    // w-momentum-budget capture (checkpoint iters only): store the four rhs_w
+    // contributions so write_w_momentum_budget can attribute the zonal-mean
+    // zonal-velocity tendency by latitude/depth. The last RK4 sub-stage written
+    // wins, which is representative for the diagnostic.
+    if (wbudget_capture) {
+        wbud_pgf.x[i][j][k]  = -dpdphi_invrs;
+        wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
+        wbud_adv.x[i][j][k]  = -transport_w;
+        wbud_diff.x[i][j][k] =  diffusion_w;
+    }
+
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;
 
 

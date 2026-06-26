@@ -335,11 +335,22 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  dt = " << std::scientific << std::setprecision(4) << dt
              << std::defaultfloat << endl;
 
+        // w-momentum-budget diagnostic: on checkpoint iters, snapshot the
+        // zonal-mean zonal velocity before the RK4 and have RHS_Hyd store its
+        // per-term split this step (see write_w_momentum_budget).
+        wbudget_capture = (iter_n % checkpoint == 0);
+        if(wbudget_capture){
+            wbar_before.assign(im, std::vector<double>(jm, 0.0));
+            zonal_mean_w(wbar_before);
+        }
+
         if (use_turbulence_model && !inviscid_phase) {
             solveRungeKutta_Hydrosphere_Turb();
         } else {
             solveRungeKutta_Hydrosphere();
         }
+
+        wbudget_capture = false;   // wbud_* now hold this iter's term split
 
         // Heavy block (pressure solver, salinity/thermo, turbulence update) runs every 2
         // iterations in the viscous phase, but only every 10 iterations during the inviscid
@@ -402,6 +413,10 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // Binary restart checkpoint alongside the vtk/vts output, every
             // `checkpoint` iters, so a long spin-up can be resumed.
             save_state(total_iter_count);
+
+            // Zonal-mean w-momentum budget CSV (uses the wbud_* term split
+            // captured this iter + the wbar_before snapshot for the net Δwbar).
+            write_w_momentum_budget(total_iter_count);
         }
     }  // end iter_n
 
