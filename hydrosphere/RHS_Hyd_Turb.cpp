@@ -27,12 +27,11 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     const double inv_rm2sinthe2      = geo.inv_rm2sinthe2;
     const double costhe_inv_rm2sinthe = geo.costhe_inv_rm2sinthe;
 
-    const double inv_2dr   = geo.inv_2dr;
     const double inv_2dthe = geo.inv_2dthe;
     const double inv_2dphi = geo.inv_2dphi;
-    const double inv_dr2   = geo.inv_dr2;
     const double inv_dthe2 = geo.inv_dthe2;
     const double inv_dphi2 = geo.inv_dphi2;
+    // radial derivatives use the per-i non-uniform stencil coeffs (rc*/rf*), not inv_2dr/inv_dr2
 
     double u_ijk = u.x[i][j][k];
     double v_ijk = v.x[i][j][k];
@@ -55,51 +54,58 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
     // ===== R-direction derivatives =====
     if(i < im-2 && land_ijk && is_air(h, i+1, j, k)){
+        // Forward-biased stencil (points i, i+1, i+2) on the stretched radial grid
         #define COMPUTE_DR_B(FIELD, d1, d2) \
-            d1 = (-3.0*FIELD.x[i][j][k] + 4.0*FIELD.x[i+1][j][k] - FIELD.x[i+2][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[i][j][k] - 2.0*FIELD.x[i+1][j][k] + FIELD.x[i+2][j][k]) * inv_dr2;
+            d1 = rf10[i]*FIELD.x[i][j][k] + rf11[i]*FIELD.x[i+1][j][k] + rf12[i]*FIELD.x[i+2][j][k]; \
+            d2 = rf20[i]*FIELD.x[i][j][k] + rf21[i]*FIELD.x[i+1][j][k] + rf22[i]*FIELD.x[i+2][j][k];
         COMPUTE_DR_B(u, dudr, d2udr2)  COMPUTE_DR_B(v, dvdr, d2vdr2)
         COMPUTE_DR_B(w, dwdr, d2wdr2)  COMPUTE_DR_B(t, dtdr, d2tdr2)
         COMPUTE_DR_B(c, dcdr, d2cdr2)
         COMPUTE_DR_B(tke, dtkedr, d2tkedr2)  COMPUTE_DR_B(dis, ddisdr, d2disdr2)
-        dpdr   = (-3.0*p_dyn.x[i][j][k] + 4.0*p_dyn.x[i+1][j][k] - p_dyn.x[i+2][j][k]) * inv_2dr;
-        dnuedr = (-3.0*nue.x[i][j][k]   + 4.0*nue.x[i+1][j][k]   - nue.x[i+2][j][k])   * inv_2dr;
+        dpdr   = rf10[i]*p_dyn.x[i][j][k] + rf11[i]*p_dyn.x[i+1][j][k] + rf12[i]*p_dyn.x[i+2][j][k];
+        dnuedr = rf10[i]*nue.x[i][j][k]   + rf11[i]*nue.x[i+1][j][k]   + rf12[i]*nue.x[i+2][j][k];
         r_flag = true;
         #undef COMPUTE_DR_B
     }
     else if(i == 0){
+        // Forward stencil at the bottom (points 0, 1, 2) on the stretched radial grid
         #define COMPUTE_DR_F(FIELD, d1, d2) \
-            d1 = (-3.0*FIELD.x[0][j][k] + 4.0*FIELD.x[1][j][k] - FIELD.x[2][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[0][j][k] - 2.0*FIELD.x[1][j][k] + FIELD.x[2][j][k]) * inv_dr2;
+            d1 = rf10[0]*FIELD.x[0][j][k] + rf11[0]*FIELD.x[1][j][k] + rf12[0]*FIELD.x[2][j][k]; \
+            d2 = rf20[0]*FIELD.x[0][j][k] + rf21[0]*FIELD.x[1][j][k] + rf22[0]*FIELD.x[2][j][k];
         COMPUTE_DR_F(u, dudr, d2udr2)  COMPUTE_DR_F(v, dvdr, d2vdr2)
         COMPUTE_DR_F(w, dwdr, d2wdr2)  COMPUTE_DR_F(t, dtdr, d2tdr2)
         COMPUTE_DR_F(c, dcdr, d2cdr2)
         COMPUTE_DR_F(tke, dtkedr, d2tkedr2)  COMPUTE_DR_F(dis, ddisdr, d2disdr2)
-        dpdr   = (-3.0*p_dyn.x[0][j][k] + 4.0*p_dyn.x[1][j][k] - p_dyn.x[2][j][k]) * inv_2dr;
-        dnuedr = (-3.0*nue.x[0][j][k]   + 4.0*nue.x[1][j][k]   - nue.x[2][j][k])   * inv_2dr;
+        dpdr   = rf10[0]*p_dyn.x[0][j][k] + rf11[0]*p_dyn.x[1][j][k] + rf12[0]*p_dyn.x[2][j][k];
+        dnuedr = rf10[0]*nue.x[0][j][k]   + rf11[0]*nue.x[1][j][k]   + rf12[0]*nue.x[2][j][k];
         r_flag = true;
         #undef COMPUTE_DR_F
     }
 
     if(!r_flag){
+        // Central stencil (points i-1, i, i+1) on the stretched radial grid
         #define COMPUTE_DR_C(FIELD, d1, d2) \
-            d1 = (FIELD.x[i+1][j][k] - FIELD.x[i-1][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[i+1][j][k] - 2.0*FIELD.x[i][j][k] + FIELD.x[i-1][j][k]) * inv_dr2;
+            d1 = rc1m[i]*FIELD.x[i-1][j][k] + rc10[i]*FIELD.x[i][j][k] + rc1p[i]*FIELD.x[i+1][j][k]; \
+            d2 = rc2m[i]*FIELD.x[i-1][j][k] + rc20[i]*FIELD.x[i][j][k] + rc2p[i]*FIELD.x[i+1][j][k];
         COMPUTE_DR_C(u, dudr, d2udr2)  COMPUTE_DR_C(v, dvdr, d2vdr2)
         COMPUTE_DR_C(w, dwdr, d2wdr2)  COMPUTE_DR_C(t, dtdr, d2tdr2)
         COMPUTE_DR_C(c, dcdr, d2cdr2)
         COMPUTE_DR_C(tke, dtkedr, d2tkedr2)  COMPUTE_DR_C(dis, ddisdr, d2disdr2)
-        dpdr   = (p_dyn.x[i+1][j][k] - p_dyn.x[i-1][j][k]) * inv_2dr;
-        dnuedr = (nue.x[i+1][j][k]   - nue.x[i-1][j][k])   * inv_2dr;
+        dpdr   = rc1m[i]*p_dyn.x[i-1][j][k] + rc10[i]*p_dyn.x[i][j][k] + rc1p[i]*p_dyn.x[i+1][j][k];
+        dnuedr = rc1m[i]*nue.x[i-1][j][k]   + rc10[i]*nue.x[i][j][k]   + rc1p[i]*nue.x[i+1][j][k];
         #undef COMPUTE_DR_C
 
         // Neumann BC at seafloor: first water cell reads land (zeroed) below it.
-        // Replace land neighbour's tke/dis with current cell value (zero-gradient).
+        // Replace land neighbour's tke/dis with current cell value (zero-gradient),
+        // using the local upward spacing hp = rad.z[i+1]-rad.z[i] (stretched grid).
         if (!land_ijk && i > 0 && is_land(h, i-1, j, k)) {
-            dtkedr   = (tke.x[i+1][j][k] - tke.x[i][j][k]) * inv_2dr;
-            d2tkedr2 = (tke.x[i+1][j][k] - tke.x[i][j][k]) * inv_dr2;
-            ddisdr   = (dis.x[i+1][j][k] - dis.x[i][j][k]) * inv_2dr;
-            d2disdr2 = (dis.x[i+1][j][k] - dis.x[i][j][k]) * inv_dr2;
+            const double hp = rad.z[i+1] - rad.z[i];
+            const double inv_hp = 1.0 / hp;
+            const double inv_hp2 = inv_hp * inv_hp;
+            dtkedr   = (tke.x[i+1][j][k] - tke.x[i][j][k]) * inv_hp;
+            d2tkedr2 = (tke.x[i+1][j][k] - tke.x[i][j][k]) * inv_hp2;
+            ddisdr   = (dis.x[i+1][j][k] - dis.x[i][j][k]) * inv_hp;
+            d2disdr2 = (dis.x[i+1][j][k] - dis.x[i][j][k]) * inv_hp2;
         }
     }
 
@@ -280,10 +286,14 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     //   F_r = +2Ω sin(θ) w               (Eötvös: east → up at equator)
     //   F_θ = +2Ω cos(θ) w
     //   F_φ = -2Ω cos(θ) v - 2Ω sin(θ) u
-    double two_omega_Lhyd_dt_over_u0 = 2.0 * omega * L_hyd / u_0 * dt;
-    double Coriolis_rad =  two_omega_Lhyd_dt_over_u0 * sinthe * w_ijk;
-    double Coriolis_the =  two_omega_Lhyd_dt_over_u0 * costhe * w_ijk;
-    double Coriolis_phi = -two_omega_Lhyd_dt_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
+    // EXPERIMENT 2026-06-26 (uncommitted): inverse Rossby number = 2*Omega*L/u_0
+    // with NO dt (RK4 supplies the timestep); the old coefficient's extra *dt made
+    // Coriolis ~1/dt too weak vs advection/diffusion -> SH gyre spin-down. Test:
+    // drop the *dt. Active (turbulent) path. See project_hydro_coriolis_dt_scaling.
+    double two_omega_Lhyd_over_u0 = 2.0 * omega * L_hyd / u_0;
+    double Coriolis_rad =  two_omega_Lhyd_over_u0 * sinthe * w_ijk;
+    double Coriolis_the =  two_omega_Lhyd_over_u0 * costhe * w_ijk;
+    double Coriolis_phi = -two_omega_Lhyd_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
 
     double rad_dist     = (double)i * L_hyd * exp_rm;
     double rad_Earth_m  = rad_dist + r_Earth * 1e3;
@@ -588,6 +598,29 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
+    // --- rhs_u term-split diagnostic at the iter-635 blow-up seed (13°S/73°E,
+    //     i=im-2 = the wind-stress injection cell). Logs every RK4 stage for
+    //     iters >= 620 so we can see which term drives the radial-velocity
+    //     runaway (advection / PGF / buoyancy / Coriolis / diffusion) and how the
+    //     horizontal convergence (dvdthe, dwdphi) evolves. See
+    //     project_hydro_polar_blowup. Remove once the driver is identified. ---
+    if (i == im-2 && j == 103 && k == 73 && total_iter_count >= 620) {
+        double buoy_u = buoyancy * g * dt / u_0
+            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
+        #pragma omp critical
+        std::cout << "[usplit] it=" << total_iter_count
+            << "  u=" << u_ijk << " v=" << v_ijk << " w=" << w_ijk
+            << " | pgf=" << -dpdr_exp
+            << " adv=" << -transport_u
+            << " diff=" << diffusion_u
+            << " buoy=" << buoy_u
+            << " cor=" << (Coriolis * Coriolis_rad)
+            << " cf=" << (-centrifugal * centrifugal_rad)
+            << " => rhs_u=" << rhs_u.x[i][j][k]
+            << " | dudr=" << dudr << " dvdthe=" << dvdthe << " dwdphi=" << dwdphi
+            << std::endl;
+    }
+
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
         + Coriolis * Coriolis_the - centrifugal * centrifugal_the;
 
@@ -603,6 +636,24 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
         wbud_adv.x[i][j][k]  = -transport_w;
         wbud_diff.x[i][j][k] =  diffusion_w;
+    }
+
+    // Surface wind-stress forcing (active turbulent path; mirror of RHS_Hyd.cpp).
+    // The ocean momentum equation otherwise has NO sustained wind input — the
+    // atmosphere wind only initialises the currents, so wind-driven currents spin
+    // down (see project_hydro_no_wind_stress_forcing). Bulk stress
+    // tau = r_air*C_D*|U_wind|*U_wind as a body force in the topmost integrated
+    // cell (i=im-2 ~ mixed layer), non-dim by L_hyd/u_0^2 (advective time).
+    constexpr bool WIND_STRESS_FORCING = true;
+    if (WIND_STRESS_FORCING && i == im - 2 && is_water(h, i, j, k)) {
+        constexpr double C_D = 2.6e-3;
+        const double dz_top = (rad.z[im-1] - rad.z[im-2]) * L_hyd;        // [m]
+        const double U_wind = sqrt(v_wind.y[j][k] * v_wind.y[j][k]
+                                 + w_wind.y[j][k] * w_wind.y[j][k]);      // [m/s]
+        const double accel_nd = r_air * C_D * U_wind / (r_0_water * dz_top)
+                              * L_hyd / (u_0 * u_0);
+        rhs_w.x[i][j][k] += accel_nd * w_wind.y[j][k];                    // zonal     (East+)
+        rhs_v.x[i][j][k] += accel_nd * v_wind.y[j][k];                    // meridional (South+)
     }
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;

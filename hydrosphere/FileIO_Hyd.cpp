@@ -112,6 +112,19 @@ void cHydrosphereModel::HydrosphereDataTransfer(const string &Name_Bathymetry_Fi
     }
 
     string line;
+
+    // The atmosphere writes a one-line headline first (e.g. "# iter_n = 155").
+    // Consume it so the jm*km data rows line up; tolerate older header-less
+    // transfer files by rewinding to the start when no '#' headline is present.
+    if(getline(Transfer_File, line)){
+        if(!line.empty() && line[0] == '#'){
+            cout << "      OGCM: transfer file headline: " << line << endl;
+        }else{
+            Transfer_File.clear();
+            Transfer_File.seekg(0, ios::beg);
+        }
+    }
+
     bool truncated = false;
     for(int j = 0; j < jm && !truncated; j++) {
         for(int k = 0; k < km; k++) {

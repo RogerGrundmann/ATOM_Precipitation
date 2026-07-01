@@ -191,6 +191,7 @@ private:
     void print_final_remarks();
     void print_loop_3D_headings();
     void print_min_max_hyd();
+    bool scanForNaN_hyd(int iter, const char *stage);
     void LandOceanFraction();
     void init_bathymetry(const string &bathymetry_file);
     void BC_Surface_Salinity_NASA(const string &Name_SurfaceSalinity_File);
@@ -243,6 +244,20 @@ public:
     Array_1D rad;                                                       // radial coordinate direction
     Array_1D the;                                                       // lateral coordinate direction
     Array_1D phi;                                                       // longitudinal coordinate direction
+
+    // Per-i non-uniform 3-point radial finite-difference coefficients, derived
+    // from the actual (stretched) rad.z spacing. The radial grid is stretched
+    // (sinh, fine at the surface i=im-1, coarse at the bottom i=0), but the FD
+    // stencils were written for a uniform grid (constant dr). These coefficients
+    // make every radial derivative correct on the stretched grid. Filled once by
+    // setupRadialStencilCoeffs() after rad is built; const for the whole run.
+    //   central (points i-1,i,i+1), valid i in [1,im-2]
+    std::vector<double> rc1m, rc10, rc1p;   // 1st derivative
+    std::vector<double> rc2m, rc20, rc2p;   // 2nd derivative
+    //   forward (points i,i+1,i+2), valid i in [0,im-3]
+    std::vector<double> rf10, rf11, rf12;   // 1st derivative
+    std::vector<double> rf20, rf21, rf22;   // 2nd derivative
+    void setupRadialStencilCoeffs();
     Array_1D aux_grad_v;                                                // auxilliar array
     Array_1D aux_grad_w;                                                // auxilliar array
     
@@ -262,6 +277,7 @@ public:
     Array_2D temp_landscape;                                            // landscape temperature
     Array_2D temp_reconst;                                              // surface temperature from reconstuction tool
     Array_2D c_fix;                                                     // local surface salinity fixed for iterations
+    Array_2D t_surf_fix;                                                // prescribed surface SST, fixed for iterations (sustained surface heat-flux forcing)
     Array_2D v_wind;                                                    // v-component of surface wind
     Array_2D w_wind;                                                    // w-component of surface wind
     Array_2D velocity_v_NASA;                                           // surface v-velocity from NASA

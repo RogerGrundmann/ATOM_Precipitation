@@ -110,6 +110,47 @@ void cHydrosphereModel::LoadConfig(const char *filename){
 /*
 *
 */
+// Build the per-i non-uniform 3-point radial finite-difference coefficients from
+// the actual (stretched) rad.z spacing. On a uniform grid these reduce exactly to
+// the textbook (f[i+1]-f[i-1])/(2dr) and (f[i+1]-2f[i]+f[i-1])/dr2 stencils; on the
+// stretched hydro grid they give the correct derivative w.r.t. the rad coordinate,
+// which the constant-dr stencils did not. exp_rm and all metric factors are left
+// untouched — they multiply d/drad and are unaffected by how d/drad is discretised.
+void cHydrosphereModel::setupRadialStencilCoeffs(){
+    rc1m.assign(im, 0.0); rc10.assign(im, 0.0); rc1p.assign(im, 0.0);
+    rc2m.assign(im, 0.0); rc20.assign(im, 0.0); rc2p.assign(im, 0.0);
+    rf10.assign(im, 0.0); rf11.assign(im, 0.0); rf12.assign(im, 0.0);
+    rf20.assign(im, 0.0); rf21.assign(im, 0.0); rf22.assign(im, 0.0);
+
+    // Central stencil (points i-1, i, i+1)
+    for(int i = 1; i < im-1; i++){
+        const double hm = rad.z[i]   - rad.z[i-1];     // spacing below
+        const double hp = rad.z[i+1] - rad.z[i];       // spacing above
+        const double hs = hm + hp;
+        rc1m[i] = -hp / (hm * hs);
+        rc10[i] =  (hp - hm) / (hm * hp);
+        rc1p[i] =  hm / (hp * hs);
+        rc2m[i] =  2.0 / (hm * hs);
+        rc20[i] = -2.0 / (hm * hp);
+        rc2p[i] =  2.0 / (hp * hs);
+    }
+
+    // Forward stencil (points i, i+1, i+2)
+    for(int i = 0; i < im-2; i++){
+        const double h1 = rad.z[i+1] - rad.z[i];
+        const double h2 = rad.z[i+2] - rad.z[i+1];
+        const double hs = h1 + h2;
+        rf10[i] = -(2.0 * h1 + h2) / (h1 * hs);
+        rf11[i] =  hs / (h1 * h2);
+        rf12[i] = -h1 / (h2 * hs);
+        rf20[i] =  2.0 / (h1 * hs);
+        rf21[i] = -2.0 / (h1 * h2);
+        rf22[i] =  2.0 / (h2 * hs);
+    }
+}
+/*
+*
+*/
 void cHydrosphereModel::RunTimeSlice(int Ma){
 
     #ifdef _OPENMP
@@ -156,12 +197,29 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     the.Coordinates(jm, the0, dthe);
     phi.Coordinates(km, phi0, dphi);
 
+    setupRadialStencilCoeffs();   // non-uniform radial FD coefficients for the stretched rad grid
+
     read_Hydrosphere_Surface_Data(Ma);
 
 //    if(use_NASA_velocity)
 //        IC_vwt_WestEastCoast();                                         // horizontal velocity initial condition and temperature adjustments along coasts
 
     initTemperature(Ma);
+
+    // Snapshot the prescribed surface SST as a sustained surface heat-flux forcing.
+    // The atmosphere only INITIALISES the ocean surface temperature; rhs_t has no
+    // surface heat-flux source term and bcRadius never re-pins the surface (it sets
+    // only the insulating bottom t[0]=t[1]), so the ocean thermal state is unforced
+    // and drifts — a hot grid-mode runaway without t-smoothing, or a cold collapse
+    // with it (the warm surface bleeds into the vast cold deep ocean, nothing
+    // re-warms it). Re-pinning t.x[im-1] to this fixed field every iteration in
+    // run_3D_loop is a standard ocean-spin-up surface data BC; it is the thermal
+    // analogue of the surface wind-stress forcing. Captured here, before the IC
+    // damp_wiggles, so it holds the raw prescribed SST.
+    for (int j = 0; j < jm; j++)
+        for (int k = 0; k < km; k++)
+            t_surf_fix.y[j][k] = t.x[im-1][j][k];
+
     AtomUtils::damp_wiggles(t, &i_bathymetry, true, true, true);
 
 //    if(!use_NASA_temperature)  IC_t_WestEastCoast();
@@ -180,6 +238,20 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     if (ocean_depth_mode == "deep") {
         ThermoHalineConveyorBelt(*this).run();                          // deep-water thermohaline circulation — only meaningful at full ocean depth
     }
+
+    // Vertical (radial) velocity is DIAGNOSTIC, not prescribed. EkmanSpiral sets
+    // only the horizontal Ekman currents; ThermoHalineConveyorBelt, however, was
+    // painting the radial velocity u directly with O(1 m/s) strips (IC_water=1,
+    // factors up to -10) — ~1e4 too large for an ocean (real w ~ 1e-4 m/s) — which
+    // seeded the near-surface radial-velocity runaway. Keep THC's horizontal
+    // (v,w) gyre/overturning currents but discard its prescribed u; the divergence-
+    // free projection (project_initial_velocity) then derives u from div(v,w) via
+    // continuity, the physically correct source of ocean vertical velocity.
+    for(int i = 0; i < im; i++)
+        for(int j = 0; j < jm; j++)
+            for(int k = 0; k < km; k++)
+                u.x[i][j][k] = 0.0;
+
     AtomUtils::damp_wiggles(u, &i_bathymetry, true, true, true);
     AtomUtils::damp_wiggles(v, &i_bathymetry, true, true, true);
     AtomUtils::damp_wiggles(w, &i_bathymetry, true, true, true);
@@ -308,6 +380,15 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     if(restart_from_iter >= 0)
         load_state(restart_from_iter);
 
+    // Project the initial velocity field divergence-free before time-stepping
+    // (mirror of the atmosphere, cAtmosphereModel.cpp). The ocean IC (EkmanSpiral
+    // + thermohaline currents) is NOT divergence-free, and the in-loop projection
+    // can never fully catch up — leaving residual divergence that drove the
+    // tropical-Indian-Ocean radial-velocity runaway (see project_hydro_polar_blowup).
+    // Only on a fresh start; a restart resumes an already-evolved (projected) field.
+    if(restart_from_iter < 0)
+        PressureSolverHyd(*this).project_initial_velocity(200);
+
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
         print_loop_3D_headings();
@@ -352,13 +433,32 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 
         wbudget_capture = false;   // wbud_* now hold this iter's term split
 
+        // First-NaN scanner — pinpoint the prognostic field + cell + iter of the
+        // ~iter700 polar-velocity blow-up (project RESUME 2026-06-28). Runs right
+        // after the RK4 solve, before BC/filters can relocate or mask the NaN, so
+        // the report names the field that fails first (suspected v/w near N Pole).
+        if(scanForNaN_hyd(total_iter_count, "post-RK4")){
+            print_min_max_hyd();
+            cout << endl << "      OGCM: aborting at first NaN (post-RK4 scan)." << endl;
+            std::exit(1);
+        }
+
         // Heavy block (pressure solver, salinity/thermo, turbulence update) runs every 2
         // iterations in the viscous phase, but only every 10 iterations during the inviscid
         // spin-up — dt_inviscid is 10× smaller so the physical-time cadence stays comparable.
         int heavy_block_stride = inviscid_phase ? 10 : 2;
         if(iter_n % heavy_block_stride == 0){
 
-            PressureSolverHyd(*this).run();
+            // NOTE (continuity): an explicit Chorin velocity projection
+            // (project_velocity) was tried here to enforce div(u)->0 directly. It cut
+            // the divergence (RMS 2.0->0.23) and restored Ekman symmetry, but the
+            // collocated central-difference div/grad/Laplacian are not a consistent
+            // triple, so it amplifies the checkerboard (odd-even) pressure mode —
+            // "more sweeps = worse" (blew up iter 80 at 40 sweeps, iter 27 at 150).
+            // A robust fix needs a staggered grid or Rhie-Chow interpolation. Until
+            // then, keep the (stable) pressure-as-force scheme: solve p_dyn and let
+            // grad(p) act through rhs_u/v/w. See project_hydro_polar_blowup.
+            PressureSolverHyd(*this).run(20);
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 
             ThermoHyd(*this).SaltWaterDens();
@@ -374,6 +474,18 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
                 AtomUtils::damp_wiggles(nue, &i_bathymetry, true, true, true);
             }
         }  // iter_n % heavy_block_stride == 0
+
+        // Post-heavy-block NaN scan — the post-RK4 scan above showed the prognostic
+        // fields stay finite while the EkmanPumping diagnostic goes NaN ~iter700, so
+        // the NaN is born in the heavy block (PressureSolver / SaltWaterDens /
+        // runDataHyd). This scan covers the derived 3D fields (aux_v/aux_w/
+        // r_salt_water/r_water) + the 2D EkmanPumping to attribute the first NaN to
+        // its real source, before valueLimitation/BC/filters can move or mask it.
+        if(scanForNaN_hyd(total_iter_count, "post-heavy")){
+            print_min_max_hyd();
+            cout << endl << "      OGCM: aborting at first NaN (post-heavy scan)." << endl;
+            std::exit(1);
+        }
 
         UtilsHyd(*this).valueLimitationHyd();
 
@@ -397,6 +509,32 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         AtomUtils::polar_zonal_filter(u, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(v, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(w, the.z, &i_bathymetry, 30.0, 12, 3.0);
+
+        // Temperature wiggle damping — cure the deep high-latitude T instability.
+        // The momentum/pressure/turbulence fields are de-checkerboarded every iter
+        // (damp_wiggles on p_dyn/tke/dis/nue, polar filter on u/v/w) but T had NO
+        // smoothing at all, so with the stronger wind-driven circulation a growing
+        // 2Δ (checkerboard) temperature mode at the deepest cells ran away to
+        // hundreds of degrees -> NaN (the T-clamp only masked it). A 1-2-1 Shapiro
+        // step is curvature-selective: it damps the 2Δ mode strongly while leaving
+        // the smooth thermocline essentially unchanged. Applied every iter, all
+        // axes (the deep mode is not purely vertical), like the p_dyn treatment.
+        AtomUtils::damp_wiggles(t, &i_bathymetry, true, true, true);
+
+        // Sustained surface heat-flux forcing: re-pin the ocean surface temperature
+        // to the prescribed atmospheric SST (snapshot in t_surf_fix at init) every
+        // iteration — a Dirichlet surface data BC. rhs_t carries no surface heat
+        // source and the surface BC never re-pins t.x[im-1], so without this the
+        // ocean thermal state is unforced and drifts (cold collapse / hot runaway,
+        // the corvalid/windtest failure). Applied after damp_wiggles so the warm
+        // surface is the final word each iter; the smoother then only mixes the
+        // interior (deep-checkerboard protection). Ocean cells only — land surface
+        // temperature is handled by bcSolidGround. Thermal analogue of the wind-stress
+        // forcing (see project_hydro_no_surface_heat_flux).
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++)
+                if (is_water(h, im-1, j, k))
+                    t.x[im-1][j][k] = t_surf_fix.y[j][k];
 
 //        UtilsHyd(*this).findResiduumHyd();
 

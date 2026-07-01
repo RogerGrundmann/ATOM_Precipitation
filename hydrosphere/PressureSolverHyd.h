@@ -32,10 +32,11 @@ public:
         : m(model)
     {}
 
-    void run()
+    void run(int n_sweeps = 1, bool verbose = true)
     {
         using namespace std;
-        cout << endl << endl << endl << "      OGCM: PressureSolverHyd" << endl;
+        if (verbose) cout << endl << endl << endl
+            << "      OGCM: PressureSolverHyd (" << n_sweeps << " Jacobi sweeps)" << endl;
 
         auto begin = std::chrono::high_resolution_clock::now();
 
@@ -95,8 +96,16 @@ public:
         const double inv_dphi  = 1.0 / m.dphi;
 
         // ====================================================================
-        // Main pressure sweep
+        // Main pressure sweep — iterated n_sweeps times so the pressure-Poisson
+        // equation actually converges each call. A single Jacobi sweep barely
+        // dents the residual; the hydro solver previously did just ONE sweep per
+        // call (and only every 2nd iter), so continuity (div u -> 0) was never
+        // enforced and the wind-driven convergence in the tropical Indian Ocean
+        // drove a radial-velocity runaway to NaN (~iter 635, see
+        // project_hydro_polar_blowup). aux (the divergence source) and the land
+        // mask are fixed across sweeps, so only the p_dyn update + its BCs repeat.
         // ====================================================================
+        for (int sweep = 0; sweep < n_sweeps; sweep++) {
         #pragma omp parallel for collapse(2) schedule(dynamic, 4)
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
@@ -106,6 +115,8 @@ public:
 
                 geo.rm           = m.rad.z[i];
                 geo.rm2          = geo.rm * geo.rm;
+                geo.exp_rm       = 1.0 / (geo.rm + 1.0);
+                geo.exp_2_rm     = geo.exp_rm * geo.exp_rm;
                 geo.sinthe       = sinthe_table[j];
                 geo.sinthe2      = geo.sinthe * geo.sinthe;
                 geo.costhe       = cos(m.the.z[j]);
@@ -122,11 +133,24 @@ public:
                 geo.inv_dthe2 = inv_dthe2;
                 geo.inv_dphi2 = inv_dphi2;
 
-                const double denom = 2.0 * inv_dr2
+                // Radial terms carry the exp_rm metric (exp_2_rm = exp_rm² on the
+                // Laplacian, exp_rm on the divergence source below) so this Poisson
+                // operator is consistent with the RHS_Hyd momentum pressure gradient
+                // (dpdr * exp_rm) and with the working atmosphere solver. Dropping
+                // exp_rm here left the solved p_dyn unable to cancel the radial
+                // divergence the gradient correction applied -> radial-velocity
+                // runaway (see project_hydro_polar_blowup metric-mismatch audit).
+                // Radial Laplacian uses the per-i non-uniform 2nd-derivative
+                // coefficients (stretched grid); theta/phi grids are uniform so keep
+                // the symmetric inv_d*2 form. rc20 = -(rc2m+rc2p) is the radial
+                // diagonal contribution.
+                const double num1m = geo.exp_2_rm * m.rc2m[i];   // coeff of p[i-1]
+                const double num1p = geo.exp_2_rm * m.rc2p[i];   // coeff of p[i+1]
+                const double rad_diag = geo.exp_2_rm * (m.rc2m[i] + m.rc2p[i]);
+                const double denom = rad_diag
                                    + 2.0 * geo.inv_rm       * inv_dthe2
                                    + 2.0 * geo.inv_rmsinthe * inv_dphi2;
                 const double inv_denom = 1.0 / denom;
-                const double num1 = inv_dr2;
                 const double num2 = geo.inv_rm       * inv_dthe2;
                 const double num3 = geo.inv_rmsinthe * inv_dphi2;
 
@@ -154,9 +178,9 @@ public:
 
                     // ---- r direction -----------------------------------
                     if (i_in_range && lnd_ijk && !LAND(i+1,j,k)) {
-                        du_dr = (-3.0 * m.aux_u.x[i][j][k]
-                                 + 4.0 * m.aux_u.x[i+1][j][k]
-                                 - m.aux_u.x[i+2][j][k]) * inv_2dr;
+                        du_dr = m.rf10[i] * m.aux_u.x[i][j][k]
+                              + m.rf11[i] * m.aux_u.x[i+1][j][k]
+                              + m.rf12[i] * m.aux_u.x[i+2][j][k];
                         r_flag = true;
                     }
 
@@ -225,8 +249,9 @@ public:
 
                     // ---- Central-difference fallbacks -------------------
                     if (!r_flag)
-                        du_dr   = (m.aux_u.x[i+1][j][k]
-                                  - m.aux_u.x[i-1][j][k]) * inv_2dr;
+                        du_dr   = m.rc1m[i] * m.aux_u.x[i-1][j][k]
+                                + m.rc10[i] * m.aux_u.x[i][j][k]
+                                + m.rc1p[i] * m.aux_u.x[i+1][j][k];
                     if (!the_flag)
                         dv_dthe = (m.aux_v.x[i][j+1][k]
                                   - m.aux_v.x[i][j-1][k]) * inv_2dthe;
@@ -236,10 +261,10 @@ public:
 
                     // ---- Pressure update --------------------------------
                     m.p_dyn.x[i][j][k] =
-                        ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
+                        ( num1m * m.p_dyn.x[i-1][j][k] + num1p * m.p_dyn.x[i+1][j][k]
                        + (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]) * num2
                        + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
-                       - du_dr
+                       - du_dr   * geo.exp_rm
                        - dv_dthe * geo.inv_rm
                        - dw_dphi * geo.inv_rmsinthe) * inv_denom;
 
@@ -247,10 +272,8 @@ public:
             }  // j
         }  // i
 
-        #undef LAND
-
         // ====================================================================
-        // Boundary conditions on p_dyn
+        // Boundary conditions on p_dyn (re-applied after every sweep)
         // ====================================================================
 
         // Radial: cubic extrapolation at both ends
@@ -290,11 +313,100 @@ public:
             }
         }
 
+        }  // sweep
+
+        #undef LAND
+
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-        printf(" time measured: %.3f seconds for PressureSolverHyd\n",
-               elapsed.count() * 1e-9);
-        cout << "      OGCM: PressureSolverHyd ended" << endl;
+        if (verbose) {
+            printf(" time measured: %.3f seconds for PressureSolverHyd\n",
+                   elapsed.count() * 1e-9);
+            cout << "      OGCM: PressureSolverHyd ended" << endl;
+        }
+    }
+
+    // ====================================================================
+    // Project the initial velocity field divergence-free (mirror of the
+    // atmosphere's PressureSolverAtm::project_initial_velocity). The ocean IC
+    // (EkmanSpiral + thermohaline currents) is NOT divergence-free and was never
+    // projected, so the single-sweep in-loop solver could never catch up and the
+    // residual divergence drove the radial-velocity runaway. Feed the velocity
+    // itself as the Poisson source (aux <- v), iterate to approximate the
+    // projection pressure, apply v <- v - grad p in the same metric form as the
+    // RHS pressure-gradient term, then clear p_dyn/aux so the time loop starts
+    // fresh. See project_hydro_polar_blowup.
+    // ====================================================================
+    void project_initial_velocity(int n_sweeps = 200)
+    {
+        using namespace std;
+        cout << endl << endl << "      OGCM: project_initial_velocity ("
+             << n_sweeps << " Jacobi sweeps)" << endl;
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        // Step 1 — seed Poisson source from current velocity, zero p_dyn.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++) {
+                    m.aux_u.x[i][j][k] = m.u.x[i][j][k];
+                    m.aux_v.x[i][j][k] = m.v.x[i][j][k];
+                    m.aux_w.x[i][j][k] = m.w.x[i][j][k];
+                    m.p_dyn.x[i][j][k] = 0.0;
+                }
+
+        // Step 2 — Jacobi iteration until p_dyn approximates the projection pressure.
+        run(n_sweeps, false);
+
+        // Step 3 — gradient correction v <- v - grad p_dyn in the interior.
+        // Metric factors match rhs_u/v/w (exp_rm = 1/(rm+1), inv_rm, inv_rmsinthe).
+        const double inv_2dthe = 1.0 / (2.0 * m.dthe);
+        const double inv_2dphi = 1.0 / (2.0 * m.dphi);
+        // radial dp/dr uses the per-i non-uniform central coeffs (rc1*), not inv_2dr
+
+        std::vector<double> sinthe_tab(m.jm);
+        for (int j = 0; j < m.jm; j++) {
+            sinthe_tab[j] = sin(m.the.z[j]);
+            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;   // metric floor — match run()
+        }
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm           = m.rad.z[i];
+                const double exp_rm       = 1.0 / (rm + 1.0);
+                const double inv_rm       = 1.0 / rm;
+                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+
+                for (int k = 1; k < m.km-1; k++) {
+                    if (is_land(m.h, i, j, k)) continue;
+                    const double dpdr   = m.rc1m[i]*m.p_dyn.x[i-1][j][k]
+                                        + m.rc10[i]*m.p_dyn.x[i][j][k]
+                                        + m.rc1p[i]*m.p_dyn.x[i+1][j][k];
+                    const double dpdthe = (m.p_dyn.x[i][j+1][k] - m.p_dyn.x[i][j-1][k]) * inv_2dthe;
+                    const double dpdphi = (m.p_dyn.x[i][j][k+1] - m.p_dyn.x[i][j][k-1]) * inv_2dphi;
+
+                    m.u.x[i][j][k] -= dpdr   * exp_rm;
+                    m.v.x[i][j][k] -= dpdthe * inv_rm;
+                    m.w.x[i][j][k] -= dpdphi * inv_rmsinthe;
+                }
+            }
+        }
+
+        // Step 4 — clear p_dyn and aux so the time loop starts fresh.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++) {
+                    m.p_dyn.x[i][j][k] = 0.0;
+                    m.aux_u.x[i][j][k] = 0.0;
+                    m.aux_v.x[i][j][k] = 0.0;
+                    m.aux_w.x[i][j][k] = 0.0;
+                }
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0);
+        printf("      OGCM: project_initial_velocity ended (%.3fs)\n", elapsed.count() * 1e-9);
     }
 
 private:

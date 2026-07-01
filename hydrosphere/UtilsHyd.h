@@ -38,7 +38,7 @@ public:
             &m.Bathymetry, &m.Upwelling, &m.Downwelling, &m.EkmanPumping,
             &m.salinity_evaporation, &m.Evaporation_Dalton, &m.Evaporation_Penman, &m.Evaporation,
             &m.Precipitation_2D, &m.precipitation_NASA, &m.temperature_NASA,
-            &m.temp_reconst, &m.c_fix, &m.v_wind, &m.w_wind,
+            &m.temp_reconst, &m.c_fix, &m.t_surf_fix, &m.v_wind, &m.w_wind,
             &m.velocity_v_NASA, &m.velocity_w_NASA, &m.temp_landscape,
             &m.BuoyancyForce_2D,
             &m.vel_star     // friction velocity per (j,k) column — turbulence only
@@ -162,6 +162,15 @@ public:
         cout << endl << "      OGCM: ValueLimitationHyd" << endl;
 
         const double c_max = 45.0 / m.c_35;
+        // Physical temperature bounds (non-dim t = T_K/t_0): -4 C .. 40 C. The
+        // limiter previously bounded p_dyn and c but NOT t, so a deep-cell
+        // temperature instability could run to hundreds of degrees -> NaN (seen
+        // with the stronger-Coriolis experiment: deep high-lat T -> 275 C ->
+        // NaN). Clamp t to a generous ocean range so a local instability stays
+        // finite instead of poisoning the whole field. See
+        // project_hydro_coriolis_dt_scaling.
+        const double t_min = (m.t_0 -  4.0) / m.t_0;   //  -4 C
+        const double t_max = (m.t_0 + 40.0) / m.t_0;   //  40 C
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {
@@ -169,11 +178,25 @@ public:
                 #pragma omp simd
                 for (int k = 0; k < m.km; k++) {
 
-                    if (m.p_dyn.x[i][j][k] >=  0.1)  m.p_dyn.x[i][j][k] =  0.1;
-                    if (m.p_dyn.x[i][j][k] < - 0.1)  m.p_dyn.x[i][j][k] = - 0.1;
+                    // p_dyn clamp loosened 0.1 -> 10 (2026-06-29). The old ±0.1
+                    // cap was the proximate ENABLER of the iter-635 tropical-Indian-
+                    // Ocean radial-velocity runaway: the [usplit] term-split showed
+                    // p_dyn pegged at ±0.1 across the wind-driven-convergence zone,
+                    // flattening the pressure field so the radial pressure gradient
+                    // (pgf=-dpdr) was EXACTLY ZERO — no restoring force, letting the
+                    // nonlinear self-advection u·∂u/∂r blow up. Opposing adv (~-300
+                    // non-dim) needs p_dyn ~7-8 (dr~0.025), 75× over the old cap.
+                    // ±10 lets the projection build a real radial PGF while still
+                    // catching a genuine unbounded blow-up. See project_hydro_polar_blowup.
+                    constexpr double p_dyn_cap = 10.0;
+                    if (m.p_dyn.x[i][j][k] >=  p_dyn_cap)  m.p_dyn.x[i][j][k] =  p_dyn_cap;
+                    if (m.p_dyn.x[i][j][k] < - p_dyn_cap)  m.p_dyn.x[i][j][k] = - p_dyn_cap;
 
                     if (m.c.x[i][j][k] >= c_max)  m.c.x[i][j][k] = c_max;
                     if (m.c.x[i][j][k] <  0.0)    m.c.x[i][j][k] = 0.0;
+
+                    if (m.t.x[i][j][k] > t_max)  m.t.x[i][j][k] = t_max;
+                    if (m.t.x[i][j][k] < t_min)  m.t.x[i][j][k] = t_min;
  
                     if (is_land(m.h, i, j, k)) {
                         m.c.x[i][j][k]     = 0.0;

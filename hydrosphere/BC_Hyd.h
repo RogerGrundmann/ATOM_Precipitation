@@ -42,8 +42,14 @@ public:
     void bcRadius()
     {
         // Pattern A: cubic at i=0 AND i=im-1
+        // NB: salinity c is deliberately NOT here — the cubic c[0]=c[3]-3c[2]+3c[1]
+        // overshot at both boundaries (e.g. +126 psu at the 80°N surface, -52 psu at
+        // the -6000 m floor), unphysical extremes the [0,45] clamp could not catch
+        // because valueLimitationHyd runs BEFORE this BC. Same failure (and same fix)
+        // as the bottom temperature cubic. c now gets a zero-gradient bottom below,
+        // and its surface is set by the SalinityEvaporation flux BC (not re-extrapolated).
         Array* both_cubic[] = {
-            &m.u, &m.v, &m.w, &m.c,
+            &m.u, &m.v, &m.w,
             &m.BuoyancyForce, &m.CoriolisForce,
             &m.CentrifugalForce, &m.PresGradForce
         };
@@ -61,9 +67,22 @@ public:
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
-                // t: cubic at i=0 only (i=im-1 is the sea surface — set from data)
-                m.t.x[0][j][k] = m.t.x[3][j][k]
-                    - 3.0 * m.t.x[2][j][k] + 3.0 * m.t.x[1][j][k];
+                // t bottom BC: zero-gradient (insulating seafloor). The previous
+                // cubic t[0]=t[3]-3t[2]+3t[1] (condition number ~7) overshot at
+                // deep water columns with a sharp near-bottom T gradient, leaking
+                // an unphysical cold extreme at i=0 (-10 C and growing) that the
+                // [-4,40] C clamp (applied before this BC) did not catch. A
+                // zero-gradient bottom is also the physically standard no-heat-flux
+                // seafloor and cannot overshoot.
+                m.t.x[0][j][k] = m.t.x[1][j][k];
+
+                // c bottom BC: zero-gradient (no salt flux through the seafloor),
+                // mirror of the temperature treatment above. Replaces the cubic
+                // c[0]=c[3]-3c[2]+3c[1] that overshot to negative salinity (-52 psu)
+                // at deep columns. The surface salinity (i=im-1) is left untouched
+                // here — it is set every heavy block by SalinityEvaporation (the
+                // virtual salt-flux BC), which the previous surface cubic clobbered.
+                m.c.x[0][j][k] = m.c.x[1][j][k];
 
                 // Pattern A
                 for (int f = 0; f < n_both; f++) {

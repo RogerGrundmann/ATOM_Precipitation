@@ -306,7 +306,6 @@ private:
                     double sinthe         = sin(m.the.z[j]);
                     if (sinthe == 0.0) sinthe = 1.0e-5;
                     const double rmsinthe = rm * sinthe;
-                    const double inv_2dr  = 1.0 / (2.0 * m.dr);
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
                     const double inv_rm2dthe  = inv_2dthe / rm;
@@ -316,9 +315,9 @@ private:
                     m.dis.x[i][j][k] = std::max(dis_min, m.dis.x[i][j][k]);
 
                     // ---- velocity gradients ----
-                    const double dudr   = (m.u.x[i+1][j][k] - m.u.x[i-1][j][k]) * inv_2dr * exp_rm;
-                    const double dvdr   = (m.v.x[i+1][j][k] - m.v.x[i-1][j][k]) * inv_2dr * exp_rm;
-                    const double dwdr   = (m.w.x[i+1][j][k] - m.w.x[i-1][j][k]) * inv_2dr * exp_rm;
+                    const double dudr   = (m.rc1m[i]*m.u.x[i-1][j][k] + m.rc10[i]*m.u.x[i][j][k] + m.rc1p[i]*m.u.x[i+1][j][k]) * exp_rm;
+                    const double dvdr   = (m.rc1m[i]*m.v.x[i-1][j][k] + m.rc10[i]*m.v.x[i][j][k] + m.rc1p[i]*m.v.x[i+1][j][k]) * exp_rm;
+                    const double dwdr   = (m.rc1m[i]*m.w.x[i-1][j][k] + m.rc10[i]*m.w.x[i][j][k] + m.rc1p[i]*m.w.x[i+1][j][k]) * exp_rm;
                     const double dudthe = (m.u.x[i][j+1][k] - m.u.x[i][j-1][k]) * inv_rm2dthe;
                     const double dvdthe = (m.v.x[i][j+1][k] - m.v.x[i][j-1][k]) * inv_rm2dthe;
                     const double dwdthe = (m.w.x[i][j+1][k] - m.w.x[i][j-1][k]) * inv_rm2dthe;
@@ -344,8 +343,8 @@ private:
                     const double dis_km1 = neumann_km1 ? m.dis.x[i][j][k] : m.dis.x[i][j][k-1];
                     const double dis_kp1 = neumann_kp1 ? m.dis.x[i][j][k] : m.dis.x[i][j][k+1];
 
-                    const double dtkedr   = (m.tke.x[i+1][j][k] - tke_im1) * inv_2dr * exp_rm;
-                    const double ddisdr   = (m.dis.x[i+1][j][k] - dis_im1) * inv_2dr * exp_rm;
+                    const double dtkedr   = (m.rc1m[i]*tke_im1 + m.rc10[i]*m.tke.x[i][j][k] + m.rc1p[i]*m.tke.x[i+1][j][k]) * exp_rm;
+                    const double ddisdr   = (m.rc1m[i]*dis_im1 + m.rc10[i]*m.dis.x[i][j][k] + m.rc1p[i]*m.dis.x[i+1][j][k]) * exp_rm;
                     const double dtkedthe = (tke_jp1 - tke_jm1) * inv_rm2dthe;
                     const double ddisdthe = (dis_jp1 - dis_jm1) * inv_rm2dthe;
                     const double dtkedphi = (tke_kp1 - tke_km1) * inv_rmsinthe2dphi;
@@ -493,24 +492,24 @@ private:
         const double dis_kp1 = neumann_kp1 ? m.dis.x[i][j][k] : m.dis.x[i][j][k+1];
 
         const double dtkedr_neu  = neumann_bot
-            ? (m.tke.x[i+1][j][k] - m.tke.x[i][j][k]) * (1.0 / (2.0 * m.dr)) * exp_rm
+            ? (m.tke.x[i+1][j][k] - m.tke.x[i][j][k]) / (m.rad.z[i+1] - m.rad.z[i]) * exp_rm
             : dtkedr;
         const double ddisdr_neu  = neumann_bot
-            ? (m.dis.x[i+1][j][k] - m.dis.x[i][j][k]) * (1.0 / (2.0 * m.dr)) * exp_rm
+            ? (m.dis.x[i+1][j][k] - m.dis.x[i][j][k]) / (m.rad.z[i+1] - m.rad.z[i]) * exp_rm
             : ddisdr;
         const double dtkedthe_neu = (tke_jp1 - tke_jm1) / (rm  * 2.0 * m.dthe);
         const double ddisdthe_neu = (dis_jp1 - dis_jm1) / (rm  * 2.0 * m.dthe);
         const double dtkedphi_neu = (tke_kp1 - tke_km1) / (rmsinthe * 2.0 * m.dphi);
         const double ddisdphi_neu = (dis_kp1 - dis_km1) / (rmsinthe * 2.0 * m.dphi);
 
-        const double dudr   = (m.u.x[i+1][j][k] - m.u.x[i-1][j][k]) / (2.0 * m.dr) / (rm + 1.0);
+        const double dudr   = (m.rc1m[i]*m.u.x[i-1][j][k] + m.rc10[i]*m.u.x[i][j][k] + m.rc1p[i]*m.u.x[i+1][j][k]) * exp_rm;
         const double dvdthe = (m.v.x[i][j+1][k] - m.v.x[i][j-1][k]) / (rm * 2.0 * m.dthe);
         const double dwdphi = (m.w.x[i][j][k+1] - m.w.x[i][j][k-1]) / (rmsinthe * 2.0 * m.dphi);
 
         const double dudthe_u = (m.u.x[i][j+1][k] - m.u.x[i][j-1][k]) / (rm       * 2.0 * m.dthe);
         const double dudphi_u = (m.u.x[i][j][k+1] - m.u.x[i][j][k-1]) / (rmsinthe * 2.0 * m.dphi);
-        const double dvdr_u   = (m.v.x[i+1][j][k] - m.v.x[i-1][j][k]) / (2.0 * m.dr) / (rm + 1.0);
-        const double dwdr_u   = (m.w.x[i+1][j][k] - m.w.x[i-1][j][k]) / (2.0 * m.dr) / (rm + 1.0);
+        const double dvdr_u   = (m.rc1m[i]*m.v.x[i-1][j][k] + m.rc10[i]*m.v.x[i][j][k] + m.rc1p[i]*m.v.x[i+1][j][k]) * exp_rm;
+        const double dwdr_u   = (m.rc1m[i]*m.w.x[i-1][j][k] + m.rc10[i]*m.w.x[i][j][k] + m.rc1p[i]*m.w.x[i+1][j][k]) * exp_rm;
         const double dvdphi_u = (m.v.x[i][j][k+1] - m.v.x[i][j][k-1]) / (rmsinthe * 2.0 * m.dphi);
         const double dwdthe_u = (m.w.x[i][j+1][k] - m.w.x[i][j-1][k]) / (rm       * 2.0 * m.dthe);
 
@@ -593,10 +592,10 @@ private:
         const double dis_kp1 = neumann_kp1 ? m.dis.x[i][j][k] : m.dis.x[i][j][k+1];
 
         const double dtkedr_neu  = neumann_bot
-            ? (m.tke.x[i+1][j][k] - m.tke.x[i][j][k]) * (1.0 / (2.0 * m.dr)) * exp_rm
+            ? (m.tke.x[i+1][j][k] - m.tke.x[i][j][k]) / (m.rad.z[i+1] - m.rad.z[i]) * exp_rm
             : dtkedr;
         const double ddisdr_neu  = neumann_bot
-            ? (m.dis.x[i+1][j][k] - m.dis.x[i][j][k]) * (1.0 / (2.0 * m.dr)) * exp_rm
+            ? (m.dis.x[i+1][j][k] - m.dis.x[i][j][k]) / (m.rad.z[i+1] - m.rad.z[i]) * exp_rm
             : ddisdr;
         const double dtkedthe_neu = (tke_jp1 - tke_jm1) / (rm       * 2.0 * m.dthe);
         const double ddisdthe_neu = (dis_jp1 - dis_jm1) / (rm       * 2.0 * m.dthe);

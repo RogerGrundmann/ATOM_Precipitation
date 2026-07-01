@@ -11,6 +11,14 @@
 using namespace std;
 using namespace AtomUtils;
 
+// NaN/Inf test must survive -ffast-math. The project compiles with -ffast-math
+// (=> -ffinite-math-only), under which the compiler assumes no non-finite values
+// exist and constant-folds std::isfinite()/std::isnan() to a constant, so a scanner
+// built on them silently never fires. Use the project's canonical bit-level test
+// AtomUtils::is_finite_safe (lib/Utils.h) instead — it inspects the IEEE-754
+// exponent field with no FP comparison the optimiser can defeat.
+static inline bool nonfinite_bits(double v){ return !AtomUtils::is_finite_safe(v); }
+
 void cHydrosphereModel::print_min_max_hyd(){
     cout << endl << " flow properties: " << endl << endl;
     searchMinMax_3D(" max temperature ", " min temperature ", 
@@ -61,6 +69,88 @@ void cHydrosphereModel::print_min_max_hyd(){
     }
 }
 /*
- * 
+ *
+*/
+
+
+
+// First-NaN scanner: sweep the prognostic fields (u, v, w, t, c, p_dyn) for the
+// first non-finite cell and report field + (i,j,k) + lat/lon + iteration, then
+// abort. Mirrors the atmosphere's scanForNaN. The hydro 0Ma spin-up dies ~iter700
+// in a whack-a-mole where each field-fix relocates the NaN; MinMax only exposes
+// u/v/w indirectly (via EkmanPumping at 90N), so we cannot see *which* prognostic
+// field and *which* cell fails first. Called right after the RK4 solve each iter
+// (before BC/filters can move or mask the blow-up). Grid: i=0 deepest .. im-1
+// surface; lat = 90 - j (deg); lon = k (deg E). Returns true if a NaN was found.
+bool cHydrosphereModel::scanForNaN_hyd(int iter, const char *stage){
+    bool found = false;
+
+    // 3D fields: prognostic (u,v,w,t,c,p_dyn) + derived ones in the EkmanPumping
+    // chain (aux_v, aux_w, r_salt_water, r_water) so an end-of-iter scan after the
+    // heavy block can attribute a diagnostic NaN to its real source.
+    struct Field3D { const char *name; Array *a; };
+    Field3D fields3d[] = {
+        {"u",            &u},
+        {"v",            &v},
+        {"w",            &w},
+        {"t",            &t},
+        {"c",            &c},
+        {"p_dyn",        &p_dyn},
+        {"aux_v",        &aux_v},
+        {"aux_w",        &aux_w},
+        {"r_salt_water", &r_salt_water},
+        {"r_water",      &r_water},
+    };
+    for(auto &f : fields3d){
+        for(int i = 0; i < im && !found; i++)
+            for(int j = 0; j < jm && !found; j++)
+                for(int k = 0; k < km && !found; k++){
+                    double val = f.a->x[i][j][k];
+                    if(nonfinite_bits(val)){
+                        cout << endl
+                             << "      OGCM: *** NaN/Inf DETECTED *** stage=" << stage
+                             << "  iter=" << iter
+                             << "  field=" << f.name
+                             << "  value=" << val << endl
+                             << "      OGCM:   cell (i,j,k) = (" << i << "," << j << "," << k << ")"
+                             << "  lat=" << (90 - j) << " deg"
+                             << "  lon=" << k << " deg E"
+                             << "  level i=" << i << " of " << (im-1) << " (im-1=surface)"
+                             << "  water=" << (is_water(h, i, j, k) ? "yes" : "land") << endl;
+                        found = true;
+                    }
+                }
+    }
+
+    // 2D surface diagnostics (EkmanPumping etc.) — these have a polar 1/sinthe
+    // factor and are output-only, but report them so we can confirm whether the
+    // first NaN is genuinely born here or inherited from a 3D field above.
+    struct Field2D { const char *name; Array_2D *a; };
+    Field2D fields2d[] = {
+        {"EkmanPumping", &EkmanPumping},
+        {"Upwelling",    &Upwelling},
+    };
+    for(auto &f : fields2d){
+        for(int j = 0; j < jm && !found; j++)
+            for(int k = 0; k < km && !found; k++){
+                double val = f.a->y[j][k];
+                if(nonfinite_bits(val)){
+                    cout << endl
+                         << "      OGCM: *** NaN/Inf DETECTED (2D) *** stage=" << stage
+                         << "  iter=" << iter
+                         << "  field=" << f.name
+                         << "  value=" << val << endl
+                         << "      OGCM:   cell (j,k) = (" << j << "," << k << ")"
+                         << "  lat=" << (90 - j) << " deg"
+                         << "  lon=" << k << " deg E" << endl;
+                    found = true;
+                }
+            }
+    }
+
+    return found;
+}
+/*
+ *
 */
 

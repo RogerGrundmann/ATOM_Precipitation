@@ -36,12 +36,11 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
     const double inv_rm2sinthe2 = geo.inv_rm2sinthe2;
     const double costhe_inv_rm2sinthe = geo.costhe_inv_rm2sinthe;
 
-    const double inv_2dr   = geo.inv_2dr;
     const double inv_2dthe = geo.inv_2dthe;
     const double inv_2dphi = geo.inv_2dphi;
-    const double inv_dr2   = geo.inv_dr2;
     const double inv_dthe2 = geo.inv_dthe2;
     const double inv_dphi2 = geo.inv_dphi2;
+    // radial derivatives use the per-i non-uniform stencil coeffs (rc*/rf*), not inv_2dr/inv_dr2
 
     // Cache local cell velocities
     double u_ijk = u.x[i][j][k];
@@ -72,46 +71,49 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
     // ===== R-direction derivatives =====
     if(i < im-2 && land_ijk && is_air(h, i+1, j, k)){
         // Forward-biased stencil near land-air boundary
+        // Forward-biased stencil (points i, i+1, i+2) on the stretched radial grid
         #define COMPUTE_DR_B(FIELD, d1, d2) \
-            d1 = (-3.0*FIELD.x[i][j][k] + 4.0*FIELD.x[i+1][j][k] - FIELD.x[i+2][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[i][j][k] - 2.0*FIELD.x[i+1][j][k] + FIELD.x[i+2][j][k]) * inv_dr2;
+            d1 = rf10[i]*FIELD.x[i][j][k] + rf11[i]*FIELD.x[i+1][j][k] + rf12[i]*FIELD.x[i+2][j][k]; \
+            d2 = rf20[i]*FIELD.x[i][j][k] + rf21[i]*FIELD.x[i+1][j][k] + rf22[i]*FIELD.x[i+2][j][k];
 
         COMPUTE_DR_B(u, dudr, d2udr2)
         COMPUTE_DR_B(v, dvdr, d2vdr2)
         COMPUTE_DR_B(w, dwdr, d2wdr2)
         COMPUTE_DR_B(t, dtdr, d2tdr2)
         COMPUTE_DR_B(c, dcdr, d2cdr2)
-        dpdr = (-3.0*p_dyn.x[i][j][k] + 4.0*p_dyn.x[i+1][j][k] - p_dyn.x[i+2][j][k]) * inv_2dr;
+        dpdr = rf10[i]*p_dyn.x[i][j][k] + rf11[i]*p_dyn.x[i+1][j][k] + rf12[i]*p_dyn.x[i+2][j][k];
         r_flag = true;
         #undef COMPUTE_DR_B
     }
     else if(i == 0){
+        // Forward stencil at the bottom (points 0, 1, 2) on the stretched radial grid
         #define COMPUTE_DR_F(FIELD, d1, d2) \
-            d1 = (-3.0*FIELD.x[0][j][k] + 4.0*FIELD.x[1][j][k] - FIELD.x[2][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[0][j][k] - 2.0*FIELD.x[1][j][k] + FIELD.x[2][j][k]) * inv_dr2;
+            d1 = rf10[0]*FIELD.x[0][j][k] + rf11[0]*FIELD.x[1][j][k] + rf12[0]*FIELD.x[2][j][k]; \
+            d2 = rf20[0]*FIELD.x[0][j][k] + rf21[0]*FIELD.x[1][j][k] + rf22[0]*FIELD.x[2][j][k];
 
         COMPUTE_DR_F(u, dudr, d2udr2)
         COMPUTE_DR_F(v, dvdr, d2vdr2)
         COMPUTE_DR_F(w, dwdr, d2wdr2)
         COMPUTE_DR_F(t, dtdr, d2tdr2)
         COMPUTE_DR_F(c, dcdr, d2cdr2)
-        dpdr = (-3.0*p_dyn.x[0][j][k] + 4.0*p_dyn.x[1][j][k] - p_dyn.x[2][j][k]) * inv_2dr;
+        dpdr = rf10[0]*p_dyn.x[0][j][k] + rf11[0]*p_dyn.x[1][j][k] + rf12[0]*p_dyn.x[2][j][k];
         r_flag = true;
         #undef COMPUTE_DR_F
     }
 
     if(!r_flag){
         // Central differences (default path — most common)
+        // Central stencil (points i-1, i, i+1) on the stretched radial grid
         #define COMPUTE_DR_C(FIELD, d1, d2) \
-            d1 = (FIELD.x[i+1][j][k] - FIELD.x[i-1][j][k]) * inv_2dr; \
-            d2 = (FIELD.x[i+1][j][k] - 2.0*FIELD.x[i][j][k] + FIELD.x[i-1][j][k]) * inv_dr2;
+            d1 = rc1m[i]*FIELD.x[i-1][j][k] + rc10[i]*FIELD.x[i][j][k] + rc1p[i]*FIELD.x[i+1][j][k]; \
+            d2 = rc2m[i]*FIELD.x[i-1][j][k] + rc20[i]*FIELD.x[i][j][k] + rc2p[i]*FIELD.x[i+1][j][k];
 
         COMPUTE_DR_C(u, dudr, d2udr2)
         COMPUTE_DR_C(v, dvdr, d2vdr2)
         COMPUTE_DR_C(w, dwdr, d2wdr2)
         COMPUTE_DR_C(t, dtdr, d2tdr2)
         COMPUTE_DR_C(c, dcdr, d2cdr2)
-        dpdr = (p_dyn.x[i+1][j][k] - p_dyn.x[i-1][j][k]) * inv_2dr;
+        dpdr = rc1m[i]*p_dyn.x[i-1][j][k] + rc10[i]*p_dyn.x[i][j][k] + rc1p[i]*p_dyn.x[i+1][j][k];
         #undef COMPUTE_DR_C
     }
 
@@ -252,10 +254,16 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
     //   F_r = +2Ω sin(θ) w               (Eötvös: east → up at equator)
     //   F_θ = +2Ω cos(θ) w
     //   F_φ = -2Ω cos(θ) v - 2Ω sin(θ) u
-    double two_omega_Lhyd_dt_over_u0 = 2.0 * omega * L_hyd / u_0 * dt;
-    double Coriolis_rad =  two_omega_Lhyd_dt_over_u0 * sinthe * w_ijk;
-    double Coriolis_the =  two_omega_Lhyd_dt_over_u0 * costhe * w_ijk;
-    double Coriolis_phi = -two_omega_Lhyd_dt_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
+    // EXPERIMENT 2026-06-26 (uncommitted): the inverse Rossby number in the
+    // advective-time nondim is 2*Omega*L/u_0 with NO dt (the RK4 supplies the
+    // timestep). The previous coefficient carried an extra *dt, leaving Coriolis
+    // ~1/dt (~2000x) too weak vs advection/diffusion (w-budget confirmed) -> no
+    // geostrophic gyre balance -> SH spin-down. Test: drop the *dt.
+    // See project_hydro_coriolis_dt_scaling.
+    double two_omega_Lhyd_over_u0 = 2.0 * omega * L_hyd / u_0;
+    double Coriolis_rad =  two_omega_Lhyd_over_u0 * sinthe * w_ijk;
+    double Coriolis_the =  two_omega_Lhyd_over_u0 * costhe * w_ijk;
+    double Coriolis_phi = -two_omega_Lhyd_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
 
     double rad_dist = (double)i * L_hyd * exp_rm;
     double rad_Earth_m = rad_dist + r_Earth * 1e3;
@@ -290,7 +298,11 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
     // Precompute shared sub-expressions
     double two_over_rm_exp = 2.0 * inv_rm * exp_rm;
     double cos_rm2sin = costhe_inv_rm2sinthe;
-    double v_metric = (1.0 + costhe / sinthe2) * inv_rm2;
+    // Curvature term on v_θ / v_φ in the spherical vector Laplacian: −v/(r²sin²θ),
+    // i.e. (1 + cos²θ/sin²θ)/r². The cosine MUST be squared — a bare costhe makes
+    // the bracket negative poleward of ~38°S (costhe<0), turning −v_metric·v into
+    // anti-diffusion. Same bug/fix as atmosphere RHS_Atm.cpp; mirror convention.
+    double v_metric = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
     double diffusion_t = (d2tdr2 * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
@@ -358,6 +370,28 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
         wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
         wbud_adv.x[i][j][k]  = -transport_w;
         wbud_diff.x[i][j][k] =  diffusion_w;
+    }
+
+    // Surface wind-stress forcing. The ocean momentum equation otherwise has NO
+    // sustained wind input — the atmosphere wind only INITIALISES the currents
+    // (EkmanSpiral, once), so every wind-driven current (West Wind Drift / ACC,
+    // subtropical gyres) spins down (Coriolis+diffusion erode it, nothing drives
+    // it; see project_hydro_no_wind_stress_forcing). Apply the bulk wind stress
+    // tau = r_air*C_D*|U_wind|*U_wind as a body force in the topmost integrated
+    // cell (i=im-2, whose thickness ~ the mixed layer; the surface row im-1 is a
+    // BC extrapolated from here). Non-dim by L_hyd/u_0^2 (advective time, matching
+    // PGF/advection/diffusion). v_wind/w_wind [m/s] = atmosphere surface wind,
+    // set once in EkmanSpiral and persistent (resetArrays runs before it).
+    constexpr bool WIND_STRESS_FORCING = true;
+    if (WIND_STRESS_FORCING && i == im - 2 && is_water(h, i, j, k)) {
+        constexpr double C_D = 2.6e-3;                                    // bulk drag coefficient
+        const double dz_top = (rad.z[im-1] - rad.z[im-2]) * L_hyd;        // [m] top-cell (mixed-layer) thickness
+        const double U_wind = sqrt(v_wind.y[j][k] * v_wind.y[j][k]
+                                 + w_wind.y[j][k] * w_wind.y[j][k]);      // [m/s]
+        const double accel_nd = r_air * C_D * U_wind / (r_0_water * dz_top)
+                              * L_hyd / (u_0 * u_0);                      // nondim accel per (m/s) of wind component
+        rhs_w.x[i][j][k] += accel_nd * w_wind.y[j][k];                    // zonal stress      (East+)
+        rhs_v.x[i][j][k] += accel_nd * v_wind.y[j][k];                    // meridional stress (South+)
     }
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;

@@ -372,6 +372,17 @@ void cHydrosphereModel::paraview_vtk_longal(const string &Name_Bathymetry_File,
 */
     dump_longal("Bathymetry", h, 1.0, j_longal, Hydrosphere_vtk_longal_File);
 
+    // Layer height [m]: signed vertical coordinate, 0 at the sea surface (i=im-1),
+    // negative downward to -depth at the bottom (i=0). Mirrors the atmosphere's
+    // "height" field. height = (rad.z[i] - rad.z[im-1]) * L_hyd.
+    Array height_l(im, jm, km, 0.0);
+    for(int i = 0; i < im; i++){
+        double height = (rad.z[i] - rad.z[im-1]) * L_hyd;
+        for(int k = 0; k < km; k++)
+            height_l.x[i][j_longal][k] = height;
+    }
+    dump_longal("height", height_l, 1.0, j_longal, Hydrosphere_vtk_longal_File);
+
     dump_longal("u-Component", u, u_0 * 1e2, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("v-Component", v, u_0 * 1e2, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("w-Component", w, u_0 * 1e2, j_longal, Hydrosphere_vtk_longal_File);
@@ -601,6 +612,18 @@ void cHydrosphereModel::paraview_vtk_zonal(const string &Name_Bathymetry_File,
         }
     }
     dump_zonal("Bathymetry", h, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
+
+    // Layer height [m]: signed vertical coordinate, 0 at the sea surface (i=im-1),
+    // negative downward to -depth at the bottom (i=0). Mirrors the atmosphere's
+    // "height" field; lets ParaView place/scale layers at their true depth on the
+    // stretched radial grid. height = (rad.z[i] - rad.z[im-1]) * L_hyd.
+    Array height_z(im, jm, km, 0.0);
+    for(int i = 0; i < im; i++){
+        double height = (rad.z[i] - rad.z[im-1]) * L_hyd;
+        for(int j = 0; j < jm; j++)
+            height_z.x[i][j][k_zonal] = height;
+    }
+    dump_zonal("height", height_z, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
 
     dump_zonal("u-Component", u, u_0 * 1e2, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("v-Component", v, u_0 * 1e2, k_zonal, Hydrosphere_vtk_zonal_File);
