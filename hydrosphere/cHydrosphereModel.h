@@ -309,6 +309,17 @@ public:
     Array aux_v;                                                        // auxilliar field v-velocity component
     Array aux_w;                                                        // auxilliar field w-velocity component
 
+    // Rhie-Chow face mass fluxes (divergence-free transporting velocity).
+    // uf.x[i][j][k] = radial flux on face i+1/2, vf on face j+1/2, wf on face
+    // k+1/2 (last face index in each direction unused). Built by
+    // PressureSolverHyd::project_velocity so continuity is enforced on faces
+    // (the collocated cell-centre projection cannot — div/grad central vs the
+    // compact Poisson Laplacian decouple odd/even -> checkerboard). Step 2 uses
+    // these as the advecting velocity in RHS_Hyd. See project_hydro_continuity_checkerboard.
+    Array uf;                                                           // radial face flux (face i+1/2)
+    Array vf;                                                           // meridional face flux (face j+1/2)
+    Array wf;                                                           // zonal face flux (face k+1/2)
+
     Array Salt_Finger;                                                  // salt bulge of higher density
     Array Salt_Diffusion;                                               // salt bulge of lowerer density and temperature
     Array Salt_Balance;                                                 // +/- salt balance

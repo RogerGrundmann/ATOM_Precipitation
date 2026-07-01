@@ -389,6 +389,11 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     if(restart_from_iter < 0)
         PressureSolverHyd(*this).project_initial_velocity(200);
 
+    // Seed the divergence-free face fluxes (uf/vf/wf) once before the loop so the
+    // first advection step (before the first heavy block) transports with them
+    // rather than a zero field. Also projects the (restored, on restart) field.
+    PressureSolverHyd(*this).project_velocity(60);
+
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
         print_loop_3D_headings();
@@ -449,16 +454,15 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         int heavy_block_stride = inviscid_phase ? 10 : 2;
         if(iter_n % heavy_block_stride == 0){
 
-            // NOTE (continuity): an explicit Chorin velocity projection
-            // (project_velocity) was tried here to enforce div(u)->0 directly. It cut
-            // the divergence (RMS 2.0->0.23) and restored Ekman symmetry, but the
-            // collocated central-difference div/grad/Laplacian are not a consistent
-            // triple, so it amplifies the checkerboard (odd-even) pressure mode —
-            // "more sweeps = worse" (blew up iter 80 at 40 sweeps, iter 27 at 150).
-            // A robust fix needs a staggered grid or Rhie-Chow interpolation. Until
-            // then, keep the (stable) pressure-as-force scheme: solve p_dyn and let
-            // grad(p) act through rhs_u/v/w. See project_hydro_polar_blowup.
-            PressureSolverHyd(*this).run(20);
+            // Continuity via the face-consistent fractional-step projection: solve
+            // the masked-Neumann Poisson (source/Laplacian/gradient a single face-
+            // consistent triple), correct the cell velocity, and fill the divergence-
+            // free face fluxes uf/vf/wf that RHS_Hyd(_Turb) advect with. Replaces the
+            // pressure-as-force run() (which left div(u)~2, radial u~0.5). Earlier
+            // half-Rhie-Chow (face advection + run()'s rc1 cell projection) blew up;
+            // the consistent source is blind to the cell checkerboard so it no longer
+            // feeds back. See project_hydro_continuity_checkerboard.
+            PressureSolverHyd(*this).project_velocity(60);
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 
             ThermoHyd(*this).SaltWaterDens();

@@ -517,9 +517,28 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
 
     // ===== Transport (advection) =====
-    double u_exp   = u_ijk * exp_rm;
-    double v_invrm = v_ijk * inv_rm;
-    double w_invrs = w_ijk * inv_rmsinthe;
+    // Rhie-Chow: advect with the divergence-free FACE fluxes (uf/vf/wf, filled by
+    // PressureSolverHyd::project_velocity in the heavy block), reconstructed to the
+    // cell centre as the average of the two bracketing faces. This is what removes
+    // the collocated checkerboard: after the projection the cell-centre velocity
+    // still carries a small odd-even pressure mode, but the transporting velocity
+    // does not, so central advection no longer re-reads and amplifies it. Fall back
+    // to the pointwise cell velocity at the domain edges (no bracketing face). uf is
+    // a bare radial velocity (units of u), so the metric factor exp_rm still applies
+    // once below. See project_hydro_continuity_checkerboard.
+    // Advect with the divergence-free face fluxes from the face-consistent
+    // projection (PressureSolverHyd::project_velocity). See
+    // project_hydro_continuity_checkerboard.
+    constexpr bool RHIE_CHOW_ADVECTION = true;
+    double u_tr = u_ijk, v_tr = v_ijk, w_tr = w_ijk;
+    if (RHIE_CHOW_ADVECTION) {
+        if (i >= 1) u_tr = 0.5 * (uf.x[i-1][j][k] + uf.x[i][j][k]);
+        if (j >= 1) v_tr = 0.5 * (vf.x[i][j-1][k] + vf.x[i][j][k]);
+        if (k >= 1) w_tr = 0.5 * (wf.x[i][j][k-1] + wf.x[i][j][k]);
+    }
+    double u_exp   = u_tr * exp_rm;
+    double v_invrm = v_tr * inv_rm;
+    double w_invrs = w_tr * inv_rmsinthe;
 
     double pressure_t = coeff_energy_p * (u_exp * dpdr + v_invrm * dpdthe + w_invrs * dpdphi);
 

@@ -91,6 +91,21 @@ public:
                     xf[iml][j][k] = xf[iml-3][j][k]   - 3.0 * xf[iml-2][j][k]   + 3.0 * xf[iml-1][j][k];
                 }
 
+                // Radial velocity: no-normal-flow (zero-gradient) at BOTH the
+                // impermeable seafloor (i=0) and the rigid-lid sea surface (i=im-1),
+                // overriding the cubic above. The cubic u[end]=u[e-3]-3u[e-2]+3u[e-1]
+                // (condition ~7) AMPLIFIES the boundary radial velocity ~2x per level.
+                // Harmless while u was painted/inert, but once the face-consistent
+                // projection made the vertical dynamics active it ran away at whichever
+                // boundary stayed cubic: seafloor (i0/1 -> 45 m/s @42S/139W by ~iter150)
+                // and — after the bottom was fixed — the sea surface (i40 -> 9 m/s
+                // @53N/153E by ~iter500, NaN ~595). The radial velocity vanishes at an
+                // impermeable floor AND a rigid lid, so zero-gradient (factor 1) is both
+                // physical and breaks the feedback. v,w keep the cubic (boundary
+                // horizontal currents are real; the instability is radial only).
+                m.u.x[0][j][k]   = m.u.x[1][j][k];
+                m.u.x[iml][j][k] = m.u.x[iml-1][j][k];
+
                 // Pattern B
                 for (int f = 0; f < n_vn_cubic; f++) {
                     double*** xf = vn_bot_cubic_top[f]->x;

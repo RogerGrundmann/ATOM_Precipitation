@@ -409,6 +409,196 @@ public:
         printf("      OGCM: project_initial_velocity ended (%.3fs)\n", elapsed.count() * 1e-9);
     }
 
+    // ====================================================================
+    // Face-consistent fractional-step projection (the real Rhie-Chow fix).
+    //
+    // The first cut (advect with faces, but project with run()'s rc1 cell
+    // divergence + central cell correction) BLEW UP: the cell-level checkerboard
+    // feedback survived (source read the cell odd-even mode -> phi -> correction
+    // re-injected it). Cure = make the SOURCE, LAPLACIAN and GRADIENT a single
+    // consistent triple, all face-based, so div_face(corrected face flux) = 0 by
+    // construction and the source is BLIND to the cell checkerboard:
+    //
+    //   source  D(u*) = exp_rm*(2/hs)*(Uf~[i]-Uf~[i-1]) + inv_rm/dthe*(Vf~-Vf~)
+    //                   + inv_rmsinthe/dphi*(Wf~-Wf~),   Uf~=0.5(u[i]+u[i+1])
+    //   Laplacian L(p) = exp_2_rm*rc2 (radial, factors as the same face diff)
+    //                   + inv_rm2/dthe2 * d2_theta + inv_rm2sinthe2/dphi2 * d2_phi
+    //   face flux Uf   = Uf~ - exp_rm_face*(p[i+1]-p[i])/hp   (etc.)
+    //
+    // Crucially the theta/phi Laplacian uses inv_rm2 / inv_rm2sinthe2 (= the
+    // metric of div o grad), NOT run()'s single inv_rm / inv_rmsinthe — that
+    // single-power form is the latent inconsistency that made the collocated
+    // projection non-idempotent. All operators are LAND-MASKED as homogeneous
+    // Neumann (drop land neighbours; no flux through land faces), which also
+    // fixes the coastal blow-up. The div-free faces uf/vf/wf are the advecting
+    // velocity (RHS_Hyd); the cell velocity gets the pointwise gradient too.
+    // Uses aux_u as the per-cell source scratch. See
+    // project_hydro_continuity_checkerboard.
+    // ====================================================================
+    void project_velocity(int n_sweeps = 60)
+    {
+        using namespace std;
+        cout << endl << "      OGCM: project_velocity (face-consistent, "
+             << n_sweeps << " sweeps)" << endl;
+
+        const double inv_dthe  = 1.0 / m.dthe;
+        const double inv_dphi  = 1.0 / m.dphi;
+        const double inv_dthe2 = inv_dthe * inv_dthe;
+        const double inv_dphi2 = inv_dphi * inv_dphi;
+
+        std::vector<double> sinthe_tab(m.jm);
+        for (int j = 0; j < m.jm; j++) {
+            sinthe_tab[j] = sin(m.the.z[j]);
+            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;   // metric floor — match run()
+        }
+
+        auto water = [&](int i, int j, int k){ return is_water(m.h, i, j, k); };
+
+        // ---- Step 1: source = face-average divergence of the current velocity,
+        // with no-flux masking through land faces. Stored in aux_u; p_dyn zeroed.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    m.p_dyn.x[i][j][k] = 0.0;
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm           = m.rad.z[i];
+                const double exp_rm       = 1.0 / (rm + 1.0);
+                const double inv_rm       = 1.0 / rm;
+                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                const double hs_r         = m.rad.z[i+1] - m.rad.z[i-1];
+                const double two_over_hs  = 2.0 / hs_r;
+                for (int k = 1; k < m.km-1; k++) {
+                    if (!water(i, j, k)) { m.aux_u.x[i][j][k] = 0.0; continue; }
+                    // intermediate face fluxes (0 through a land face)
+                    const double ufRp = water(i+1,j,k) ? 0.5*(m.u.x[i][j][k]+m.u.x[i+1][j][k]) : 0.0;
+                    const double ufRm = water(i-1,j,k) ? 0.5*(m.u.x[i-1][j][k]+m.u.x[i][j][k]) : 0.0;
+                    const double ufTp = water(i,j+1,k) ? 0.5*(m.v.x[i][j][k]+m.v.x[i][j+1][k]) : 0.0;
+                    const double ufTm = water(i,j-1,k) ? 0.5*(m.v.x[i][j-1][k]+m.v.x[i][j][k]) : 0.0;
+                    const double ufPp = water(i,j,k+1) ? 0.5*(m.w.x[i][j][k]+m.w.x[i][j][k+1]) : 0.0;
+                    const double ufPm = water(i,j,k-1) ? 0.5*(m.w.x[i][j][k-1]+m.w.x[i][j][k]) : 0.0;
+                    m.aux_u.x[i][j][k] = exp_rm       * two_over_hs * (ufRp - ufRm)
+                                       + inv_rm       * inv_dthe    * (ufTp - ufTm)
+                                       + inv_rmsinthe * inv_dphi    * (ufPp - ufPm);
+                }
+            }
+        }
+
+        // ---- Step 2: masked-Neumann Jacobi solve  L(p) = source.
+        for (int sweep = 0; sweep < n_sweeps; sweep++) {
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int i = 1; i < m.im-1; i++) {
+                for (int j = 1; j < m.jm-1; j++) {
+                    const double rm      = m.rad.z[i];
+                    const double exp_2_rm = 1.0 / ((rm + 1.0) * (rm + 1.0));
+                    const double inv_rm2  = 1.0 / (rm * rm);
+                    const double inv_rm2sinthe2 = inv_rm2 / (sinthe_tab[j] * sinthe_tab[j]);
+                    const double cT = inv_rm2 * inv_dthe2;
+                    const double cP = inv_rm2sinthe2 * inv_dphi2;
+                    for (int k = 1; k < m.km-1; k++) {
+                        if (!water(i, j, k)) continue;
+                        const double aRm = water(i-1,j,k) ? exp_2_rm * m.rc2m[i] : 0.0;
+                        const double aRp = water(i+1,j,k) ? exp_2_rm * m.rc2p[i] : 0.0;
+                        const double aTm = water(i,j-1,k) ? cT : 0.0;
+                        const double aTp = water(i,j+1,k) ? cT : 0.0;
+                        const double aPm = water(i,j,k-1) ? cP : 0.0;
+                        const double aPp = water(i,j,k+1) ? cP : 0.0;
+                        const double diag = aRm + aRp + aTm + aTp + aPm + aPp;
+                        if (diag <= 0.0) continue;
+                        m.p_dyn.x[i][j][k] =
+                            ( aRm*m.p_dyn.x[i-1][j][k] + aRp*m.p_dyn.x[i+1][j][k]
+                            + aTm*m.p_dyn.x[i][j-1][k] + aTp*m.p_dyn.x[i][j+1][k]
+                            + aPm*m.p_dyn.x[i][j][k-1] + aPp*m.p_dyn.x[i][j][k+1]
+                            - m.aux_u.x[i][j][k] ) / diag;
+                    }
+                }
+            }
+            // zero-gradient (Neumann) pressure BCs on the domain faces
+            #pragma omp parallel for collapse(2)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++) {
+                    m.p_dyn.x[0][j][k]      = m.p_dyn.x[1][j][k];
+                    m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-2][j][k];
+                }
+            #pragma omp parallel for collapse(2)
+            for (int i = 0; i < m.im; i++)
+                for (int k = 0; k < m.km; k++) {
+                    m.p_dyn.x[i][0][k]      = m.p_dyn.x[i][1][k];
+                    m.p_dyn.x[i][m.jm-1][k] = m.p_dyn.x[i][m.jm-2][k];
+                }
+            #pragma omp parallel for collapse(2)
+            for (int i = 0; i < m.im; i++)
+                for (int j = 0; j < m.jm; j++) {
+                    m.p_dyn.x[i][j][0]      = m.p_dyn.x[i][j][1];
+                    m.p_dyn.x[i][j][m.km-1] = m.p_dyn.x[i][j][m.km-2];
+                }
+        }
+
+        // ---- Step 3: divergence-free face fluxes  Uf = Uf~ - grad_face(p).
+        // Same metric on the face gradient as in the source (exp_rm/inv_rm/
+        // inv_rmsinthe), so div_face(Uf) = source - L(p) -> 0. Zero on land faces.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++) {
+            for (int j = 0; j < m.jm; j++) {
+                const double rm           = m.rad.z[i];
+                const double inv_rm       = 1.0 / rm;
+                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                for (int k = 0; k < m.km; k++) {
+                    if (i < m.im-1 && water(i,j,k) && water(i+1,j,k)) {
+                        const double rmf = 0.5*(m.rad.z[i]+m.rad.z[i+1]);
+                        const double exp_rm_face = 1.0/(rmf+1.0);
+                        const double hp = m.rad.z[i+1]-m.rad.z[i];
+                        m.uf.x[i][j][k] = 0.5*(m.u.x[i][j][k]+m.u.x[i+1][j][k])
+                            - exp_rm_face*(m.p_dyn.x[i+1][j][k]-m.p_dyn.x[i][j][k])/hp;
+                    } else m.uf.x[i][j][k] = 0.0;
+
+                    if (j < m.jm-1 && water(i,j,k) && water(i,j+1,k))
+                        m.vf.x[i][j][k] = 0.5*(m.v.x[i][j][k]+m.v.x[i][j+1][k])
+                            - inv_rm*(m.p_dyn.x[i][j+1][k]-m.p_dyn.x[i][j][k])*inv_dthe;
+                    else m.vf.x[i][j][k] = 0.0;
+
+                    if (k < m.km-1 && water(i,j,k) && water(i,j,k+1))
+                        m.wf.x[i][j][k] = 0.5*(m.w.x[i][j][k]+m.w.x[i][j][k+1])
+                            - inv_rmsinthe*(m.p_dyn.x[i][j][k+1]-m.p_dyn.x[i][j][k])*inv_dphi;
+                    else m.wf.x[i][j][k] = 0.0;
+                }
+            }
+        }
+
+        // ---- Step 4: pointwise cell-velocity correction (central gradient; the
+        // advection uses the div-free faces, so this is only for momentum/output).
+        // Skip a component where the neighbour is land (don't read a land pressure).
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm           = m.rad.z[i];
+                const double exp_rm       = 1.0 / (rm + 1.0);
+                const double inv_rm       = 1.0 / rm;
+                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                for (int k = 1; k < m.km-1; k++) {
+                    if (!water(i, j, k)) continue;
+                    if (water(i-1,j,k) && water(i+1,j,k)) {
+                        const double dpdr = m.rc1m[i]*m.p_dyn.x[i-1][j][k]
+                                          + m.rc10[i]*m.p_dyn.x[i][j][k]
+                                          + m.rc1p[i]*m.p_dyn.x[i+1][j][k];
+                        m.u.x[i][j][k] -= dpdr * exp_rm;
+                    }
+                    if (water(i,j-1,k) && water(i,j+1,k)) {
+                        const double dpdthe = (m.p_dyn.x[i][j+1][k]-m.p_dyn.x[i][j-1][k])*0.5*inv_dthe;
+                        m.v.x[i][j][k] -= dpdthe * inv_rm;
+                    }
+                    if (water(i,j,k-1) && water(i,j,k+1)) {
+                        const double dpdphi = (m.p_dyn.x[i][j][k+1]-m.p_dyn.x[i][j][k-1])*0.5*inv_dphi;
+                        m.w.x[i][j][k] -= dpdphi * inv_rmsinthe;
+                    }
+                }
+            }
+        }
+    }
+
 private:
     cHydrosphereModel& m;
 };

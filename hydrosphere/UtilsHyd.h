@@ -52,6 +52,7 @@ public:
             &m.p_dyn,
             &m.rhs_t, &m.rhs_u, &m.rhs_v, &m.rhs_w, &m.rhs_c,
             &m.aux_u, &m.aux_v, &m.aux_w,
+            &m.uf, &m.vf, &m.wf,   // Rhie-Chow face mass fluxes
             &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance,
             &m.BuoyancyForce, &m.CoriolisForce,
             &m.CentrifugalForce, &m.PresGradForce,
