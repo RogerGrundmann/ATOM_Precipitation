@@ -29,7 +29,7 @@ void cHydrosphereModel::SetDefaultConfig() {
   temperature_equat_file = "../data/scotese_etal_2021_equat_temp_1my.txt";
   temperature_pole_file = "../data/scotese_etal_2021_polar_temp_1my.txt";
   reconstruction_script_path = "../reconstruction/reconstruct_atom_data.py";
-  use_earthbyte_reconstruction = true;
+  use_earthbyte_reconstruction = false;
   use_NASA_velocity = false;
   use_NASA_temperature = true;
   Ma_switch = 100;
@@ -53,8 +53,8 @@ void cHydrosphereModel::SetDefaultConfig() {
   moist_phys_start_iter = 300;
   checkpoint_save_iter = 300;
   restart_from_iter = 300;
-  dt_visc = 0.0005;
-  dt_inviscid = 0.0001;
+  dt_visc = 0.0001;
+  dt_inviscid = 2e-05;
 
   // hydrosphere section
   input_path = "output_ATOM_Precipitation";

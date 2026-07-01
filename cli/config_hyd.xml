@@ -23,7 +23,7 @@
         <temperature_equat_file>../data/scotese_etal_2021_equat_temp_1my.txt</temperature_equat_file>  <!-- (string) -->
         <temperature_pole_file>../data/scotese_etal_2021_polar_temp_1my.txt</temperature_pole_file>  <!-- (string) -->
         <reconstruction_script_path>../reconstruction/reconstruct_atom_data.py</reconstruction_script_path>  <!-- (string) -->
-        <use_earthbyte_reconstruction>true</use_earthbyte_reconstruction>  <!-- control whether use earthbyte method to recontruct grids(bool) -->
+        <use_earthbyte_reconstruction>false</use_earthbyte_reconstruction>  <!-- control whether use earthbyte method to recontruct grids(bool) -->
         <use_NASA_velocity>false</use_NASA_velocity>  <!-- if use NASA velocity to initialise velocity(bool) -->
         <use_NASA_temperature>true</use_NASA_temperature>  <!-- if use NASA temperature to initialise surface temperature(bool) -->
         <Ma_switch>100</Ma_switch>  <!-- switch initial temperatur from NASA to parabolic approach(int) -->
@@ -45,8 +45,10 @@
         <inviscid_spinup_iters>0</inviscid_spinup_iters>  <!-- cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables(int) -->
         <inviscid_ramp_iters>20</inviscid_ramp_iters>  <!-- iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase(int) -->
         <moist_phys_start_iter>300</moist_phys_start_iter>  <!-- cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)(int) -->
-        <dt_visc>0.0005</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
-        <dt_inviscid>0.0001</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
+        <checkpoint_save_iter>300</checkpoint_save_iter>  <!-- dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables(int) -->
+        <restart_from_iter>300</restart_from_iter>  <!-- load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables(int) -->
+        <dt_visc>0.0001</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
+        <dt_inviscid>2e-05</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
     </common>
     <hydrosphere>
         <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->
