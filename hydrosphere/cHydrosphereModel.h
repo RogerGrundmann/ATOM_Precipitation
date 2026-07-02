@@ -216,6 +216,9 @@ private:
     void zonal_mean_w(std::vector<std::vector<double> >& wbar);
     void write_w_momentum_budget(int iter);
     void write_deep_momentum_budget(int iter);
+    void locate_blowup_cell();
+    void record_stage(int s);
+    void write_stage_budget(int iter);
     void searchMinMax_2D(string, string, 
         string, Array_2D &, double coeff=1.);
     void searchMinMax_3D(string, string, 
@@ -241,6 +244,18 @@ public:
     // CSV. See project_hydro_ekman_sh_gyre.
     bool wbudget_capture = false;
     std::vector<std::vector<double> > wbar_before;
+
+    // Stage-resolved velocity-change decomposition at the deep blow-up cell.
+    // The radial-momentum budget showed the momentum RHS is net-DAMPING at the
+    // near-pole runaway cell, so a step AFTER the RK4 must inject the growth.
+    // On checkpoint iters (stage_capture), locate_blowup_cell() picks the
+    // max-|u| interior ocean cell and record_stage() snapshots u,v,w at it after
+    // each iteration stage; write_stage_budget attributes the per-iteration net
+    // Δ(u,v,w) to RK4 / projection / BC+clamp / polar-filter. See
+    // project_hydro_polar_blowup.
+    bool stage_capture = false;
+    int  scell_i = -1, scell_j = -1, scell_k = -1;
+    double su[5] = {0}, sv[5] = {0}, sw[5] = {0};   // velocity [nondim] after stages 0..4
 
     Array_1D rad;                                                       // radial coordinate direction
     Array_1D the;                                                       // lateral coordinate direction

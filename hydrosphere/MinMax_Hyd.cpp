@@ -364,3 +364,83 @@ void cHydrosphereModel::write_deep_momentum_budget(int iter){
          << " buoy=" << buoy << " cor=" << cor
          << " => rhs_u=" << rhs_sum << " cm/s/iter" << endl;
 }
+
+// ----------------------------------------------------------------------------
+// Stage-resolved velocity-change decomposition at the deep blow-up cell.
+//
+// The radial-momentum budget (write_deep_momentum_budget) showed the momentum
+// RHS is net-DAMPING at the near-pole runaway cell, yet u/v/w grow — so a step
+// AFTER the RK4 solve injects the growth. These three helpers snapshot u,v,w at
+// the worst cell after each iteration stage and attribute the per-iteration net
+// Δ to RK4 / projection / BC+clamp / polar-filter, pinning the injector.
+//   stage 0: entering the iteration (post previous store)   [loop top]
+//   stage 1: after solveRungeKutta_Hydrosphere(_Turb)       (RK4)
+//   stage 2: after PressureSolverHyd::project_velocity      (projection)
+//   stage 3: after valueLimitationHyd + bc* + apply_wall_bc (BC+clamp)
+//   stage 4: after polar_zonal_filter(u,v,w)                (polar filter)
+// The cell is located at loop top (the persistent max-|u| interior cell); pole
+// BC rows j=0/jm-1 are excluded (bcTheta sets them by copy; the RK4 skips them).
+// ----------------------------------------------------------------------------
+void cHydrosphereModel::locate_blowup_cell(){
+    scell_i = scell_j = scell_k = -1;
+    double umax = -1.0;
+    for(int i = 1; i <= im - 2; i++)
+        for(int j = 1; j <= jm - 2; j++)
+            for(int k = 0; k < km; k++){
+                if(!AtomUtils::is_water(h, i, j, k)) continue;
+                double a = u.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(a)) a = 1.0e30;   // NaN/Inf ranks worst
+                if(fabs(a) > umax){ umax = fabs(a); scell_i = i; scell_j = j; scell_k = k; }
+            }
+}
+
+void cHydrosphereModel::record_stage(int s){
+    if(!stage_capture || scell_i < 0) return;
+    su[s] = u.x[scell_i][scell_j][scell_k];
+    sv[s] = v.x[scell_i][scell_j][scell_k];
+    sw[s] = w.x[scell_i][scell_j][scell_k];
+    // Default the conditional projection stage to "no change" so a checkpoint
+    // iter that skips the heavy block still yields proj-Δ = 0 (not stale).
+    if(s == 1){ su[2] = su[1]; sv[2] = sv[1]; sw[2] = sw[1]; }
+}
+
+void cHydrosphereModel::write_stage_budget(int iter){
+    if(scell_i < 0) return;
+    const double sc = u_0 * 100.0;   // nondim velocity -> cm/s (per-iteration Δ)
+
+    // Per-stage change in each velocity component [cm/s over this iteration].
+    const double rk4_u = (su[1]-su[0])*sc, rk4_v = (sv[1]-sv[0])*sc, rk4_w = (sw[1]-sw[0])*sc;
+    const double prj_u = (su[2]-su[1])*sc, prj_v = (sv[2]-sv[1])*sc, prj_w = (sw[2]-sw[1])*sc;
+    const double bc_u  = (su[3]-su[2])*sc, bc_v  = (sv[3]-sv[2])*sc, bc_w  = (sw[3]-sw[2])*sc;
+    const double flt_u = (su[4]-su[3])*sc, flt_v = (sv[4]-sv[3])*sc, flt_w = (sw[4]-sw[3])*sc;
+    const double net_u = (su[4]-su[0])*sc, net_v = (sv[4]-sv[0])*sc, net_w = (sw[4]-sw[0])*sc;
+
+    const double lat = 90.0 - (double)scell_j * 180.0 / (double)(jm - 1);
+    const double lon = (double)scell_k * 360.0 / (double)(km - 1);
+    const double depth = (rad.z[im-1] - rad.z[scell_i]) * L_hyd;
+
+    std::ostringstream fname;
+    fname << output_path << "/stage_budget.csv";
+    std::ofstream f(fname.str().c_str(), std::ios::app);
+    if(f.is_open()){
+        if(f.tellp() == std::streampos(0))
+            f << "iter,i,j,k,lat_deg,lon_deg,depth_m,"
+              << "rk4_u,proj_u,bc_u,filter_u,net_u,"
+              << "rk4_v,proj_v,bc_v,filter_v,net_v,"
+              << "rk4_w,proj_w,bc_w,filter_w,net_w\n";
+        f << iter << "," << scell_i << "," << scell_j << "," << scell_k << ","
+          << lat << "," << lon << "," << depth << ","
+          << rk4_u << "," << prj_u << "," << bc_u << "," << flt_u << "," << net_u << ","
+          << rk4_v << "," << prj_v << "," << bc_v << "," << flt_v << "," << net_v << ","
+          << rk4_w << "," << prj_w << "," << bc_w << "," << flt_w << "," << net_w << "\n";
+        f.close();
+    }
+
+    cout << "      [stagebud] iter=" << iter << fixed << setprecision(1)
+         << "  @i=" << scell_i << " lat=" << lat << " lon=" << lon
+         << " depth=" << setprecision(0) << depth << "m" << setprecision(4)
+         << "  Du: rk4=" << rk4_u << " proj=" << prj_u << " bc=" << bc_u
+         << " filt=" << flt_u << " NET=" << net_u
+         << "  | Dw: rk4=" << rk4_w << " proj=" << prj_w << " bc=" << bc_w
+         << " filt=" << flt_w << " NET=" << net_w << " cm/s/iter" << endl;
+}

@@ -430,6 +430,13 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             zonal_mean_w(wbar_before);
         }
 
+        // Stage-resolved velocity-change decomposition: on checkpoint iters,
+        // locate the deep blow-up cell and snapshot u,v,w after each iteration
+        // stage (record_stage 0..4) to attribute the net Δ to RK4 / projection /
+        // BC / polar-filter. See write_stage_budget / project_hydro_polar_blowup.
+        stage_capture = (iter_n % checkpoint == 0);
+        if(stage_capture){ locate_blowup_cell(); record_stage(0); }
+
         if (use_turbulence_model && !inviscid_phase) {
             solveRungeKutta_Hydrosphere_Turb();
         } else {
@@ -437,6 +444,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         }
 
         wbudget_capture = false;   // wbud_* now hold this iter's term split
+        record_stage(1);           // stage 1: after RK4
 
         // First-NaN scanner — pinpoint the prognostic field + cell + iter of the
         // ~iter700 polar-velocity blow-up (project RESUME 2026-06-28). Runs right
@@ -463,6 +471,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // the consistent source is blind to the cell checkerboard so it no longer
             // feeds back. See project_hydro_continuity_checkerboard.
             PressureSolverHyd(*this).project_velocity(60);
+            record_stage(2);   // stage 2: after the pressure projection
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 
             ThermoHyd(*this).SaltWaterDens();
@@ -501,6 +510,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         if (use_turbulence_model && !inviscid_phase) {
             TurbulenceHyd(*this).apply_wall_bc();
         }
+        record_stage(3);   // stage 3: after valueLimitation + BC + wall BC
 
         // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up,
         // ported from the atmosphere (cAtmosphereModel.cpp). The ocean grid has the same
@@ -513,6 +523,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         AtomUtils::polar_zonal_filter(u, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(v, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(w, the.z, &i_bathymetry, 30.0, 12, 3.0);
+        record_stage(4);   // stage 4: after the polar zonal filter (final u,v,w)
 
         // Temperature wiggle damping — cure the deep high-latitude T instability.
         // The momentum/pressure/turbulence fields are de-checkerboarded every iter
@@ -565,6 +576,10 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // deep_momentum_budget.csv + a console [ubudget] line. Diagnoses the
             // ~1500-iter polar radial-velocity runaway. See project_hydro_polar_blowup.
             write_deep_momentum_budget(total_iter_count);
+
+            // Stage-resolved net-Δ(u,v,w) decomposition at the same cell —
+            // attributes the growth to RK4 / projection / BC / polar-filter.
+            write_stage_budget(total_iter_count);
         }
     }  // end iter_n
 
