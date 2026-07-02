@@ -280,3 +280,87 @@ void cHydrosphereModel::write_w_momentum_budget(int iter){
          << "  dyn_sum=" << dyn_sum
          << "  dnet=" << (have_before ? wbar[ip][jp] - wbar_before[ip][jp] : 0.0) << endl;
 }
+
+// ----------------------------------------------------------------------------
+// Radial (u) momentum budget at the DEEP blow-up cell.
+//
+// The 0Ma spin-up is clean to ~300-700 iters but blows up by ~1500 as an
+// isolated deep-cell radial-velocity runaway that relocates when clamped
+// (N Pole -> 84N -> 51S; see project_hydro_polar_blowup). A zonal-mean budget
+// smears a single-cell blow-up out, so instead this SELF-LOCATES the worst
+// cell — the interior ocean cell with the largest |u| (radial velocity) — and
+// dumps its full per-term radial-momentum split, captured in ubud_* during the
+// RK4. The five terms sum to rhs_u; comparing them isolates the driver
+// (metric-singular advection/diffusion near the pole, buoyancy, Coriolis, ...)
+// wherever the blow-up sits this checkpoint.
+//
+// Units: cm/s per iteration for each term (rhs_u contribution * dt * u_0, the
+// Euler-step increment the RK4 applies), u in cm/s. inv_sin2 = 1/sin^2(colat)
+// is the polar metric-amplification factor carried by the 1/sin^2 diffusion
+// and 1/sin advection terms — it diverges at the poles.
+//
+// A single trajectory file deep_momentum_budget.csv is appended one row per
+// checkpoint so the run-up to the blow-up is visible in one place.
+// ----------------------------------------------------------------------------
+void cHydrosphereModel::write_deep_momentum_budget(int iter){
+    // Locate the worst interior ocean cell by |u| (radial velocity). Skip the
+    // seafloor (i=0) / sea-surface (i=im-1) radial BC rows and the pole
+    // (j=0 / j=jm-1) latitudinal BC rows — bcTheta sets the pole rows by plain
+    // copy of j=1 / j=jm-2 and the RK4 skips them, so ubud_* there is 0 and would
+    // mask the real (dynamically-updated) near-pole blow-up cell at j=1.
+    int bi = -1, bj = -1, bk = -1;
+    double umax = -1.0;
+    for(int i = 1; i <= im - 2; i++)
+        for(int j = 1; j <= jm - 2; j++)
+            for(int k = 0; k < km; k++){
+                if(!AtomUtils::is_water(h, i, j, k)) continue;
+                double a = u.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(a)) a = 1.0e30;   // NaN/Inf ranks worst
+                if(fabs(a) > umax){ umax = fabs(a); bi = i; bj = j; bk = k; }
+            }
+    if(bi < 0) return;   // no interior ocean cell
+
+    const double term_scale = dt * u_0 * 100.0;                 // rhs_u term -> cm/s per iter
+    const double lat = 90.0 - (double)bj * 180.0 / (double)(jm - 1);
+    const double lon = (double)bk * 360.0 / (double)(km - 1);
+    const double depth = (rad.z[im-1] - rad.z[bi]) * L_hyd;     // [m] below surface
+    const double colat_rad = M_PI * (double)bj / (double)(jm - 1);
+    const double s = sin(colat_rad);
+    const double inv_sin2 = (fabs(s) > 1.0e-12) ? 1.0 / (s * s) : 0.0;
+
+    const double pgf  = ubud_pgf.x[bi][bj][bk]  * term_scale;
+    const double adv  = ubud_adv.x[bi][bj][bk]  * term_scale;
+    const double diff = ubud_diff.x[bi][bj][bk] * term_scale;
+    const double buoy = ubud_buoy.x[bi][bj][bk] * term_scale;
+    const double cor  = ubud_cor.x[bi][bj][bk]  * term_scale;
+    const double rhs_sum = pgf + adv + diff + buoy + cor;       // = rhs_u increment [cm/s/iter]
+
+    const double u_cms = u.x[bi][bj][bk] * u_0 * 100.0;
+    const double v_cms = v.x[bi][bj][bk] * u_0 * 100.0;
+    const double w_cms = w.x[bi][bj][bk] * u_0 * 100.0;
+
+    std::ostringstream fname;
+    fname << output_path << "/deep_momentum_budget.csv";
+    std::ofstream f(fname.str().c_str(), std::ios::app);
+    if(f.is_open()){
+        if(f.tellp() == std::streampos(0))
+            f << "iter,i,j,k,lat_deg,lon_deg,depth_m,inv_sin2,"
+              << "u_cms,v_cms,w_cms,pgf,advection,diffusion,buoyancy,coriolis,rhs_sum\n";
+        f << iter << "," << bi << "," << bj << "," << bk << ","
+          << lat << "," << lon << "," << depth << "," << inv_sin2 << ","
+          << u_cms << "," << v_cms << "," << w_cms << ","
+          << pgf << "," << adv << "," << diff << "," << buoy << "," << cor << ","
+          << rhs_sum << "\n";
+        f.close();
+    }
+
+    cout << "      [ubudget] iter=" << iter << fixed << setprecision(2)
+         << "  worst|u| @i=" << bi << " lat=" << setprecision(1) << lat
+         << " lon=" << lon << " depth=" << setprecision(0) << depth << "m"
+         << setprecision(3)
+         << "  u=" << u_cms << "cm/s (v=" << v_cms << " w=" << w_cms << ")"
+         << "  inv_sin2=" << setprecision(1) << inv_sin2 << setprecision(4)
+         << " | pgf=" << pgf << " adv=" << adv << " diff=" << diff
+         << " buoy=" << buoy << " cor=" << cor
+         << " => rhs_u=" << rhs_sum << " cm/s/iter" << endl;
+}

@@ -617,27 +617,20 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
-    // --- rhs_u term-split diagnostic at the iter-635 blow-up seed (13°S/73°E,
-    //     i=im-2 = the wind-stress injection cell). Logs every RK4 stage for
-    //     iters >= 620 so we can see which term drives the radial-velocity
-    //     runaway (advection / PGF / buoyancy / Coriolis / diffusion) and how the
-    //     horizontal convergence (dvdthe, dwdphi) evolves. See
-    //     project_hydro_polar_blowup. Remove once the driver is identified. ---
-    if (i == im-2 && j == 103 && k == 73 && total_iter_count >= 620) {
-        double buoy_u = buoyancy * g * dt / u_0
+    // Radial (u) momentum-budget capture — the DEEP polar blow-up is a
+    // radial-velocity runaway, so split rhs_u into its five contributions on
+    // checkpoint iters. write_deep_momentum_budget self-locates the max-|u|
+    // interior ocean cell and dumps this split, so the driver is isolated
+    // wherever the blow-up relocates (pole -> 84N -> 51S). The sum of the five
+    // equals rhs_u. See project_hydro_polar_blowup.
+    if (wbudget_capture) {
+        ubud_pgf.x[i][j][k]  = -dpdr_exp;
+        ubud_adv.x[i][j][k]  = -transport_u;
+        ubud_diff.x[i][j][k] =  diffusion_u;
+        ubud_buoy.x[i][j][k] =  buoyancy * g * dt / u_0
             * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
-        #pragma omp critical
-        std::cout << "[usplit] it=" << total_iter_count
-            << "  u=" << u_ijk << " v=" << v_ijk << " w=" << w_ijk
-            << " | pgf=" << -dpdr_exp
-            << " adv=" << -transport_u
-            << " diff=" << diffusion_u
-            << " buoy=" << buoy_u
-            << " cor=" << (Coriolis * Coriolis_rad)
-            << " cf=" << (-centrifugal * centrifugal_rad)
-            << " => rhs_u=" << rhs_u.x[i][j][k]
-            << " | dudr=" << dudr << " dvdthe=" << dvdthe << " dwdphi=" << dwdphi
-            << std::endl;
+        ubud_cor.x[i][j][k]  =  Coriolis * Coriolis_rad
+                              - centrifugal * centrifugal_rad;
     }
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v

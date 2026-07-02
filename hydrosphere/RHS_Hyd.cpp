@@ -386,6 +386,16 @@ void cHydrosphereModel::RHS_Hydrosphere(int i, int j, int k, const CellGeometry&
         wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
         wbud_adv.x[i][j][k]  = -transport_w;
         wbud_diff.x[i][j][k] =  diffusion_w;
+
+        // Radial (u) momentum-budget split — mirror of RHS_Hyd_Turb.cpp so
+        // inviscid-phase checkpoints also populate it. Sum equals rhs_u.
+        ubud_pgf.x[i][j][k]  = -dpdr_exp;
+        ubud_adv.x[i][j][k]  = -transport_u;
+        ubud_diff.x[i][j][k] =  diffusion_u;
+        ubud_buoy.x[i][j][k] =  buoyancy * g * dt / u_0
+            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
+        ubud_cor.x[i][j][k]  =  Coriolis * Coriolis_rad
+                              - centrifugal * centrifugal_rad;
     }
 
     // Surface wind-stress forcing. The ocean momentum equation otherwise has NO

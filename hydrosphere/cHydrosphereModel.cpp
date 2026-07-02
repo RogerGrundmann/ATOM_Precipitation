@@ -559,6 +559,12 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // Zonal-mean w-momentum budget CSV (uses the wbud_* term split
             // captured this iter + the wbar_before snapshot for the net Δwbar).
             write_w_momentum_budget(total_iter_count);
+
+            // Radial (u) momentum budget at the self-located deep blow-up cell
+            // (uses the ubud_* split captured this iter) — appends one row to
+            // deep_momentum_budget.csv + a console [ubudget] line. Diagnoses the
+            // ~1500-iter polar radial-velocity runaway. See project_hydro_polar_blowup.
+            write_deep_momentum_budget(total_iter_count);
         }
     }  // end iter_n
 

@@ -61,7 +61,9 @@ public:
             &m.nue, &m.prod, &m.tke_source, &m.dis_source,
             &m.rhs_tke, &m.rhs_dis,
             // w-momentum-budget diagnostic fields (zero-initialised)
-            &m.wbud_pgf, &m.wbud_cor, &m.wbud_adv, &m.wbud_diff
+            &m.wbud_pgf, &m.wbud_cor, &m.wbud_adv, &m.wbud_diff,
+            // u (radial) momentum-budget diagnostic fields (zero-initialised)
+            &m.ubud_pgf, &m.ubud_adv, &m.ubud_diff, &m.ubud_buoy, &m.ubud_cor
         };
         constexpr int n_3d_zero = sizeof(arrays_3d_zero) / sizeof(arrays_3d_zero[0]);
 

@@ -215,6 +215,7 @@ private:
     bool load_state(int iter);
     void zonal_mean_w(std::vector<std::vector<double> >& wbar);
     void write_w_momentum_budget(int iter);
+    void write_deep_momentum_budget(int iter);
     void searchMinMax_2D(string, string, 
         string, Array_2D &, double coeff=1.);
     void searchMinMax_3D(string, string, 
@@ -347,6 +348,19 @@ public:
     Array wbud_cor;                                                     // w-budget: Coriolis  -2*Omega*(costhe*v + sinthe*u)
     Array wbud_adv;                                                     // w-budget: advection -transport_w
     Array wbud_diff;                                                    // w-budget: diffusion (incl. curvature/metric)
+
+    // Radial (u) momentum-budget diagnostic — attributes the DEEP polar
+    // velocity blow-up that makes the spin-up not long-run stable (clean to
+    // ~300-700, blows up by ~1500: N Pole -> 84N -> 51S). Captured into ubud_*
+    // on the same wbudget_capture checkpoint iters; write_deep_momentum_budget
+    // self-locates the max-|u| interior ocean cell and dumps the full split so
+    // the driving term (metric-singular advection/diffusion, buoyancy, ...) is
+    // isolated wherever the blow-up relocates. See project_hydro_polar_blowup.
+    Array ubud_pgf;                                                     // u-budget: -dp/dr * exp_rm  radial pressure gradient
+    Array ubud_adv;                                                     // u-budget: advection -transport_u
+    Array ubud_diff;                                                    // u-budget: diffusion (eddy visc + 1/sin^2 metric — polar singular)
+    Array ubud_buoy;                                                    // u-budget: Boussinesq buoyancy (thermal + haline anomaly)
+    Array ubud_cor;                                                     // u-budget: Coriolis(radial) + centrifugal
     Array_2D vel_star;                                                  // friction velocity u_τ per (j,k) column [m/s]
 };
 #endif
