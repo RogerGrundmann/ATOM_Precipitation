@@ -272,19 +272,19 @@ void cHydrosphereModel::paraview_panorama_vts(const string &Name_Bathymetry_File
     dy = 0.1;
     dz = 0.1;
 
+    // Regular structured grid: x = i*dx, y = j*dy, z = k*dz. The previous incremental
+    // form forced x = 0 for the ENTIRE k=0 plane and every j=0 row (via the in-loop
+    // "if(k==0||j==0) x=0.0"), collapsing those cells to zero width -> degenerate
+    // (zero-volume) cells, which made VTK's gradient/contour filters fail with
+    // "Unable to factor linear system / Cannot compute gradient of grid".
     for(int k = 0; k < km; k++){
         for(int j = 0; j < jm; j++){
             for(int i = 0; i < im; i++){
-                if(k == 0 || j == 0) x = 0.0;
-                else x = x + dx;
+                x = i * dx;  y = j * dy;  z = k * dz;
                 Hydrosphere_panorama_vts_File << x << " " << y << " " << z  << endl;
             }
-            x = 0.0;
-            y = y + dy;
             Hydrosphere_panorama_vts_File <<  "\n"  << endl;
         }
-        y = 0;
-        z = z + dz;
         Hydrosphere_panorama_vts_File <<  "\n"  << endl;
     }
 
