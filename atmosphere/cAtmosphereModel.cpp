@@ -399,8 +399,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     //                     operator-split relaxation of the dynamical t toward the RE field by
     //                     omega_rad. t_eq stays the Scotese snapshot + CO2 forcing so Held-
     //                     Suarez still supplies the mean-state APE and radiation heats T on top).
-    // The CO2 Planck forcing of t_eq (surface climate sensitivity) is applied in every mode.
-    constexpr int    radiation_mode     = 1;               // default: 1 = option A (MLR->t_eq); 2 = option B (MLR->heating)
+    //   3 = OPTION ii (DEFAULT): t_eq = Scotese snapshot + MLR CO2 PERTURBATION [MLR(C)-MLR(C0)].
+    //       MLR now warms the surface with CO2 (surface energy balance), but its grey ABSOLUTE
+    //       is ~7 K cold-biased; taking the DIFFERENCE MLR(C)-MLR(C0) cancels that bias and
+    //       leaves the physical CO2 warming (surface ~+1.6 K/doubling + profile), added to the
+    //       realistic observed baseline. Replaces the 5.35 parametric forcing (mode 0), no cold
+    //       bias, no double-count. The parametric CO2 shift is now used ONLY in mode 0.
+    constexpr int    radiation_mode     = 3;               // default: option (ii) CO2 perturbation
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
     constexpr double co2_ref_ppm        = 280.0;           // pre-industrial reference C0
@@ -430,7 +435,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     t.x[i][j][k]     = t_eq.x[i][j][k];
                     t_eq.x[i][j][k]  = tmp;
                 }
-        apply_co2_forcing();
+        // No separate CO2 forcing here: MLR now warms the surface with CO2 via its surface
+        // energy balance, so adding the 5.35 shift would double-count. (Grey absolute stays
+        // ~7 K cold-biased in this mode — mode 3 avoids that via the difference.)
     };
 
     // Option B helper: nudge the dynamical t toward the MLR radiative-equilibrium field by
@@ -454,12 +461,43 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 }
     };
 
-    if (radiation_mode == 1) refresh_radiative_teq();           // A: initial MLR -> t_eq
-    else                     apply_co2_forcing();               // B / legacy: Scotese t_eq + CO2 forcing
+    // Option (ii) helper: t_eq += MLR(current CO2) - MLR(reference 280 ppm). Two MLR solves on
+    // the current field; MLR's grey absolute cold bias is identical in both and CANCELS, leaving
+    // the physical CO2 warming (surface + profile) which is added to the observed t_eq baseline.
+    // t and co2 are saved/restored around the two solves. Computed once at start (fixed CO2).
+    std::vector<double> t_save, mlr_hi, co2_save;
+    auto apply_co2_perturbation = [&]() {
+        if (co2_0 <= 0.0) return;
+        const size_t N = (size_t)im * jm * km;
+        if (t_save.empty()) { t_save.assign(N, 0.0); mlr_hi.assign(N, 0.0); co2_save.assign(N, 0.0); }
+        size_t idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
+            t_save[idx] = t.x[i][j][k]; co2_save[idx] = co2.x[i][j][k]; idx++;
+        }
+        MultiLayerRadiation(*this).run();                         // t := MLR(current CO2)
+        idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            mlr_hi[idx++] = t.x[i][j][k];
+        const double co2_ref_ratio = co2_ref_ppm / co2_0;         // co2.x giving the 280 ppm reference
+        idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
+            t.x[i][j][k] = t_save[idx++]; co2.x[i][j][k] = co2_ref_ratio;
+        }
+        MultiLayerRadiation(*this).run();                         // t := MLR(reference CO2)
+        idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
+            t_eq.x[i][j][k] += mlr_hi[idx] - t.x[i][j][k];        // + physical CO2 warming (cold bias cancels)
+            t.x[i][j][k] = t_save[idx]; co2.x[i][j][k] = co2_save[idx]; idx++;
+        }
+    };
+
+    if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq
+    else if (radiation_mode == 3) apply_co2_perturbation();      // ii: Scotese baseline + MLR CO2 perturbation
+    else if (radiation_mode == 0) apply_co2_forcing();          // legacy: Scotese + 5.35 parametric forcing
+    // mode 2: t_eq stays the Scotese snapshot; the in-loop MLR heating carries the radiation.
     std::cout << "      AGCM: radiation_mode=" << radiation_mode
-              << " (1=MLR->t_eq refresh/" << teq_refresh_stride
-              << ", 2=MLR->heating omega=" << omega_rad << ")  co2_0=" << co2_0 << " ppm  dT_eq=+"
-              << (co2_0 > 0.0 ? co2_lambda*5.35*std::log(co2_0/co2_ref_ppm) : 0.0) << " K" << std::endl;
+              << " (0=legacy,1=MLR->t_eq,2=MLR->heat,3=Scotese+MLR-CO2-perturb)  co2_0="
+              << co2_0 << " ppm" << std::endl;
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
     // state and resume from its total_iter_count (skips re-running the dry spin-up).

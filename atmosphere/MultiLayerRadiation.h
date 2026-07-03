@@ -251,6 +251,33 @@ public:
                     m.radiation.x[i][j][k] = radiation_original[i] + m.radiation.x[i][j][k];
                     m.t.x[i][j][k] = pow(m.radiation.x[i][j][k] / m.sigma, 0.25) / m.t_0;
                 }
+
+                // ---- Surface energy balance (radiative-CONVECTIVE) ----
+                // The tridiagonal inversion left the surface T ~insensitive to the longwave
+                // opacity, so CO2 did not warm the surface. Replace the surface value with an
+                // explicit balance:  (1-albedo)*SW + L_down = sigma*T_s^4 + c_H*(T_s - T_air1).
+                //  - L_down = downwelling longwave (back-radiation) = sum of atmospheric-layer
+                //    emissions transmitted down to the surface; it RISES with CO2/H2O emissivity,
+                //    so more greenhouse -> warmer surface (the physically-correct response).
+                //  - c_H*(T_s - T_air1): bulk turbulent (sensible+latent) flux to the lowest air
+                //    layer, which keeps the surface off the pure-radiative overheating —
+                //    radiative-convective, not pure radiative. sigma*T_s^4 is linearised about
+                //    the current surface T_s0 (one Newton step). See project_multilayer_radiation.
+                double L_down = 0.0, trans = 1.0;
+                for (int i = i_mount + 1; i <= i_trop; i++) {
+                    L_down += m.epsilon.x[i][j][k] * m.sigma
+                            * pow(m.t.x[i][j][k] * m.t_0, 4.0) * trans;     // layer i emission reaching surface
+                    trans  *= (1.0 - m.epsilon.x[i][j][k]);                // attenuation through layer i
+                }
+                const double SW_abs = (1.0 - m.albedo.y[j][k]) * m.short_wave_radiation[j];
+                const double T_air1 = m.t.x[i_mount + 1][j][k] * m.t_0;     // lowest air-layer T [K]
+                const double T_s0   = m.t.x[i_mount][j][k] * m.t_0;         // linearisation point [K]
+                const double c_H    = 15.0;                                // bulk turbulent transfer [W/m2/K]
+                const double dsigT4 = 4.0 * m.sigma * T_s0 * T_s0 * T_s0;
+                const double T_s    = (SW_abs + L_down - m.sigma * pow(T_s0, 4.0)
+                                       + dsigT4 * T_s0 + c_H * T_air1) / (dsigT4 + c_H);
+                m.radiation.x[i_mount][j][k] = m.sigma * pow(T_s, 4.0);
+                m.t.x[i_mount][j][k]         = T_s / m.t_0;
             }  // k
         }  // j
 
