@@ -392,46 +392,74 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // t with the RE field, so we back t up in t_eq, run MLR, then swap back — the dynamical t is
     // preserved and only the target t_eq is updated. MLR uses i_mount=0 (ignores topography);
     // BC_Atm handles sub-surface. See project_multilayer_radiation.
-    constexpr bool   use_mlr_radiative_teq = true;
-    constexpr int    teq_refresh_stride    = 20;           // re-solve MLR every N iters
-    constexpr double co2_ref_ppm           = 280.0;        // pre-industrial reference C0
-    constexpr double co2_lambda            = 0.31;         // Planck (no-feedback) sensitivity [K/(W/m2)]
+    // radiation_mode: 0 = legacy (no MLR; t_eq = Scotese snapshot + CO2 forcing),
+    //                 1 = OPTION A (MLR radiative equilibrium -> t_eq target, refreshed every
+    //                     teq_refresh_stride iters; Held-Suarez relaxes t toward it),
+    //                 2 = OPTION B (MLR applied as a DIRECT radiative heating on T each iter:
+    //                     operator-split relaxation of the dynamical t toward the RE field by
+    //                     omega_rad. t_eq stays the Scotese snapshot + CO2 forcing so Held-
+    //                     Suarez still supplies the mean-state APE and radiation heats T on top).
+    // The CO2 Planck forcing of t_eq (surface climate sensitivity) is applied in every mode.
+    constexpr int    radiation_mode     = 1;               // default: 1 = option A (MLR->t_eq); 2 = option B (MLR->heating)
+    constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
+    constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
+    constexpr double co2_ref_ppm        = 280.0;           // pre-industrial reference C0
+    constexpr double co2_lambda         = 0.31;            // Planck (no-feedback) sensitivity [K/(W/m2)]
 
-    auto refresh_radiative_teq = [&]() {
-        for (int i = 0; i < im; i++)
-            for (int j = 0; j < jm; j++)
-                for (int k = 0; k < km; k++)
-                    t_eq.x[i][j][k] = t.x[i][j][k];             // (i) back up dynamical t into t_eq
-        MultiLayerRadiation(*this).run();                       // (ii) t := radiative equilibrium of t
-        for (int i = 0; i < im; i++)
-            for (int j = 0; j < jm; j++)
-                for (int k = 0; k < km; k++) {                  // (iii) swap: restore t, set t_eq := RE
-                    const double tmp   = t.x[i][j][k];
-                    t.x[i][j][k]       = t_eq.x[i][j][k];
-                    t_eq.x[i][j][k]    = tmp;
-                }
-        if (co2_0 > 0.0) {                                      // (iv) CO2 forcing on top of the RE t_eq
-            const double dT_eq_nd = (co2_lambda * 5.35 * std::log(co2_0 / co2_ref_ppm)) / t_0;
-            for (int i = 0; i < im; i++)
-                for (int j = 0; j < jm; j++)
-                    for (int k = 0; k < km; k++)
-                        t_eq.x[i][j][k] += dT_eq_nd;
-        }
-    };
-
-    if (use_mlr_radiative_teq) {
-        refresh_radiative_teq();                               // initial radiative t_eq
-        std::cout << "      AGCM: interactive t_eq = MultiLayerRadiation + CO2 forcing  (co2_0="
-                  << co2_0 << " ppm, dT_eq=+" << co2_lambda*5.35*std::log(co2_0/co2_ref_ppm)
-                  << " K, refresh every " << teq_refresh_stride << " iters)" << std::endl;
-    } else if (co2_0 > 0.0) {
-        // Legacy: Scotese/NASA t_eq (snapshot above) + parametric CO2 forcing (no MLR).
+    auto apply_co2_forcing = [&]() {                       // Planck-equivalent CO2 shift of t_eq
+        if (co2_0 <= 0.0) return;
         const double dT_eq_nd = (co2_lambda * 5.35 * std::log(co2_0 / co2_ref_ppm)) / t_0;
         for (int i = 0; i < im; i++)
             for (int j = 0; j < jm; j++)
                 for (int k = 0; k < km; k++)
                     t_eq.x[i][j][k] += dT_eq_nd;
-    }
+    };
+
+    // Option A helper: t_eq := MLR radiative equilibrium of the CURRENT field (+ CO2 forcing).
+    // MLR OVERWRITES t, so t_eq doubles as the backup buffer (swap restores the dynamical t).
+    auto refresh_radiative_teq = [&]() {
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++)
+                    t_eq.x[i][j][k] = t.x[i][j][k];             // back up dynamical t
+        MultiLayerRadiation(*this).run();                       // t := radiative equilibrium
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++) {                  // swap: restore t, set t_eq := RE
+                    const double tmp = t.x[i][j][k];
+                    t.x[i][j][k]     = t_eq.x[i][j][k];
+                    t_eq.x[i][j][k]  = tmp;
+                }
+        apply_co2_forcing();
+    };
+
+    // Option B helper: nudge the dynamical t toward the MLR radiative-equilibrium field by
+    // omega_rad (radiation as a direct heating/tendency). Own backup buffer — t_eq is busy
+    // holding the Held-Suarez target here. t_new = (1-omega)*t_old + omega*RE.
+    std::vector<double> t_backup;
+    auto apply_radiative_heating = [&]() {
+        if (t_backup.empty()) t_backup.assign((size_t)im * jm * km, 0.0);
+        size_t idx = 0;
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++)
+                    t_backup[idx++] = t.x[i][j][k];             // save dynamical t
+        MultiLayerRadiation(*this).run();                       // t := radiative equilibrium
+        idx = 0;
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++) {                  // blend t toward RE by omega_rad
+                    const double re = t.x[i][j][k];
+                    t.x[i][j][k] = t_backup[idx++] * (1.0 - omega_rad) + re * omega_rad;
+                }
+    };
+
+    if (radiation_mode == 1) refresh_radiative_teq();           // A: initial MLR -> t_eq
+    else                     apply_co2_forcing();               // B / legacy: Scotese t_eq + CO2 forcing
+    std::cout << "      AGCM: radiation_mode=" << radiation_mode
+              << " (1=MLR->t_eq refresh/" << teq_refresh_stride
+              << ", 2=MLR->heating omega=" << omega_rad << ")  co2_0=" << co2_0 << " ppm  dT_eq=+"
+              << (co2_0 > 0.0 ? co2_lambda*5.35*std::log(co2_0/co2_ref_ppm) : 0.0) << " K" << std::endl;
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
@@ -859,11 +887,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
 
-        // Interactive radiation: re-solve MLR on the CURRENT field to refresh the radiative
-        // target t_eq every teq_refresh_stride iters, so t_eq tracks the evolving climate
-        // (water-vapour feedback, CO2) rather than staying frozen at the initial state.
-        if (use_mlr_radiative_teq && iter_n % teq_refresh_stride == 0)
-            refresh_radiative_teq();
+        // Interactive radiation, per mode: (A) re-solve MLR on the current field to refresh the
+        // t_eq relaxation target every teq_refresh_stride iters; (B) apply MLR as a direct
+        // radiative heating on T every iteration. Either way the radiation tracks the evolving
+        // climate (water-vapour feedback, CO2) instead of being frozen at the initial state.
+        if (radiation_mode == 1 && iter_n % teq_refresh_stride == 0)
+            refresh_radiative_teq();                            // A: refresh MLR -> t_eq target
+        else if (radiation_mode == 2)
+            apply_radiative_heating();                          // B: MLR direct heating on T
 
         ThermoAtm(*this).printDataAtm();
 
