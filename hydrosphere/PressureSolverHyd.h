@@ -568,32 +568,35 @@ public:
             }
         }
 
-        // ---- Step 4: pointwise cell-velocity correction (central gradient; the
-        // advection uses the div-free faces, so this is only for momentum/output).
-        // Skip a component where the neighbour is land (don't read a land pressure).
+        // ---- Step 4: reconstruct the cell velocity as the average of its two
+        // bounding divergence-free faces (uf/vf/wf from Step 3), instead of a
+        // SEPARATE central-gradient pressure correction.
+        //
+        // The old central-gradient form (u -= dpdr*exp_rm) is a DIFFERENT discrete
+        // operator from the face flux, so the collocated cell velocity did NOT
+        // inherit the faces' divergence-free property — it accumulated spurious
+        // divergence that Step 1 re-read as the source next call and the projection
+        // re-amplified: a self-feeding u->source->u loop that ran the deepest, most-
+        // convergent cell away (first the metric-amplified North Pole ~iter600, then
+        // — once the pole was filtered — a deep Southern-Ocean cell at 52 S ~iter1150;
+        // the instability is latitude-independent, see project_hydro_polar_blowup).
+        //
+        // Face-averaging is the standard staggered->collocated reconstruction: it
+        // makes the prognostic cell velocity consistent with the div-free faces, so
+        // its divergence (hence the next source) stays small and the loop is broken.
+        // uf[i-1]/vf[j-1]/wf[k-1] are the low-side faces of cell (i,j,k), uf[i]/
+        // vf[j]/wf[k] the high-side faces; faces are 0 on land (no-normal-flow), so a
+        // cell against a boundary correctly gets a halved (reduced) velocity. The
+        // average also carries an implicit 1-2-1 smoothing of the pre-projection
+        // velocity (mild, stabilising — inherent to Rhie-Chow collocation).
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
-                const double rm           = m.rad.z[i];
-                const double exp_rm       = 1.0 / (rm + 1.0);
-                const double inv_rm       = 1.0 / rm;
-                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
                 for (int k = 1; k < m.km-1; k++) {
                     if (!water(i, j, k)) continue;
-                    if (water(i-1,j,k) && water(i+1,j,k)) {
-                        const double dpdr = m.rc1m[i]*m.p_dyn.x[i-1][j][k]
-                                          + m.rc10[i]*m.p_dyn.x[i][j][k]
-                                          + m.rc1p[i]*m.p_dyn.x[i+1][j][k];
-                        m.u.x[i][j][k] -= dpdr * exp_rm;
-                    }
-                    if (water(i,j-1,k) && water(i,j+1,k)) {
-                        const double dpdthe = (m.p_dyn.x[i][j+1][k]-m.p_dyn.x[i][j-1][k])*0.5*inv_dthe;
-                        m.v.x[i][j][k] -= dpdthe * inv_rm;
-                    }
-                    if (water(i,j,k-1) && water(i,j,k+1)) {
-                        const double dpdphi = (m.p_dyn.x[i][j][k+1]-m.p_dyn.x[i][j][k-1])*0.5*inv_dphi;
-                        m.w.x[i][j][k] -= dpdphi * inv_rmsinthe;
-                    }
+                    m.u.x[i][j][k] = 0.5 * (m.uf.x[i-1][j][k] + m.uf.x[i][j][k]);
+                    m.v.x[i][j][k] = 0.5 * (m.vf.x[i][j-1][k] + m.vf.x[i][j][k]);
+                    m.w.x[i][j][k] = 0.5 * (m.wf.x[i][j][k-1] + m.wf.x[i][j][k]);
                 }
             }
         }
