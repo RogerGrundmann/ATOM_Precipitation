@@ -62,6 +62,8 @@ class cAtmosphereModel{
     friend class UtilsAtm;
     friend class BC_Atm;
     friend class TurbulenceAtm;
+    friend class MultiLayerRadiation;
+    friend class RadiationSelfTest;   // offline standalone driver (test/ dir) — no run-loop call site
 
 public:
 
@@ -398,6 +400,8 @@ public:
     Array_2D Q_latent_2D;                                               // latent heat from bottom values by the energy transport equation
     Array_2D Q_sensible_2D;                                             // sensible heat from bottom values by the energy transport equation
     Array_2D Q_bottom_2D;                                               // difference by Q_radiation - Q_latent - Q_sensible
+    Array_2D albedo;                                                    // surface albedo (pole->equator parabola) — MultiLayerRadiation
+    Array_2D epsilon_2D;                                                // surface emissivity (bottom layer of epsilon) — MultiLayerRadiation
     Array_2D vapour_evaporation;                                        // water vapour by evaporation in [mm/d]
     Array_2D Evaporation_Dalton;                                        // evaporation by Dalton in [mm/d]
     Array_2D Evaporation_Meyer;                                         // evaporation by Meyer (1915) in [mm/d]

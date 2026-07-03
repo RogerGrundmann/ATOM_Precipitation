@@ -334,7 +334,8 @@ public:
             &m.Q_bottom_2D, &m.vapour_evaporation, &m.Evaporation_Dalton,
             &m.Evaporation_Meyer, &m.Evaporation_Rohwer, &m.Evaporation, &m.co2_total,
             &m.dew_point_temperature, &m.condensation_level, &m.c_fix, &m.Landscape,
-            &m.Tropopause
+            &m.Tropopause,
+            &m.albedo, &m.epsilon_2D                                    // MultiLayerRadiation surface fields
         };
         // vel_star is initialised separately — must not be zero when TurbulenceAtm::init()
         // reads it before the first compute_vel_star() call.

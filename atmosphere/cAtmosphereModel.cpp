@@ -26,6 +26,7 @@
 #include "UtilsAtm.h"
 #include "BC_Atm.h"
 #include "TurbulenceAtm.h"
+#include "MultiLayerRadiation.h"
 
 
 using namespace std;
@@ -367,14 +368,70 @@ void cAtmosphereModel::run_3D_loop(int Ma){
 
 cout << endl << endl << endl << "      AGCM: run_3D_loop atm ..........................." << endl;
 
-    // Held-Suarez relaxation target: snapshot the freshly-built initial temperature field as
-    // the radiative-equilibrium state t_eq BEFORE any restart overwrite, so rhs_t always
-    // relaxes back toward the intended (Scotese parabola + topography + land-sea) profile
-    // rather than toward a restarted/evolved state.
+    // Held-Suarez relaxation target: snapshot the freshly-built initial temperature field
+    // (used as-is by the LEGACY path; overwritten by MLR in the radiative path below).
     for (int i = 0; i < im; i++)
         for (int j = 0; j < jm; j++)
             for (int k = 0; k < km; k++)
                 t_eq.x[i][j][k] = t.x[i][j][k];
+
+    // ===== INTERACTIVE radiative target t_eq = MLR structure + CO2 surface forcing =====
+    //
+    // t_eq is the Held-Suarez relaxation target. MultiLayerRadiation computes the multi-layer
+    // LW/SW radiative-equilibrium temperature (de-saturated water-vapour + tuned CO2 band
+    // emissivity, albedo-reduced shortwave, tridiagonal solve) and we use it as t_eq — giving
+    // t_eq a physical radiative/spatial structure (1). On TOP of it we add the CO2 climate
+    // sensitivity (2): a Planck-equivalent shift dT_eq = lambda * 5.35*ln(C/C0) (Myhre 1998).
+    // MLR's radiative-equilibrium leaves the SURFACE ~unchanged (its correction ~0 there), so
+    // the CO2 band shapes OLR/the upper profile while the parametric shift supplies the surface
+    // warming (3.7 W/m2/doubling) — complementary, not a surface double-count (option A).
+    //
+    // The radiation is INTERACTIVE: refresh_radiative_teq() re-solves MLR on the CURRENT field
+    // both at start and every teq_refresh_stride iters, so t_eq tracks the evolving climate
+    // (water-vapour feedback etc.) instead of being frozen at the initial state. MLR OVERWRITES
+    // t with the RE field, so we back t up in t_eq, run MLR, then swap back — the dynamical t is
+    // preserved and only the target t_eq is updated. MLR uses i_mount=0 (ignores topography);
+    // BC_Atm handles sub-surface. See project_multilayer_radiation.
+    constexpr bool   use_mlr_radiative_teq = true;
+    constexpr int    teq_refresh_stride    = 20;           // re-solve MLR every N iters
+    constexpr double co2_ref_ppm           = 280.0;        // pre-industrial reference C0
+    constexpr double co2_lambda            = 0.31;         // Planck (no-feedback) sensitivity [K/(W/m2)]
+
+    auto refresh_radiative_teq = [&]() {
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++)
+                    t_eq.x[i][j][k] = t.x[i][j][k];             // (i) back up dynamical t into t_eq
+        MultiLayerRadiation(*this).run();                       // (ii) t := radiative equilibrium of t
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++) {                  // (iii) swap: restore t, set t_eq := RE
+                    const double tmp   = t.x[i][j][k];
+                    t.x[i][j][k]       = t_eq.x[i][j][k];
+                    t_eq.x[i][j][k]    = tmp;
+                }
+        if (co2_0 > 0.0) {                                      // (iv) CO2 forcing on top of the RE t_eq
+            const double dT_eq_nd = (co2_lambda * 5.35 * std::log(co2_0 / co2_ref_ppm)) / t_0;
+            for (int i = 0; i < im; i++)
+                for (int j = 0; j < jm; j++)
+                    for (int k = 0; k < km; k++)
+                        t_eq.x[i][j][k] += dT_eq_nd;
+        }
+    };
+
+    if (use_mlr_radiative_teq) {
+        refresh_radiative_teq();                               // initial radiative t_eq
+        std::cout << "      AGCM: interactive t_eq = MultiLayerRadiation + CO2 forcing  (co2_0="
+                  << co2_0 << " ppm, dT_eq=+" << co2_lambda*5.35*std::log(co2_0/co2_ref_ppm)
+                  << " K, refresh every " << teq_refresh_stride << " iters)" << std::endl;
+    } else if (co2_0 > 0.0) {
+        // Legacy: Scotese/NASA t_eq (snapshot above) + parametric CO2 forcing (no MLR).
+        const double dT_eq_nd = (co2_lambda * 5.35 * std::log(co2_0 / co2_ref_ppm)) / t_0;
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++)
+                    t_eq.x[i][j][k] += dT_eq_nd;
+    }
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
@@ -801,6 +858,12 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         UtilsAtm(*this).findResiduumAtm();
 
         UtilsAtm(*this).storeIntermediateData3D(1.0);
+
+        // Interactive radiation: re-solve MLR on the CURRENT field to refresh the radiative
+        // target t_eq every teq_refresh_stride iters, so t_eq tracks the evolving climate
+        // (water-vapour feedback, CO2) rather than staying frozen at the initial state.
+        if (use_mlr_radiative_teq && iter_n % teq_refresh_stride == 0)
+            refresh_radiative_teq();
 
         ThermoAtm(*this).printDataAtm();
 
