@@ -478,10 +478,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         idx = 0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
             mlr_hi[idx++] = t.x[i][j][k];
-        const double co2_ref_ratio = co2_ref_ppm / co2_0;         // co2.x giving the 280 ppm reference
-        idx = 0;
+        idx = 0;                                                  // co2.x is ppm-valued (not a ratio),
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
-            t.x[i][j][k] = t_save[idx++]; co2.x[i][j][k] = co2_ref_ratio;
+            t.x[i][j][k] = t_save[idx++]; co2.x[i][j][k] = co2_ref_ppm;   // so the reference field = 280 ppm directly
         }
         MultiLayerRadiation(*this).run();                         // t := MLR(reference CO2)
         idx = 0;

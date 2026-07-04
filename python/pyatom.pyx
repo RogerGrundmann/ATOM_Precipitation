@@ -966,6 +966,15 @@ cdef class Atmosphere:
             self._check_alive()
             self._thisptr.co2_land = <double> value
     
+    property co2_scale:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.co2_scale
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.co2_scale = <double> value
+    
     property c_land:
         def __get__(Atmosphere self):
             self._check_alive()

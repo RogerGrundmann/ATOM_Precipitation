@@ -107,5 +107,6 @@ cdef extern from "cAtmosphereModel.h":
         double co2_vegetation
         double co2_ocean
         double co2_land
+        double co2_scale
         double c_land
         double c_ocean

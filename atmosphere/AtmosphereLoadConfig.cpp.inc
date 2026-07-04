@@ -109,6 +109,7 @@
     Config::FillDoubleWithElement(elem_atmosphere, "co2_vegetation", co2_vegetation);
     Config::FillDoubleWithElement(elem_atmosphere, "co2_ocean", co2_ocean);
     Config::FillDoubleWithElement(elem_atmosphere, "co2_land", co2_land);
+    Config::FillDoubleWithElement(elem_atmosphere, "co2_scale", co2_scale);
     Config::FillDoubleWithElement(elem_atmosphere, "c_land", c_land);
     Config::FillDoubleWithElement(elem_atmosphere, "c_ocean", c_ocean);
   }

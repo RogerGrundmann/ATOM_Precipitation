@@ -206,6 +206,7 @@ def main():
             ('co2_vegetation', 'value compares to ppm of co2 consumed by the vegetation', 'double', 140.0),
             ('co2_ocean', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
             ('co2_land', 'value compares to ppm of co2 consumed by the vegetation', 'double', 0.0),
+            ('co2_scale', 'multiplier applied to the whole CO2 field for sensitivity experiments (1.0 = field as built; 2.0 = doubled CO2)', 'double', 1.0),
 
             ('c_land', 'water vapour reduction on land(60% of the saturation value)', 'double', 66),
             ('c_ocean', 'water vapour reduction on sea surface(64% of the saturation value)', 'double', 70),

@@ -165,7 +165,12 @@ public:
                     const double co2_band_scale = 0.17;
                     const double dz  = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
                                                     : (m.get_layer_height(i) - m.get_layer_height(i-1));
-                    const double P_c = 1e-6 * m.p_stat.x[i][j][k] * m.co2.x[i][j][k] * m.co2_0 / m.p_0; // [atm]
+                    // co2.x is stored in ppm (ThermoAtm init, BCs, transport all use ppm): a
+                    // mixing ratio co2*1e-6 times the local pressure fraction p_stat/p_0 gives the
+                    // CO2 partial pressure in atm. (Earlier this multiplied by co2_0, which assumed
+                    // co2.x was a ~1 ratio — wrong for the ppm field; it over-saturated the band
+                    // regardless of co2_0. See project_multilayer_radiation CO2-units fix.)
+                    const double P_c = 1e-6 * m.p_stat.x[i][j][k] * m.co2.x[i][j][k] / m.p_0; // [atm], co2 in ppm
                     double u_c = P_c * dz * 100.0;                                                       // [atm*cm]
                     if (u_c < 0.0) u_c = 0.0;
                     double eps_co2 = co2_band_scale * 0.185 * (1.0 - exp(-0.3919 * pow(u_c, 0.4)));       // Atwater & Ball

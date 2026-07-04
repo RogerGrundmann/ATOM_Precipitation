@@ -105,6 +105,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   co2_vegetation = 140.0;
   co2_ocean = 0.0;
   co2_land = 0.0;
+  co2_scale = 1.0;
   c_land = 66;
   c_ocean = 70;
 }

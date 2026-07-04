@@ -33,7 +33,7 @@ public:
         // allocate the fields the scheme reads / writes (ctor leaves these unallocated)
         m.t.initArray(im, jm, km, 1.0);
         m.c.initArray(im, jm, km, 0.0);
-        m.co2.initArray(im, jm, km, 1.0);           // ratio 1.0 -> co2_0 (=380 ppm)
+        m.co2.initArray(im, jm, km, 380.0);         // ppm (co2 is ppm-valued; 380 = 1x, 760 = 2x)
         m.p_stat.initArray(im, jm, km, 0.0);
         m.h.initArray(im, jm, km, 0.0);             // 0 everywhere -> ocean surface at i=0
         m.radiation.initArray(im, jm, km, 0.0);
@@ -59,7 +59,7 @@ public:
                         m.t.x[i][j][k]      = T / m.t_0;   // nondim temperature (reset each case)
                         m.p_stat.x[i][j][k] = p;
                         m.c.x[i][j][k]      = cc;
-                        m.co2.x[i][j][k]    = co2f;        // 1.0 -> co2_0 (380 ppm); 2.0 -> 760 ppm
+                        m.co2.x[i][j][k]    = co2f;        // ppm: 380 -> 1x, 760 -> 2x
                     }
             }
             std::vector<double> Tin(im);
@@ -78,13 +78,13 @@ public:
             double F = m.sigma * pow(m.t.x[0][j0][k0]*m.t_0, 4);
             for (int i = 1; i < im; i++) { double eps = m.epsilon.x[i][j0][k0]; F = F*(1.0-eps) + eps*m.sigma*pow(m.t.x[i][j0][k0]*m.t_0, 4); }
             double Tsurf = m.t.x[0][j0][k0]*m.t_0;
-            printf("  CO2x%.0f:  surface T = %.2f K (%.2f C)   OLR = %.1f W/m2%s\n",
+            printf("  CO2=%.0f ppm:  surface T = %.2f K (%.2f C)   OLR = %.1f W/m2%s\n",
                    co2f, Tsurf, Tsurf-273.15, F, nan ? "   *** NaN/Inf ***" : "");
             return Tsurf;
         };
 
-        double Ts1 = run_case(1.0, true);
-        double Ts2 = run_case(2.0, false);
+        double Ts1 = run_case(380.0, true);
+        double Ts2 = run_case(760.0, false);
         printf("\n  ==> CO2 doubling surface warming: dT_s = %+.3f K   (should be POSITIVE)\n", Ts2 - Ts1);
     }
 };

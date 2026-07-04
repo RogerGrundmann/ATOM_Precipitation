@@ -772,6 +772,20 @@ public:
                     m.co2.x[0][j][k] = co2_at_mount;
             }
         }
+
+        // CO2 sensitivity multiplier: scale the whole (ppm) field uniformly. co2_scale=1 leaves
+        // the field as built; co2_scale=2 is a clean CO2 doubling (modern base + paleo increment),
+        // so the mode-3 radiation sees 2x the ppm and the perturbation MLR(2x field) - MLR(280 ppm)
+        // carries the doubling forcing. Leaves the paleo-CO2 construction (co2_max, co2_paleo)
+        // untouched — this is a dedicated experiment knob (default 1.0).
+        if (m.co2_scale != 1.0) {
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    for (int i = 0; i < m.im; i++)
+                        m.co2.x[i][j][k] *= m.co2_scale;
+        }
+        cout << "      AGCM: co2_atmosphere  co2_scale = " << m.co2_scale << endl;
         cout << "      AGCM: co2_atmosphere ended" << endl;
     }
 

@@ -160,10 +160,13 @@ public:
                         m.tn.x[i][j][k]    = 1.0;
                         m.p_dyn.x[i][j][k] = 0.0;
 
-                        // Density reset to dry-air reference; CO2 to background.
+                        // Density reset to dry-air reference. CO2: reset buried cells to the
+                        // column's surface value co2.x[0] (not the co2_0 constant) so (a) no
+                        // artificial sub-terrain->air jump packs contour lines at mountains, and
+                        // (b) it stays consistent with co2_scale (co2.x[0] is already scaled).
                         m.r_dry.x[i][j][k]   = m.r_air;
                         m.r_humid.x[i][j][k] = m.r_air;
-                        m.co2.x[i][j][k]     = m.co2_0;
+                        m.co2.x[i][j][k]     = m.co2.x[0][j][k];
 
                         // Microphysics (current and time-level n+1).
                         m.c.x[i][j][k]      = 0.0;
@@ -305,10 +308,13 @@ public:
                         m.tn.x[i][j][k]    = 1.0;
                         m.p_dyn.x[i][j][k] = 0.0;
 
-                        // Density reset to dry-air reference; CO2 to background.
+                        // Density reset to dry-air reference. CO2: reset buried cells to the
+                        // column's surface value co2.x[0] (not the co2_0 constant) so (a) no
+                        // artificial sub-terrain->air jump packs contour lines at mountains, and
+                        // (b) it stays consistent with co2_scale (co2.x[0] is already scaled).
                         m.r_dry.x[i][j][k]   = m.r_air;
                         m.r_humid.x[i][j][k] = m.r_air;
-                        m.co2.x[i][j][k]     = m.co2_0;
+                        m.co2.x[i][j][k]     = m.co2.x[0][j][k];
 
                         // Microphysics (current and time-level n+1).
                         m.c.x[i][j][k]      = 0.0;
