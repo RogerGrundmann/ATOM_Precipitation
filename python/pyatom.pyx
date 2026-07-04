@@ -1539,6 +1539,15 @@ cdef class Hydrosphere:
             self._check_alive()
             self._thisptr.panorama_print = <int> value
     
+    property atm_transfer_iter:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.atm_transfer_iter
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.atm_transfer_iter = <int> value
+    
     property ocean_depth_mode:
         def __get__(Hydrosphere self):
             self._check_alive()

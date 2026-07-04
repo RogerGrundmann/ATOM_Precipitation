@@ -221,6 +221,8 @@ def main():
             ('checkpoint', "control when to write output files", 'int', 10),
             ('panorama_print', "control when to write panorama files", 'int', 100),
 
+            ('atm_transfer_iter', 'select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp', 'int', -1),
+
 
 
             ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),

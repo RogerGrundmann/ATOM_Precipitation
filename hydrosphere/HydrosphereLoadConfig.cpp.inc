@@ -65,6 +65,7 @@
     Config::FillIntWithElement(elem_hydrosphere, "nm", nm);
     Config::FillIntWithElement(elem_hydrosphere, "checkpoint", checkpoint);
     Config::FillIntWithElement(elem_hydrosphere, "panorama_print", panorama_print);
+    Config::FillIntWithElement(elem_hydrosphere, "atm_transfer_iter", atm_transfer_iter);
     Config::FillStringWithElement(elem_hydrosphere, "ocean_depth_mode", ocean_depth_mode);
     Config::FillDoubleWithElement(elem_hydrosphere, "L_hyd", L_hyd);
     Config::FillDoubleWithElement(elem_hydrosphere, "re", re);

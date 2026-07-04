@@ -100,7 +100,15 @@ void cHydrosphereModel::HydrosphereDataTransfer(const string &Name_Bathymetry_Fi
     { auto dot = stem_t.rfind('.'); if(dot != string::npos) stem_t = stem_t.substr(0, dot); }
     string base_t = output_path;
     if(!base_t.empty() && base_t.back() == '/') base_t.pop_back();
-    string Name_Transfer_File = base_t + "/" + stem_t + "_Transfer_Atm.vwtp";
+    // Select which atmosphere surface-coupling snapshot to read: an iter-stamped
+    // <stem>_Transfer_Atm_<iter>.vwtp when atm_transfer_iter >= 0, else the latest
+    // fixed-name <stem>_Transfer_Atm.vwtp (default). The atmosphere writes both every
+    // checkpoint (see AtmosphereDataTransfer).
+    string Name_Transfer_File = (atm_transfer_iter >= 0)
+        ? base_t + "/" + stem_t + "_Transfer_Atm_" + std::to_string(atm_transfer_iter) + ".vwtp"
+        : base_t + "/" + stem_t + "_Transfer_Atm.vwtp";
+    cout << "      OGCM: atmosphere transfer file = " << Name_Transfer_File
+         << (atm_transfer_iter >= 0 ? "  (atm_transfer_iter)" : "  (latest)") << endl;
 
     ifstream Transfer_File(Name_Transfer_File);
 

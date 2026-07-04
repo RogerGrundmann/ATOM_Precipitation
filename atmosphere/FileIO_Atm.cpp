@@ -179,23 +179,31 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
         return;
     }
 
-    ofstream Transfer_File(Name_Transfer_File);
-    if(!Transfer_File.is_open()){
-        cerr << "ERROR: could not open transfer file: " << Name_Transfer_File << "\n";
-        abort();
+    // Write the finished buffer to TWO files:
+    //   (1) an iter-stamped snapshot  <stem>_Transfer_Atm_<iter_n>.vwtp  — retained (no
+    //       clobber), so the hydrosphere can be driven by a chosen atmosphere iteration
+    //       (see HydrosphereDataTransfer / atm_transfer_iter), mirroring the atm_restart
+    //       .bin cadence. Kept as TEXT (surface-only, ~few MB, human-inspectable BC file).
+    //   (2) the fixed-name latest      <stem>_Transfer_Atm.vwtp             — overwritten each
+    //       time, for backward compatibility + the manual copy-into-output-dir workflow.
+    const string stamped_name = Name_Transfer_File.substr(0, Name_Transfer_File.size() - 5)  // strip ".vwtp"
+                              + "_" + std::to_string(iter_n) + ".vwtp";
+    for(const string &fname : { stamped_name, Name_Transfer_File }){
+        ofstream Transfer_File(fname);
+        if(!Transfer_File.is_open()){
+            cerr << "ERROR: could not open transfer file: " << fname << "\n";
+            abort();
+        }
+        // headline carrying the iteration this transfer corresponds to; the hydrosphere
+        // reader (HydrosphereDataTransfer) consumes this single line before the data rows.
+        Transfer_File << "# iter_n = " << iter_n << "\n";
+        for(int i = 0; i < jm * km; i++){
+            Transfer_File << line_buffer[i] << "\n";
+        }
+        Transfer_File.close();
     }
-
-    // headline carrying the iteration this transfer corresponds to; the hydrosphere
-    // reader (HydrosphereDataTransfer) consumes this single line before the data rows.
-    Transfer_File << "# iter_n = " << iter_n << "\n";
-
-    // serial write of finished buffer to file
-    for(int i = 0; i < jm * km; i++){
-        Transfer_File << line_buffer[i] << "\n";
-    }
-
-    Transfer_File.close();
-    cout << "      AGCM: AtmosphereDataTransfer ended" << endl;
+    cout << "      AGCM: AtmosphereDataTransfer ended (wrote " << stamped_name
+         << " + latest)" << endl;
 }
 /*
 *

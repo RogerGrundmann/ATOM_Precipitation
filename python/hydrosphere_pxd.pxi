@@ -63,6 +63,7 @@ cdef extern from "cHydrosphereModel.h":
         int nm
         int checkpoint
         int panorama_print
+        int atm_transfer_iter
         string ocean_depth_mode
         double L_hyd
         double re

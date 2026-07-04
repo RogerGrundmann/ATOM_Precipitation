@@ -61,6 +61,7 @@ void cHydrosphereModel::SetDefaultConfig() {
   nm = 400;
   checkpoint = 10;
   panorama_print = 100;
+  atm_transfer_iter = -1;
   ocean_depth_mode = "deep";
   L_hyd = 200.0;
   re = 10.0;
