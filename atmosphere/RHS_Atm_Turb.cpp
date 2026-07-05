@@ -882,7 +882,11 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         if (bl < 0.0) bl = 0.0;
         const double cos4lat = sinthe2 * sinthe2;            // cos^4(lat) = sin^4(colatitude)
         const double k_T = k_a + (k_s - k_a) * bl * cos4lat; // [1/s]
-        rhs_t.x[i][j][k] -= (k_T * L_atm / u_0 * dt) * (t.x[i][j][k] - t_eq.x[i][j][k]);
+        // HS-dt TEST (2026-07-04): removed the extra *dt. Advective-time nondim of a Newtonian
+        // relaxation is k_T*L_atm/u_0 (dimensionless), integrated by RK4's own *dt like every
+        // other rhs_t term (advection/diffusion/latent, all dt^1). The extra *dt made HS enter
+        // as dt^2 = ~1e-4 too weak -> inert (t_eq shift never reached T; CO2 forcing invisible).
+        rhs_t.x[i][j][k] -= (k_T * L_atm / u_0) * (t.x[i][j][k] - t_eq.x[i][j][k]);
     }
 
 
