@@ -405,7 +405,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     //       leaves the physical CO2 warming (surface ~+1.6 K/doubling + profile), added to the
     //       realistic observed baseline. Replaces the 5.35 parametric forcing (mode 0), no cold
     //       bias, no double-count. The parametric CO2 shift is now used ONLY in mode 0.
-    constexpr int    radiation_mode     = 3;               // default: option (ii) CO2 perturbation
+    //   4 = OPTION ii + SEED (DEFAULT): like mode 3, but the CO2 perturbation is ALSO added
+    //       directly to the prognostic t (not only the t_eq target). The Held-Suarez relaxation
+    //       is too gentle to transmit the t_eq shift to t within a single run (a co2x1/co2x2 pair
+    //       otherwise differences to ~0 since both start t from the same Scotese snapshot); seeding
+    //       t makes the two runs evolve to distinct, CO2-separated equilibria that the shifted t_eq
+    //       then anchors. This is the working single-run CO2 sensitivity path.
+    constexpr int    radiation_mode     = 4;               // default: option (ii) + seed prognostic t
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
     constexpr double co2_ref_ppm        = 280.0;           // pre-industrial reference C0
@@ -465,8 +471,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // the current field; MLR's grey absolute cold bias is identical in both and CANCELS, leaving
     // the physical CO2 warming (surface + profile) which is added to the observed t_eq baseline.
     // t and co2 are saved/restored around the two solves. Computed once at start (fixed CO2).
+    // seed_prognostic (mode 4): in addition to shifting t_eq, also add the CO2 perturbation
+    // directly to the prognostic t field, so the warming enters the DYNAMICAL temperature
+    // immediately rather than having to be transmitted from t_eq by the (gentle) Held-Suarez
+    // relaxation. Without this the CO2 signal never reaches t in a single run and a co2x1/co2x2
+    // pair differences to ~0 (both runs start t from the identical Scotese snapshot).
     std::vector<double> t_save, mlr_hi, co2_save;
-    auto apply_co2_perturbation = [&]() {
+    auto apply_co2_perturbation = [&](bool seed_prognostic) {
         if (co2_0 <= 0.0) return;
         const size_t N = (size_t)im * jm * km;
         if (t_save.empty()) { t_save.assign(N, 0.0); mlr_hi.assign(N, 0.0); co2_save.assign(N, 0.0); }
@@ -484,18 +495,31 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         }
         MultiLayerRadiation(*this).run();                         // t := MLR(reference CO2)
         idx = 0;
+        double dsurf_sum = 0.0, dsurf_w = 0.0, dsurf_max = -1e30, dcol_sum = 0.0, dcol_w = 0.0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
-            t_eq.x[i][j][k] += mlr_hi[idx] - t.x[i][j][k];        // + physical CO2 warming (cold bias cancels)
-            t.x[i][j][k] = t_save[idx]; co2.x[i][j][k] = co2_save[idx]; idx++;
+            const double dpert = mlr_hi[idx] - t.x[i][j][k];       // CO2 perturbation (model units)
+            const double dK = dpert * t_0;                         // perturbation in Kelvin
+            t_eq.x[i][j][k] += dpert;                              // + physical CO2 warming (cold bias cancels)
+            const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            dcol_sum += w * dK; dcol_w += w;
+            if (i == 0) { dsurf_sum += w * dK; dsurf_w += w; if (dK > dsurf_max) dsurf_max = dK; }
+            // mode 4 seeds the prognostic t with the perturbation; mode 3 restores the Scotese baseline.
+            t.x[i][j][k] = seed_prognostic ? (t_save[idx] + dpert) : t_save[idx];
+            co2.x[i][j][k] = co2_save[idx]; idx++;
         }
+        std::cout << "      AGCM: [co2-perturb DIAG] t_eq shift vs 280ppm (co2_scale=" << co2_scale
+                  << "): surface cos-lat mean = " << (dsurf_w > 0 ? dsurf_sum / dsurf_w : 0.0)
+                  << " K, surface max = " << dsurf_max
+                  << " K, whole-domain mean = " << (dcol_w > 0 ? dcol_sum / dcol_w : 0.0) << " K" << std::endl;
     };
 
     if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq
-    else if (radiation_mode == 3) apply_co2_perturbation();      // ii: Scotese baseline + MLR CO2 perturbation
+    else if (radiation_mode == 3) apply_co2_perturbation(false); // ii: Scotese t_eq + MLR CO2 perturbation
+    else if (radiation_mode == 4) apply_co2_perturbation(true);  // ii+seed: also inject perturbation into t
     else if (radiation_mode == 0) apply_co2_forcing();          // legacy: Scotese + 5.35 parametric forcing
     // mode 2: t_eq stays the Scotese snapshot; the in-loop MLR heating carries the radiation.
     std::cout << "      AGCM: radiation_mode=" << radiation_mode
-              << " (0=legacy,1=MLR->t_eq,2=MLR->heat,3=Scotese+MLR-CO2-perturb)  co2_0="
+              << " (0=legacy,1=MLR->t_eq,2=MLR->heat,3=Scotese+MLR-CO2-perturb,4=+seed-t)  co2_0="
               << co2_0 << " ppm" << std::endl;
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
