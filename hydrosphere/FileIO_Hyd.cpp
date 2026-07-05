@@ -2,6 +2,7 @@
 #include "cHydrosphereModel.h"
 
 #include <cmath>
+#include <dirent.h>
 
 using namespace std;
 using namespace AtomUtils;
@@ -100,15 +101,45 @@ void cHydrosphereModel::HydrosphereDataTransfer(const string &Name_Bathymetry_Fi
     { auto dot = stem_t.rfind('.'); if(dot != string::npos) stem_t = stem_t.substr(0, dot); }
     string base_t = output_path;
     if(!base_t.empty() && base_t.back() == '/') base_t.pop_back();
-    // Select which atmosphere surface-coupling snapshot to read: an iter-stamped
-    // <stem>_Transfer_Atm_<iter>.vwtp when atm_transfer_iter >= 0, else the latest
-    // fixed-name <stem>_Transfer_Atm.vwtp (default). The atmosphere writes both every
-    // checkpoint (see AtmosphereDataTransfer).
-    string Name_Transfer_File = (atm_transfer_iter >= 0)
-        ? base_t + "/" + stem_t + "_Transfer_Atm_" + std::to_string(atm_transfer_iter) + ".vwtp"
-        : base_t + "/" + stem_t + "_Transfer_Atm.vwtp";
+    // Select which atmosphere surface-coupling snapshot to read. The atmosphere writes an
+    // iter-stamped <stem>_Transfer_Atm_<iter>.vwtp every checkpoint (see AtmosphereDataTransfer).
+    //   atm_transfer_iter >= 0 : read exactly that iteration.
+    //   atm_transfer_iter <  0 : (default) read the LATEST — the highest-iter snapshot present in
+    //       the output dir, i.e. wherever the atmosphere run happened to stop. Found by scanning
+    //       the directory (no fixed-name "latest" file is written by the atmosphere any more).
+    const string prefix = stem_t + "_Transfer_Atm_";
+    string Name_Transfer_File;
+    if(atm_transfer_iter >= 0){
+        Name_Transfer_File = base_t + "/" + prefix + std::to_string(atm_transfer_iter) + ".vwtp";
+    }else{
+        int best = -1;
+        if(DIR *dir = opendir(base_t.c_str())){
+            while(struct dirent *ent = readdir(dir)){
+                const string fn = ent->d_name;
+                // match <prefix><digits>.vwtp exactly
+                if(fn.size() > prefix.size() + 5
+                && fn.compare(0, prefix.size(), prefix) == 0
+                && fn.compare(fn.size() - 5, 5, ".vwtp") == 0){
+                    const string mid = fn.substr(prefix.size(), fn.size() - prefix.size() - 5);
+                    if(!mid.empty() && mid.find_first_not_of("0123456789") == string::npos){
+                        const int n = std::stoi(mid);
+                        if(n > best) best = n;
+                    }
+                }
+            }
+            closedir(dir);
+        }
+        if(best < 0){
+            cout << "WARNING: no iter-stamped transfer file (" << prefix
+                 << "<iter>.vwtp) found in " << base_t
+                 << ", skipping atmosphere data transfer\n";
+            cout << "      OGCM: HydrosphereDataTransfer skipped" << endl;
+            return;
+        }
+        Name_Transfer_File = base_t + "/" + prefix + std::to_string(best) + ".vwtp";
+    }
     cout << "      OGCM: atmosphere transfer file = " << Name_Transfer_File
-         << (atm_transfer_iter >= 0 ? "  (atm_transfer_iter)" : "  (latest)") << endl;
+         << (atm_transfer_iter >= 0 ? "  (atm_transfer_iter)" : "  (latest snapshot)") << endl;
 
     ifstream Transfer_File(Name_Transfer_File);
 

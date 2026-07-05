@@ -179,19 +179,19 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
         return;
     }
 
-    // Write the finished buffer to TWO files:
-    //   (1) an iter-stamped snapshot  <stem>_Transfer_Atm_<iter_n>.vwtp  — retained (no
-    //       clobber), so the hydrosphere can be driven by a chosen atmosphere iteration
-    //       (see HydrosphereDataTransfer / atm_transfer_iter), mirroring the atm_restart
-    //       .bin cadence. Kept as TEXT (surface-only, ~few MB, human-inspectable BC file).
-    //   (2) the fixed-name latest      <stem>_Transfer_Atm.vwtp             — overwritten each
-    //       time, for backward compatibility + the manual copy-into-output-dir workflow.
+    // Write the finished buffer to an iter-stamped snapshot
+    //   <stem>_Transfer_Atm_<iter_n>.vwtp  — retained (no clobber), so the hydrosphere can be
+    //   driven by a chosen atmosphere iteration, or by the LATEST one wherever the atmosphere
+    //   run happened to stop (see HydrosphereDataTransfer / atm_transfer_iter, which auto-selects
+    //   the highest-iter snapshot by default). Mirrors the atm_restart_<iter>.bin cadence/naming.
+    //   Kept as TEXT (surface-only, ~few MB, human-inspectable BC file). No fixed-name "latest"
+    //   copy is written any more — the hydrosphere discovers the newest snapshot itself.
     const string stamped_name = Name_Transfer_File.substr(0, Name_Transfer_File.size() - 5)  // strip ".vwtp"
                               + "_" + std::to_string(iter_n) + ".vwtp";
-    for(const string &fname : { stamped_name, Name_Transfer_File }){
-        ofstream Transfer_File(fname);
+    {
+        ofstream Transfer_File(stamped_name);
         if(!Transfer_File.is_open()){
-            cerr << "ERROR: could not open transfer file: " << fname << "\n";
+            cerr << "ERROR: could not open transfer file: " << stamped_name << "\n";
             abort();
         }
         // headline carrying the iteration this transfer corresponds to; the hydrosphere
@@ -202,8 +202,7 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
         }
         Transfer_File.close();
     }
-    cout << "      AGCM: AtmosphereDataTransfer ended (wrote " << stamped_name
-         << " + latest)" << endl;
+    cout << "      AGCM: AtmosphereDataTransfer ended (wrote " << stamped_name << ")" << endl;
 }
 /*
 *
