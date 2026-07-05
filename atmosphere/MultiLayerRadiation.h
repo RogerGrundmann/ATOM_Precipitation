@@ -47,6 +47,8 @@ using namespace AtomUtils;
 //
 // Usage:  MultiLayerRadiation(*this).run();
 // ============================================================================
+
+
 class MultiLayerRadiation {
 public:
     explicit MultiLayerRadiation(cAtmosphereModel& model)
@@ -283,6 +285,25 @@ public:
                                        + dsigT4 * T_s0 + c_H * T_air1) / (dsigT4 + c_H);
                 m.radiation.x[i_mount][j][k] = m.sigma * pow(T_s, 4.0);
                 m.t.x[i_mount][j][k]         = T_s / m.t_0;
+
+                // De-kink the surface radiative step in the DIAGNOSTIC radiation profile only.
+                // The 1-point surface energy balance (sigma T_s^4 at i_mount) and the column
+                // Thomas solve above it are computed separately, leaving a sharp discontinuity
+                // at the surface. One light 1-2-1 pass over the lowest layers softens it for
+                // plotting. This touches ONLY radiation.x — t.x / the surface-balance T_s (and
+                // hence the CO2 surface sensitivity) are left exactly as computed above.
+                {
+                    const int i_top_sm = std::min(i_mount + 4, i_trop);
+                    double r_orig[5];                            // originals (i_mount .. i_top_sm)
+                    for (int i = i_mount; i <= i_top_sm; i++)
+                        r_orig[i - i_mount] = m.radiation.x[i][j][k];
+                    for (int i = i_mount + 1; i < i_top_sm; i++)  // interior 1-2-1
+                        m.radiation.x[i][j][k] = 0.25 * r_orig[i - 1 - i_mount]
+                                               + 0.5  * r_orig[i - i_mount]
+                                               + 0.25 * r_orig[i + 1 - i_mount];
+                    if (i_top_sm > i_mount)                       // surface: one-sided blend toward air
+                        m.radiation.x[i_mount][j][k] = 0.5 * r_orig[0] + 0.5 * r_orig[1];
+                }
             }  // k
         }  // j
 
