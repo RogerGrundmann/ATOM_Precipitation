@@ -513,6 +513,25 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                   << " K, whole-domain mean = " << (dcol_w > 0 ? dcol_sum / dcol_w : 0.0) << " K" << std::endl;
     };
 
+    // Mode 4 DIAGNOSTIC refresh: re-solve MLR on the CURRENT field so the radiation/epsilon
+    // arrays track the evolving climate instead of staying frozen at the start-of-run solve
+    // (mode 4 seeds the CO2 perturbation into t once and otherwise never calls MLR in-loop, so
+    // radiation.x never changed — e.g. identical at iter 100 and 300). MLR overwrites t with its
+    // radiative-equilibrium field, so back t up and restore it afterwards: the dynamical t and the
+    // already-seeded CO2 perturbation are untouched; only the diagnostic radiation.x/epsilon (and
+    // the σT^4-consistent RE profile behind them) are refreshed against the actual current CO2.
+    std::vector<double> t_diag_backup;
+    auto refresh_radiation_diag = [&]() {
+        if (t_diag_backup.empty()) t_diag_backup.assign((size_t)im * jm * km, 0.0);
+        size_t idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            t_diag_backup[idx++] = t.x[i][j][k];                 // save dynamical t
+        MultiLayerRadiation(*this).run();                        // fills radiation.x/epsilon; overwrites t
+        idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            t.x[i][j][k] = t_diag_backup[idx++];                 // restore dynamical t (radiation.x kept)
+    };
+
     if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq
     else if (radiation_mode == 3) apply_co2_perturbation(false); // ii: Scotese t_eq + MLR CO2 perturbation
     else if (radiation_mode == 4) apply_co2_perturbation(true);  // ii+seed: also inject perturbation into t
@@ -956,6 +975,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             refresh_radiative_teq();                            // A: refresh MLR -> t_eq target
         else if (radiation_mode == 2)
             apply_radiative_heating();                          // B: MLR direct heating on T
+        else if (radiation_mode == 4 && iter_n % teq_refresh_stride == 0)
+            refresh_radiation_diag();                           // 4: refresh radiation.x diag (t unchanged)
 
         ThermoAtm(*this).printDataAtm();
 
