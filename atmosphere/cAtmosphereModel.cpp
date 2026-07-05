@@ -411,9 +411,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     //       otherwise differences to ~0 since both start t from the same Scotese snapshot); seeding
     //       t makes the two runs evolve to distinct, CO2-separated equilibria that the shifted t_eq
     //       then anchors. This is the working single-run CO2 sensitivity path.
-    constexpr int    radiation_mode     = 4;               // default: option (ii) + seed prognostic t
+    constexpr int    radiation_mode     = 5;               // mode 5: strong relaxation to Scotese+CO2 perturbation
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
+    constexpr double omega_teq          = 0.05;            // mode 5: relaxation rate toward t_eq (frac/iter)
     constexpr double co2_ref_ppm        = 280.0;           // pre-industrial reference C0
     constexpr double co2_lambda         = 0.31;            // Planck (no-feedback) sensitivity [K/(W/m2)]
 
@@ -444,6 +445,21 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // No separate CO2 forcing here: MLR now warms the surface with CO2 via its surface
         // energy balance, so adding the 5.35 shift would double-count. (Grey absolute stays
         // ~7 K cold-biased in this mode — mode 3 avoids that via the difference.)
+    };
+
+    // Mode 5 helper: strong Newtonian relaxation of the dynamical t toward t_eq (= Scotese/
+    // observed baseline + the MLR CO2 perturbation, built once at start by apply_co2_perturbation
+    // (false)). REPLACES the near-inert in-RHS Held-Suarez term (k_a=1/4day enters as ~1e-8/iter,
+    // never imposes t_eq); omega_teq per iter is dynamically competitive so the CO2 signal PERSISTS
+    // to equilibrium AND the absolute climate stays anchored to the realistic baseline (no grey
+    // cold bias, unlike mode 2). The realistic equator-pole gradient in t_eq preserves the mean
+    // circulation driving; only transient eddies are damped (canonical Held-Suarez at proper
+    // strength). t_new = (1-omega_teq)*t_old + omega_teq*t_eq.
+    auto apply_teq_relaxation = [&]() {
+        for (int i = 0; i < im; i++)
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++)
+                    t.x[i][j][k] = (1.0 - omega_teq) * t.x[i][j][k] + omega_teq * t_eq.x[i][j][k];
     };
 
     // Option B helper: nudge the dynamical t toward the MLR radiative-equilibrium field by
@@ -535,10 +551,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq
     else if (radiation_mode == 3) apply_co2_perturbation(false); // ii: Scotese t_eq + MLR CO2 perturbation
     else if (radiation_mode == 4) apply_co2_perturbation(true);  // ii+seed: also inject perturbation into t
+    else if (radiation_mode == 5) apply_co2_perturbation(false); // 5: build t_eq = Scotese + CO2 perturbation
     else if (radiation_mode == 0) apply_co2_forcing();          // legacy: Scotese + 5.35 parametric forcing
     // mode 2: t_eq stays the Scotese snapshot; the in-loop MLR heating carries the radiation.
     std::cout << "      AGCM: radiation_mode=" << radiation_mode
-              << " (0=legacy,1=MLR->t_eq,2=MLR->heat,3=Scotese+MLR-CO2-perturb,4=+seed-t)  co2_0="
+              << " (0=legacy,1=MLR->t_eq,2=MLR->heat,3=Scotese+MLR-CO2-perturb,4=+seed-t,5=strong-relax-teq)  co2_0="
               << co2_0 << " ppm" << std::endl;
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
@@ -977,6 +994,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             apply_radiative_heating();                          // B: MLR direct heating on T
         else if (radiation_mode == 4 && iter_n % teq_refresh_stride == 0)
             refresh_radiation_diag();                           // 4: refresh radiation.x diag (t unchanged)
+        else if (radiation_mode == 5)
+            apply_teq_relaxation();                             // 5: strong relax t -> Scotese+CO2 perturbation
 
         ThermoAtm(*this).printDataAtm();
 
