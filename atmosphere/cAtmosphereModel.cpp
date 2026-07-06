@@ -591,6 +591,46 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             t.x[i][j][k] = t_diag_backup[idx++];                 // restore dynamical t (radiation.x kept)
     };
 
+    // Mode-5 CLOUD radiation diagnostic. Mode 5 otherwise calls MLR only clear-sky (inside the CO2
+    // perturbation), so radiation.x/epsilon never see the cloud/ice fields. This runs MLR twice on
+    // the CURRENT field — clear-sky then cloudy — leaving radiation.x/epsilon CLOUDY (visible in the
+    // output) and printing the cloud longwave effect = cos-lat-mean top-layer radiation clear minus
+    // cloudy. Diagnostic only: cloud/ice and t are saved and restored, dynamics untouched.
+    std::vector<double> cld_diag_save, ice_diag_save;
+    auto cloud_radiation_diag = [&]() {
+        const size_t N = (size_t)im * jm * km;
+        if (t_diag_backup.empty()) t_diag_backup.assign(N, 0.0);
+        if (cld_diag_save.empty()) { cld_diag_save.assign(N, 0.0); ice_diag_save.assign(N, 0.0); }
+        size_t idx = 0;
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
+            t_diag_backup[idx] = t.x[i][j][k];
+            cld_diag_save[idx] = cloud.x[i][j][k]; ice_diag_save[idx] = ice.x[i][j][k];
+            cloud.x[i][j][k] = 0.0; ice.x[i][j][k] = 0.0;        // clear-sky pass
+            idx++;
+        }
+        MultiLayerRadiation(*this).run();
+        double w_sum = 0.0, olr_clear = 0.0;
+        for (int j = 0; j < jm; j++) { const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            w_sum += w * km;
+            for (int k = 0; k < km; k++) olr_clear += w * radiation.x[im - 1][j][k]; }
+        idx = 0;                                                 // restore t + clouds, cloudy pass
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
+            t.x[i][j][k] = t_diag_backup[idx];
+            cloud.x[i][j][k] = cld_diag_save[idx]; ice.x[i][j][k] = ice_diag_save[idx];
+            idx++;
+        }
+        MultiLayerRadiation(*this).run();                        // radiation.x/epsilon end CLOUDY (kept for output)
+        double olr_cloudy = 0.0;
+        for (int j = 0; j < jm; j++) { const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            for (int k = 0; k < km; k++) olr_cloudy += w * radiation.x[im - 1][j][k]; }
+        idx = 0;                                                 // restore dynamical t (radiation.x kept cloudy)
+        for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            t.x[i][j][k] = t_diag_backup[idx++];
+        std::cout << "      AGCM: [cloud-rad DIAG] cos-lat-mean top radiation: clear=" << olr_clear / w_sum
+                  << " cloudy=" << olr_cloudy / w_sum << " W/m2  ->  cloud LW effect="
+                  << (olr_clear - olr_cloudy) / w_sum << " W/m2" << std::endl;
+    };
+
     if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq
     else if (radiation_mode == 3) apply_co2_perturbation(false); // ii: Scotese t_eq + MLR CO2 perturbation
     else if (radiation_mode == 4) apply_co2_perturbation(true);  // ii+seed: also inject perturbation into t
@@ -1038,8 +1078,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         else if (radiation_mode == 4 && iter_n % teq_refresh_stride == 0)
             refresh_radiation_diag();                           // 4: refresh radiation.x diag (t unchanged)
         else if (radiation_mode == 5) {
-            if (iter_n % teq_refresh_stride == 0)
+            if (iter_n % teq_refresh_stride == 0) {
                 apply_co2_perturbation(false);                  // 5: WV feedback — rebuild deep t_eq perturbation on the warmed field
+                cloud_radiation_diag();                         // 5: refresh radiation.x with clouds + print cloud LW effect
+            }
             apply_teq_relaxation();                             // 5: strong relax t -> Scotese+CO2 perturbation
         }
 
