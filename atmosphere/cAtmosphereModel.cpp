@@ -414,9 +414,18 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     constexpr int    radiation_mode     = 5;               // mode 5: strong relaxation to Scotese+CO2 perturbation
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
-    constexpr double omega_teq          = 0.05;            // mode 5: relaxation rate toward t_eq (frac/iter)
+    constexpr double omega_teq          = 0.20;            // mode 5: relaxation rate toward t_eq (frac/iter)
     constexpr double co2_ref_ppm        = 280.0;           // pre-industrial reference C0
     constexpr double co2_lambda         = 0.31;            // Planck (no-feedback) sensitivity [K/(W/m2)]
+    // Deep (tropospheric-depth) CO2 perturbation shape (modes 3/4/5). The MLR CO2 response is
+    // surface-trapped; imposing it only near the ground lets the strong t_eq relaxation aloft
+    // (toward the UNperturbed Scotese profile) suppress the deep warming -> weak, shallow
+    // sensitivity. Instead spread the SURFACE perturbation coherently through the troposphere
+    // (uniform, optionally moist-adiabatically amplified toward the tropopause) then taper it to
+    // zero across the tropopause, so t_eq carries the warming up the whole column.
+    constexpr double co2_pert_ztrop     = 11000.0;         // uniform-deep up to here [m]
+    constexpr double co2_pert_ztop      = 14000.0;         // perturbation tapered to 0 by here [m]
+    constexpr double co2_pert_amp       = 1.0;             // amplification at tropopause (1 = uniform-deep)
 
     auto apply_co2_forcing = [&]() {                       // Planck-equivalent CO2 shift of t_eq
         if (co2_0 <= 0.0) return;
@@ -448,8 +457,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     };
 
     // Mode 5 helper: strong Newtonian relaxation of the dynamical t toward t_eq (= Scotese/
-    // observed baseline + the MLR CO2 perturbation, built once at start by apply_co2_perturbation
-    // (false)). REPLACES the near-inert in-RHS Held-Suarez term (k_a=1/4day enters as ~1e-8/iter,
+    // observed baseline + the MLR CO2 perturbation, spread through the troposphere and refreshed
+    // in-loop on the warming field by apply_co2_perturbation(false) for the water-vapour feedback).
+    // REPLACES the near-inert in-RHS Held-Suarez term (k_a=1/4day enters as ~1e-8/iter,
     // never imposes t_eq); omega_teq per iter is dynamically competitive so the CO2 signal PERSISTS
     // to equilibrium AND the absolute climate stays anchored to the realistic baseline (no grey
     // cold bias, unlike mode 2). The realistic equator-pole gradient in t_eq preserves the mean
@@ -492,11 +502,31 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // immediately rather than having to be transmitted from t_eq by the (gentle) Held-Suarez
     // relaxation. Without this the CO2 signal never reaches t in a single run and a co2x1/co2x2
     // pair differences to ~0 (both runs start t from the identical Scotese snapshot).
-    std::vector<double> t_save, mlr_hi, co2_save;
+    // Vertical weight for the deep perturbation: 1 through the troposphere (optionally amplified
+    // toward the tropopause), linear taper to 0 across [ztrop, ztop]. Built once from the layer
+    // heights (fixed grid). w_pert[0] == 1 so the surface diagnostic below is unaffected.
+    std::vector<double> w_pert(im, 0.0);
+    for (int i = 0; i < im; i++) {
+        const double z = get_layer_height(i);
+        w_pert[i] = (z <= co2_pert_ztrop)
+            ? 1.0 + (co2_pert_amp - 1.0) * (z / co2_pert_ztrop)
+            : (z <  co2_pert_ztop)
+                ? co2_pert_amp * (co2_pert_ztop - z) / (co2_pert_ztop - co2_pert_ztrop)
+                : 0.0;
+    }
+    // Pristine Scotese/observed baseline. apply_co2_perturbation rebuilds t_eq = t_eq_base + deep
+    // perturbation from this each call (idempotent), so it can be re-run in-loop on the warming
+    // field for the water-vapour feedback without accumulating.
+    std::vector<double> t_eq_base((size_t)im * jm * km);
+    { size_t idx = 0; for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+        t_eq_base[idx++] = t_eq.x[i][j][k]; }
+
+    std::vector<double> t_save, mlr_hi, co2_save, dpert_surf;
     auto apply_co2_perturbation = [&](bool seed_prognostic) {
         if (co2_0 <= 0.0) return;
         const size_t N = (size_t)im * jm * km;
-        if (t_save.empty()) { t_save.assign(N, 0.0); mlr_hi.assign(N, 0.0); co2_save.assign(N, 0.0); }
+        if (t_save.empty()) { t_save.assign(N, 0.0); mlr_hi.assign(N, 0.0); co2_save.assign(N, 0.0);
+                              dpert_surf.assign((size_t)jm * km, 0.0); }
         size_t idx = 0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
             t_save[idx] = t.x[i][j][k]; co2_save[idx] = co2.x[i][j][k]; idx++;
@@ -513,9 +543,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         idx = 0;
         double dsurf_sum = 0.0, dsurf_w = 0.0, dsurf_max = -1e30, dcol_sum = 0.0, dcol_w = 0.0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
-            const double dpert = mlr_hi[idx] - t.x[i][j][k];       // CO2 perturbation (model units)
+            const double dpert_raw = mlr_hi[idx] - t.x[i][j][k];   // raw MLR CO2 response (surface-trapped)
+            if (i == 0) dpert_surf[(size_t)j * km + k] = dpert_raw;// i is the outer loop -> surface filled first
+            const double dpert = dpert_surf[(size_t)j * km + k] * w_pert[i]; // deep tropospheric profile
             const double dK = dpert * t_0;                         // perturbation in Kelvin
-            t_eq.x[i][j][k] += dpert;                              // + physical CO2 warming (cold bias cancels)
+            t_eq.x[i][j][k] = t_eq_base[idx] + dpert;             // rebuild from pristine baseline (idempotent)
             const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
             dcol_sum += w * dK; dcol_w += w;
             if (i == 0) { dsurf_sum += w * dK; dsurf_w += w; if (dK > dsurf_max) dsurf_max = dK; }
@@ -994,8 +1026,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             apply_radiative_heating();                          // B: MLR direct heating on T
         else if (radiation_mode == 4 && iter_n % teq_refresh_stride == 0)
             refresh_radiation_diag();                           // 4: refresh radiation.x diag (t unchanged)
-        else if (radiation_mode == 5)
+        else if (radiation_mode == 5) {
+            if (iter_n % teq_refresh_stride == 0)
+                apply_co2_perturbation(false);                  // 5: WV feedback — rebuild deep t_eq perturbation on the warmed field
             apply_teq_relaxation();                             // 5: strong relax t -> Scotese+CO2 perturbation
+        }
 
         ThermoAtm(*this).printDataAtm();
 
