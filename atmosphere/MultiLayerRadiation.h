@@ -148,6 +148,7 @@ public:
                 const double tau_wv  = (tau_col > tau_dry) ? (tau_col - tau_dry) : 0.0;
                 const double inv_dp  = (sum_dp > 0.0) ? 1.0 / sum_dp : 0.0;
                 const double inv_vp  = (sum_vp > 0.0) ? 1.0 / sum_vp : 0.0;
+                double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated condensate paths [g/m2] (for the SW albedo bump)
                 for (int i = i_mount; i <= i_trop; i++) {
                     // CO2 band contribution (the former MLR CO2 integration, restored and
                     // un-zeroed). Well-mixed CO2 partial pressure P_c -> layer absorber path
@@ -179,10 +180,52 @@ public:
                     if (eps_co2 > 0.999) eps_co2 = 0.999;
                     const double tau_co2 = -log(1.0 - eps_co2);
 
-                    double tau = tau_dry * dp_col[i] * inv_dp + tau_wv * vpath_col[i] * inv_vp + tau_co2;
+                    // Cloud liquid + ice LONGWAVE greenhouse (suspended condensate only; the
+                    // precipitation fluxes P_rain/P_snow are NOT radiatively active here). Layer
+                    // water/ice paths [g/m2] = mixing ratio [kg/kg] * air density [kg/m3] * layer
+                    // thickness dz [m] * 1000; times a mass-absorption coefficient [m2/g] gives a
+                    // dimensionless optical depth that composes additively with the dry/vapour/CO2
+                    // depths. k_liq/k_ice after Stephens (1978): liquid ~0.10-0.15, ice ~0.05-0.06
+                    // (ice less absorbing). Density computed locally from the ideal-gas law (p_stat
+                    // in hPa -> Pa) so this needs no populated r_humid, matching the CO2 band's use
+                    // of p_stat. LW ONLY: clouds here can only ADD greenhouse (raise L_down / warm
+                    // the surface). The compensating SHORTWAVE (cloud-albedo cooling) is applied
+                    // below the column loop as an albedo bump on the accumulated condensate path
+                    // (lwp_col/iwp_col), so low thick cloud can NET-cool while thin cirrus stays
+                    // net-warming. See project_multilayer_radiation cloud/ice plan.
+                    constexpr double k_liq = 0.12, k_ice = 0.055;                 // LW mass absorption [m2/g]
+                    const double T_i   = m.t.x[i][j][k] * m.t_0;                  // [K]
+                    const double rho_i = (T_i > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_i) : 0.0; // [kg/m3]
+                    const double cw_l  = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0; // [kg/kg]
+                    const double cw_i  = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0; // [kg/kg]
+                    const double LWP_i = cw_l * rho_i * dz * 1000.0;              // liquid water path [g/m2]
+                    const double IWP_i = cw_i * rho_i * dz * 1000.0;              // ice   water path [g/m2]
+                    const double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;
+                    lwp_col += LWP_i;  iwp_col += IWP_i;                          // column paths for the SW albedo bump
+
+                    double tau = tau_dry * dp_col[i] * inv_dp + tau_wv * vpath_col[i] * inv_vp
+                               + tau_co2 + tau_cloud;
                     m.epsilon.x[i][j][k] = 1.0 - exp(-tau);
                 }
                 m.epsilon_2D.y[j][k] = m.epsilon.x[i_mount][j][k];
+
+                // Cloud/ice SHORTWAVE albedo bump (stage 2): reflective clouds raise the column
+                // albedo toward a cloud value, cutting absorbed SW (cooling) to compete with the LW
+                // greenhouse above. alpha_eff = alpha_surf + (alpha_cloud - alpha_surf)*
+                // (1 - exp(-k_sw*CWP_sw)), CWP_sw = LWP + f_ice*IWP (ice is optically thinner / less
+                // reflective per unit path, so weighted down -> thin cirrus stays net-warming while
+                // thick low liquid cloud net-cools). Overwrites the clear-sky latitude albedo for
+                // this column; it is read below by the SW terms (tridiagonal source dd + surface
+                // energy balance) and re-derived fresh each MLR call. See project_multilayer_radiation.
+                {
+                    constexpr double alpha_cloud = 0.60;   // asymptotic cloud-top albedo
+                    constexpr double k_sw        = 0.030;  // SW path -> albedo saturation [m2/g]
+                    constexpr double f_ice_sw    = 0.50;   // ice SW reflectivity weight vs liquid
+                    const double cwp_sw = lwp_col + f_ice_sw * iwp_col;
+                    const double a0     = m.albedo.y[j][k];                      // clear-sky (latitude) albedo
+                    if (alpha_cloud > a0)
+                        m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * (1.0 - exp(-k_sw * cwp_sw));
+                }
 
                 // Transmitted (AA) / absorbed (CC diagonal) radiation, and the sum CA
                 // of all radiations transmitted through each layer.

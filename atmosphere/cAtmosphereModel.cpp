@@ -521,17 +521,26 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     { size_t idx = 0; for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
         t_eq_base[idx++] = t_eq.x[i][j][k]; }
 
-    std::vector<double> t_save, mlr_hi, co2_save, dpert_surf;
+    std::vector<double> t_save, mlr_hi, co2_save, dpert_surf, cloud_save, ice_save;
     auto apply_co2_perturbation = [&](bool seed_prognostic) {
         if (co2_0 <= 0.0) return;
         const size_t N = (size_t)im * jm * km;
         if (t_save.empty()) { t_save.assign(N, 0.0); mlr_hi.assign(N, 0.0); co2_save.assign(N, 0.0);
-                              dpert_surf.assign((size_t)jm * km, 0.0); }
+                              dpert_surf.assign((size_t)jm * km, 0.0);
+                              cloud_save.assign(N, 0.0); ice_save.assign(N, 0.0); }
+        // Compute the CO2 perturbation CLEAR-SKY: save then zero cloud/ice around the two MLR
+        // solves so grey-opaque clouds don't LW-saturate and mask the CO2 marginal forcing (they
+        // mask ~40-70% otherwise — a grey-radiation artifact, not a real cloud feedback). Cloud/ice
+        // stay radiatively active for the absolute-radiation diagnostic and modes 1-2; only this
+        // difference-based CO2 forcing is taken clear-sky. Restored in the final loop below.
         size_t idx = 0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
-            t_save[idx] = t.x[i][j][k]; co2_save[idx] = co2.x[i][j][k]; idx++;
+            t_save[idx] = t.x[i][j][k]; co2_save[idx] = co2.x[i][j][k];
+            cloud_save[idx] = cloud.x[i][j][k]; ice_save[idx] = ice.x[i][j][k];
+            cloud.x[i][j][k] = 0.0; ice.x[i][j][k] = 0.0;         // clear-sky for both solves
+            idx++;
         }
-        MultiLayerRadiation(*this).run();                         // t := MLR(current CO2)
+        MultiLayerRadiation(*this).run();                         // t := MLR(current CO2, clear-sky)
         idx = 0;
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
             mlr_hi[idx++] = t.x[i][j][k];
@@ -553,7 +562,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             if (i == 0) { dsurf_sum += w * dK; dsurf_w += w; if (dK > dsurf_max) dsurf_max = dK; }
             // mode 4 seeds the prognostic t with the perturbation; mode 3 restores the Scotese baseline.
             t.x[i][j][k] = seed_prognostic ? (t_save[idx] + dpert) : t_save[idx];
-            co2.x[i][j][k] = co2_save[idx]; idx++;
+            co2.x[i][j][k] = co2_save[idx];
+            cloud.x[i][j][k] = cloud_save[idx]; ice.x[i][j][k] = ice_save[idx];   // restore clouds
+            idx++;
         }
         std::cout << "      AGCM: [co2-perturb DIAG] t_eq shift vs 280ppm (co2_scale=" << co2_scale
                   << "): surface cos-lat mean = " << (dsurf_w > 0 ? dsurf_sum / dsurf_w : 0.0)
