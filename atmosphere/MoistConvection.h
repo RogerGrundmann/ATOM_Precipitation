@@ -152,6 +152,23 @@ private:
         return ep * E_sat / std::max(p_u - E_sat, 1e-10);
     }
 
+    // Clausius-Clapeyron scaling factor for the convective moisture-perturbation
+    // ceiling (Part B of the moisture-coupling fix). Returns q_sat(T)/q_sat(T_ref)
+    // evaluated at the same pressure, so warmer columns are allowed a proportionally
+    // larger updraft-moisture seed and convective precipitation follows CC (~7%/K)
+    // instead of falling as q_sat outruns a fixed cap. >1 warm, <1 cold, 1 at T_ref.
+    double cc_factor(double T_K, double p_hPa) const {
+        constexpr double T_ref_cc = 288.15;                 // [K] reference surface T (15°C)
+        auto E_sat_of = [&](double T) {
+            return (T >= m.t_0)
+                ? m.hp * AtomUtils::exp_func(T, 17.2694, 35.86)   // over water
+                : m.hp * AtomUtils::exp_func(T, 21.8746,  7.66);  // over ice
+        };
+        double qs_T   = safe_q_sat(m.ep, E_sat_of(T_K),     p_hPa);
+        double qs_ref = safe_q_sat(m.ep, E_sat_of(T_ref_cc), p_hPa);
+        return (qs_ref > 0.0) ? qs_T / qs_ref : 1.0;
+    }
+
     // Moist-air density floor: prevents 1/r_humid blow-up when r_humid is
     // clamped to 0 by the limiter in UtilsAtm.
     static double safe_r_humid(double r_h) noexcept {
@@ -369,14 +386,26 @@ private:
                 int i_lfs  = i_LFS_local[j][k];
                 if(i_base < 0 || i_lfs <= i_base) continue;
 
+                // Surface state (i = 0 is the lowest model level), shared by all branches.
+                double T_sfc   = m.t.x[0][j][k] * m.t_0;             // [K]
+                double rho_sfc = safe_r_humid(m.r_humid.x[0][j][k]); // [kg/m³]
+
+                // Part B — Clausius-Clapeyron ceiling for the moisture perturbation.
+                // The old fixed cap q_v_u_add clipped away the warming signal (q_sat
+                // rises ~7%/K but the seed stayed constant, so condensation
+                // q_c_u = q_v_u − scale·q_sat FELL with warming → wrong-sign precip).
+                // Scaling the cap by q_sat(T_sfc)/q_sat(T_ref) lets warmer columns
+                // inject proportionally more updraft moisture so convective precip
+                // follows CC. Applied to both the midlevel and shallow moisture seeds.
+                double q_cap = q_v_u_add * cc_factor(T_sfc, m.p_stat.x[0][j][k]);
+
                 // Midlevel convection (Bechtold 2001): triggered by free tropospheric
-                // instability, not surface fluxes → always use fixed offsets,
-                // independent of convection_mode.  convection_mode controls whether
-                // midlevel clouds are non-precipitating (updraftEntrainment), not
-                // how they are triggered.
+                // instability, not surface fluxes → fixed T offset, CC-scaled moisture.
+                // convection_mode controls whether midlevel clouds are non-precipitating
+                // (updraftEntrainment), not how they are triggered.
                 if(m.p_stat.x[i_base][j][k] < p_stat_midlevel){
                     delta_T_sfp[j][k] = t_add_u;
-                    delta_q_sfp[j][k] = q_v_u_add;
+                    delta_q_sfp[j][k] = q_cap;
                     continue;
                 }
 
@@ -384,32 +413,36 @@ private:
                 if((m.p_stat.x[i_base][j][k] - m.p_stat.x[i_lfs][j][k]) >= p_stat_diff)
                     continue;
 
-                // Shallow convection branch: zero if surface flux is non-positive
-                double H_s = m.Q_sensible_2D.y[j][k];   // [W/m²]
-                if(H_s <= 0.0) continue;
-
-                // Moisture flux derived from latent heat flux
-                double E = m.Q_latent_2D.y[j][k] / m.lv;  // [kg/(m²s)]
-
-                // Surface state (i = 0 is the lowest model level)
-                double T_sfc   = m.t.x[0][j][k] * m.t_0;             // [K]
-                double rho_sfc = safe_r_humid(m.r_humid.x[0][j][k]); // [kg/m³]
+                // Part A — surface MOISTURE flux from the T-responsive Dalton evaporation
+                // (ThermoAtm: Evaporation ∝ E_sat(T_sfc), i.e. Clausius-Clapeyron). The
+                // Bechtold branch previously read Q_latent_2D/Q_sensible_2D, which are
+                // never populated (always 0) → δq/δT were identically zero for every
+                // shallow column, so warming never reached the convective moisture seed.
+                // Sensible flux is still unavailable (Q_sensible_2D ≈ 0); it only affects
+                // the small δT and the buoyancy flux, so convection is moisture-driven.
+                // 1 mm/d over 1 m² = 1 kg/m² per 86400 s.
+                double H_s = m.Q_sensible_2D.y[j][k];                         // [W/m²] (≈0)
+                double E   = std::max(0.0, m.Evaporation.y[j][k]) / 86400.0;  // [kg/(m²s)]
+                if(E <= 0.0 && H_s <= 0.0) continue;                          // no surface forcing
 
                 // BL depth: cloud-base height as proxy for BL top
                 double z_BL = height_table[i_base];     // [m]
                 if(z_BL <= 0.0) continue;
 
-                // Deardorff (1970) convective velocity scale: w* = (g/T · z_BL · H_s/(ρ·c_p))^(1/3)
-                double B_sfc  = (m.g / T_sfc) * H_s / (rho_sfc * m.cp_l);  // [m²/s³]
-                double w_star = std::cbrt(B_sfc * z_BL);                    // [m/s]
+                // Deardorff (1970) convective velocity scale from the surface VIRTUAL
+                // heat flux B = g/T·[H_s/(ρ·c_p) + 0.61·T·E/ρ], so moisture-driven
+                // convection is captured even when the sensible flux is unavailable.
+                double B_sfc  = (m.g / T_sfc)
+                    * (H_s / (rho_sfc * m.cp_l) + 0.61 * T_sfc * E / rho_sfc);  // [m²/s³]
+                double w_star = std::cbrt(std::max(0.0, B_sfc * z_BL));          // [m/s]
                 if(w_star <= 0.0) continue;
 
                 double inv_rho_w  = 1.0 / (rho_sfc * w_star);
-                // Cap at fixed offsets: Bechtold gives smaller values for strong BL
-                // (w* ~ 2 m/s → δq ~ 5e-6 kg/kg); the cap prevents blow-up when
-                // w* is near zero but positive (weak-flux edge case).
+                // Cap at the CC-scaled ceiling: Bechtold gives smaller values for strong
+                // BL (w* ~ 2 m/s → δq ~ 5e-6 kg/kg); the cap prevents blow-up when w* is
+                // near zero but positive (weak-flux edge case).
                 delta_T_sfp[j][k] = std::min(alpha_sfp * H_s * inv_rho_w / m.cp_l, t_add_u);
-                delta_q_sfp[j][k] = std::min(alpha_sfp * E  * inv_rho_w, q_v_u_add);
+                delta_q_sfp[j][k] = std::min(alpha_sfp * E  * inv_rho_w, q_cap);
             }
         }
     }
