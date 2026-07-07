@@ -25,6 +25,13 @@ public:
         using namespace std;
         cout << endl << endl << endl << "      AGCM: BC_SolidGround" << endl;
 
+        // Reference upward long-wave flux for reset land cells — the radiative
+        // counterpart of the t = 1.0 reference (T = t_0), i.e. σ·t_0⁴ [W/m²].
+        // radiation.x = σ·(t·t_0)⁴ everywhere (see MultiLayerRadiation), so a solid
+        // cell whose t is reset to 1.0 must have its radiation reset to σ·t_0⁴ to
+        // stay consistent and not leave a stale flux inside the topography.
+        const double rad_ref = m.sigma * std::pow(m.t_0, 4.0);
+
         // Multi-direction averaging from face-neighbouring air cells.
         //
         // Replaces the previous (4/3)·x_near − (1/3)·x_far one-sided Neumann
@@ -79,6 +86,7 @@ public:
             m.nue.x[i][j][k] = std::max(0.0, avg(m.nue));
 
             m.t.x[i][j][k]   = avg(m.t);
+            m.radiation.x[i][j][k] = avg(m.radiation);
 
             m.p_dyn.x[i][j][k] = avg(m.p_dyn);
 
@@ -158,6 +166,7 @@ public:
                         // growing sub-terrain cold pool at the steep BC/Alaska coast). Mirrors
                         // the un/vn/wn and cn/cloudn/icen/grn resets elsewhere in this branch.
                         m.tn.x[i][j][k]    = 1.0;
+                        m.radiation.x[i][j][k] = rad_ref;
                         m.p_dyn.x[i][j][k] = 0.0;
 
                         // Density reset to dry-air reference. CO2: reset buried cells to the
@@ -306,6 +315,7 @@ public:
                         // growing sub-terrain cold pool at the steep BC/Alaska coast). Mirrors
                         // the un/vn/wn and cn/cloudn/icen/grn resets elsewhere in this branch.
                         m.tn.x[i][j][k]    = 1.0;
+                        m.radiation.x[i][j][k] = rad_ref;
                         m.p_dyn.x[i][j][k] = 0.0;
 
                         // Density reset to dry-air reference. CO2: reset buried cells to the
@@ -421,7 +431,9 @@ public:
 
                 if (is_finite_safe(m.t.x[i_mount][j][k]))
                     m.t.x[0][j][k] = m.t.x[i_mount][j][k];
- 
+
+                m.radiation.x[0][j][k] = m.radiation.x[i_mount][j][k];
+
                 m.p_dyn.x[0][j][k] = m.p_dyn.x[i_mount][j][k];
 
                 m.r_dry.x[0][j][k] = m.r_dry.x[i_mount][j][k];
@@ -613,6 +625,14 @@ public:
                 m.t.x[iml][j][k] = pin_t_top ? m.t_top_init[j][k]
                                              : m.t.x[iml-1][j][k];
 
+                // radiation lid (i=im-1): the radiative counterpart of the t lid
+                // pin above. radiation.x = σ·(t·t_0)⁴, so tie the lid flux to the
+                // just-pinned lid temperature (blackbody). This holds the top-of-
+                // atmosphere upward long-wave flux fixed with t instead of letting
+                // an extrapolation project interior curvature onto the lid.
+                m.radiation.x[iml][j][k] =
+                    m.sigma * std::pow(m.t.x[iml][j][k] * m.t_0, 4.0);
+
                 // Pattern A
                 for (int f = 0; f < n_both; f++) {
                     double*** xf = both_cubic[f]->x;
@@ -705,7 +725,7 @@ public:
         // within ~150 iter (observed at 90°N 0°E, height 0 m). Plain copy gives
         // factor 1.0 — same as an axisymmetric-pole assumption to first order.
         Array* fields_vn[] = {
-            &m.t, &m.p_stat, &m.r_humid, &m.r_dry,
+            &m.t, &m.radiation, &m.p_stat, &m.r_humid, &m.r_dry,
             &m.u, &m.v, &m.w,
             &m.c, &m.cloud, &m.ice, &m.gr,
             &m.PrecipitableWaterLocal, &m.co2,
@@ -751,7 +771,7 @@ public:
     {
         // fields: von Neumann extrapolation + periodic averaging
         Array* fields_avg[] = {
-            &m.t, &m.p_stat, &m.r_humid, &m.r_dry,
+            &m.t, &m.radiation, &m.p_stat, &m.r_humid, &m.r_dry,
             &m.u, &m.v, &m.w,
             &m.c, &m.cloud, &m.ice, &m.gr, &m.co2,
             &m.S_c_c, &m.S_v, &m.S_c, &m.S_i, &m.S_r, &m.S_s, &m.S_g,
@@ -980,7 +1000,7 @@ public:
         // zeros them at land cells and projects x[i_mount] to i=0, so Neumann
         // extrapolation here would only produce spuriously high land-cell values.
         Array* scalars[] = {
-            &m.t,
+            &m.t, &m.radiation,
             &m.c, &m.cloud, &m.ice, &m.gr, &m.co2,
             &m.p_stat,
             &m.r_dry, &m.r_humid,
@@ -1053,6 +1073,7 @@ public:
 
                 if (is_finite_safe(m.t.x[i_mount][j][k]))
                     m.t.x[0][j][k] = m.t.x[i_mount][j][k];
+                m.radiation.x[0][j][k] = m.radiation.x[i_mount][j][k];
                 m.c.x[0][j][k]     = m.c.x[i_mount][j][k];
                 m.cloud.x[0][j][k] = m.cloud.x[i_mount][j][k];
                 m.ice.x[0][j][k]   = m.ice.x[i_mount][j][k];
