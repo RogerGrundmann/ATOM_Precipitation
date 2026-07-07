@@ -20,11 +20,27 @@ namespace TwoCatIce {
 
     // microphysical rate coefficients
     constexpr double c_i_dep  = 1.3e-5;                                 // m3/(s*kg^(1/3))  [formula: c_i_dep * N_i[1/m3] * m_i^(1/3)[kg^(1/3)] * supersaturation -> 1/s]
-    constexpr double c_c_au   = 4.0e-4;                                 // 1/s COSMO
+    // Cloud->rain autoconversion rate. Raised from the COSMO 4.0e-4 to 1.0e-3 as the
+    // rain-side partner of the reduced snow riming (c_rim_snow): reducing riming frees
+    // cloud water that must reach the ground as RAIN rather than accumulate as cloud, so
+    // the cloud->rain drain is sped up to match. Calibrated so global-mean precip stays
+    // at the baseline (~5.9 mm/d) while the snow fraction drops from ~45% to ~16% — the
+    // q_c_crit reservoir threshold is kept, so only excess cloud drains (no return to the
+    // immediate-rain-out over-precipitation). project_snow_overproduction.
+    constexpr double c_c_au   = 1.0e-3;                                 // 1/s (COSMO original 4.0e-4)
     constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
     constexpr double c_i_au   = 1.0e-3;                                 // 1/s COSMO
     constexpr double c_ac     = 0.24;                                   // m2/kg
     constexpr double c_rim    = 18.6;                                   // m2/kg
+    // Reduced snow-side riming coefficient. Un-reduced riming (S_rim = c_rim*cloud*Snow)
+    // dominated snow production ~10x every other source and monopolised the proportional
+    // cloud-water limiter, routing ~90% of cloud water into SNOW and starving the
+    // autoconversion->rain pathway — giving an unphysical ~45-58% snow fraction (Earth
+    // ~5-10%). Reducing it (paired with the faster c_c_au autoconversion) lets the freed
+    // cloud water convert to RAIN instead, dropping the snow fraction to ~16% with global
+    // precip preserved. Warm-side shedding (S_shed) keeps the full c_rim.
+    // project_snow_overproduction.
+    constexpr double c_rim_snow = 18.6 / 5.0;                          // m2/kg (reduced snow riming)
     constexpr double c_agg    = 10.3;                                   // m2/kg
     constexpr double c_i_cri  = 0.24;                                   // m2/kg  [same structure as c_ac: c_i_cri * ice * Rain^(7/9)]
     constexpr double c_r_cri  = 3.2e-5;                                 // m2     [divided by m_i[kg] in formula -> effective m2/kg]
@@ -317,7 +333,7 @@ private:
 
                         // collection of cloud water by snow or graupel (riming)
                         if(t_u < m.t_0)
-                            S_rim = c_rim * m.cloud.x[i][j][k] * Snow;  // c_rim = 18.6, m²/kg
+                            S_rim = c_rim_snow * m.cloud.x[i][j][k] * Snow;  // reduced riming (see c_rim_snow)
                         else  S_rim = 0.0;                              // riming rate of snow mass due to collection of supercooled cloud droplets, < VIII > in kg/(kg*s)
 
                         // collection of cloud water by wet snow to form rain (shedding)
