@@ -197,6 +197,18 @@ public:
                     m.Evaporation.y[j][k] = (active == EvapModel::Meyer)  ? m.Evaporation_Meyer.y[j][k]
                                           : (active == EvapModel::Rohwer) ? m.Evaporation_Rohwer.y[j][k]
                                           :                                 m.Evaporation_Dalton.y[j][k];
+                    // Calm ocean cell: the wind-driven evaporation FLUX is zero (above), but the
+                    // surface-layer vapour CONCENTRATION still equilibrates toward saturation (a
+                    // windy no-precip cell converges to ~c_sat too). Relax c.x[0] toward c_sat with
+                    // the same w_norm as the windy branch below, instead of leaving the
+                    // RK4-unintegrated i=0 layer at a stale near-zero value — which showed as
+                    // near-zero water-vapour patches over calm ocean (with normal "spots" at windy
+                    // cells) in zonal cross-sections. Concentration only; the flux stays wind-limited.
+                    double denom_calm = p_stat_0jk - (1.0 - m.ep) * E_sat;      // [hPa]
+                    double c_sat_calm = (denom_calm > 0.0) ? m.ep * E_sat / denom_calm
+                                                           : m.ep * E_sat / p_stat_0jk; // [kg/kg]
+                    m.c_fix.y[j][k] = m.c.x[0][j][k];
+                    m.c.x[0][j][k]  = m.c_fix.y[j][k] + (c_sat_calm - m.c_fix.y[j][k]) * w_norm;
                     continue;
                 }
 
