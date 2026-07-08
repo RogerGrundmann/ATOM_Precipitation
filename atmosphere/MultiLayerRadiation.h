@@ -66,17 +66,33 @@ public:
 
         // ---- latitude profiles (computed once; read-only in the parallel loop) ----
 
-        // Effective surface albedo: pole -> equator parabola over any surface cell.
-        const double albedo_eff = m.albedo_pole - m.albedo_equator;
+        // Surface albedo with a temperature-dependent ICE/SNOW FEEDBACK (replaces the former
+        // fixed pole->equator parabola, which froze the feedback out). Base value by surface
+        // type (ocean vs land); where the surface is cold, blend toward a bright snow/sea-ice
+        // albedo over a smooth ramp around freezing. Recomputed every MLR call on the CURRENT
+        // surface T, so it is a LIVE feedback: warming -> less ice -> lower albedo -> more
+        // absorbed shortwave -> extra (polar-amplified) warming that the dynamics cannot mix
+        // away (unlike a forcing/nudge). Constants are tunable. NOTE the cloud SW bump below
+        // overwrites this per column where cloud is present, so its net reach is cloud-limited.
+        constexpr double alb_ocean  = 0.08;    // open water
+        constexpr double alb_land   = 0.20;    // generic snow-free land
+        constexpr double alb_ice    = 0.60;    // snow / sea-ice
+        constexpr double T_ice_none = 275.15;  // surface T >= this -> ice-free   [+2 C]
+        constexpr double T_ice_full = 265.15;  // surface T <= this -> full ice   [-8 C]
         #pragma omp parallel for schedule(static)
         for (int j = 0; j < m.jm; j++)
             for (int k = 0; k < m.km; k++)
-                for (int i = 0; i < m.im - 1; i++)
-                    if (is_ocean_surface(m.h, i, j, k) || is_land_surface(m.h, i, j, k)) {
-                        m.albedo.y[j][k] =
-                            albedo_eff * parabola((double)j / (double)j_half) + m.albedo_pole;
-                        break;   // albedo depends only on latitude — first surface cell suffices
+                for (int i = 0; i < m.im - 1; i++) {
+                    const bool ocean = is_ocean_surface(m.h, i, j, k);
+                    if (ocean || is_land_surface(m.h, i, j, k)) {
+                        const double a_base = ocean ? alb_ocean : alb_land;
+                        const double T_s    = m.t.x[i][j][k] * m.t_0;          // surface T [K]
+                        double f_ice = (T_ice_none - T_s) / (T_ice_none - T_ice_full);
+                        f_ice = std::max(0.0, std::min(1.0, f_ice));           // 0 (warm) -> 1 (cold)
+                        m.albedo.y[j][k] = a_base + (alb_ice - a_base) * f_ice;
+                        break;   // first surface cell per column
                     }
+                }
 
         // Incoming short-wave radiation: pole -> equator parabola, hemispherically symmetric.
         m.short_wave_radiation = std::vector<double>(m.jm, m.rad_pole_short);
