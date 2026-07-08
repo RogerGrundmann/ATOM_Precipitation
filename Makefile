@@ -9,14 +9,14 @@ CFLAGS = -ggdb -Wall -ffast-math -march=native -fPIC -std=c++17 -Ilib -Iatmosphe
 LIB_OBJ = lib/Array.o lib/Array_2D.o lib/Array_1D.o lib/Config.o lib/Utils.o lib/FFT.o
 
 ATM_OBJ = atmosphere/cAtmosphereModel.o atmosphere/PrintMsg_Atm.o \
-atmosphere/FileIO_Atm.o atmosphere/RHS_Atm.o atmosphere/RHS_Atm_Turb.o \
-atmosphere/RungeKutta_Atm.o atmosphere/RungeKutta_Atm_Turb.o atmosphere/MinMax_Atm.o \
+atmosphere/FileIO_Atm.o atmosphere/RHS_Atm_Turb.o \
+atmosphere/RungeKutta_Atm_Turb.o atmosphere/MinMax_Atm.o \
 atmosphere/Paraview_Atm.o atmosphere/InitValues_Atm.o \
 atmosphere/Results_Atm.o
 
 HYD_OBJ = hydrosphere/cHydrosphereModel.o hydrosphere/PrintMsg_Hyd.o \
-hydrosphere/FileIO_Hyd.o hydrosphere/RHS_Hyd.o hydrosphere/RHS_Hyd_Turb.o \
-hydrosphere/RungeKutta_Hyd.o hydrosphere/RungeKutta_Hyd_Turb.o hydrosphere/MinMax_Hyd.o \
+hydrosphere/FileIO_Hyd.o hydrosphere/RHS_Hyd_Turb.o \
+hydrosphere/RungeKutta_Hyd_Turb.o hydrosphere/MinMax_Hyd.o \
 hydrosphere/Paraview_Hyd.o  hydrosphere/InitValues_Hyd.o \
 hydrosphere/Results_Hyd.o
 

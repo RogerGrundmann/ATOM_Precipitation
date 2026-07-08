@@ -248,7 +248,7 @@ void cHydrosphereModel::paraview_panorama_vts(const string &Name_Bathymetry_File
     dump_array("CoriolisForce", CoriolisForce, 1.0, Hydrosphere_panorama_vts_File);
     dump_array("PresGradForce", PresGradForce, 1.0, Hydrosphere_panorama_vts_File);
 */
-    if (turb_model != "none") {
+    if (turb_model != "laminar") {
         dump_array("TKE",           tke,        1.0, Hydrosphere_panorama_vts_File);
         dump_array("Dissipation",   dis,        1.0, Hydrosphere_panorama_vts_File);
         dump_array("EddyViscosity", nue,        1.0, Hydrosphere_panorama_vts_File);
@@ -405,7 +405,7 @@ void cHydrosphereModel::paraview_vtk_longal(const string &Name_Bathymetry_File,
     dump_longal("CoriolisForce", CoriolisForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("CentrifugalForce", CentrifugalForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("PresGradForce", PresGradForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
-    if (turb_model != "none") {
+    if (turb_model != "laminar") {
         dump_longal("TKE",           tke,        1.0, j_longal, Hydrosphere_vtk_longal_File);
         dump_longal("Dissipation",   dis,        1.0, j_longal, Hydrosphere_vtk_longal_File);
         dump_longal("EddyViscosity", nue,        1.0, j_longal, Hydrosphere_vtk_longal_File);
@@ -530,7 +530,7 @@ void cHydrosphereModel::paraview_vtk_radial(const string &Name_Bathymetry_File,
     dump_radial_2d("Precipitation", Precipitation_2D, 1.0, Hydrosphere_vtk_radial_File);
     dump_radial_2d("SalinityEvap", salinity_evaporation, c_35, Hydrosphere_vtk_radial_File);
     dump_radial("Evap-Precip", aux_w, 1.0, i_radial, Hydrosphere_vtk_radial_File);
-    if (turb_model != "none") {
+    if (turb_model != "laminar") {
         dump_radial("TKE",           tke,        1.0, i_radial, Hydrosphere_vtk_radial_File);
         dump_radial("Dissipation",   dis,        1.0, i_radial, Hydrosphere_vtk_radial_File);
         dump_radial("EddyViscosity", nue,        1.0, i_radial, Hydrosphere_vtk_radial_File);
@@ -644,7 +644,7 @@ void cHydrosphereModel::paraview_vtk_zonal(const string &Name_Bathymetry_File,
     dump_zonal("CoriolisForce", CoriolisForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("CentrifugalForce", CentrifugalForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("PresGradForce", PresGradForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
-    if (turb_model != "none") {
+    if (turb_model != "laminar") {
         dump_zonal("TKE",           tke,        1.0, k_zonal, Hydrosphere_vtk_zonal_File);
         dump_zonal("Dissipation",   dis,        1.0, k_zonal, Hydrosphere_vtk_zonal_File);
         dump_zonal("EddyViscosity", nue,        1.0, k_zonal, Hydrosphere_vtk_zonal_File);

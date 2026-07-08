@@ -153,7 +153,11 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     iter_n = 0;
     total_iter_count = 0;                                               // reset per time slice so the inviscid spin-up fires at the start of every Ma slice
 
-    use_turbulence_model             = (turb_model != "none");
+    // "laminar" is the descriptive name for the no-turbulence path; accept the legacy
+    // "none" and an empty string as synonyms so old configs keep working.
+    if(turb_model.empty() || turb_model == "none") turb_model = "laminar";
+
+    use_turbulence_model             = (turb_model != "laminar");
     use_k_epsilon_turbulence_model   = (turb_model == "k_epsilon");
     use_k_omega_turbulence_model     = (turb_model == "k_omega");
     use_k_omega_SST_turbulence_model = (turb_model == "k_omega_SST");
@@ -248,7 +252,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 
 //    goto Printout;
 
-    if(turb_model != "none") {
+    if(turb_model != "laminar") {
         TurbulenceAtm(*this).init();                                    // turbulence field initialisation (skipped in laminar mode)
         TurbulenceAtm(*this).run();                                     // call for turbulence models
 
@@ -944,8 +948,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             ThermoAtm(*this).vegetationLand();                          // vegetation on land
             ThermoAtm(*this).co2Atmosphere();                           // greenhouse gas co2 as function of temperature
 
-            if(turb_model != "none") {
-                TurbulenceAtm(*this).run();                             // update turbulence sources (skipped in laminar mode)
+            if(turb_model != "laminar" && !inviscid_phase) {
+                TurbulenceAtm(*this).run();                             // update turbulence sources (skipped in laminar mode / inviscid spin-up)
 
                 AtomUtils::damp_wiggles(tke,        &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(dis,        &i_topography, true, true, true);
@@ -960,7 +964,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
         if(iter_n % momentum_stride == 0){
             BC_Atm(*this).bcRadius();                                   // extrapolation in i-direction alomg grid boundaries
-            if(turb_model != "none") TurbulenceAtm(*this).apply_wall_bc();  // reassert ω_wall at i=0 after bcRadius cubic extrapolation
+            if(turb_model != "laminar") TurbulenceAtm(*this).apply_wall_bc();  // reassert ω_wall at i=0 after bcRadius cubic extrapolation
             BC_Atm(*this).bcTheta();                                    // extrapolation in j-direction alomg grid boundaries
             BC_Atm(*this).bcPhi();                                      // extrapolation in k-direction alomg grid boundaries
 
@@ -996,8 +1000,12 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         }
 
         vbudget_capture = do_vbudget;     // have rhs_v store its per-term split this RK4 (turbulent path)
-        if(turb_model == "none" || inviscid_phase) solveRungeKutta_Atmosphere();   // laminar: standard RK4 on transport equations (also during inviscid spin-up)
-        else                                       solveRungeKutta_Atmosphere_Turb();  // turbulent: RK4 extended with k and ω equations
+        // Single dynamical core (2026-07-08): the turbulent RHS reduces to LAMINAR when
+        // use_turbulence_model is false (molecular diffusion, zeroed turbulence) and to EULER
+        // when diffusion_ramp=0 (inviscid spin-up). The former separate laminar
+        // solveRungeKutta_Atmosphere / RHS_Atm.cpp path was dropped — inviscid is now an
+        // independent switch (diffusion_ramp), decoupled from the turbulence selection.
+        solveRungeKutta_Atmosphere_Turb();
         vbudget_capture = false;
         if(do_vbudget) vb_diff(vb_dyn);   // RK4 net (PGF+Coriolis+advection+diffusion+drag+MC)
 

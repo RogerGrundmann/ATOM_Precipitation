@@ -264,7 +264,11 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     BC_Hyd(*this).bcSolidGround();
     BC_Hyd(*this).boundaryCondition();
 
-    if (!turb_model.empty() && turb_model != "none") {
+    // "laminar" is the descriptive name for the no-turbulence path; accept legacy "none"
+    // and empty as synonyms (runs before the turbulence init and run_3D_loop flag setup).
+    if (turb_model.empty() || turb_model == "none") turb_model = "laminar";
+
+    if (turb_model != "laminar") {
         TurbulenceHyd(*this).init();
         TurbulenceHyd(*this).apply_wall_bc();
     }
@@ -366,7 +370,7 @@ void cHydrosphereModel::run_3D_loop(){
 cout << endl << endl << endl << "      OGCM: run_3D_loop ..........................." << endl;
 
     // Set turbulence model flags once, before the iteration loop
-    if (!turb_model.empty() && turb_model != "none") {
+    if (!turb_model.empty() && turb_model != "laminar") {
         use_turbulence_model             = true;
         use_k_epsilon_turbulence_model   = (turb_model == "k_epsilon");
         use_k_omega_turbulence_model     = (turb_model == "k_omega");
@@ -437,11 +441,12 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         stage_capture = (iter_n % checkpoint == 0);
         if(stage_capture){ locate_blowup_cell(); record_stage(0); }
 
-        if (use_turbulence_model && !inviscid_phase) {
-            solveRungeKutta_Hydrosphere_Turb();
-        } else {
-            solveRungeKutta_Hydrosphere();
-        }
+        // Single hyd dynamical core (2026-07-08): the turbulent RHS reduces to LAMINAR when
+        // use_turbulence_model is false (molecular diffusion, zeroed turbulence) and to EULER
+        // when diffusion_ramp=0 (inviscid spin-up). The former separate laminar
+        // solveRungeKutta_Hydrosphere / RHS_Hyd.cpp path was dropped — inviscid is now an
+        // independent switch (diffusion_ramp), decoupled from the turbulence selection.
+        solveRungeKutta_Hydrosphere_Turb();
 
         wbudget_capture = false;   // wbud_* now hold this iter's term split
         record_stage(1);           // stage 1: after RK4
@@ -523,6 +528,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         AtomUtils::polar_zonal_filter(u, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(v, the.z, &i_bathymetry, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(w, the.z, &i_bathymetry, 30.0, 12, 3.0);
+
         record_stage(4);   // stage 4: after the polar zonal filter (final u,v,w)
 
         // Temperature wiggle damping — cure the deep high-latitude T instability.

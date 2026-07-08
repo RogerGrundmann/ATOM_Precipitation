@@ -243,7 +243,7 @@ void cAtmosphereModel::print_min_max_atm(){
         "./.", i_LFS, 1);
 */
 
-    if(turb_model != "none"){
+    if(turb_model != "laminar"){
         cout << endl << " turbulence: " << endl;
         searchMinMax_3D(" max TKE ",          " min TKE ",          "m²/s²",     tke,        1.0);
         searchMinMax_3D(" max dissipation ",  " min dissipation ",  "m²/s³",     dis,        1.0);

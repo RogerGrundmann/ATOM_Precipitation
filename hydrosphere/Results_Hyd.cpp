@@ -58,7 +58,7 @@ void cHydrosphereModel::print_min_max_hyd(){
     cout << endl << " solid soil contours like sea mounts: " << endl << endl;
     searchMinMax_2D(" max bathymetry ", " min bathymetry ", "m", Bathymetry, 1.0);
 
-    if (turb_model != "none") {
+    if (turb_model != "laminar") {
         cout << endl << " turbulence: " << endl;
         searchMinMax_3D(" max TKE ",           " min TKE ",           "m²/s²", tke,        1.0);
         searchMinMax_3D(" max dissipation ",   " min dissipation ",   "m²/s³", dis,        1.0);

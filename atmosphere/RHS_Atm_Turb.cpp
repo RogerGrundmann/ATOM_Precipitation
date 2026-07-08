@@ -438,7 +438,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + dtdthe * costhe_inv_rm2sinthe + d2tdphi2 * inv_rm2sinthe2);
 
     if(land_ijk){
-        BuoyancyForce.x[i][j][k]        = 0.0;
+        BuoyancyForce.x[i][j][k]         = 0.0;
         PressureGradientForce.x[i][j][k] = 0.0;
         CoriolisForce.x[i][j][k]         = 0.0;
         Q_Latent.x[i][j][k]              = 0.0;
@@ -681,6 +681,14 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         disn.x[i][j][k]       = 0.0;
     }
 
+    // Inviscid spin-up: ramp the diffusion (molecular background + eddy nue) from 0, mirroring
+    // the former laminar RHS_Atm.cpp. This lets the turbulent path also serve the inviscid phase
+    // (diffusion_ramp=0 => Euler) and the laminar case (use_turbulence_model=false => molecular
+    // only, above), so it is now the single dynamical core. No-op post-spinup (diffusion_ramp=1).
+    diffusion_t_re   *= diffusion_ramp;
+    diffusion_vel_re *= diffusion_ramp;
+    diffusion_tke_re *= diffusion_ramp;
+    diffusion_dis_re *= diffusion_ramp;
 
     // ===== Transport terms (advection) =====
     double u_exp   = u_ijk * exp_rm;

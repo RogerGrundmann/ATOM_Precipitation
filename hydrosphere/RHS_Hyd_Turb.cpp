@@ -515,6 +515,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         disn.x[i][j][k]       = 0.0;
     }
 
+    // Inviscid spin-up: ramp the diffusion (molecular background + eddy nue) from 0, mirroring
+    // the former laminar RHS_Hyd.cpp. Lets the turbulent path also serve the inviscid phase
+    // (diffusion_ramp=0 => Euler) and the laminar case (use_turbulence_model=false => molecular
+    // only, above), so it is now the single hyd dynamical core. No-op post-spinup (ramp=1).
+    diffusion_t_re   *= diffusion_ramp;
+    diffusion_vel_re *= diffusion_ramp;
+    diffusion_tke_re *= diffusion_ramp;
+    diffusion_dis_re *= diffusion_ramp;
+
 
     // ===== Transport (advection) =====
     // Rhie-Chow: advect with the divergence-free FACE fluxes (uf/vf/wf, filled by

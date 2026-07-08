@@ -223,7 +223,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
 */
     dump_array("PrecipitationConv", P_conv, 8.64e4, Atmosphere_panorama_vts_File);
 
-    if(turb_model != "none"){
+    if(turb_model != "laminar"){
         dump_array("TKE",           tke,        1.0, Atmosphere_panorama_vts_File);
         dump_array("Dissipation",   dis,        1.0, Atmosphere_panorama_vts_File);
         dump_array("EddyViscosity", nue,        1.0, Atmosphere_panorama_vts_File);
@@ -533,7 +533,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
 
     dump_radial("CO2", co2, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
-    if(turb_model != "none"){
+    if(turb_model != "laminar"){
         dump_radial("TKE",        tke,        1.0, i_radial, Atmosphere_vtk_radial_File);
         dump_radial("Dissipation", dis,        1.0, i_radial, Atmosphere_vtk_radial_File);
         dump_radial("EddyViscosity", nue,      1.0, i_radial, Atmosphere_vtk_radial_File);
@@ -741,7 +741,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
 
     dump_zonal("CO2", co2, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
-    if(turb_model != "none"){
+    if(turb_model != "laminar"){
         dump_zonal("TKE",          tke,        1.0, k_zonal, Atmosphere_vtk_zonal_File);
         dump_zonal("Dissipation",  dis,        1.0, k_zonal, Atmosphere_vtk_zonal_File);
         dump_zonal("EddyViscosity", nue,       1.0, k_zonal, Atmosphere_vtk_zonal_File);
@@ -924,7 +924,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     dump_longal("CO2", co2, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("height", aux_t, 1e-3, j_longal, Atmosphere_vtk_longal_File);
 
-    if(turb_model != "none"){
+    if(turb_model != "laminar"){
         dump_longal("TKE",           tke,        1.0, j_longal, Atmosphere_vtk_longal_File);
         dump_longal("Dissipation",   dis,        1.0, j_longal, Atmosphere_vtk_longal_File);
         dump_longal("EddyViscosity", nue,        1.0, j_longal, Atmosphere_vtk_longal_File);

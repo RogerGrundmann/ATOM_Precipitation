@@ -326,9 +326,7 @@ private:
     void calculate_node_weights();
     void init_steps();
     void init_tropopause_layers();
-    void RHS_Atmosphere(int i, int j, int k, const CellGeometry& geo);
-    void RHS_Atmosphere_Turb(int i, int j, int k, const CellGeometry& geo);
-    void solveRungeKutta_Atmosphere();
+    void RHS_Atmosphere_Turb(int i, int j, int k, const CellGeometry& geo);   // single dynamical core (laminar RHS_Atmosphere dropped 2026-07-08)
     void solveRungeKutta_Atmosphere_Turb();
     void fft(Array &);
     void LandOceanFraction();

@@ -15,6 +15,32 @@
 using namespace std;
 
 
+// Boussinesq buoyancy base state: the area-weighted (sin θ, θ = colatitude)
+// horizontal mean of the non-dim temperature at each radial level i, taken over
+// air cells only. Buoyancy is then driven by (t − t_ref_level[i]) so the body
+// force has zero mean at every height and only horizontal temperature contrasts
+// accelerate the flow. Refilled once per RK4 step. (Moved here from the former
+// RungeKutta_Atm.cpp when the separate laminar solver was dropped.)
+void cAtmosphereModel::computeLevelMeanTemperature(){
+    if((int)t_ref_level.size() != im) t_ref_level.assign(im, 1.0);
+
+    #pragma omp parallel for schedule(static)
+    for(int i = 0; i < im; i++){
+        double sum = 0.0, wsum = 0.0;
+        for(int j = 0; j < jm; j++){
+            const double w = sin(the.z[j]);                 // spherical area weight
+            for(int k = 0; k < km; k++){
+                if(AtomUtils::is_air(h, i, j, k)){
+                    sum  += w * t.x[i][j][k];
+                    wsum += w;
+                }
+            }
+        }
+        t_ref_level[i] = (wsum > 0.0) ? sum / wsum : 1.0;   // all-land level → neutral
+    }
+}
+
+
 void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
     cout << endl << "      solveRungeKutta_Atmosphere_Turb begin" << endl;
 

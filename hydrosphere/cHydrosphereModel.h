@@ -183,9 +183,7 @@ private:
     void IC_u_WestEastCoast();
     void IC_Equatorial_Currents();
     void CircumPolarCurrent();
-    void solveRungeKutta_Hydrosphere();
-    void solveRungeKutta_Hydrosphere_Turb();
-    void RHS_Hydrosphere(int i, int j, int k, const CellGeometry& geo);
+    void solveRungeKutta_Hydrosphere_Turb();   // single dynamical core (laminar RHS_Hydrosphere dropped 2026-07-08)
     void RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeometry& geo);
     void print_welcome_msg();
     void print_final_remarks();
