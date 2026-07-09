@@ -30,9 +30,19 @@ void cAtmosphereModel::print_min_max_atm(){
 
     cAtmosphereModel::searchMinMax_3D(" max temperature ", " min temperature ", 
         " deg", t, 273.15, [](double i)->double{return i - 273.15;}, true);
-    searchMinMax_3D(" max standard_temp ", " standard_temp ", 
+    searchMinMax_3D(" max standard_temp ", " min standard_temp ", 
         " deg", TempStand, 1.0);
 
+
+    cout << endl << " long wave radiation: " << endl;
+    searchMinMax_3D(" max radiation ", " min radiation ", 
+        " deg", radiation, 1.0);
+    searchMinMax_3D(" max epsilon ", " min epsilon ", 
+        " deg", epsilon, 1.0);
+    searchMinMax_2D(" max epsilon_2D ", " min epsilon_2D ", 
+         " ppm ", epsilon_2D, 1.0);
+    searchMinMax_2D(" max albedo ", " min albedo ", 
+         " ppm ", albedo, 1.0);
 
 
 

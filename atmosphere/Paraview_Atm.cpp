@@ -172,9 +172,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     buf.clear();
 
 
-
-
-//    dump_array("Epsilon_3D", epsilon, 1.0, Atmosphere_panorama_vts_File);
+    dump_array("Radiation", radiation, 1.0, Atmosphere_panorama_vts_File);
     dump_array("WaterVapour", c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudWater", cloud, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudIce", ice, 1e3, Atmosphere_panorama_vts_File);
@@ -477,11 +475,16 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
 //    dump_radial_2d("Temperature_Reconst", temp_reconst, 1.0, Atmosphere_vtk_radial_File);
     dump_radial_2d("Temperature_Landscape", temp_landscape, 1.0, Atmosphere_vtk_radial_File);
 
+    dump_radial("Radiation", radiation, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("Epsilon", epsilon, 1.0, i_radial, Atmosphere_vtk_radial_File);
+
     dump_radial_2d("Tropopause", Tropopause, 1.0, Atmosphere_vtk_radial_File);
 
     dump_radial_2d("Pressure_Landscape", p_stat_landscape, 1.0, Atmosphere_vtk_radial_File);
 
     dump_radial_2d("Evaporation", Evaporation, 1.0, Atmosphere_vtk_radial_File);
+
+    dump_radial_2d("Albedo", albedo, 1.0, Atmosphere_vtk_radial_File);
 
     dump_radial("Topography", h, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
@@ -699,6 +702,9 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     }
 
 
+    dump_zonal("Radiation", radiation, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("Epsilon", epsilon, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
+
     dump_zonal("Topography", h, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("height", aux_t, 1e-3, k_zonal, Atmosphere_vtk_zonal_File);
 
@@ -881,6 +887,9 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
             aux_t.x[i][j_longal][k] = height;
         }
     }
+
+    dump_longal("Radiation", radiation, 1.0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("Epsilon", epsilon, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
     dump_longal("Topography", h, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
