@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "IceSchemeCommon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,7 @@ using namespace AtomUtils;
 namespace ZeroCatIce {
     constexpr double tau_r = 3.3e3;                                     // s
     constexpr double tau_r_inv = 1.0 / tau_r;
+    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining. Ported from TwoCat (project_overprecip_saturation_injection) — without it ALL cloud autoconverts every step -> ~25x over-precip.
     constexpr double b_ev = 8.05;                                       // m2*s/kg
     constexpr double c_ac = 0.24;                                       // m2/kg
     constexpr int iter_prec_end = 2;                                    // COSMO iterations
@@ -126,9 +128,10 @@ private:
                             ? c_ac * cl_i * pow(Rain, 7.0/9.0)
                             : 0.0;
 
-                        // Autoconversion: cloud water -> rain
-                        double S_au = (cl_i > 0.0)
-                            ? cl_i * tau_r_inv
+                        // Autoconversion: cloud water -> rain (Kessler with q_c_crit threshold —
+                        // only the cloud excess above the reservoir rains, not all of it)
+                        double S_au = (cl_i > q_c_crit)
+                            ? (cl_i - q_c_crit) * tau_r_inv
                             : 0.0;
 
                         // Evaporation of rain
@@ -199,70 +202,20 @@ private:
 
     // ==================== BOUNDARY CONDITIONS ====================
     void applyBoundaryConditions() {
-        // Top boundary (extrapolation)
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                m.P_rain.x[m.im-1][j][k] = m.c43 * m.P_rain.x[m.im-2][j][k]
-                    - m.c13 * m.P_rain.x[m.im-3][j][k];
-                m.P_snow.x[m.im-1][j][k] = m.c43 * m.P_snow.x[m.im-2][j][k]
-                    - m.c13 * m.P_snow.x[m.im-3][j][k];
-            }
-        }
-
-        // Latitude (theta) boundaries
-        #pragma omp parallel for collapse(2)
-        for(int k = 0; k < m.km; k++){
-            for(int i = 0; i < m.im; i++){
-                m.P_rain.x[i][0][k]       = m.c43 * m.P_rain.x[i][1][k]       - m.c13 * m.P_rain.x[i][2][k];
-                m.P_rain.x[i][m.jm-1][k]  = m.c43 * m.P_rain.x[i][m.jm-2][k] - m.c13 * m.P_rain.x[i][m.jm-3][k];
-                m.P_snow.x[i][0][k]       = m.c43 * m.P_snow.x[i][1][k]       - m.c13 * m.P_snow.x[i][2][k];
-                m.P_snow.x[i][m.jm-1][k]  = m.c43 * m.P_snow.x[i][m.jm-2][k] - m.c13 * m.P_snow.x[i][m.jm-3][k];
-            }
-        }
-
-        // Longitude (phi) boundaries – von Neumann + periodicity
-        #pragma omp parallel for collapse(2)
-        for(int i = 0; i < m.im; i++){
-            for(int j = 0; j < m.jm; j++){
-                m.P_rain.x[i][j][0]      = m.c43 * m.P_rain.x[i][j][1]      - m.c13 * m.P_rain.x[i][j][2];
-                m.P_rain.x[i][j][m.km-1] = m.c43 * m.P_rain.x[i][j][m.km-2] - m.c13 * m.P_rain.x[i][j][m.km-3];
-                m.P_rain.x[i][j][0] = m.P_rain.x[i][j][m.km-1]
-                    = (m.P_rain.x[i][j][0] + m.P_rain.x[i][j][m.km-1]) * 0.5;
-                m.P_snow.x[i][j][0]      = m.c43 * m.P_snow.x[i][j][1]      - m.c13 * m.P_snow.x[i][j][2];
-                m.P_snow.x[i][j][m.km-1] = m.c43 * m.P_snow.x[i][j][m.km-2] - m.c13 * m.P_snow.x[i][j][m.km-3];
-            }
-        }
+        IceSchemeCommon::extrapolateBC(m, m.P_rain, true);   // rain: phi-seam periodicity averaged
+        IceSchemeCommon::extrapolateBC(m, m.P_snow, false);  // snow: no seam average (preserves original ZeroCat behaviour)
     }
 
 
     // ==================== TOPOGRAPHY FILL ====================
     void applyTopography() {
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                int i_mount = m.i_topography[j][k];
-                double pr_m  = m.P_rain.x[i_mount][j][k];
-                double ps_m  = m.P_snow.x[i_mount][j][k];
-                double sr_m  = m.S_r.x[i_mount][j][k];
-                double ss_m  = m.S_s.x[i_mount][j][k];
-                double sv_m  = m.S_v.x[i_mount][j][k];
-                double sc_m  = m.S_c.x[i_mount][j][k];
-                double scc_m = m.S_c_c.x[i_mount][j][k];
-
-                for(int i = i_mount - 1; i >= 0; i--){
-                    if(is_land(m.h, i, j, k)){
-                        m.P_rain.x[i][j][k] = pr_m;
-                        m.P_snow.x[i][j][k] = ps_m;
-                        m.S_r.x[i][j][k]    = sr_m;
-                        m.S_s.x[i][j][k]    = ss_m;
-                        m.S_v.x[i][j][k]    = sv_m;
-                        m.S_c.x[i][j][k]    = sc_m;
-                        m.S_c_c.x[i][j][k]  = scc_m;
-                    }
-                }
-            }
-        }
+        IceSchemeCommon::fillTopography(m, m.P_rain);
+        IceSchemeCommon::fillTopography(m, m.P_snow);
+        IceSchemeCommon::fillTopography(m, m.S_r);
+        IceSchemeCommon::fillTopography(m, m.S_s);
+        IceSchemeCommon::fillTopography(m, m.S_v);
+        IceSchemeCommon::fillTopography(m, m.S_c);
+        IceSchemeCommon::fillTopography(m, m.S_c_c);
     }
 
 

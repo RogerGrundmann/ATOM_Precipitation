@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "IceSchemeCommon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -527,51 +528,8 @@ private:
 */
 // ==================== BOUNDARY CONDITIONS ====================
     void applyBoundaryConditions() {
-        // Top boundary (extrapolation)
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                m.P_rain.x[m.im-1][j][k] = m.c43 * m.P_rain.x[m.im-2][j][k]
-                    - m.c13 * m.P_rain.x[m.im-3][j][k];
-                m.P_snow.x[m.im-1][j][k] = m.c43 * m.P_snow.x[m.im-2][j][k]
-                    - m.c13 * m.P_snow.x[m.im-3][j][k];
-            }
-        }
-
-        // Latitude (theta) boundaries
-        #pragma omp parallel for collapse(2)
-        for(int k = 0; k < m.km; k++){
-            for(int i = 0; i < m.im; i++){
-                m.P_rain.x[i][0][k] = m.c43 * m.P_rain.x[i][1][k]
-                    - m.c13 * m.P_rain.x[i][2][k];
-                m.P_rain.x[i][m.jm-1][k] = m.c43 * m.P_rain.x[i][m.jm-2][k]
-                    - m.c13 * m.P_rain.x[i][m.jm-3][k];
-                m.P_snow.x[i][0][k] = m.c43 * m.P_snow.x[i][1][k]
-                    - m.c13 * m.P_snow.x[i][2][k];
-                m.P_snow.x[i][m.jm-1][k] = m.c43 * m.P_snow.x[i][m.jm-2][k]
-                    - m.c13 * m.P_snow.x[i][m.jm-3][k];
-            }
-        }
-
-        // Longitude (phi) boundaries – von Neumann + periodicity
-        #pragma omp parallel for collapse(2)
-        for(int i = 0; i < m.im; i++){
-            for(int j = 0; j < m.jm; j++){
-                m.P_rain.x[i][j][0] = m.c43 * m.P_rain.x[i][j][1]
-                    - m.c13 * m.P_rain.x[i][j][2];                     // von Neumann boundary condition dt/dphi = 0.0
-                m.P_rain.x[i][j][m.km-1] = m.c43 * m.P_rain.x[i][j][m.km-2]
-                    - m.c13 * m.P_rain.x[i][j][m.km-3];                // von Neumann boundary condition dt/dphi = 0.0
-                m.P_rain.x[i][j][0] = m.P_rain.x[i][j][m.km-1]
-                    = (m.P_rain.x[i][j][0] + m.P_rain.x[i][j][m.km-1])/2.0;
-
-                m.P_snow.x[i][j][0] = m.c43 * m.P_snow.x[i][j][1]
-                    - m.c13 * m.P_snow.x[i][j][2];                     // von Neumann boundary condition dt/dphi = 0.0
-                m.P_snow.x[i][j][m.km-1] = m.c43 * m.P_snow.x[i][j][m.km-2]
-                    - m.c13 * m.P_snow.x[i][j][m.km-3];                // von Neumann boundary condition dt/dphi = 0.0
-                m.P_snow.x[i][j][0] = m.P_snow.x[i][j][m.km-1]
-                    = (m.P_snow.x[i][j][0] + m.P_snow.x[i][j][m.km-1])/2.0;
-            }
-        }
+        IceSchemeCommon::extrapolateBC(m, m.P_rain, true);   // rain: phi-seam periodicity averaged
+        IceSchemeCommon::extrapolateBC(m, m.P_snow, true);   // snow: phi-seam periodicity averaged
     }
 /*
 *
@@ -579,18 +537,8 @@ private:
 // ==================== TOPOGRAPHY FILL ====================
     void applyTopography() {
         // Precipitation on mountains projected to sea level
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                int i_mount = m.i_topography[j][k];
-                for(int i = i_mount; i >= 0; i--){
-                    if((is_land(m.h, i, j, k))&&(i <= i_mount)){
-                        m.P_rain.x[i][j][k] = m.P_rain.x[i_mount][j][k];
-                        m.P_snow.x[i][j][k] = m.P_snow.x[i_mount][j][k];
-                    }
-                }
-            }
-        }
+        IceSchemeCommon::fillTopography(m, m.P_rain);
+        IceSchemeCommon::fillTopography(m, m.P_snow);
     }
 /*
 *

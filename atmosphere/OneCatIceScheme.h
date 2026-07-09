@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "IceSchemeCommon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,7 +27,8 @@ namespace OneCatIce {
     constexpr double N_cf_0_surf = 2.0e5;                               // 1/m3
     constexpr double N_cf_0_top = 1.0e4;                                // 1/m3
     constexpr double tau_r = 3.3e3;                                     // s, adjusted for NASA avg 2.68 mm/d
-    constexpr double tau_s = 1.0e3;                                     // s
+    constexpr double tau_s = 4.0e4;                                     // s — slowed 8x from 1e3: S_nuc is now the sole snow seed and accumulates over the full [-37,0)C band; 1e3 over-produced snow (63% frac). 8e3 gives a moderate snow fraction.
+    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg). Ported from TwoCat — without it the tau_r tuning above is defeated (ALL cloud autoconverts) -> ~25x over-precip. Applied to the rain autoconversion only; snow nucleation (S_nuc) is left unthresholded.
     constexpr double a_mc = 0.08;                                       // kg/m2
     constexpr double a_mv = 0.02;                                       // kg/m2
     constexpr int iter_prec_end = 2;                                    // COSMO iterations
@@ -165,8 +167,8 @@ private:
                             eps_t = 0.0;
 
                         if(m.cloud.x[i][j][k] > 0.0){
-                            S_au  = (1.0 - eps_t)/tau_r * max(0.0, m.cloud.x[i][j][k]);
-                            S_nuc = eps_t/tau_s * max(0.0, m.cloud.x[i][j][k]);
+                            S_au  = (1.0 - eps_t)/tau_r * max(0.0, m.cloud.x[i][j][k] - q_c_crit); // Kessler threshold: only cloud excess rains
+                            S_nuc = eps_t/tau_s * max(0.0, m.cloud.x[i][j][k]);                    // snow nucleation left unthresholded (want snow)
                         }
 
 
@@ -175,12 +177,21 @@ private:
                         S_ac = (1.0 - eps_t) * c_ac * m.cloud.x[i][j][k] // c_ac = 0.24, in m²/kg
                             * pow(Rain,(7.0/9.0));                      // in kg/s
 
+                        // Riming S_rim = c_rim*cloud*Snow is ∝ Snow, a positive feedback that
+                        // ran P_snow away to 1e7+ once the accumulation band was widened (same
+                        // instability TwoCat cured / ThreeCat had). Two guards, matching TwoCat:
+                        // (1) q_c_crit threshold — in the cold snow-forming layers cloud water is
+                        //     ~0.09 g/kg < q_c_crit, so riming (the runaway term) switches OFF there
+                        //     while nucleation still makes snow; (2) c_rim reduced 5x. Snow now
+                        //     forms (from S_nuc) and stays bounded.
                         if(t_u < m.t_0)
-                            S_rim = c_rim/a_m * m.cloud.x[i][j][k] * Snow; // c_rim = 18.6, m²/kg
+                            S_rim = (m.cloud.x[i][j][k] > q_c_crit)
+                                ? (c_rim/5.0)/a_m * (m.cloud.x[i][j][k] - q_c_crit) * Snow : 0.0;
                         else  S_rim = 0.0;                              // riming rate of snow mass due to collection of supercooled cloud droplets, < VIII >
 
                         if(t_u >= m.t_0)
-                            S_shed = c_rim/a_m * m.cloud.x[i][j][k] * Snow;
+                            S_shed = (m.cloud.x[i][j][k] > q_c_crit)
+                                ? (c_rim/5.0)/a_m * (m.cloud.x[i][j][k] - q_c_crit) * Snow : 0.0;
                         else  S_shed = 0.0;                             // rate of water shed by melting wet snow particles, < IX >
 
 
@@ -196,6 +207,14 @@ private:
                         S_dep = a_dep/pow(a_m, - 0.5) * (1.0 + b_dep   // melting rate of snow to form rain, < XVI >
                             * pow(a_m, - 0.25) * pow(Snow, (0.9/4.3))) // c_s_melt = 8.43e-5, (m²*s)/(K*kg)
                             * ((m.c.x[i][j][k] - q_Ice) * pow(Snow, (5.0/8.6)));
+                        // Vapour-limit the deposition. As written S_dep ∝ Snow^0.58 with no bound
+                        // on vapour supply, so it grew snow to the flux cap (the over-production).
+                        // Bergeron deposition can consume at most the available supersaturation per
+                        // snow timescale — mirror TwoCat's supersaturation-limited deposition.
+                        if(m.c.x[i][j][k] > q_Ice)
+                            S_dep = std::min(S_dep, (m.c.x[i][j][k] - q_Ice)/tau_s);
+                        else
+                            S_dep = 0.0;
 
                         // melting of snow to form cloud water
                         S_melt = a_melt/pow(a_mc, - 0.5) * (1.0 + b_melt // melting rate of snow to form rain, < XVI >
@@ -215,7 +234,7 @@ private:
                         }
                         else  N_cf = 0.0;
 
-                        if((t_u <= m.t_0)&&(t_u = m.t_00)){
+                        if((t_u <= m.t_0)&&(t_u >= m.t_00)){        // FIX: was (t_u = m.t_00) — an assignment that corrupted t_u to -37C for sub-freezing cells
                             S_if_frz = a_if * (exp(a_if * (t_u - m.t_0)) - 1.0) // immersion freezing
                                 * pow(Rain, (14.0/9.0));
                             S_cf_frz = a_cf * E_cf * N_cf                  // contact freezing nucleation
@@ -236,6 +255,7 @@ private:
 
 
                         // rain integration
+                        constexpr double P_max_flux = 3.0e-3;         // kg/(m2*s) ~260 mm/d hard cap (finiteness backstop)
                         if(t_u >= m.t_0)
                               m.P_rain.x[i][j][k] = m.P_rain.x[i+1][j][k]
                                   + m.r_humid.x[i+1][j][k] * m.S_r.x[i+1][j][k]
@@ -243,6 +263,7 @@ private:
                         else  m.P_rain.x[i][j][k] = 0.0;
 
                         if(m.P_rain.x[i][j][k] < 0.0)  m.P_rain.x[i][j][k] = 0.0;
+                        if(m.P_rain.x[i][j][k] > P_max_flux) m.P_rain.x[i][j][k] = P_max_flux;
 
                         if(m.P_rain.x[i][j][k] > 0.0){
                             rain = true;
@@ -258,14 +279,19 @@ private:
                         }
 
 
-                        // snow integration
-                        if((t_u < m.t_0)&&(t_u >= m.t_000))
+                        // snow integration. Accumulate over the FULL sub-freezing column
+                        // [t_00, t_0) = [-37,0)C, not just [t_000, t_0) = [-20,0)C: the old lower
+                        // bound t_000 discarded the -37..-20C layers where the ice fraction eps_t
+                        // (and hence snow nucleation S_nuc) is STRONGEST, so the snow that formed
+                        // was zeroed before it could fall — OneCat produced zero snow everywhere.
+                        if((t_u < m.t_0)&&(t_u >= m.t_00))
                               m.P_snow.x[i][j][k] = m.P_snow.x[i+1][j][k]
                                   + m.r_humid.x[i+1][j][k] * m.S_s.x[i+1][j][k]
                                   * step[i];                            // in kg/(m² * s) == mm/s
                         else  m.P_snow.x[i][j][k] = 0.0;
 
                         if(m.P_snow.x[i][j][k] < 0.0)  m.P_snow.x[i][j][k] = 0.0;
+                        if(m.P_snow.x[i][j][k] > P_max_flux) m.P_snow.x[i][j][k] = P_max_flux;
 
                         if(m.P_snow.x[i][j][k] > 0.0){
                             snow = true;
@@ -316,73 +342,20 @@ private:
 
     // ==================== BOUNDARY CONDITIONS ====================
     void applyBoundaryConditions() {
-        // Top boundary (extrapolation)
-        #pragma omp parallel for
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                m.P_rain.x[m.im-1][j][k] = m.c43 * m.P_rain.x[m.im-2][j][k]
-                    - m.c13 * m.P_rain.x[m.im-3][j][k];
-                m.P_snow.x[m.im-1][j][k] = m.c43 * m.P_snow.x[m.im-2][j][k]
-                    - m.c13 * m.P_snow.x[m.im-3][j][k];
-            }
-        }
-
-        // Latitude (theta) boundaries
-        #pragma omp parallel for
-        for(int k = 0; k < m.km; k++){
-            for(int i = 0; i < m.im; i++){
-                m.P_rain.x[i][0][k] = m.c43 * m.P_rain.x[i][1][k]
-                    - m.c13 * m.P_rain.x[i][2][k];
-                m.P_rain.x[i][m.jm-1][k] = m.c43 * m.P_rain.x[i][m.jm-2][k]
-                    - m.c13 * m.P_rain.x[i][m.jm-3][k];
-                m.P_snow.x[i][0][k] = m.c43 * m.P_snow.x[i][1][k]
-                    - m.c13 * m.P_snow.x[i][2][k];
-                m.P_snow.x[i][m.jm-1][k] = m.c43 * m.P_snow.x[i][m.jm-2][k]
-                    - m.c13 * m.P_snow.x[i][m.jm-3][k];
-            }
-        }
-
-        // Longitude (phi) boundaries – von Neumann + periodicity
-        #pragma omp parallel for
-        for(int i = 0; i < m.im; i++){
-            for(int j = 0; j < m.jm; j++){
-                m.P_rain.x[i][j][0] = m.c43 * m.P_rain.x[i][j][1]
-                    - m.c13 * m.P_rain.x[i][j][2];                     // von Neumann boundary condition dt/dphi = 0.0
-                m.P_rain.x[i][j][m.km-1] = m.c43 * m.P_rain.x[i][j][m.km-2]
-                    - m.c13 * m.P_rain.x[i][j][m.km-3];                // von Neumann boundary condition dt/dphi = 0.0
-                m.P_rain.x[i][j][0] = m.P_rain.x[i][j][m.km-1]
-                    = (m.P_rain.x[i][j][0] + m.P_rain.x[i][j][m.km-1])/2.0;
-
-                m.P_snow.x[i][j][0] = m.c43 * m.P_snow.x[i][j][1]
-                    - m.c13 * m.P_snow.x[i][j][2];                     // von Neumann boundary condition dt/dphi = 0.0
-                m.P_snow.x[i][j][m.km-1] = m.c43 * m.P_snow.x[i][j][m.km-2]
-                    - m.c13 * m.P_snow.x[i][j][m.km-3];                // von Neumann boundary condition dt/dphi = 0.0
-                m.P_snow.x[i][j][0] = m.P_snow.x[i][j][m.km-1]
-                    = (m.P_snow.x[i][j][0] + m.P_snow.x[i][j][m.km-1])/2.0;
-            }
-        }
+        IceSchemeCommon::extrapolateBC(m, m.P_rain, true);   // rain: phi-seam periodicity averaged
+        IceSchemeCommon::extrapolateBC(m, m.P_snow, true);   // snow: phi-seam periodicity averaged
     }
 
 
     // ==================== TOPOGRAPHY FILL ====================
     void applyTopography() {
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                int i_mount = m.i_topography[j][k];
-                for(int i = i_mount; i >= 0; i--){
-                    if((is_land(m.h, i, j, k))&&(i < i_mount)){
-                        m.P_rain.x[i][j][k] = m.P_rain.x[i_mount][j][k];
-                        m.P_snow.x[i][j][k] = m.P_snow.x[i_mount][j][k];
-
-                        m.S_r.x[i][j][k]   = m.S_r.x[i_mount][j][k];
-                        m.S_s.x[i][j][k]   = m.S_s.x[i_mount][j][k];
-                        m.S_v.x[i][j][k]   = m.S_v.x[i_mount][j][k];
-                        m.S_c.x[i][j][k]   = m.S_c.x[i_mount][j][k];
-                        m.S_c_c.x[i][j][k] = m.S_c_c.x[i_mount][j][k];
-                    }
-                }
-            }
-        }
+        IceSchemeCommon::fillTopography(m, m.P_rain);
+        IceSchemeCommon::fillTopography(m, m.P_snow);
+        IceSchemeCommon::fillTopography(m, m.S_r);
+        IceSchemeCommon::fillTopography(m, m.S_s);
+        IceSchemeCommon::fillTopography(m, m.S_v);
+        IceSchemeCommon::fillTopography(m, m.S_c);
+        IceSchemeCommon::fillTopography(m, m.S_c_c);
     }
 
 

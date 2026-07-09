@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "IceSchemeCommon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -182,14 +183,19 @@ private:
 
                     for(int i = m.im - 2; i >= 0; i--){
 
-                        // Normalize precipitation (guard division by zero)
-                        double P_rain_0    = m.P_rain.x[0][j][k];
-                        double P_snow_0    = m.P_snow.x[0][j][k];
-                        double P_graupel_0 = m.P_graupel.x[0][j][k];
+                        // Normalize precipitation by the surface flux. FLOORED denominator: a
+                        // tiny-but-nonzero surface flux made Snow = P_snow[i]/P_snow_0 explode,
+                        // and S_s_rim ∝ Snow then amplified P_snow geometrically down the column
+                        // to overflow (the ThreeCat NaN blow-up). Flooring at P_norm_floor bounds
+                        // the normalized ratios; the flux cap below guarantees finiteness.
+                        constexpr double P_norm_floor = 1.0e-6;      // kg/(m2*s) ~0.09 mm/d
+                        double P_rain_0    = std::max(m.P_rain.x[0][j][k],    P_norm_floor);
+                        double P_snow_0    = std::max(m.P_snow.x[0][j][k],    P_norm_floor);
+                        double P_graupel_0 = std::max(m.P_graupel.x[0][j][k], P_norm_floor);
 
-                        double Rain    = (P_rain_0    != 0.0) ? m.P_rain.x[i][j][k]    / P_rain_0    : 0.0;
-                        double Snow    = (P_snow_0    != 0.0) ? m.P_snow.x[i][j][k]    / P_snow_0    : 0.0;
-                        double Graupel = (P_graupel_0 != 0.0) ? m.P_graupel.x[i][j][k] / P_graupel_0 : 0.0;
+                        double Rain    = m.P_rain.x[i][j][k]    / P_rain_0;
+                        double Snow    = m.P_snow.x[i][j][k]    / P_snow_0;
+                        double Graupel = m.P_graupel.x[i][j][k] / P_graupel_0;
 
                         // pow() calls guarded — skip entirely when base is zero
                         double Rain_79  = (Rain > 0.0) ? pow(Rain, 7.0/9.0)  : 0.0;
@@ -372,19 +378,26 @@ private:
                                            + S_r_frz - S_g_melt + S_csg;
 
                         // --- Column integration (top-down) ---
+                        // Each flux is clamped to [0, P_max_flux]. The upper cap is a hard backstop
+                        // against the P_snow riming runaway (see the floored normalization above):
+                        // even if a source spikes, the accumulated flux can no longer overflow to
+                        // inf, so the scheme stays finite (over-precipitates at worst, like the
+                        // other untuned schemes — usable, not NaN). ~260 mm/d, well above any
+                        // physical precip.
+                        constexpr double P_max_flux = 3.0e-3;        // kg/(m2*s) ~260 mm/d hard cap
                         m.P_rain.x[i][j][k] = (t_u >= m.t_0)
-                            ? std::max(0.0, m.P_rain.x[i+1][j][k]
-                                + m.r_humid.x[i+1][j][k] * m.S_r.x[i+1][j][k] * step_i)
+                            ? std::min(P_max_flux, std::max(0.0, m.P_rain.x[i+1][j][k]
+                                + m.r_humid.x[i+1][j][k] * m.S_r.x[i+1][j][k] * step_i))
                             : 0.0;
 
                         m.P_snow.x[i][j][k] = (t_u < m.t_0 && t_u >= m.t_000)
-                            ? std::max(0.0, m.P_snow.x[i+1][j][k]
-                                + m.r_humid.x[i+1][j][k] * m.S_s.x[i+1][j][k] * step_i)
+                            ? std::min(P_max_flux, std::max(0.0, m.P_snow.x[i+1][j][k]
+                                + m.r_humid.x[i+1][j][k] * m.S_s.x[i+1][j][k] * step_i))
                             : 0.0;
 
                         m.P_graupel.x[i][j][k] = (t_u < m.t_0 && t_u >= m.t_00)
-                            ? std::max(0.0, m.P_graupel.x[i+1][j][k]
-                                + m.r_humid.x[i+1][j][k] * m.S_g.x[i+1][j][k] * step_i)
+                            ? std::min(P_max_flux, std::max(0.0, m.P_graupel.x[i+1][j][k]
+                                + m.r_humid.x[i+1][j][k] * m.S_g.x[i+1][j][k] * step_i))
                             : 0.0;
 
                         // Track column maxima (thread-local via reduction)
@@ -435,67 +448,17 @@ private:
 
     // ==================== BOUNDARY CONDITIONS ====================
     void applyBoundaryConditions() {
-        // Top boundary (extrapolation)
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                m.P_rain.x[m.im-1][j][k]    = m.c43 * m.P_rain.x[m.im-2][j][k]    - m.c13 * m.P_rain.x[m.im-3][j][k];
-                m.P_snow.x[m.im-1][j][k]    = m.c43 * m.P_snow.x[m.im-2][j][k]    - m.c13 * m.P_snow.x[m.im-3][j][k];
-                m.P_graupel.x[m.im-1][j][k] = m.c43 * m.P_graupel.x[m.im-2][j][k] - m.c13 * m.P_graupel.x[m.im-3][j][k];
-            }
-        }
-
-        // Latitude (theta) boundaries
-        #pragma omp parallel for collapse(2)
-        for(int k = 0; k < m.km; k++){
-            for(int i = 0; i < m.im; i++){
-                m.P_rain.x[i][0][k]         = m.c43 * m.P_rain.x[i][1][k]         - m.c13 * m.P_rain.x[i][2][k];
-                m.P_rain.x[i][m.jm-1][k]    = m.c43 * m.P_rain.x[i][m.jm-2][k]   - m.c13 * m.P_rain.x[i][m.jm-3][k];
-                m.P_snow.x[i][0][k]         = m.c43 * m.P_snow.x[i][1][k]         - m.c13 * m.P_snow.x[i][2][k];
-                m.P_snow.x[i][m.jm-1][k]    = m.c43 * m.P_snow.x[i][m.jm-2][k]   - m.c13 * m.P_snow.x[i][m.jm-3][k];
-                m.P_graupel.x[i][0][k]      = m.c43 * m.P_graupel.x[i][1][k]      - m.c13 * m.P_graupel.x[i][2][k];
-                m.P_graupel.x[i][m.jm-1][k] = m.c43 * m.P_graupel.x[i][m.jm-2][k] - m.c13 * m.P_graupel.x[i][m.jm-3][k];
-            }
-        }
-
-        // Longitude (phi) boundaries – von Neumann + periodicity
-        #pragma omp parallel for collapse(2)
-        for(int i = 0; i < m.im; i++){
-            for(int j = 0; j < m.jm; j++){
-                m.P_rain.x[i][j][0]       = m.c43 * m.P_rain.x[i][j][1]       - m.c13 * m.P_rain.x[i][j][2];
-                m.P_rain.x[i][j][m.km-1]  = m.c43 * m.P_rain.x[i][j][m.km-2]  - m.c13 * m.P_rain.x[i][j][m.km-3];
-                m.P_rain.x[i][j][0] = m.P_rain.x[i][j][m.km-1] = (m.P_rain.x[i][j][0] + m.P_rain.x[i][j][m.km-1]) * 0.5;
-
-                m.P_snow.x[i][j][0]       = m.c43 * m.P_snow.x[i][j][1]       - m.c13 * m.P_snow.x[i][j][2];
-                m.P_snow.x[i][j][m.km-1]  = m.c43 * m.P_snow.x[i][j][m.km-2]  - m.c13 * m.P_snow.x[i][j][m.km-3];
-                m.P_snow.x[i][j][0] = m.P_snow.x[i][j][m.km-1] = (m.P_snow.x[i][j][0] + m.P_snow.x[i][j][m.km-1]) * 0.5;
-
-                m.P_graupel.x[i][j][0]    = m.c43 * m.P_graupel.x[i][j][1]    - m.c13 * m.P_graupel.x[i][j][2];
-                m.P_graupel.x[i][j][m.km-1] = m.c43 * m.P_graupel.x[i][j][m.km-2] - m.c13 * m.P_graupel.x[i][j][m.km-3];
-                m.P_graupel.x[i][j][0] = m.P_graupel.x[i][j][m.km-1] = (m.P_graupel.x[i][j][0] + m.P_graupel.x[i][j][m.km-1]) * 0.5;
-            }
-        }
+        IceSchemeCommon::extrapolateBC(m, m.P_rain,    true);   // rain:    phi-seam periodicity averaged
+        IceSchemeCommon::extrapolateBC(m, m.P_snow,    true);   // snow:    phi-seam periodicity averaged
+        IceSchemeCommon::extrapolateBC(m, m.P_graupel, true);   // graupel: phi-seam periodicity averaged
     }
 
 
     // ==================== TOPOGRAPHY FILL ====================
     void applyTopography() {
-        #pragma omp parallel for collapse(2)
-        for(int j = 0; j < m.jm; j++){
-            for(int k = 0; k < m.km; k++){
-                int i_mount = m.i_topography[j][k];
-                double pr_m = m.P_rain.x[i_mount][j][k];
-                double ps_m = m.P_snow.x[i_mount][j][k];
-                double pg_m = m.P_graupel.x[i_mount][j][k];
-                for(int i = i_mount - 1; i >= 0; i--){
-                    if(is_land(m.h, i, j, k)){
-                        m.P_rain.x[i][j][k]    = pr_m;
-                        m.P_snow.x[i][j][k]    = ps_m;
-                        m.P_graupel.x[i][j][k] = pg_m;
-                    }
-                }
-            }
-        }
+        IceSchemeCommon::fillTopography(m, m.P_rain);
+        IceSchemeCommon::fillTopography(m, m.P_snow);
+        IceSchemeCommon::fillTopography(m, m.P_graupel);
     }
 
 
