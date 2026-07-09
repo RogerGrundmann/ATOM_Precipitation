@@ -164,7 +164,30 @@ public:
                 const double tau_wv  = (tau_col > tau_dry) ? (tau_col - tau_dry) : 0.0;
                 const double inv_dp  = (sum_dp > 0.0) ? 1.0 / sum_dp : 0.0;
                 const double inv_vp  = (sum_vp > 0.0) ? 1.0 / sum_vp : 0.0;
-                double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated condensate paths [g/m2] (for the SW albedo bump)
+
+                // Physical cap on the column cloud condensate the RADIATION sees. The model
+                // over-condenses (column LWP ~1500 g/m2 vs observed ~100), which saturates BOTH
+                // the LW cloud greenhouse (each layer's k_liq*LWP_i ~5 -> ~opaque) AND the SW
+                // albedo bump (pinned at the cloud value everywhere). Compute the raw column path
+                // and a single uniform scale so the radiation treats the column as a physically
+                // thick cloud (<= cwp_cap_col), preserving the vertical cloud DISTRIBUTION.
+                // Applied to LWP_i/IWP_i below, it feeds BOTH the LW tau_cloud and the SW path, so
+                // the two stay BALANCED — fixing only one (e.g. SW albedo alone) removes the
+                // excess cooling but leaves the excess greenhouse and tips the climate hot.
+                constexpr double cwp_cap_col = 250.0;                // g/m2 physical thick-cloud column condensate
+                double cwp_raw = 0.0;
+                for (int i = i_mount; i <= i_trop; i++) {
+                    const double dz_i   = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
+                                                       : (m.get_layer_height(i) - m.get_layer_height(i-1));
+                    const double T_ii   = m.t.x[i][j][k] * m.t_0;
+                    const double rho_ii = (T_ii > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_ii) : 0.0;
+                    const double cwl    = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0;
+                    const double cwi    = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0;
+                    cwp_raw += (cwl + cwi) * rho_ii * dz_i * 1000.0;
+                }
+                const double cloud_scale = (cwp_raw > cwp_cap_col) ? (cwp_cap_col / cwp_raw) : 1.0;
+
+                double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated (scaled) condensate paths [g/m2] (for the SW albedo bump)
                 for (int i = i_mount; i <= i_trop; i++) {
                     // CO2 band contribution (the former MLR CO2 integration, restored and
                     // un-zeroed). Well-mixed CO2 partial pressure P_c -> layer absorber path
@@ -214,8 +237,8 @@ public:
                     const double rho_i = (T_i > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_i) : 0.0; // [kg/m3]
                     const double cw_l  = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0; // [kg/kg]
                     const double cw_i  = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0; // [kg/kg]
-                    const double LWP_i = cw_l * rho_i * dz * 1000.0;              // liquid water path [g/m2]
-                    const double IWP_i = cw_i * rho_i * dz * 1000.0;              // ice   water path [g/m2]
+                    const double LWP_i = cloud_scale * cw_l * rho_i * dz * 1000.0; // liquid water path [g/m2], capped
+                    const double IWP_i = cloud_scale * cw_i * rho_i * dz * 1000.0; // ice   water path [g/m2], capped
                     const double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;
                     lwp_col += LWP_i;  iwp_col += IWP_i;                          // column paths for the SW albedo bump
 
@@ -234,13 +257,26 @@ public:
                 // this column; it is read below by the SW terms (tridiagonal source dd + surface
                 // energy balance) and re-derived fresh each MLR call. See project_multilayer_radiation.
                 {
-                    constexpr double alpha_cloud = 0.60;   // asymptotic cloud-top albedo
-                    constexpr double k_sw        = 0.030;  // SW path -> albedo saturation [m2/g]
+                    // Two-stream-like cloud SW reflectivity on a CAPPED condensate path. The old
+                    // exp(-k_sw*CWP) with k_sw=0.030 saturated at CWP~100 g/m2, so — and especially
+                    // with the model's excessive cloud water (LWP ~1500 g/m2 vs observed ~100) —
+                    // EVERY cloudy column was pinned at the asymptotic 0.60, wiping out the latitude
+                    // gradient and MASKING the surface ice-albedo feedback (poles read the same 0.60
+                    // as tropical ocean). Instead cap the path the radiation sees at a physical
+                    // thick-cloud value and let reflectivity rise GENTLY as refl = tau/(tau+2)
+                    // (0.5 at tau=2), composited over the surface (ice-feedback) albedo. Cloudy
+                    // tropics now land ~0.3, thin/clear cells relax toward the surface value, and
+                    // the polar ice albedo shows through — a physical gradient. (The same cloud-water
+                    // excess still inflates the LW tau_cloud above; capping that is the next step.)
+                    constexpr double alpha_cloud = 0.50;   // thick cloud-top SW albedo
                     constexpr double f_ice_sw    = 0.50;   // ice SW reflectivity weight vs liquid
-                    const double cwp_sw = lwp_col + f_ice_sw * iwp_col;
-                    const double a0     = m.albedo.y[j][k];                      // clear-sky (latitude) albedo
+                    constexpr double cwp_tau     = 100.0;  // g/m2 per unit effective optical thickness
+                    const double cwp_sw = lwp_col + f_ice_sw * iwp_col;          // already capped via cloud_scale above
+                    const double tau    = cwp_sw / cwp_tau;
+                    const double refl   = tau / (tau + 2.0);                     // gentle saturation (0.5 at tau=2)
+                    const double a0     = m.albedo.y[j][k];                      // surface (ice-feedback) albedo
                     if (alpha_cloud > a0)
-                        m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * (1.0 - exp(-k_sw * cwp_sw));
+                        m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * refl;
                 }
 
                 // Transmitted (AA) / absorbed (CC diagonal) radiation, and the sum CA
