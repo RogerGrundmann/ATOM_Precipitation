@@ -74,4 +74,51 @@ namespace IceSchemeCommon {
         const double E = m.hp * AtomUtils::exp_func(t_u, 21.8746, 7.66);
         return m.ep * E / (m.p_stat.x[i][j][k] - E);
     }
+
+    // ---- Vapour -> ice -> snow throttle (Seifert-Beheng / COSMO; TwoCat's) ----
+    // The stable way to make snow: grow it through the CLOUD-ICE reservoir, not
+    // directly from vapour. Deposition onto ice is SUPERSATURATION-LIMITED
+    // (S_i_dep proportional to c - q_Ice, and to the ice particle population
+    // N_i*m_i^(1/3)), and the ice->snow autoconversions (S_i_au aggregation,
+    // S_d_au deposition) are bounded — so snow cannot run away. This is exactly
+    // what OneCat lacked (it deposited vapour straight onto snow proportional to
+    // Snow^0.58, an unbounded feedback). TwoCat carries the same physics inline;
+    // sharing it here lets OneCat inherit the throttle.
+    // Also returns the ice particle number density N_i and mean mass m_i, which the
+    // callers need for their own nucleation / ice-rain-collection terms.
+    struct IceSnowRates { double S_i_dep = 0.0, S_i_au = 0.0, S_d_au = 0.0,
+                                 N_i = 0.0, m_i = 1.0e-9; };
+
+    inline IceSnowRates depositionThrottle(cAtmosphereModel& m, int i, int j, int k,
+                                           double t_u, double q_Ice, double dt_snow_dim) {
+        constexpr double N_i_0   = 1.0e2;    // 1/m3
+        constexpr double m_i_0   = 1.0e-12;  // kg
+        constexpr double m_i_max = 1.0e-9;   // kg
+        constexpr double m_s_0   = 3.0e-9;   // kg (snow-size threshold)
+        constexpr double c_i_dep = 1.3e-5;   // m3/(s*kg^1/3)
+        constexpr double c_i_au  = 1.0e-3;   // 1/s
+        constexpr double t_hn    = 236.15;   // K (-37C) homogeneous freezing floor
+
+        IceSnowRates r;
+        const double c   = m.c.x[i][j][k];
+        const double ice = m.ice.x[i][j][k];
+
+        // ice number density + mean particle mass (only in the mixed-phase band)
+        double N_i = 0.0, m_i = m_i_max;
+        if(t_u <= m.t_0 && t_u > t_hn){
+            N_i = N_i_0 * std::exp(0.2 * (m.t_0 - t_u));
+            m_i = std::min(m.r_humid.x[i][j][k] * ice / N_i, m_i_max);
+            m_i = std::max(m_i_0, std::min(m_i, m_i_max));
+        }
+
+        // deposition (supersaturation-limited) / sublimation (ice-mass-limited)
+        if(c > q_Ice)      r.S_i_dep = c_i_dep * N_i * std::pow(m_i, 1.0/3.0) * (c - q_Ice);
+        else if(c < q_Ice) r.S_i_dep = std::max(-ice / dt_snow_dim, (c - q_Ice) / dt_snow_dim);
+
+        // ice -> snow: aggregation (bounded) + depositional autoconversion
+        if(ice > 0.0)       r.S_i_au = std::max(c_i_au * ice, 0.0);
+        if(r.S_i_dep > 0.0) r.S_d_au = r.S_i_dep / (1.5 * (std::pow(m_s_0 / m_i, 2.0/3.0) - 1.0));
+        r.N_i = N_i;  r.m_i = m_i;
+        return r;
+    }
 }

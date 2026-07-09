@@ -152,6 +152,13 @@ private:
                         E_Ice = m.hp * AtomUtils::exp_func(t_u, 21.8746, 7.66);
                         q_Ice = m.ep * E_Ice/(m.p_stat.x[i][j][k] - E_Ice);      // relativ water vapour contents on ocean surface reduced by factor in kg/kg
 
+                        // Snow is grown through the cloud-ICE reservoir via the shared, bounded
+                        // vapour->ice->snow throttle (TwoCat's), replacing OneCat's unbounded
+                        // direct vapour->snow deposition. thr.S_i_au + thr.S_d_au feed S_s below.
+                        const double dt_snow_dim = step[i] / 0.96;               // snow fall time step (v_s = 0.96 m/s)
+                        IceSchemeCommon::IceSnowRates thr =
+                            IceSchemeCommon::depositionThrottle(m, i, j, k, t_u, q_Ice, dt_snow_dim);
+
 
                         // mass size relation of circular plates
                         if((t_u < m.t_0)&&(t_u >= t_m1))
@@ -202,19 +209,9 @@ private:
                             * (q_sat - m.c.x[i][j][k])
                             * pow(Rain, (4.0/9.0));
 
-                        // deposition growth and sublimation of cloud ice
-                        a_dep = 1.13e-3 * exp(0.073 * (m.t_0 - t_u));
-                        S_dep = a_dep/pow(a_m, - 0.5) * (1.0 + b_dep   // melting rate of snow to form rain, < XVI >
-                            * pow(a_m, - 0.25) * pow(Snow, (0.9/4.3))) // c_s_melt = 8.43e-5, (m²*s)/(K*kg)
-                            * ((m.c.x[i][j][k] - q_Ice) * pow(Snow, (5.0/8.6)));
-                        // Vapour-limit the deposition. As written S_dep ∝ Snow^0.58 with no bound
-                        // on vapour supply, so it grew snow to the flux cap (the over-production).
-                        // Bergeron deposition can consume at most the available supersaturation per
-                        // snow timescale — mirror TwoCat's supersaturation-limited deposition.
-                        if(m.c.x[i][j][k] > q_Ice)
-                            S_dep = std::min(S_dep, (m.c.x[i][j][k] - q_Ice)/tau_s);
-                        else
-                            S_dep = 0.0;
+                        // (Old direct vapour->snow deposition S_dep removed: it was ∝ Snow^0.58,
+                        //  an unbounded feedback the model's excess vapour ran to the flux cap.
+                        //  Snow deposition now goes through the shared ice reservoir — thr above.)
 
                         // melting of snow to form cloud water
                         S_melt = a_melt/pow(a_mc, - 0.5) * (1.0 + b_melt // melting rate of snow to form rain, < XVI >
@@ -244,14 +241,23 @@ private:
                         else  S_frz = 0.0;
 
 
-                        // sinks and sources
-                        m.S_v.x[i][j][k] = - m.S_c_c.x[i][j][k] + S_ev - S_dep; // in kg/(kg*s)
+                        // sinks and sources. Snow now grows from the cloud-ICE reservoir
+                        // (thr.S_i_au aggregation + thr.S_d_au depositional autoconversion),
+                        // not directly from vapour/cloud — the shared, bounded throttle.
+                        // Vapour->ice is owned by SaturationAdjustment upstream, so S_i_dep is
+                        // used only to size S_d_au and is not re-applied to the vapour budget.
+                        m.S_v.x[i][j][k] = - m.S_c_c.x[i][j][k] + S_ev;         // in kg/(kg*s)
                         m.S_c.x[i][j][k] =   m.S_c_c.x[i][j][k] - S_au - S_ac
-                                           - S_nuc - S_rim - S_shed;
+                                           - S_rim - S_shed;
                         m.S_r.x[i][j][k] =   S_au + S_ac - S_ev + S_shed
                                            - S_frz + S_melt;
-                        m.S_s.x[i][j][k] =   S_nuc + S_rim + S_dep
+                        m.S_s.x[i][j][k] =   thr.S_i_au + thr.S_d_au + S_rim
                                            + S_frz - S_melt;
+                        // NOTE: cloud ice here is diagnostic (set by SaturationAdjustment; the
+                        // scheme's S_i tendency is not integrated into it), so ice cannot be
+                        // depleted and m_i stays saturated — the throttle bounds S_d_au but does
+                        // not reach a realistic snow fraction in OneCat's over-condensed climate.
+                        // Realistic snow needs TwoCat's full budget (project_ice_scheme_states).
 
 
                         // rain integration

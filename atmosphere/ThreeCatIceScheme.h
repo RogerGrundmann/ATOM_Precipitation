@@ -231,13 +231,11 @@ private:
                         double rh_rqg_06 = (r_q_g > 0.0) ? pow(r_h_i * r_q_g, 0.6)     : 0.0;
                         double rh_rqg_95 = (r_q_g > 0.0) ? pow(r_h_i * r_q_g, 0.94878) : 0.0;
 
-                        // --- Ice particle properties ---
-                        double m_i = m_i_max;
-                        double N_i = 0.0;
-                        if(t_u <= m.t_0 && t_u > t_hn){
-                            N_i = N_i_0 * exp(0.2 * (m.t_0 - t_u));
-                            m_i = std::clamp(r_h_i * ice_i / N_i, m_i_0, m_i_max);
-                        }
+                        // --- Ice particle properties + vapour->ice->snow throttle (shared) ---
+                        IceSchemeCommon::IceSnowRates thr =
+                            IceSchemeCommon::depositionThrottle(m, i, j, k, t_u, q_Ice, dt_snow_dim);
+                        double m_i = thr.m_i;
+                        double N_i = thr.N_i;
 
                         // --- Nucleation ---
                         double S_nuc = 0.0;
@@ -250,21 +248,15 @@ private:
                         double S_c_frz = (t_u < t_hn && cl_i > 0.0)
                             ? cl_i / dt_rain_dim : 0.0;
 
-                        // --- Deposition growth of cloud ice ---
-                        double S_i_dep = (t_u <= m.t_0 && c_ijk > q_Ice)
-                            ? c_i_dep * N_i * pow(m_i, 1.0/3.0) * (c_ijk - q_Ice)
-                            : 0.0;
+                        // --- Deposition growth of cloud ice (shared throttle) ---
+                        double S_i_dep = thr.S_i_dep;
 
                         // --- Autoconversion ---
                         double S_c_au = (t_u >= m.t_0 && cl_i > 0.0)
                             ? std::max(c_c_au * (cl_i - 0.0002), 0.0) : 0.0;
 
-                        double S_i_au = (t_u <= m.t_0 && ice_i > 0.0)
-                            ? std::max(c_i_au * ice_i, 0.0) : 0.0;
-
-                        double S_d_au = (S_i_dep > 0.0)
-                            ? S_i_dep / (1.5 * (pow(m_s_0 / m_i, 2.0/3.0) - 1.0))
-                            : 0.0;
+                        double S_i_au = thr.S_i_au;   // shared throttle (ice aggregation -> snow)
+                        double S_d_au = thr.S_d_au;   // shared throttle (ice deposition -> snow)
 
                         // --- Collection ---
                         double S_ac = (t_u >= m.t_0) ? c_ac * cl_i * Rain_79 : 0.0;
