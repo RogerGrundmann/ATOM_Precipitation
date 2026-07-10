@@ -13,6 +13,7 @@ using namespace AtomUtils;
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 // ============================================================================
 // Physical Constants — Ekman Spiral
@@ -332,6 +333,287 @@ void cHydrosphereModel::EkmanSpiral() {
     printf(" Time measured: %.3f seconds for EkmanSpiral\n", elapsed.count() * 1e-9);
 
     std::cout << "      OGCM: EkmanSpiral ended" << std::endl;
+}
+
+
+// ============================================================================
+// Sverdrup / Stommel wind-driven gyre initial condition
+// ============================================================================
+//
+// A more physically complete ocean IC than the local Ekman spiral. The observed
+// surface currents are dominated by the wind-stress-CURL-driven geostrophic
+// gyres (Sverdrup interior + western-boundary intensification), NOT by the thin
+// ~2 %-of-wind ageostrophic Ekman drift. This routine seeds those gyres so the
+// wind-stress body force (RHS_Hyd_Turb.cpp) spins the ocean up toward its own
+// attractor from a state that already resembles the target circulation, instead
+// of first unwinding an analytic spiral that disagrees with the discrete
+// dynamics.
+//
+// Method (barotropic transport streamfunction Psi, per latitude row):
+//   tau        = r_air * C_D * |U_wind| * U_wind            wind stress [N/m^2]
+//   curl_z tau = (1/(R sin th)) [ d(tau_e sin th)/d th - d tau_s/d phi ]
+//   V_north    = curl_z tau / (r_0_water * beta)            Sverdrup transport [m^2/s]
+//   Psi(x)     = integral_{x_E}^{x} V_north dx'             from each basin's eastern wall
+//   U_east     = -dPsi/dy = (1/R) dPsi/d th                 zonal transport [m^2/s]
+//   (u,v,w)    = transports / H_ref                         barotropic velocities [m/s]
+//
+// The eastern-boundary integration keys off the land mask h alone, so it adapts
+// to whatever basins a given Ma bathymetry provides (multiple basins, arbitrary
+// coastlines). Circumpolar latitudes (no meridional walls, e.g. a Drake-open
+// Southern Ocean) have no Sverdrup eastern boundary; they are left to the wind-
+// stress body force to spin up and are zeroed here. The vertical velocity u is
+// diagnostic and is set to zero by the caller, so it is not computed here.
+namespace SverdrupConstants {
+    constexpr double DRAG_COEFF    = 2.6e-3;    // bulk drag coefficient [.]
+    constexpr double H_REF         = 4000.0;    // reference barotropic ocean depth [m]
+    constexpr double V_MAX         = 1.5;       // cap on |velocity| component [m/s]
+    constexpr double SINTHE_FLOOR  = 0.26;      // floor on sin(colat) (~poleward of 75 deg lat) — guards curl 1/sin th and beta->0
+    constexpr double LAT_TAPER_HI  = 80.0;      // taper velocities to 0 poleward of this latitude [deg]
+    constexpr double LAT_TAPER_LO  = 3.0;       // taper to 0 within this latitude of the equator [deg]
+}
+
+void cHydrosphereModel::SverdrupGyre() {
+
+    // Explicit qualification (not `using namespace`): DRAG_COEFF also lives in
+    // EkmanConstants, which is `using`-imported at file scope.
+    using SverdrupConstants::H_REF;
+    using SverdrupConstants::V_MAX;
+    using SverdrupConstants::SINTHE_FLOOR;
+    using SverdrupConstants::LAT_TAPER_HI;
+    using SverdrupConstants::LAT_TAPER_LO;
+
+    std::cout << "\n\n\n      OGCM: SverdrupGyre" << std::endl;
+
+    auto begin = std::chrono::high_resolution_clock::now();
+
+    const double R      = r_Earth * 1.0e3;                 // Earth radius [m]
+    const double CD     = SverdrupConstants::DRAG_COEFF;
+    const int    j_eq   = (jm - 1) / 2;
+
+    // ========================================================================
+    // Step 1: Surface wind field (dimensional, m/s) — identical to EkmanSpiral.
+    // These 2D fields are also consumed by the sustained wind-stress body force
+    // in RHS_Hyd_Turb.cpp, so they must be populated here.
+    // ========================================================================
+    #pragma omp parallel for collapse(2)
+    for (int k = 0; k < km; k++) {
+        for (int j = 0; j < jm; j++) {
+            v_wind.y[j][k] = v.x[im-1][j][k] * u_0_wind;               // [m/s]
+            w_wind.y[j][k] = w.x[im-1][j][k] * u_0_wind;
+            if (is_land(h, im - 1, j, k)) {
+                v_wind.y[j][k] = 0.0;
+                w_wind.y[j][k] = 0.0;
+            }
+        }
+    }
+
+    // ========================================================================
+    // Step 2: Wind stress on the surface (j,k) grid.
+    //   model frame: w = east(+), v = south(+)
+    //   tau_east  along +phi (east),  tau_south along +theta (increasing colat)
+    // Zero over land.
+    // ========================================================================
+    std::vector<std::vector<double>> tau_e(jm, std::vector<double>(km, 0.0));
+    std::vector<std::vector<double>> tau_s(jm, std::vector<double>(km, 0.0));
+
+    #pragma omp parallel for collapse(2)
+    for (int j = 0; j < jm; j++) {
+        for (int k = 0; k < km; k++) {
+            if (is_land(h, im - 1, j, k)) continue;
+            const double We = w_wind.y[j][k];                          // east  [m/s]
+            const double Ws = v_wind.y[j][k];                          // south [m/s]
+            const double U  = sqrt(We * We + Ws * Ws);                 // [m/s]
+            tau_e[j][k] = r_air * CD * U * We;                         // [N/m^2]
+            tau_s[j][k] = r_air * CD * U * Ws;                         // [N/m^2]
+        }
+    }
+
+    // ========================================================================
+    // Step 3: Vertical component of the wind-stress curl and the Sverdrup
+    // meridional (northward) transport V_north = curl_z(tau)/(rho*beta) [m^2/s].
+    //   curl_z = (1/(R sin th)) [ d(tau_e sin th)/d th  -  d tau_s/d phi ]
+    //   beta   = df/dy = 2 Omega sin(th)/R   (th = colatitude)
+    // ========================================================================
+    std::vector<std::vector<double>> Vn(jm, std::vector<double>(km, 0.0));
+
+    #pragma omp parallel for
+    for (int j = 1; j < jm - 1; j++) {
+
+        double sinthe = sin(the.z[j]);
+        double sinthe_g = (fabs(sinthe) < SINTHE_FLOOR)
+                        ? (sinthe < 0.0 ? -SINTHE_FLOOR : SINTHE_FLOOR) : sinthe;
+
+        const double sin_jp = sin(the.z[j+1]);
+        const double sin_jm = sin(the.z[j-1]);
+        const double beta   = 2.0 * omega * fabs(sinthe_g) / R;        // [1/(m s)]
+
+        for (int k = 0; k < km; k++) {
+            if (is_land(h, im - 1, j, k)) continue;
+
+            const int kp = (k + 1) % km;
+            const int km_ = (k - 1 + km) % km;
+
+            const double dtau_e_dthe = (tau_e[j+1][k] * sin_jp
+                                      - tau_e[j-1][k] * sin_jm) / (2.0 * dthe);
+            const double dtau_s_dphi = (tau_s[j][kp] - tau_s[j][km_]) / (2.0 * dphi);
+
+            const double curl_z = (dtau_e_dthe - dtau_s_dphi) / (R * sinthe_g); // [N/m^3]
+            Vn[j][k] = curl_z / (r_0_water * beta);                    // [m^2/s] northward
+        }
+    }
+
+    // ========================================================================
+    // Step 4: Barotropic transport streamfunction Psi [m^3/s] by zonal
+    // integration of dPsi/dx = V_north, westward from each basin's eastern wall
+    // (Psi = 0 there). Marching starts at a land cell so basins are traversed
+    // whole and the Greenwich seam is handled naturally. All-water (circumpolar)
+    // rows have no eastern wall — left at Psi = 0.
+    // ========================================================================
+    std::vector<std::vector<double>> Psi(jm, std::vector<double>(km, 0.0));
+
+    #pragma omp parallel for
+    for (int j = 1; j < jm - 1; j++) {
+
+        const double dx = R * std::max(fabs(sin(the.z[j])), SINTHE_FLOOR) * dphi; // [m] zonal step
+
+        // locate a land cell to anchor the westward march
+        int k_land = -1;
+        for (int k = 0; k < km; k++)
+            if (is_land(h, im - 1, j, k)) { k_land = k; break; }
+        if (k_land < 0) continue;                                      // circumpolar row: no eastern wall
+
+        bool prev_land = true;
+        int  k_east    = -1;
+        for (int s = 0; s < km; s++) {
+            const int k = (k_land - s % km + km) % km;                 // march west from land
+            if (is_land(h, im - 1, j, k)) {
+                Psi[j][k] = 0.0;
+                prev_land = true;
+                continue;
+            }
+            if (prev_land) {
+                Psi[j][k] = 0.0;                                       // eastern boundary of a basin
+            } else {
+                Psi[j][k] = Psi[j][k_east] - 0.5 * (Vn[j][k] + Vn[j][k_east]) * dx;
+            }
+            k_east    = k;
+            prev_land = false;
+        }
+    }
+
+    // ========================================================================
+    // Step 5: Transports -> barotropic velocities, assigned over the whole water
+    // column. w (east) = U_east/H_ref, v (south) = -V_north/H_ref.
+    //   U_east = -dPsi/dy = (1/R) dPsi/d th  (central in colatitude)
+    // Latitude taper zeros the equatorial (geostrophically singular) band and the
+    // high latitudes. Velocity components are capped at V_MAX.
+    // ========================================================================
+    // start from zero so land and untouched cells are clean
+    #pragma omp parallel for collapse(3)
+    for (int i = 0; i < im; i++)
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++) {
+                v.x[i][j][k] = 0.0;
+                w.x[i][j][k] = 0.0;
+            }
+
+    #pragma omp parallel for
+    for (int j = 2; j < jm - 2; j++) {
+
+        const double lat_deg = (the.z[j_eq] - the.z[j]) * pi180;      // + north, - south
+        const double alat    = fabs(lat_deg);
+
+        // smooth taper: 0 in |lat|<LO, ramp to 1, then ramp back to 0 beyond HI
+        double w_lat = 1.0;
+        if (alat < LAT_TAPER_LO)      w_lat = 0.0;
+        else if (alat < LAT_TAPER_LO + 2.0)
+            w_lat = (alat - LAT_TAPER_LO) / 2.0;
+        if (alat > LAT_TAPER_HI)      w_lat = 0.0;
+        else if (alat > LAT_TAPER_HI - 5.0)
+            w_lat = std::min(w_lat, (LAT_TAPER_HI - alat) / 5.0);
+        if (w_lat <= 0.0) continue;
+
+        for (int k = 0; k < km; k++) {
+            if (is_land(h, im - 1, j, k)) continue;
+
+            // zonal transport from the meridional streamfunction gradient;
+            // only where both meridional neighbours are ocean (interior).
+            double U_east = 0.0;
+            if (is_water(h, im - 1, j+1, k) && is_water(h, im - 1, j-1, k))
+                U_east = (Psi[j+1][k] - Psi[j-1][k]) / (2.0 * dthe * R); // [m^2/s]
+
+            double v_south =  -Vn[j][k] / H_REF * w_lat;               // [m/s]
+            double w_east  =   U_east   / H_REF * w_lat;               // [m/s]
+
+            v_south = std::max(-V_MAX, std::min(V_MAX, v_south));
+            w_east  = std::max(-V_MAX, std::min(V_MAX, w_east));
+
+            for (int i = 0; i < im; i++) {
+                if (is_land(h, i, j, k)) continue;
+                v.x[i][j][k] = v_south;                                // barotropic
+                w.x[i][j][k] = w_east;
+            }
+        }
+    }
+
+    // ========================================================================
+    // Step 6: Polar boundary conditions (extrapolation, j = 0 and j = jm-1)
+    // ========================================================================
+    #pragma omp parallel for collapse(2)
+    for (int k = 0; k < km; k++) {
+        for (int i = 0; i < im; i++) {
+            v.x[i][0][k]    = c43 * v.x[i][1][k]    - c13 * v.x[i][2][k];
+            w.x[i][0][k]    = c43 * w.x[i][1][k]    - c13 * w.x[i][2][k];
+            v.x[i][jm-1][k] = c43 * v.x[i][jm-2][k] - c13 * v.x[i][jm-3][k];
+            w.x[i][jm-1][k] = c43 * w.x[i][jm-2][k] - c13 * w.x[i][jm-3][k];
+        }
+    }
+
+    // ========================================================================
+    // Step 7: Longitudinal periodic wrap at Greenwich
+    // ========================================================================
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < im; i++) {
+        for (int j = 0; j < jm; j++) {
+            v.x[i][j][0] = v.x[i][j][km-1] = 0.5 * (v.x[i][j][0] + v.x[i][j][km-1]);
+            w.x[i][j][0] = w.x[i][j][km-1] = 0.5 * (w.x[i][j][0] + w.x[i][j][km-1]);
+        }
+    }
+
+    // ========================================================================
+    // Step 8: Non-dimensionalise horizontal velocities; zero land and vertical.
+    // ========================================================================
+    double vmax_diag = 0.0, wmax_diag = 0.0, psi_min = 0.0, psi_max = 0.0;
+    #pragma omp parallel for collapse(3)
+    for (int k = 0; k < km; k++) {
+        for (int j = 0; j < jm; j++) {
+            for (int i = 0; i < im; i++) {
+                u.x[i][j][k] = 0.0;                                    // diagnostic; caller re-zeros too
+                v.x[i][j][k] /= u_0;
+                w.x[i][j][k] /= u_0;
+                if (is_land(h, i, j, k)) {
+                    u.x[i][j][k] = 0.0;
+                    v.x[i][j][k] = 0.0;
+                    w.x[i][j][k] = 0.0;
+                }
+            }
+        }
+    }
+    for (int j = 0; j < jm; j++)
+        for (int k = 0; k < km; k++) {
+            vmax_diag = std::max(vmax_diag, fabs(v.x[im-1][j][k]) * u_0);
+            wmax_diag = std::max(wmax_diag, fabs(w.x[im-1][j][k]) * u_0);
+            psi_min   = std::min(psi_min, Psi[j][k]);
+            psi_max   = std::max(psi_max, Psi[j][k]);
+        }
+
+    auto end     = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    printf("      OGCM: SverdrupGyre  Psi[Sv] min/max = %.1f / %.1f   surface |v|,|w| max = %.3f / %.3f m/s\n",
+           psi_min * 1e-6, psi_max * 1e-6, vmax_diag, wmax_diag);
+    printf(" Time measured: %.3f seconds for SverdrupGyre\n", elapsed.count() * 1e-9);
+
+    std::cout << "      OGCM: SverdrupGyre ended" << std::endl;
 }
 /*
             if((j == 45) &&(k == 180)) cout << endl << "Ekman-Layer north" << endl

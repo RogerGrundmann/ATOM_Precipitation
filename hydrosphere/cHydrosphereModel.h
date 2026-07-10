@@ -196,6 +196,7 @@ private:
     void BC_Surface_Temperature_NASA
        (const string &Name_SurfaceTemperature_File);
     void EkmanSpiral();
+    void SverdrupGyre();
     void initTemperature(int Ma);
     void initSalinity();
     void Pressure_Limitation_Hyd();

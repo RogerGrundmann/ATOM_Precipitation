@@ -233,7 +233,14 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     ThermoHyd(*this).forces();
     LandOceanFraction();
 
-    EkmanSpiral();                                                      // computes local velocity components by Ekmans spiral
+    // Wind-driven surface-current IC. SverdrupGyre seeds the wind-stress-curl
+    // geostrophic gyres (Sverdrup interior + western intensification), which is
+    // what actually dominates the observed circulation and what the sustained
+    // wind-stress body force spins up toward — a better-matched start than the
+    // local Ekman spiral. EkmanSpiral() is the alternative (thin ageostrophic
+    // drift only); swap the call to A/B them. Both are general over Ma bathymetry.
+    SverdrupGyre();                                                     // wind-stress-curl gyres (Sverdrup/Stommel)
+//  EkmanSpiral();                                                      // local Ekman drift (alternative IC)
 
     if (ocean_depth_mode == "deep") {
         ThermoHalineConveyorBelt(*this).run();                          // deep-water thermohaline circulation — only meaningful at full ocean depth
