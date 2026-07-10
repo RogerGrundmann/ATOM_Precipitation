@@ -77,6 +77,8 @@ def main():
 
             ('use_NASA_temperature', 'if use NASA temperature to initialise surface temperature', 'bool', True),
 
+            ('use_NASA_salinity', 'if use NASA sea-surface salinity to initialise surface salinity: Ma=0 uses the 2D field, Ma>0 its zonal-mean latitude profile; false = invert the Gill density equation', 'bool', True),
+
 #            ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 50),
             ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 100),
 

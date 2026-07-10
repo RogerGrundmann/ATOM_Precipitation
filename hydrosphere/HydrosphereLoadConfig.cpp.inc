@@ -33,6 +33,7 @@
     Config::FillBoolWithElement(elem_common, "use_earthbyte_reconstruction", use_earthbyte_reconstruction);
     Config::FillBoolWithElement(elem_common, "use_NASA_velocity", use_NASA_velocity);
     Config::FillBoolWithElement(elem_common, "use_NASA_temperature", use_NASA_temperature);
+    Config::FillBoolWithElement(elem_common, "use_NASA_salinity", use_NASA_salinity);
     Config::FillIntWithElement(elem_common, "Ma_switch", Ma_switch);
     Config::FillIntWithElement(elem_common, "CategoryIceScheme", CategoryIceScheme);
     Config::FillDoubleWithElement(elem_common, "p_0", p_0);

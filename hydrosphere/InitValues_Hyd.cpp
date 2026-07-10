@@ -14,6 +14,7 @@ using namespace AtomUtils;
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <sys/stat.h>
 
 // ============================================================================
 // Physical Constants — Ekman Spiral
@@ -1000,24 +1001,77 @@ void cHydrosphereModel::initSalinity() {
                   << c_average + c_paleo << " psu\n\n";
 
     // ========================================================================
-    // Step 3: Sea-surface salinity from density equation (Gill, 1982)
-    //         plus paleo correction
+    // Step 3: Sea-surface salinity
+    //   use_NASA_salinity: observed NASA sea-surface salinity climatology.
+    //     Ma == 0 -> the full 2-D field (modern geography matches).
+    //     Ma  > 0 -> its zonal-mean latitude profile. The E-P-driven latitudinal
+    //                band structure (salty subtropics, fresh equator/poles) is
+    //                set by the latitude-organised atmospheric circulation and
+    //                transfers across paleogeographies; the modern LONGITUDINAL
+    //                pattern is tied to today's coastlines and does not.
+    //   Otherwise (toggle off, or the file is missing) -> invert the Gill (1982)
+    //   density equation for surface salinity (the historical synthetic IC).
+    //   All branches add the paleo mean-salinity offset c_paleo_nd.
     // ========================================================================
     const int i_max = im - 1;
 
-    #pragma omp parallel for collapse(2)
-    for (int k = 0; k < km; k++) {
-        for (int j = 0; j < jm; j++) {
-            const double t_Celsius = t.x[i_max][j][k] * t_0 - t_0;          // [°C]
-            const double alfa_t_p  = ALPHA_T * (1.0 + ALPHA_T2 * t_Celsius);
-            const double gamma_t_p = GAMMA_T * (1.0 - GAMMA_T2 * t_Celsius);
-            const double rho       = (iter_n == 1) ? r_0_saltwater
-                                                   : r_salt_water.x[i_max][j][k];
+    bool nasa_sss = false;
+    if (use_NASA_salinity) {
+        struct stat info;
+        if (stat(salinity_file.c_str(), &info) == 0) {
+            Array_2D sss(jm, km, 0.0);
+            read_IC(salinity_file, sss.y, jm, km);                          // [psu]
 
-            c.x[i_max][j][k] =
-                ((rho - C_P + (alfa_t_p + 35.0 * gamma_t_p) * t_Celsius)
-                 / (BETA_P + gamma_t_p * t_Celsius)) / c_35
-                + c_paleo_nd;                                                  // apply paleo offset
+            if (Ma == 0) {
+                #pragma omp parallel for collapse(2)
+                for (int k = 0; k < km; k++)
+                    for (int j = 0; j < jm; j++)
+                        c.x[i_max][j][k] = sss.y[j][k] / c_35 + c_paleo_nd;
+            } else {
+                // zonal-mean latitude profile over ocean cells
+                std::vector<double> zmean(jm, 0.0);
+                for (int j = 0; j < jm; j++) {
+                    double sum = 0.0; int n = 0;
+                    for (int k = 0; k < km; k++)
+                        if (is_water(h, i_max, j, k)) { sum += sss.y[j][k]; ++n; }
+                    zmean[j] = (n > 0) ? sum / (double)n : 0.0;
+                }
+                // fill all-land latitude rows from the nearest valid neighbour
+                for (int j = 0; j < jm; j++) if (zmean[j] == 0.0)
+                    for (int d = 1; d < jm; d++) {
+                        if (j-d >= 0   && zmean[j-d] > 0.0) { zmean[j] = zmean[j-d]; break; }
+                        if (j+d < jm   && zmean[j+d] > 0.0) { zmean[j] = zmean[j+d]; break; }
+                    }
+                #pragma omp parallel for collapse(2)
+                for (int k = 0; k < km; k++)
+                    for (int j = 0; j < jm; j++)
+                        c.x[i_max][j][k] = zmean[j] / c_35 + c_paleo_nd;
+            }
+            nasa_sss = true;
+            std::cout << "       sea-surface salinity IC: NASA "
+                      << (Ma == 0 ? "2-D field" : "zonal-mean latitude profile")
+                      << " (+ " << c_paleo << " psu paleo offset)\n";
+        } else {
+            std::cout << "       use_NASA_salinity set but " << salinity_file
+                      << " not found — falling back to the Gill density inversion\n";
+        }
+    }
+
+    if (!nasa_sss) {
+        #pragma omp parallel for collapse(2)
+        for (int k = 0; k < km; k++) {
+            for (int j = 0; j < jm; j++) {
+                const double t_Celsius = t.x[i_max][j][k] * t_0 - t_0;      // [°C]
+                const double alfa_t_p  = ALPHA_T * (1.0 + ALPHA_T2 * t_Celsius);
+                const double gamma_t_p = GAMMA_T * (1.0 - GAMMA_T2 * t_Celsius);
+                const double rho       = (iter_n == 1) ? r_0_saltwater
+                                                       : r_salt_water.x[i_max][j][k];
+
+                c.x[i_max][j][k] =
+                    ((rho - C_P + (alfa_t_p + 35.0 * gamma_t_p) * t_Celsius)
+                     / (BETA_P + gamma_t_p * t_Celsius)) / c_35
+                    + c_paleo_nd;                                            // apply paleo offset
+            }
         }
     }
 

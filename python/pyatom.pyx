@@ -344,6 +344,15 @@ cdef class Atmosphere:
             self._check_alive()
             self._thisptr.use_NASA_temperature = <bool> value
     
+    property use_NASA_salinity:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.use_NASA_salinity
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.use_NASA_salinity = <bool> value
+    
     property Ma_switch:
         def __get__(Atmosphere self):
             self._check_alive()
@@ -1330,6 +1339,15 @@ cdef class Hydrosphere:
         def __set__(Hydrosphere self, value):
             self._check_alive()
             self._thisptr.use_NASA_temperature = <bool> value
+    
+    property use_NASA_salinity:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.use_NASA_salinity
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.use_NASA_salinity = <bool> value
     
     property Ma_switch:
         def __get__(Hydrosphere self):

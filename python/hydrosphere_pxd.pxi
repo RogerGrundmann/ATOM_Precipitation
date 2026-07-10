@@ -37,6 +37,7 @@ cdef extern from "cHydrosphereModel.h":
         bool use_earthbyte_reconstruction
         bool use_NASA_velocity
         bool use_NASA_temperature
+        bool use_NASA_salinity
         int Ma_switch
         int CategoryIceScheme
         double p_0
