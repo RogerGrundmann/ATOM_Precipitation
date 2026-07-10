@@ -55,12 +55,6 @@ public:
         };
         constexpr int n_both = sizeof(both_cubic) / sizeof(both_cubic[0]);
 
-        // Pattern B: von Neumann at i=0, cubic at i=im-1
-        Array* vn_bot_cubic_top[] = {
-            &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance
-        };
-        constexpr int n_vn_cubic = sizeof(vn_bot_cubic_top) / sizeof(vn_bot_cubic_top[0]);
-
         const int iml = m.im - 1;
 
         #pragma omp parallel for schedule(static)
@@ -105,13 +99,6 @@ public:
                 // horizontal currents are real; the instability is radial only).
                 m.u.x[0][j][k]   = m.u.x[1][j][k];
                 m.u.x[iml][j][k] = m.u.x[iml-1][j][k];
-
-                // Pattern B
-                for (int f = 0; f < n_vn_cubic; f++) {
-                    double*** xf = vn_bot_cubic_top[f]->x;
-                    xf[0][j][k]   = m.c43 * xf[1][j][k]     - m.c13 * xf[2][j][k];
-                    xf[iml][j][k] = xf[iml-3][j][k] - 3.0 * xf[iml-2][j][k] + 3.0 * xf[iml-1][j][k];
-                }
             }
         }
     }
@@ -135,7 +122,6 @@ public:
         // so the polar metric singularity does not amplify them either.
         Array* fields_vn[] = {
             &m.t, &m.u, &m.v, &m.w, &m.c,
-            &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance,
             &m.BuoyancyForce, &m.CoriolisForce,
             &m.CentrifugalForce, &m.PresGradForce,
             &m.tke, &m.dis, &m.nue, &m.prod, &m.tke_source, &m.dis_source
@@ -166,7 +152,6 @@ public:
     {
         Array* fields_avg[] = {
             &m.t, &m.u, &m.v, &m.w, &m.c,
-            &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance,
             &m.BuoyancyForce, &m.CoriolisForce,
             &m.CentrifugalForce, &m.PresGradForce
         };
