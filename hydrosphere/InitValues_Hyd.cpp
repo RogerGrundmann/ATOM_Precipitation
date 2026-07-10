@@ -965,16 +965,28 @@ void cHydrosphereModel::initSalinity() {
     // t_paleo_add [°C] is the change in global mean temperature between time steps;
     // it is read directly from the curve and is NOT non-dimensionalised here.
 
+    // Paleo time slice. NOTE: initSalinity takes no Ma argument, so the bare
+    // member `Ma` is NOT the running slice (RunTimeSlice sets m_current_time, not
+    // the member) — it reads 0 at every slice, which silently disabled the paleo
+    // offset and the Ma>0 SSS branch below. Use get_current_time() as
+    // initTemperature does.
+    const int Ma_slice = (int)*get_current_time();
+
     const double t_global_mean_exp = get_temperatures_from_curve(*get_current_time(),
                                          m_global_temperature_curve);      // [°C]
 
     double t_paleo_add = 0.0;
-    if (Ma > 0) {
-        if (use_NASA_temperature && *get_current_time() > 0)
+    if (Ma_slice > 0) {
+        // Sequential NASA run: increment relative to the previous slice. But a
+        // single-Ma paleo run (the supported workflow) has no previous slice —
+        // get_previous_time() then throws — so fall back to the absolute paleo-
+        // minus-modern difference, as the non-NASA branch already does. Guard
+        // with is_first_time_slice() (mirrors initTemperature).
+        if (use_NASA_temperature && !is_first_time_slice())
             t_paleo_add =
                 get_temperatures_from_curve(*get_current_time(),  m_global_temperature_curve)
               - get_temperatures_from_curve(*get_previous_time(), m_global_temperature_curve);
-        else if (!use_NASA_temperature)
+        else
             t_paleo_add =
                 get_temperatures_from_curve(*get_current_time(), m_global_temperature_curve)
               - t_global_mean_exp;
@@ -982,7 +994,7 @@ void cHydrosphereModel::initSalinity() {
     // t_paleo_add is in °C — do NOT multiply by t_0
 
     const double c_average  = (t_global_mean_exp              + 346.0) / 10.0; // [psu] modern mean
-    const double c_paleo    = (Ma == 0) ? 0.0
+    const double c_paleo    = (Ma_slice == 0) ? 0.0
                             : (t_global_mean_exp + t_paleo_add + 346.0) / 10.0
                               - c_average;                                      // [psu] paleo offset
     const double c_paleo_nd = c_paleo / c_35;                                   // [non-dim]
@@ -1022,7 +1034,7 @@ void cHydrosphereModel::initSalinity() {
             Array_2D sss(jm, km, 0.0);
             read_IC(salinity_file, sss.y, jm, km);                          // [psu]
 
-            if (Ma == 0) {
+            if (Ma_slice == 0) {
                 #pragma omp parallel for collapse(2)
                 for (int k = 0; k < km; k++)
                     for (int j = 0; j < jm; j++)
@@ -1049,7 +1061,7 @@ void cHydrosphereModel::initSalinity() {
             }
             nasa_sss = true;
             std::cout << "       sea-surface salinity IC: NASA "
-                      << (Ma == 0 ? "2-D field" : "zonal-mean latitude profile")
+                      << (Ma_slice == 0 ? "2-D field" : "zonal-mean latitude profile")
                       << " (+ " << c_paleo << " psu paleo offset)\n";
         } else {
             std::cout << "       use_NASA_salinity set but " << salinity_file
