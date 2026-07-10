@@ -35,6 +35,9 @@ void cHydrosphereModel::print_min_max_hyd(){
 
     cout << endl << " salinity based results in the three dimensional space: " << endl << endl;
     searchMinMax_3D(" max saltinity ", " min saltinity ", "psu", c, c_35);
+    searchMinMax_3D(" max salt balance ", " min salt balance ", "kg/m3", Salt_Balance, 1.0);
+    searchMinMax_3D(" max salt finger ", " min salt finger ", "kg/m3", Salt_Finger, 1.0);
+    searchMinMax_3D(" max salt diffusion ", " min salt diffusion ", "kg/m3", Salt_Diffusion, 1.0);
 
     cout << endl << " forces per unit volume: " << endl << endl;
     searchMinMax_3D(" max pressure force ", " min pressure force ", "kN/m3", PresGradForce, 1.0);

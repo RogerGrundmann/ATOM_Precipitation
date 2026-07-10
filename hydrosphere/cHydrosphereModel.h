@@ -335,6 +335,10 @@ public:
     Array vf;                                                           // meridional face flux (face j+1/2)
     Array wf;                                                           // zonal face flux (face k+1/2)
 
+    Array Salt_Finger;                                                  // salt bulge of higher density
+    Array Salt_Diffusion;                                               // salt bulge of lowerer density and temperature
+    Array Salt_Balance;                                                 // +/- salt balance
+
     Array r_water;                                                      // water density as function of pressure
     Array r_salt_water;                                                 // salt water density as function of pressure and temperature
     Array BuoyancyForce;                                                // 3D buoyancy force
