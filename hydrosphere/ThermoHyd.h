@@ -153,12 +153,26 @@ public:
         // Units: [kg/m3]/[kg/m3] * [1] * [mm/d]/[mm/d] * [1] = [1]  (dimensionless)
         auto begin = std::chrono::high_resolution_clock::now();
 
-        const double evap_precip_0 =
-            GetMean_2D(m.jm, m.km, m.Evaporation)
-          - GetMean_2D(m.jm, m.km, m.Precipitation_2D);                 // [mm/d], global mean E-P
-
+        // Reference E-P MAGNITUDE for the non-dimensional flux. The old code used
+        // the SIGNED global mean E-P, which is ~0 in a balanced climate and
+        // EXACTLY 0 with no atmosphere coupling (Evaporation/Precipitation_2D are
+        // reset to 0 when the transfer is skipped). That made 1/(rho*E_P_ref) blow
+        // up to Inf and drove salinity_evaporation to NaN, and a negative mean
+        // flipped the flux sign. Use the mean of |E-P| over ocean as a robust
+        // positive scale, floored so the division is always finite; with no E-P
+        // data every local (E-P) is 0 so the flux is 0.
+        double ep_abs_sum = 0.0;
+        long   ep_n       = 0;
+        for (int j = 0; j < m.jm; j++)
+            for (int k = 0; k < m.km; k++)
+                if (is_water(m.h, m.im-1, j, k)) {
+                    ep_abs_sum += fabs(m.Evaporation.y[j][k] - m.Precipitation_2D.y[j][k]);
+                    ++ep_n;
+                }
+        const double E_P_ref   = std::max(ep_n ? ep_abs_sum / (double)ep_n : 0.0,
+                                          1.0e-3);                      // [mm/d], floored positive
         const double coeff_c   = m.c_35 / 1000.0;                       // salt mass fraction at c=1 [1]
-        const double inv_r0_E0 = 1.0 / (m.r_0_water * evap_precip_0);   // [m3/(kg*mm/d)]
+        const double inv_r0_E0 = 1.0 / (m.r_0_water * E_P_ref);        // [m3/(kg*mm/d)]
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int j = 0; j < m.jm; j++) {
