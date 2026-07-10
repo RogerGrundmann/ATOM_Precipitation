@@ -53,7 +53,6 @@ public:
             &m.rhs_t, &m.rhs_u, &m.rhs_v, &m.rhs_w, &m.rhs_c,
             &m.aux_u, &m.aux_v, &m.aux_w,
             &m.uf, &m.vf, &m.wf,   // Rhie-Chow face mass fluxes
-            &m.Salt_Finger, &m.Salt_Diffusion, &m.Salt_Balance,
             &m.BuoyancyForce, &m.CoriolisForce,
             &m.CentrifugalForce, &m.PresGradForce,
             // Turbulence fields — zero-initialised (inactive until TurbulenceHyd::init())
@@ -67,44 +66,29 @@ public:
         };
         constexpr int n_3d_zero = sizeof(arrays_3d_zero) / sizeof(arrays_3d_zero[0]);
 
-        #pragma omp parallel
-        {
-            #pragma omp single nowait
-            {
-                for (int n = 0; n < n_2d; n++) {
-                    #pragma omp task firstprivate(n)
-                    arrays_2d[n]->initArray_2D(m.jm, m.km, 0.0);
-                }
+        // Serial initialisation. Array allocation is a one-time cost; the previous
+        // OpenMP task-parallel version carried a data race (confirmed by
+        // ThreadSanitizer, which concentrated its reports here) that was benign
+        // only because the since-removed Salt_Finger/Diffusion/Balance arrays
+        // happened to absorb the errant access — removing them let it corrupt a
+        // live dynamics field, tipping a marginal deep-Southern-Ocean cell into a
+        // CFL blow-up at iter 2 (multi-thread only; single-thread was always
+        // stable). Serial init is deterministic and negligibly slower.
+        for (int n = 0; n < n_2d; n++)
+            arrays_2d[n]->initArray_2D(m.jm, m.km, 0.0);
+        for (int n = 0; n < n_3d_zero; n++)
+            arrays_3d_zero[n]->initArray(m.im, m.jm, m.km, 0.0);
 
-                for (int n = 0; n < n_3d_zero; n++) {
-                    #pragma omp task firstprivate(n)
-                    arrays_3d_zero[n]->initArray(m.im, m.jm, m.km, 0.0);
-                }
+        m.t.initArray(m.im, m.jm, m.km, 1.0);
+        m.c.initArray(m.im, m.jm, m.km, 1.0);
+        m.tn.initArray(m.im, m.jm, m.km, 1.0);
+        m.cn.initArray(m.im, m.jm, m.km, 1.0);
+        m.p_hydro.initArray(m.im, m.jm, m.km, 1.0);
+        m.r_water.initArray(m.im, m.jm, m.km, m.r_0_water);
+        m.r_salt_water.initArray(m.im, m.jm, m.km, m.r_0_water);
 
-                // Separately initialised values
-                #pragma omp task
-                m.t.initArray(m.im, m.jm, m.km, 1.0);
-                #pragma omp task
-                m.c.initArray(m.im, m.jm, m.km, 1.0);
-                #pragma omp task
-                m.tn.initArray(m.im, m.jm, m.km, 1.0);
-                #pragma omp task
-                m.cn.initArray(m.im, m.jm, m.km, 1.0);
-                #pragma omp task
-                m.p_hydro.initArray(m.im, m.jm, m.km, 1.0);
-                #pragma omp task
-                m.r_water.initArray(m.im, m.jm, m.km, m.r_0_water);
-                #pragma omp task
-                m.r_salt_water.initArray(m.im, m.jm, m.km, m.r_0_water);
-
-                // integer 2D vector reset
-                #pragma omp task
-                {
-                    for (auto& row : m.i_bathymetry)
-                        std::fill(row.begin(), row.end(), 0);
-                }
-            }  // implicit taskwait at end of single
-        }  // implicit barrier at end of parallel
+        for (auto& row : m.i_bathymetry)
+            std::fill(row.begin(), row.end(), 0);
 
         cout << "      OGCM: reset_arrays ended" << endl;
     }

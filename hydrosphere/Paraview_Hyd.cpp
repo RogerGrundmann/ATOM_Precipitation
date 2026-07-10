@@ -212,7 +212,7 @@ void cHydrosphereModel::paraview_panorama_vts(const string &Name_Bathymetry_File
     Hydrosphere_panorama_vts_File <<  "<VTKFile type=\"StructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n"  << endl;
     Hydrosphere_panorama_vts_File <<  " <StructuredGrid WholeExtent=\"" << 1 << " "<< im << " "<< 1 << " " << jm << " "<< 1 << " " << km << "\">\n"  << endl;
     Hydrosphere_panorama_vts_File <<  "  <Piece Extent=\"" << 1 << " "<< im << " "<< 1 << " " << jm << " "<< 1 << " " << km << "\">\n"  << endl;
-    Hydrosphere_panorama_vts_File <<  "   <PointData Vectors=\"Velocity\" Scalars=\"Bathymetry Temperature u-velocity v-velocity w-velocity PressureDynamic PressureStatic Salinity DensityWater DensitySaltWater SaltFinger SaltDiffusion SaltBalance  BuoyancyForce\">\n"  << endl;
+    Hydrosphere_panorama_vts_File <<  "   <PointData Vectors=\"Velocity\" Scalars=\"Bathymetry Temperature u-velocity v-velocity w-velocity PressureDynamic PressureStatic Salinity DensityWater DensitySaltWater BuoyancyForce\">\n"  << endl;
 
     Hydrosphere_panorama_vts_File <<  "    <DataArray type=\"Float32\" NumberOfComponents=\"3\" Name=\"Velocity\" format=\"ascii\">\n"  << endl;
 
@@ -398,9 +398,6 @@ void cHydrosphereModel::paraview_vtk_longal(const string &Name_Bathymetry_File,
     dump_longal("Salinity", c, c_35, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("DensityWater", r_water, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("DensSaltWater", r_salt_water, 1.0, j_longal, Hydrosphere_vtk_longal_File);
-    dump_longal("SaltFinger", Salt_Finger, 1.0, j_longal, Hydrosphere_vtk_longal_File);
-    dump_longal("SaltDiffusion", Salt_Diffusion, 1.0, j_longal, Hydrosphere_vtk_longal_File);
-    dump_longal("SaltBalance", Salt_Balance, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("BuoyancyForce", BuoyancyForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("CoriolisForce", CoriolisForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
     dump_longal("CentrifugalForce", CentrifugalForce, 1.0, j_longal, Hydrosphere_vtk_longal_File);
@@ -515,9 +512,6 @@ void cHydrosphereModel::paraview_vtk_radial(const string &Name_Bathymetry_File,
     dump_radial("Salinity", c, c_35, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("DensityWater", r_water, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("DensSaltWater", r_salt_water, 1.0, i_radial, Hydrosphere_vtk_radial_File);
-    dump_radial("SaltFinger", Salt_Finger, 1.0, i_radial, Hydrosphere_vtk_radial_File);
-    dump_radial("SaltDiffusion", Salt_Diffusion, 1.0, i_radial, Hydrosphere_vtk_radial_File);
-    dump_radial("SaltBalance", Salt_Balance, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("BuoyancyForce", BuoyancyForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("CoriolisForce", CoriolisForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("CentrifugalForce", CentrifugalForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
@@ -637,9 +631,6 @@ void cHydrosphereModel::paraview_vtk_zonal(const string &Name_Bathymetry_File,
     dump_zonal("Salinity", c, c_35, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("DensityWater", r_water, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("DensSaltWater", r_salt_water, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
-    dump_zonal("SaltFinger", Salt_Finger, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
-    dump_zonal("SaltDiffusion", Salt_Diffusion, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
-    dump_zonal("SaltBalance", Salt_Balance, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("BuoyancyForce", BuoyancyForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("CoriolisForce", CoriolisForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);
     dump_zonal("CentrifugalForce", CentrifugalForce, 1.0, k_zonal, Hydrosphere_vtk_zonal_File);

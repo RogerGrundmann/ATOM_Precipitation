@@ -106,29 +106,6 @@ public:
 
                     if (is_land(m.h, i, j, k))
                         m.r_salt_water.x[i][j][k] = m.r_0_saltwater;
-
-                    // --- buoyancy effects by salt water density changes ---
-                    constexpr double drodc = 0.7;                       // [(kg/m³)/PSU]
-                    double salt_water_ref =
-                        m.r_water.x[i][j][k]
-                        + drodc * m.c.x[i][j][k] * m.c_35;               // linear fresh-water base
-
-                    m.Salt_Balance.x[i][j][k] =
-                        m.r_salt_water.x[i][j][k] - salt_water_ref;     // [kg/m³]
-
-                    if (m.Salt_Balance.x[i][j][k] >= 0.0) {
-                        m.Salt_Diffusion.x[i][j][k] = m.Salt_Balance.x[i][j][k];
-                        m.Salt_Finger.x[i][j][k]    = 0.0;
-                    } else {
-                        m.Salt_Finger.x[i][j][k]    = m.Salt_Balance.x[i][j][k];
-                        m.Salt_Diffusion.x[i][j][k] = 0.0;
-                    }
-
-                    if (is_land(m.h, i, j, k)) {
-                        m.Salt_Balance.x[i][j][k]   = 0.0;
-                        m.Salt_Diffusion.x[i][j][k] = 0.0;
-                        m.Salt_Finger.x[i][j][k]    = 0.0;
-                    }
                 }  // i
             }  // k
         }  // j
@@ -319,9 +296,6 @@ public:
     //   • The shared Array_1D scratch buffers (aux_grad_v/w) are replaced
     //     with thread-local std::vector<double> so the outer (j,k) loop
     //     can be safely parallelised with OpenMP.
-    //   • SaltFinger / SaltDiffusion / Salt_total are column-sum
-    //     diagnostics local to this call; add them as Array_2D model
-    //     members if they need to persist across calls.
     //   • Local c43/c13 are double to avoid the truncation bug in
     //     cHydrosphereModel's const int members.
     // ------------------------------------------------------------------
@@ -332,26 +306,18 @@ public:
         auto begin = chrono::high_resolution_clock::now();
 
         const int    i_max  = m.im-1;
-        const int    i_half = (m.im-1) / 2;
         const double c43    = 4.0 / 3.0;
         const double c13    = 1.0 / 3.0;
 
         // ----------------------------------------------------------------
         // 1. Initialise 2D surface diagnostic arrays
         // ----------------------------------------------------------------
-        Array_2D SaltFinger_2D(m.jm, m.km, 0.);
-        Array_2D SaltDiffusion_2D(m.jm, m.km, 0.);
-        Array_2D Salt_total_2D(m.jm, m.km, 0.);
-
         #pragma omp parallel for collapse(2) schedule(static)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
                 m.Upwelling.y[j][k]       = 0.0;
                 m.Downwelling.y[j][k]     = 0.0;
                 m.EkmanPumping.y[j][k]    = 0.0;
-                SaltFinger_2D.y[j][k]     = 0.0;
-                SaltDiffusion_2D.y[j][k]  = 0.0;
-                Salt_total_2D.y[j][k]     = 0.0;
             }
         }
 
@@ -498,22 +464,6 @@ public:
         }
 
         // ----------------------------------------------------------------
-        // 6. Column sums of salt fields over lower half of the water column
-        // ----------------------------------------------------------------
-        #pragma omp parallel for collapse(2) schedule(static)
-        for (int j = 0; j < m.jm; j++) {
-            for (int k = 0; k < m.km; k++) {
-                for (int i = i_half; i < m.im; i++) {
-                    if (is_water(m.h, i, j, k)) {
-                        SaltFinger_2D.y[j][k]    += m.Salt_Finger.x[i][j][k];
-                        SaltDiffusion_2D.y[j][k] += m.Salt_Diffusion.x[i][j][k];
-                        Salt_total_2D.y[j][k]    += m.c.x[i][j][k];
-                    }
-                }
-            }
-        }
-
-        // ----------------------------------------------------------------
         // 7a. Salt / force BCs at i = 0 (linear) and i = im-1 (cubic),
         //     plus surface forces at i_max — all (j,k)-independent.
         // ----------------------------------------------------------------
@@ -524,11 +474,7 @@ public:
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
-                // i = 0: one-sided linear BC
-                m.Salt_Finger.x[0][j][k]    = c43 * m.Salt_Finger.x[1][j][k]    - c13 * m.Salt_Finger.x[2][j][k];
-                m.Salt_Diffusion.x[0][j][k] = c43 * m.Salt_Diffusion.x[1][j][k] - c13 * m.Salt_Diffusion.x[2][j][k];
-                m.Salt_Balance.x[0][j][k]   = c43 * m.Salt_Balance.x[1][j][k]   - c13 * m.Salt_Balance.x[2][j][k];
-
+                // i = 0: cubic extrapolation of the surface forces
                 m.BuoyancyForce.x[0][j][k] =
                       m.BuoyancyForce.x[3][j][k]
                     - 3.0 * m.BuoyancyForce.x[2][j][k]
@@ -541,20 +487,6 @@ public:
                       m.PresGradForce.x[3][j][k]
                     - 3.0 * m.PresGradForce.x[2][j][k]
                     + 3.0 * m.PresGradForce.x[1][j][k];
-
-                // i = im-1: cubic extrapolation
-                m.Salt_Finger.x[m.im-1][j][k] =
-                      m.Salt_Finger.x[m.im-4][j][k]
-                    - 3.0 * m.Salt_Finger.x[m.im-3][j][k]
-                    + 3.0 * m.Salt_Finger.x[m.im-2][j][k];
-                m.Salt_Diffusion.x[m.im-1][j][k] =
-                      m.Salt_Diffusion.x[m.im-4][j][k]
-                    - 3.0 * m.Salt_Diffusion.x[m.im-3][j][k]
-                    + 3.0 * m.Salt_Diffusion.x[m.im-2][j][k];
-                m.Salt_Balance.x[m.im-1][j][k] =
-                      m.Salt_Balance.x[m.im-4][j][k]
-                    - 3.0 * m.Salt_Balance.x[m.im-3][j][k]
-                    + 3.0 * m.Salt_Balance.x[m.im-2][j][k];
 
                 // Surface Coriolis force
                 const double sinthe = sin(m.the.z[j]);
@@ -586,17 +518,11 @@ public:
         }
 
         // ----------------------------------------------------------------
-        // 7b. j-direction (pole) BCs for all 3D force/salt arrays
+        // 7b. j-direction (pole) BCs for all 3D force arrays
         // ----------------------------------------------------------------
         #pragma omp parallel for schedule(static)
         for (int k = 0; k < m.km; k++) {
             for (int i = 0; i < m.im; i++) {
-                m.Salt_Finger.x[i][0][k]              = c43 * m.Salt_Finger.x[i][1][k]         - c13 * m.Salt_Finger.x[i][2][k];
-                m.Salt_Finger.x[i][m.jm-1][k]         = c43 * m.Salt_Finger.x[i][m.jm-2][k]    - c13 * m.Salt_Finger.x[i][m.jm-3][k];
-                m.Salt_Diffusion.x[i][0][k]            = c43 * m.Salt_Diffusion.x[i][1][k]      - c13 * m.Salt_Diffusion.x[i][2][k];
-                m.Salt_Diffusion.x[i][m.jm-1][k]       = c43 * m.Salt_Diffusion.x[i][m.jm-2][k] - c13 * m.Salt_Diffusion.x[i][m.jm-3][k];
-                m.Salt_Balance.x[i][0][k]              = c43 * m.Salt_Balance.x[i][1][k]        - c13 * m.Salt_Balance.x[i][2][k];
-                m.Salt_Balance.x[i][m.jm-1][k]         = c43 * m.Salt_Balance.x[i][m.jm-2][k]   - c13 * m.Salt_Balance.x[i][m.jm-3][k];
                 m.BuoyancyForce.x[i][0][k]             = c43 * m.BuoyancyForce.x[i][1][k]       - c13 * m.BuoyancyForce.x[i][2][k];
                 m.BuoyancyForce.x[i][m.jm-1][k]        = c43 * m.BuoyancyForce.x[i][m.jm-2][k]  - c13 * m.BuoyancyForce.x[i][m.jm-3][k];
                 m.CoriolisForce.x[i][0][k]             = c43 * m.CoriolisForce.x[i][1][k]       - c13 * m.CoriolisForce.x[i][2][k];
@@ -617,9 +543,6 @@ public:
                     double v1 = c43 * A.x[i][j][m.km-2] - c13 * A.x[i][j][m.km-3];
                     A.x[i][j][0] = A.x[i][j][m.km-1] = (v0 + v1) * 0.5;
                 };
-                periodic_bc_3D(m.Salt_Finger);
-                periodic_bc_3D(m.Salt_Diffusion);
-                periodic_bc_3D(m.Salt_Balance);
                 periodic_bc_3D(m.BuoyancyForce);
                 periodic_bc_3D(m.CoriolisForce);
                 periodic_bc_3D(m.PresGradForce);
