@@ -972,31 +972,22 @@ void cHydrosphereModel::initSalinity() {
     // initTemperature does.
     const int Ma_slice = (int)*get_current_time();
 
-    const double t_global_mean_exp = get_temperatures_from_curve(*get_current_time(),
-                                         m_global_temperature_curve);      // [°C]
+    // Paleo salinity offset from the empirical ocean-mean relation
+    //   S_mean [psu] = (T_global_mean [°C] + 346) / 10
+    // = shift in that mean between the MODERN (0 Ma) global-mean temperature and
+    // this slice's, i.e. c_paleo = (T_slice − T_modern) / 10. Reads the Scotese
+    // global curve at 0 Ma and at the current slice — a real, non-zero shift.
+    //   The previous formula subtracted t_global_mean = curve(current) from itself
+    //   (c_average also used curve(current), mislabelled "modern") and was always
+    //   0, so the paleo offset never took effect; it also called get_previous_time()
+    //   which throws in a single-Ma run.
+    const double t_modern_mean = get_temperatures_from_curve(0.0, m_global_temperature_curve); // [°C] 0 Ma
+    const double t_slice_mean  = get_temperatures_from_curve(*get_current_time(),
+                                     m_global_temperature_curve);                              // [°C] current slice
+    const double t_paleo_add   = (Ma_slice == 0) ? 0.0 : t_slice_mean - t_modern_mean;         // [°C] paleo warming
 
-    double t_paleo_add = 0.0;
-    if (Ma_slice > 0) {
-        // Sequential NASA run: increment relative to the previous slice. But a
-        // single-Ma paleo run (the supported workflow) has no previous slice —
-        // get_previous_time() then throws — so fall back to the absolute paleo-
-        // minus-modern difference, as the non-NASA branch already does. Guard
-        // with is_first_time_slice() (mirrors initTemperature).
-        if (use_NASA_temperature && !is_first_time_slice())
-            t_paleo_add =
-                get_temperatures_from_curve(*get_current_time(),  m_global_temperature_curve)
-              - get_temperatures_from_curve(*get_previous_time(), m_global_temperature_curve);
-        else
-            t_paleo_add =
-                get_temperatures_from_curve(*get_current_time(), m_global_temperature_curve)
-              - t_global_mean_exp;
-    }
-    // t_paleo_add is in °C — do NOT multiply by t_0
-
-    const double c_average  = (t_global_mean_exp              + 346.0) / 10.0; // [psu] modern mean
-    const double c_paleo    = (Ma_slice == 0) ? 0.0
-                            : (t_global_mean_exp + t_paleo_add + 346.0) / 10.0
-                              - c_average;                                      // [psu] paleo offset
+    const double c_average  = (t_modern_mean + 346.0) / 10.0; // [psu] modern mean
+    const double c_paleo    = t_paleo_add / 10.0;             // [psu] paleo offset = ΔT_mean / 10
     const double c_paleo_nd = c_paleo / c_35;                                   // [non-dim]
 
     // ========================================================================
