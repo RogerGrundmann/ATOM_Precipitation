@@ -69,8 +69,8 @@ def main():
 
             ('reconstruction_script_path', '', 'string', '../reconstruction/reconstruct_atom_data.py'),
 
-#            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', False),
-            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', True),
+            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', False),
+#            ('use_earthbyte_reconstruction', 'control whether use earthbyte method to recontruct grids', 'bool', True),
 
             ('use_NASA_velocity', 'if use NASA velocity to initialise velocity', 'bool', False),
 #            ('use_NASA_velocity', 'if use NASA velocity to initialise velocity', 'bool', True),
@@ -127,8 +127,14 @@ def main():
             ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', 300),
 
 #            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
-            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0005),
-            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0001),
+#            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0005),
+            # The stretched radial grid is fine at the surface (dr ~ 0.014 vs the old
+            # constant 0.025); once the radial finite differences correctly use that
+            # spacing, the explicit diffusion CFL limit at the surface tightens to
+            # dt ~ dr^2/(2D) ~ 1e-4. dt_visc=5e-4 was ~5x over it and blew up the
+            # near-surface cells at iter 174. 1e-4 is CFL-safe (validated: passes 174).
+            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0001),
+            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.00002),
 #            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0005),
 #            ('dt_inviscid', 'non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)', 'double', 0.0003),
         ],
@@ -139,7 +145,7 @@ def main():
 #            ('nm', 'the maximum number of iterations', 'int', 4),
 #            ('nm', 'the maximum number of iterations', 'int', 100),
             ('nm', 'the maximum number of iterations', 'int', 400),
-            ('checkpoint', "control when to write output files", 'int', 10),
+            ('checkpoint', "control when to write output files", 'int', 20),
             ('panorama_print', "control when to write panorama files", 'int', 100),
 
 

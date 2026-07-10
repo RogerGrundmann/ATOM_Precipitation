@@ -53,8 +53,8 @@ void cAtmosphereModel::SetDefaultConfig() {
   moist_phys_start_iter = 300;
   checkpoint_save_iter = 300;
   restart_from_iter = 300;
-  dt_visc = 0.0005;
-  dt_inviscid = 0.0001;
+  dt_visc = 0.0001;
+  dt_inviscid = 2e-05;
 
   // atmosphere section
   nm = 400;
