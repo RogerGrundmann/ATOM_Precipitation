@@ -160,7 +160,11 @@ public:
                     continue;
                 }
 
-                m.c_fix.y[j][k] = m.c.x[m.im-1][j][k];
+                // NOTE: c_fix is the FIXED IC surface-salinity baseline captured
+                // once at init (cHydrosphereModel), NOT the running value. Do not
+                // overwrite it here — re-reading the current surface salinity each
+                // call turns the flux into an unbounded accumulation that pins the
+                // surface to the 45-psu clamp (E>P) or 0 psu (P>E).
 
                 double evap_precip = m.Evaporation.y[j][k]
                                    - m.Precipitation_2D.y[j][k];        // [mm/d]

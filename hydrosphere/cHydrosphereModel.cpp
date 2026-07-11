@@ -225,6 +225,17 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
 //    if(!use_NASA_temperature)  IC_t_WestEastCoast();
 
     initSalinity();
+
+    // Fixed surface-salinity baseline for the E-P virtual salt flux, captured
+    // ONCE from the prescribed IC (NASA SSS / paleo profile). SalinityEvaporation
+    // applies the (bounded ±1 psu) evaporation offset ON TOP OF this fixed field
+    // every iteration — it must NOT re-read the running surface salinity, or the
+    // flux accumulates unboundedly (E>P pins to the 45-psu clamp, P>E to 0). This
+    // is the salinity analogue of the t_surf_fix surface-temperature forcing above.
+    for (int j = 0; j < jm; j++)
+        for (int k = 0; k < km; k++)
+            c_fix.y[j][k] = c.x[im-1][j][k];
+
     AtomUtils::damp_wiggles(c, &i_bathymetry, true, true, true);
 
     ThermoHyd(*this).SaltWaterDens();
