@@ -56,26 +56,39 @@ public:
 //        init_v_or_w(m.v, 105, -3.0,  4.0);                              // lat: -15   j=105
         init_v_or_w(m.v, 105, -3.0,  3.0);                              // lat: -15   j=105
 
-        // initialise w: tropopause and surface values per latitude
+        // initialise w: tropopause and surface values per latitude.
+        // w is the ZONAL jet (East+). The SURFACE value (2nd coeff) is what the
+        // atm->ocean transfer hands to the ocean, so it must reproduce the observed
+        // surface wind BANDS: trade EASTERLIES (w<0) through the tropics/subtropics
+        // (0-30deg, peak ~15deg), mid-latitude WESTERLIES (w>0) peaking ~45deg, then
+        // weakening poleward. The wind-stress CURL between the trade easterlies and
+        // the mid-latitude westerlies is what drives the subtropical (anticyclonic)
+        // gyre; the curl between the westerly max and the pole drives the subpolar
+        // (cyclonic) gyre. The tropopause value (1st coeff) keeps the upper-level
+        // westerly jets (subtropical jet strongest at 30deg). See wind-IC diagnosis
+        // in project_hydro_ekman_sh_gyre.
         // equator
-//        init_v_or_w(m.w,  90, -3.0, -5.4);                              // lat:   0   j=90
-        init_v_or_w(m.w,  90, -3.0, -1.0);                              // lat:   0   j=90
+        init_v_or_w(m.w,  90, -3.0, -5.0);                             // lat:   0   j=90   easterly (equatorial)
         // northern polar cell
         init_v_or_w(m.w,   0,  0.0,  0.0);                              // lat:  90   j=0
         // southern polar cell
         init_v_or_w(m.w, 180,  0.0,  0.0);                              // lat: -90   j=180
-        // northern Ferrel cell
-        init_v_or_w(m.w,  30, 10.0,  5.0);                              // lat:  60   j=30
+        // northern Ferrel cell (mid-latitude westerlies, weakening to the pole)
+        init_v_or_w(m.w,  30, 10.0,  4.0);                             // lat:  60   j=30   westerly
         // southern Ferrel cell
-        init_v_or_w(m.w, 150, 10.0,  5.0);                              // lat: -60   j=150
-        // northern Hadley cell
-        init_v_or_w(m.w,  60, 30.0,  1.8);                              // lat:  30   j=60
-        // southern Hadley cell
-        init_v_or_w(m.w, 120, 30.0,  1.8);                              // lat: -30   j=120
-        // northern Hadley cell max at j=45
-        init_v_or_w(m.w,  45, 15.0,  3.6);                              // lat:  45   j=45
-        // southern Hadley cell max at j=135
-        init_v_or_w(m.w, 135, 15.0,  3.6);                              // lat: -45   j=135
+        init_v_or_w(m.w, 150, 10.0,  4.0);                             // lat: -60   j=150  westerly
+        // northern subtropics — horse latitudes (trade/westerly transition, calm)
+        init_v_or_w(m.w,  60, 30.0, -1.0);                             // lat:  30   j=60   weak easterly
+        // southern subtropics
+        init_v_or_w(m.w, 120, 30.0, -1.0);                             // lat: -30   j=120  weak easterly
+        // northern westerly max at j=45
+        init_v_or_w(m.w,  45, 15.0,  6.0);                             // lat:  45   j=45   westerly max
+        // southern westerly max at j=135
+        init_v_or_w(m.w, 135, 15.0,  6.0);                             // lat: -45   j=135  westerly max
+        // northern trade-easterly max at j=75 (15N)
+        init_v_or_w(m.w,  75,  5.0, -6.0);                             // lat:  15   j=75   easterly (trade max)
+        // southern trade-easterly max at j=105 (15S)
+        init_v_or_w(m.w, 105,  5.0, -6.0);                             // lat: -15   j=105  easterly (trade max)
 
         // forming diagonals — northern hemisphere
         form_diagonals(m.u,  0,  30);
@@ -90,13 +103,15 @@ public:
         form_diagonals(m.v, 45,  60);
 
         form_diagonals(m.u, 60,  90);
-        form_diagonals(m.w, 60,  90);
+        form_diagonals(m.w, 60,  75);                                   // 30N->15N (trade node at j=75)
+        form_diagonals(m.w, 75,  90);                                   // 15N->0
         form_diagonals(m.v, 60,  75);
         form_diagonals(m.v, 75,  90);
 
         // forming diagonals — southern hemisphere
         form_diagonals(m.u,  90, 120);
-        form_diagonals(m.w,  90, 120);
+        form_diagonals(m.w,  90, 105);                                  // 0->15S (trade node at j=105)
+        form_diagonals(m.w, 105, 120);                                 // 15S->30S
         form_diagonals(m.w, 120, 135);
         form_diagonals(m.v,  90, 105);
         form_diagonals(m.v, 105, 120);
