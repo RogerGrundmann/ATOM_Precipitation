@@ -61,6 +61,8 @@ public:
             &m.rhs_tke, &m.rhs_dis,
             // w-momentum-budget diagnostic fields (zero-initialised)
             &m.wbud_pgf, &m.wbud_cor, &m.wbud_adv, &m.wbud_diff,
+            // v (meridional) momentum-budget diagnostic fields (zero-initialised)
+            &m.vbud_pgf, &m.vbud_cor, &m.vbud_adv, &m.vbud_diff, &m.vbud_wind,
             // u (radial) momentum-budget diagnostic fields (zero-initialised)
             &m.ubud_pgf, &m.ubud_adv, &m.ubud_diff, &m.ubud_buoy, &m.ubud_cor
         };

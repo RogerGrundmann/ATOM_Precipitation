@@ -282,6 +282,68 @@ void cHydrosphereModel::write_w_momentum_budget(int iter){
 }
 
 // ----------------------------------------------------------------------------
+// Meridional (v) momentum budget — LOCAL, per longitude, depth-integrated.
+//
+// The subtropical gyres close through an EASTERN boundary current instead of a
+// western-boundary current (project_hydro_eastern_boundary_current): the
+// barotropic streamfunction has essentially all its gradient on the eastern
+// coast (N Atlantic 40N: |dPsi| 469 east vs 0.45 west). A ZONAL-MEAN budget
+// hides this (a gyre is a longitudinal structure; the meridional PGF integrates
+// out zonally). So this dumps the per-longitude, DEPTH-INTEGRATED v-momentum
+// term split at a few gyre latitudes: for each ocean column (j,k) it sums each
+// rhs_v contribution over the water cells. The dominant term at the eastern
+// boundary vs the (empty) western boundary reveals what builds the eastern
+// current — geostrophic PGF, Coriolis, friction (diffusion) or advection.
+//
+// Cols: lat_deg,lon_deg,v_baro_cms,pgf,coriolis,advection,diffusion,wind,dyn_sum
+// (terms = depth-summed rhs_v contributions * dt*u_0*100 = cm/s per iter;
+//  v_baro = depth-summed v * u_0 * 100, a barotropic-transport proxy in cm/s;
+//  lon = -180 + k*360/(km-1) to match psi_diag.py / the 0Ma_smooth.xyz topo).
+// ----------------------------------------------------------------------------
+void cHydrosphereModel::write_v_momentum_budget(int iter){
+    const double term_scale = dt * u_0 * 100.0;     // rhs_v term -> cm/s per iter
+    const double v_scale    = u_0 * 100.0;          // v -> cm/s
+    auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };
+    auto lon_of = [&](int k){ return -180.0 + (double)k * 360.0 / (double)(km - 1); };
+
+    // gyre latitudes to probe (deg): subtropical gyre cores both hemispheres.
+    const double probe_lat[] = {40.0, 30.0, 20.0, -20.0, -30.0, -40.0};
+
+    std::ostringstream fname;
+    fname << output_path << "/v_momentum_budget_" << iter << ".csv";
+    std::ofstream f(fname.str().c_str());
+    if(!f.is_open()) return;
+    f << "lat_deg,lon_deg,v_baro_cms,pgf,coriolis,advection,diffusion,wind,dyn_sum\n";
+
+    for(double plat : probe_lat){
+        const int j = (int)round((90.0 - plat) * (jm - 1) / 180.0);
+        if(j < 0 || j >= jm) continue;
+        for(int k = 0; k < km; k++){
+            double vb = 0.0, pgf = 0.0, cor = 0.0, adv = 0.0, dif = 0.0, wnd = 0.0;
+            int nwater = 0;
+            for(int i = 0; i < im; i++){
+                if(!AtomUtils::is_water(h, i, j, k)) continue;
+                nwater++;
+                vb  += v.x[i][j][k];
+                pgf += vbud_pgf.x[i][j][k];
+                cor += vbud_cor.x[i][j][k];
+                adv += vbud_adv.x[i][j][k];
+                dif += vbud_diff.x[i][j][k];
+                wnd += vbud_wind.x[i][j][k];
+            }
+            if(nwater == 0) continue;               // land column
+            const double sum = (pgf + cor + adv + dif + wnd) * term_scale;
+            f << lat_of(j) << "," << lon_of(k) << "," << vb * v_scale << ","
+              << pgf * term_scale << "," << cor * term_scale << ","
+              << adv * term_scale << "," << dif * term_scale << ","
+              << wnd * term_scale << "," << sum << "\n";
+        }
+    }
+    f.close();
+    cout << "      OGCM: wrote " << fname.str() << endl;
+}
+
+// ----------------------------------------------------------------------------
 // Radial (u) momentum budget at the DEEP blow-up cell.
 //
 // The 0Ma spin-up is clean to ~300-700 iters but blows up by ~1500 as an

@@ -210,6 +210,7 @@ private:
     bool load_state(int iter);
     void zonal_mean_w(std::vector<std::vector<double> >& wbar);
     void write_w_momentum_budget(int iter);
+    void write_v_momentum_budget(int iter);
     void write_deep_momentum_budget(int iter);
     void locate_blowup_cell();
     void record_stage(int s);
@@ -354,6 +355,18 @@ public:
     Array wbud_cor;                                                     // w-budget: Coriolis  -2*Omega*(costhe*v + sinthe*u)
     Array wbud_adv;                                                     // w-budget: advection -transport_w
     Array wbud_diff;                                                    // w-budget: diffusion (incl. curvature/metric)
+
+    // Meridional (v) momentum-budget diagnostic — attributes WHY the subtropical
+    // gyres close on the wrong (EASTERN) boundary (no western-boundary current;
+    // see project_hydro_eastern_boundary_current). Captured into vbud_* on the
+    // same wbudget_capture checkpoint iters; write_v_momentum_budget dumps the
+    // LOCAL per-longitude split at gyre latitudes (NOT zonal-mean — a gyre is a
+    // longitudinal structure the zonal mean hides). Sum = rhs_v.
+    Array vbud_pgf;                                                     // v-budget: -dp/dthe /rm  meridional pressure gradient
+    Array vbud_cor;                                                     // v-budget: Coriolis(the)=+2*Omega*costhe*w + centrifugal
+    Array vbud_adv;                                                     // v-budget: advection -transport_v
+    Array vbud_diff;                                                    // v-budget: diffusion (eddy visc + curvature/metric)
+    Array vbud_wind;                                                    // v-budget: surface wind-stress body force (i=im-2 only)
 
     // Radial (u) momentum-budget diagnostic — attributes the DEEP polar
     // velocity blow-up that makes the spin-up not long-run stable (clean to

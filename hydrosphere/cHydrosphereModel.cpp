@@ -601,6 +601,12 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // captured this iter + the wbar_before snapshot for the net Δwbar).
             write_w_momentum_budget(total_iter_count);
 
+            // Local per-longitude, depth-integrated MERIDIONAL (v) momentum
+            // budget at gyre latitudes (uses the vbud_* split) — diagnoses why
+            // the gyres close on the EASTERN boundary instead of forming a
+            // western-boundary current. See project_hydro_eastern_boundary_current.
+            write_v_momentum_budget(total_iter_count);
+
             // Radial (u) momentum budget at the self-located deep blow-up cell
             // (uses the ubud_* split captured this iter) — appends one row to
             // deep_momentum_budget.csv + a console [ubudget] line. Diagnoses the

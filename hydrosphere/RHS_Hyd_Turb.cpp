@@ -645,6 +645,19 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
         + Coriolis * Coriolis_the - centrifugal * centrifugal_the;
 
+    // v-momentum-budget capture (meridional). Attributes why the subtropical
+    // gyres form their boundary current on the EASTERN coast instead of a
+    // western-boundary current. vbud_wind is added in the wind-stress block
+    // below (i=im-2 only). Sum of the five vbud_* equals rhs_v.
+    if (wbudget_capture) {
+        vbud_pgf.x[i][j][k]  = -dpdthe_invrm;
+        vbud_cor.x[i][j][k]  =  Coriolis * Coriolis_the
+                              - centrifugal * centrifugal_the;
+        vbud_adv.x[i][j][k]  = -transport_v;
+        vbud_diff.x[i][j][k] =  diffusion_v;
+        vbud_wind.x[i][j][k] =  0.0;   // set below at i=im-2
+    }
+
     rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
         + Coriolis * Coriolis_phi;
 
@@ -675,6 +688,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
                               * L_hyd / (u_0 * u_0);
         rhs_w.x[i][j][k] += accel_nd * w_wind.y[j][k];                    // zonal     (East+)
         rhs_v.x[i][j][k] += accel_nd * v_wind.y[j][k];                    // meridional (South+)
+        if (wbudget_capture) vbud_wind.x[i][j][k] = accel_nd * v_wind.y[j][k];
     }
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;
