@@ -187,7 +187,6 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
 
     UtilsHyd(*this).resetArrays();
 
-//    dt = 0.0005;                                                        //  no dimension      prevents wiggles
     dt = dt_visc;                                                       //  no dimension; toggled to dt_inviscid during spin-up
 
     iter_n = 0;
@@ -200,9 +199,6 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     setupRadialStencilCoeffs();   // non-uniform radial FD coefficients for the stretched rad grid
 
     read_Hydrosphere_Surface_Data(Ma);
-
-//    if(use_NASA_velocity)
-//        IC_vwt_WestEastCoast();                                         // horizontal velocity initial condition and temperature adjustments along coasts
 
     initTemperature(Ma);
 
@@ -221,8 +217,6 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
             t_surf_fix.y[j][k] = t.x[im-1][j][k];
 
     AtomUtils::damp_wiggles(t, &i_bathymetry, true, true, true);
-
-//    if(!use_NASA_temperature)  IC_t_WestEastCoast();
 
     initSalinity();
 
