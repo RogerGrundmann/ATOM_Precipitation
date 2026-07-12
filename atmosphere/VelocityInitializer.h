@@ -74,21 +74,21 @@ public:
         // southern polar cell
         init_v_or_w(m.w, 180,  0.0,  0.0);                              // lat: -90   j=180
         // northern Ferrel cell (mid-latitude westerlies, weakening to the pole)
-        init_v_or_w(m.w,  30, 10.0,  4.0);                             // lat:  60   j=30   westerly
+        init_v_or_w(m.w,  30, 10.0,  6.0);                             // lat:  60   j=30   westerly
         // southern Ferrel cell
-        init_v_or_w(m.w, 150, 10.0,  4.0);                             // lat: -60   j=150  westerly
+        init_v_or_w(m.w, 150, 10.0,  6.0);                             // lat: -60   j=150  westerly
         // northern subtropics — horse latitudes (trade/westerly transition, calm)
         init_v_or_w(m.w,  60, 30.0, -1.0);                             // lat:  30   j=60   weak easterly
         // southern subtropics
         init_v_or_w(m.w, 120, 30.0, -1.0);                             // lat: -30   j=120  weak easterly
         // northern westerly max at j=45
-        init_v_or_w(m.w,  45, 15.0,  6.0);                             // lat:  45   j=45   westerly max
+        init_v_or_w(m.w,  45, 15.0, 10.0);                             // lat:  45   j=45   westerly max
         // southern westerly max at j=135
-        init_v_or_w(m.w, 135, 15.0,  6.0);                             // lat: -45   j=135  westerly max
+        init_v_or_w(m.w, 135, 15.0, 10.0);                             // lat: -45   j=135  westerly max
         // northern trade-easterly max at j=75 (15N)
-        init_v_or_w(m.w,  75,  5.0, -6.0);                             // lat:  15   j=75   easterly (trade max)
+        init_v_or_w(m.w,  75,  5.0, -7.0);                             // lat:  15   j=75   easterly (trade max)
         // southern trade-easterly max at j=105 (15S)
-        init_v_or_w(m.w, 105,  5.0, -6.0);                             // lat: -15   j=105  easterly (trade max)
+        init_v_or_w(m.w, 105,  5.0, -7.0);                             // lat: -15   j=105  easterly (trade max)
 
         // forming diagonals — northern hemisphere
         form_diagonals(m.u,  0,  30);
