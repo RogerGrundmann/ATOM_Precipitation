@@ -13,7 +13,6 @@
 #include "BC_Hyd.h"
 #include "PressureSolverHyd.h"
 #include "ThermoHyd.h"
-#include "ThermoHalineConveyorBelt.h"
 #include "UtilsHyd.h"
 #include "TurbulenceHyd.h"
 
@@ -247,30 +246,17 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     SverdrupGyre();                                                     // wind-stress-curl gyres (Sverdrup/Stommel)
 //  EkmanSpiral();                                                      // local Ekman drift (alternative IC)
 
-    // THC seeds the deep thermohaline circulation (salinity c at depth; its
-    // prescribed radial velocity u is discarded below), but it ALSO overwrites v/w
-    // with hard-coded rectangular "surface flow" currents (spanning i_beg..surface)
-    // that clobber the wind-driven SverdrupGyre gyres — producing 90-deg-cornered
-    // blocks and a southward-shifted NH/SH separation in the iter-0 surface field.
-    // Snapshot the clean gyre v/w, run THC for its deep c seeding, then RESTORE v/w:
-    // this strips only THC's surface-current overwrite while keeping its deep
-    // seeding. See project_hydro_gyre_vertical_diffusion.
-    if (ocean_depth_mode == "deep") {
-        Array v_gyre(v), w_gyre(w);                                    // clean SverdrupGyre currents
-        ThermoHalineConveyorBelt(*this).run();                         // deep thermohaline seeding (c)
-        v = v_gyre;                                                    // restore wind-driven gyres
-        w = w_gyre;                                                    // (Array::operator= deep-copies)
-    }
+    // ThermoHalineConveyorBelt REMOVED 2026-07-12. After its surface v/w overwrite
+    // was stripped (204f50d) and its prescribed radial u discarded (below), its ONLY
+    // remaining effect was a hard-coded deep-salinity seeding painted on top of the
+    // observed/paleo initSalinity field — an externally-forced "conveyor" that the
+    // thermohaline circulation should develop on its own. Dropped entirely; the
+    // salinity is initSalinity's (NASA SSS / paleo + Gill interior).
 
-    // Vertical (radial) velocity is DIAGNOSTIC, not prescribed. SverdrupGyre sets
-    // only the horizontal wind-driven currents; ThermoHalineConveyorBelt was
-    // painting the radial velocity u directly with O(1 m/s) strips (IC_water=1,
-    // factors up to -10) — ~1e4 too large for an ocean (real w ~ 1e-4 m/s) — which
-    // seeded the near-surface radial-velocity runaway. The horizontal (v,w) currents
-    // are the wind-driven SverdrupGyre gyres (THC's surface overwrite was stripped
-    // above); discard THC's prescribed u; the divergence-free projection
-    // (project_initial_velocity) then derives u from div(v,w) via continuity, the
-    // physically correct source of ocean vertical velocity.
+    // Vertical (radial) velocity is DIAGNOSTIC, not prescribed: SverdrupGyre sets
+    // only the horizontal wind-driven currents, so zero any u here; the
+    // divergence-free projection (project_initial_velocity) then derives u from
+    // div(v,w) via continuity, the physically correct source of ocean vertical velocity.
     for(int i = 0; i < im; i++)
         for(int j = 0; j < jm; j++)
             for(int k = 0; k < km; k++)

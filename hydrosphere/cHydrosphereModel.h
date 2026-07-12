@@ -38,7 +38,6 @@ using namespace std;
 class BoundaryConditionHyd;        // forward declaration
 class PressureSolverHyd;           // forward declaration
 class ThermoHyd;                   // forward declaration
-class ThermoHalineConveyorBelt;    // forward declaration
 class UtilsHyd;                    // forward declaration
 class TurbulenceHyd;               // forward declaration
 
@@ -51,7 +50,6 @@ public:
     friend class BoundaryConditionHyd;
     friend class PressureSolverHyd;
     friend class ThermoHyd;
-    friend class ThermoHalineConveyorBelt;
     friend class UtilsHyd;
     friend class TurbulenceHyd;
 
