@@ -396,7 +396,19 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // reference (proper closed cells, w~23 m/s, u settling). force_nd converts the clean
     // Ω-time coefficients to the laminar advective-time scaling so the WHOLE turbulent RHS
     // is consistent: turbulent path = laminar dynamics + eddy viscosity (in diffusion_vel_re).
-    const double force_nd = omega * L_atm / u_0 * dt;   // = laminar 2ωL/u0·dt factor / 2
+    // TRADE-WIND FIX 2026-07-10: dropped the extra "* dt". force_nd scales ONLY
+    // the Coriolis (coriolis_rad/the/phi below); RK4 already applies its own dt
+    // (v += rhs*dt), so the old "* dt" made Coriolis enter as dt^2 -> ~1/dt (1e4
+    // at dt=1e-4) too weak vs advection (which enters as dt). Result: Rossby
+    // number ~1/dt, quasi-non-rotating -> Hadley overturning works but the
+    // equatorward surface flow is never deflected westward -> NO easterly trades
+    // -> westerly (super-rotating) surface wind everywhere. This is the SAME bug
+    // the ocean RHS already fixed (project_hydro_coriolis_dt_scaling: dropped its
+    // extra *dt). Coriolis is rotational (energy-conserving) with a tiny CFL
+    // coefficient (2*force_nd*dt ~ 7e-7), so this does NOT re-trigger the thermal
+    // polar-runaway the *dt was added to tame (that is buoyancy, scaled separately
+    // by g*dt/u_0). Advective-time nondim: Coriolis coeff = 2 Omega L/u0.
+    const double force_nd = omega * L_atm / u_0;
 
     // Acting forces
     CoriolisForce.x[i][j][k] = coriolis * coeff_Coriolis
