@@ -124,8 +124,14 @@ public:
         using namespace std;
         cout << endl << endl << endl << "      OGCM: write_file" << endl;
 
-        int i_radial = 40;
-        m.paraview_vtk_radial(bathymetry_name, i_radial, m.iter_n);
+        // Radial slice at the top INTEGRATED cell (im-2), NOT the surface row
+        // i=im-1: the latter is a boundary row that bcRadius overwrites by cubic
+        // extrapolation of the three cells below (v,w) / zero-gradient copy (u) —
+        // it carries no RHS dynamics, so a "surface" plot at im-1 is just an
+        // extrapolated echo of im-2 (appears one level low). im-2 is the real
+        // wind-forced dynamical top. Also emit im-1 for the surface scalar fields.
+        m.paraview_vtk_radial(bathymetry_name, m.im - 2, m.iter_n);
+        m.paraview_vtk_radial(bathymetry_name, m.im - 1, m.iter_n);
 
         int j_longal = 75;
         m.paraview_vtk_longal(bathymetry_name, j_longal, m.iter_n);
