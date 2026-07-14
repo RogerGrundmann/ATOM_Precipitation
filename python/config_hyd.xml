@@ -57,7 +57,7 @@
         <checkpoint>10</checkpoint>  <!-- control when to write output files(int) -->
         <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
         <atm_transfer_iter>-1</atm_transfer_iter>  <!-- select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp(int) -->
-        <ocean_depth_mode>deep</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
+        <ocean_depth_mode>shallow</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
         <L_hyd>200.0</L_hyd>  <!-- extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"(double) -->
         <re>10.0</re>  <!-- Reynolds number: ratio viscous to inertia forces, Re = u * L/nue(double) -->
         <sc>1.7329</sc>  <!-- Schmidt number for salt water(double) -->

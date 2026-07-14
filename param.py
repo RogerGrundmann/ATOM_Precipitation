@@ -233,8 +233,8 @@ def main():
 
 
 
-            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),
-#            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'shallow'),
+#            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'deep'),
+            ('ocean_depth_mode', 'depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)', 'string', 'shallow'),
             ('L_hyd', 'extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"', 'double', 200.0),
 
             ('re', 'Reynolds number: ratio viscous to inertia forces, Re = u * L/nue', 'double', 10.0),
