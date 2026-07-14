@@ -201,7 +201,7 @@ public:
 * 
 */
     // ------------------------------------------------------------------
-    void forces()
+    void Forces()
     {
         using namespace std;
         cout << endl << endl << endl << "      ATOM: Forces" << endl;
@@ -522,7 +522,7 @@ public:
                 m.CoriolisForce.x[i_max][j][k] = coeff_Cor
                     * sqrt((cor_r*cor_r + cor_the*cor_the + cor_phi*cor_phi) / 3.0);
 
-                // Same diagnostics as the interior forces() loop (buoyancy anomaly +
+                // Same diagnostics as the interior Forces() loop (buoyancy anomaly +
                 // p_hydro gradient in kN/m³), so the top row is consistent with the
                 // field below it instead of a different formula/units.
                 m.BuoyancyForce.x[i_max][j][k] =

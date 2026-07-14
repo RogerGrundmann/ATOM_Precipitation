@@ -234,7 +234,7 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     ThermoHyd(*this).SaltWaterDens();
 //    UtilsHyd(*this).valueLimitationHyd();
     ThermoHyd(*this).SalinityEvaporation();
-    ThermoHyd(*this).forces();
+    ThermoHyd(*this).Forces();
     LandOceanFraction();
 
     // Wind-driven surface-current IC. SverdrupGyre seeds the wind-stress-curl
@@ -500,7 +500,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 //            UtilsHyd(*this).valueLimitationHyd();
             ThermoHyd(*this).SalinityEvaporation();
             ThermoHyd(*this).runDataHyd();
-            ThermoHyd(*this).forces();
+            ThermoHyd(*this).Forces();
 
             if (use_turbulence_model && !inviscid_phase) {
                 TurbulenceHyd(*this).run();
