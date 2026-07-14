@@ -691,6 +691,12 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         if (wbudget_capture) vbud_wind.x[i][j][k] = accel_nd * v_wind.y[j][k];
     }
 
+    // NB: the barotropic mode is NOT injected here as a force. The geostrophic PGF
+    // f x u_bt is curl-free, so the divergence projection deletes it (verified
+    // vestigial: 1.5% flow change, ACC stayed deep-westward). Instead the barotropic
+    // (depth-mean) VELOCITY u_bt is imposed after project_velocity by
+    // PressureSolverHyd::apply_barotropic_mode_split() — immune to projection.
+
     rhs_c.x[i][j][k] = -transport_c + diffusion_c;
 
     rhs_tke.x[i][j][k] = -transport_tke + diffusion_tke + tke_source.x[i][j][k];

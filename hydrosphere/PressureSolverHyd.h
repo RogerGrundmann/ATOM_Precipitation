@@ -602,6 +602,129 @@ public:
         }
     }
 
+    // ------------------------------------------------------------------------
+    // project_barotropic — rigid-lid barotropic (Stommel) streamfunction solve.
+    // Supplies the wind-driven barotropic transport the Chorin/face projection
+    // cannot build (project_hydro_eastern_boundary_current: interior is Coriolis-
+    // vs-diffusion, PGF ~0). Solves, on the ocean surface sheet (psi=0 on land &
+    // |lat|>78, periodic in longitude):
+    //     eps*Lap(psi) + (2*omega/a^2)*dpsi/dphi = curl(tau_wind)/(rho*H)
+    // then stores the barotropic (depth-mean) VELOCITY u_bt = curl^-1... i.e.
+    // (v_bt,w_bt) = (-dpsi/dx, dpsi/dy)/H, non-dim by u_0, in m.v_bt/w_bt.
+    // apply_barotropic_mode_split() imposes it each iter as the column depth-mean.
+    // NB: injecting it as a geostrophic PGF *force* (the earlier E.3 port) is
+    // self-defeating — f x u_bt is curl-free, so the divergence projection deletes
+    // it (verified: 1.5% flow change, ACC stays deep-westward). Setting the
+    // velocity mode directly cannot be projected out.
+    // Called once after the surface wind is read (wind is fixed during a hyd run).
+    // Validated offline: scratchpad/{stommel_test,baro_e2}.py  (E.1/E.2).
+    // ------------------------------------------------------------------------
+    void project_barotropic(double eps = 3.0e-6, double gain = 1.0, int n_sweeps = 12000)
+    {
+        using namespace std;
+        cout << endl << "      OGCM: project_barotropic (Stommel eps=" << eps
+             << ", gain=" << gain << ", " << n_sweeps << " SOR sweeps)" << endl;
+        const double a     = 6371000.0;                  // earth radius [m]
+        const double omega = m.omega;                    // [rad/s]
+        const double rho   = m.r_0_water;                // [kg/m^3]
+        const double C_D   = 2.6e-3, r_air = m.r_air;
+        const double dz    = m.L_hyd / (m.im - 1);       // uniform layer thickness [m]
+        const double dthe  = m.dthe, dphi = m.dphi;
+        const int jm = m.jm, km = m.km, Kp = km - 1;     // longitude period = km-1
+        auto kper = [&](int k){ k %= Kp; if (k < 0) k += Kp; return k; };
+        auto sfl  = [&](double s){ return s < 1.0e-3 ? 1.0e-3 : s; };
+        auto latd = [&](int j){ return 90.0 - (double)j; };
+        auto ocean= [&](int j,int k){ return is_water(m.h, m.im-2, j, k)
+                                        && j>0 && j<jm-1 && std::fabs(latd(j))<=78.0; };
+        std::vector<double> sinth(jm), costh(jm);
+        for (int j=0;j<jm;j++){ sinth[j]=std::sin(m.the.z[j]); costh[j]=std::cos(m.the.z[j]); }
+        std::vector<std::vector<double>> H(jm,std::vector<double>(km,0.0)),
+                                         W(jm,std::vector<double>(km,0.0)),
+                                         Psi(jm,std::vector<double>(km,0.0));
+        for (int j=0;j<jm;j++) for(int k=0;k<km;k++){
+            int c=0; for(int i=0;i<m.im;i++) if(is_water(m.h,i,j,k)) c++;
+            H[j][k] = std::max((double)c*dz, 200.0);
+        }
+        auto tauP=[&](int j,int k){ double v=m.v_wind.y[j][k], w=m.w_wind.y[j][k];
+                                    return r_air*C_D*std::sqrt(v*v+w*w)*w; };   // east
+        auto tauT=[&](int j,int k){ double v=m.v_wind.y[j][k], w=m.w_wind.y[j][k];
+                                    return r_air*C_D*std::sqrt(v*v+w*w)*v; };   // colatitude (south+)
+        for (int j=1;j<jm-1;j++){ double st=sfl(sinth[j]);
+            for(int k=0;k<km;k++){ int kp=kper(k+1), kmn=kper(k-1);
+                double dsinTauP=(sinth[j+1]*tauP(j+1,k)-sinth[j-1]*tauP(j-1,k))/(2*dthe);
+                double dTauT=(tauT(j,kp)-tauT(j,kmn))/(2*dphi);
+                // transport-streamfunction source curl(tau)/rho (H enters only in u_bt=transport/H)
+                W[j][k]=((dsinTauP-dTauT)/(a*st))/rho;
+            }
+        }
+        const double relax=1.5;
+        for (int sweep=0; sweep<n_sweeps; sweep++){
+            for (int j=1;j<jm-1;j++){
+                double st=sfl(sinth[j]);
+                double sTp=sfl(std::sin(m.the.z[j]+dthe/2)), sTm=sfl(std::sin(m.the.z[j]-dthe/2));
+                double cTp=eps*sTp/(st*a*a*dthe*dthe), cTm=eps*sTm/(st*a*a*dthe*dthe);
+                double cP =eps/(st*st*a*a*dphi*dphi);
+                double bP =2.0*omega/(a*a*2.0*dphi);
+                double diag=cTp+cTm+2.0*cP;
+                if (diag<=0.0) continue;
+                for (int k=0;k<km;k++){
+                    if(!ocean(j,k)){ Psi[j][k]=0.0; continue; }
+                    int kp=kper(k+1), kmn=kper(k-1);
+                    double nb = cTp*Psi[j+1][k]+cTm*Psi[j-1][k]
+                              + (cP+bP)*Psi[j][kp] + (cP-bP)*Psi[j][kmn];
+                    Psi[j][k] += relax*((nb - W[j][k])/diag - Psi[j][k]);
+                }
+            }
+        }
+        for (int j=0;j<jm;j++) for(int k=0;k<km;k++){
+            m.psi_bt.y[j][k]=Psi[j][k]; m.v_bt.y[j][k]=0.0; m.w_bt.y[j][k]=0.0; }
+        double mp=0.0, mg=0.0;
+        for (int j=1;j<jm-1;j++){ double st=sfl(sinth[j]);
+            for(int k=0;k<km;k++){
+                if(!ocean(j,k)) continue;
+                int kp=kper(k+1), kmn=kper(k-1);
+                double U_east =((Psi[j+1][k]-Psi[j-1][k])/(2*dthe))/a;            // -dPsi/dy [m2/s]
+                double V_north=((Psi[j][kp]-Psi[j][kmn])/(2*dphi))/(a*st);        // dPsi/dx  [m2/s]
+                double wbt =  U_east / H[j][k];           // barotropic zonal  (E+) [m/s]
+                double vbt = -V_north / H[j][k];          // barotropic merid  (S+) [m/s]
+                m.w_bt.y[j][k] = gain*wbt / m.u_0;        // non-dim; imposed as column depth-mean
+                m.v_bt.y[j][k] = gain*vbt / m.u_0;        //          (velocity mode split)
+                mp=std::max(mp,std::fabs(Psi[j][k]));
+                mg=std::max(mg,std::max(std::fabs(m.w_bt.y[j][k]),std::fabs(m.v_bt.y[j][k])));
+            }
+        }
+        cout << "      OGCM: project_barotropic done  max|Psi|=" << mp
+             << "  max|u_bt(nd)|=" << mg << "  (=" << mg*m.u_0*100.0 << " cm/s)" << endl;
+    }
+
+    // ------------------------------------------------------------------------
+    // apply_barotropic_mode_split — impose the wind-driven barotropic (depth-mean)
+    // velocity u_bt on the horizontal flow, preserving the baroclinic deviation:
+    //     v(i) += v_bt - <v>_column ,   w(i) += w_bt - <w>_column
+    // Called every iter AFTER project_velocity. This is the piece the divergence
+    // projection cannot supply — a barotropic mode is (nearly) non-divergent, so
+    // the projection has nothing to correct and never builds it. Setting it as a
+    // velocity (not a force) is immune to being projected out. The ACC — the most
+    // barotropic current — is the pass/fail signal: it needs u_bt to fill the
+    // column at 55-60 S (see project_hydro_eastern_boundary_current).
+    // ------------------------------------------------------------------------
+    void apply_barotropic_mode_split()
+    {
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int j = 1; j < m.jm-1; j++) {
+            for (int k = 0; k < m.km; k++) {
+                int c = 0; double mv = 0.0, mw = 0.0;
+                for (int i = 0; i < m.im; i++)
+                    if (is_water(m.h, i, j, k)) { mv += m.v.x[i][j][k]; mw += m.w.x[i][j][k]; ++c; }
+                if (c == 0) continue;
+                const double dv = m.v_bt.y[j][k] - mv / c;
+                const double dw = m.w_bt.y[j][k] - mw / c;
+                for (int i = 0; i < m.im; i++)
+                    if (is_water(m.h, i, j, k)) { m.v.x[i][j][k] += dv; m.w.x[i][j][k] += dw; }
+            }
+        }
+    }
+
 private:
     cHydrosphereModel& m;
 };

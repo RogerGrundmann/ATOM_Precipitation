@@ -290,6 +290,11 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     ThermoHyd(*this).runDataHyd();
     print_min_max_hyd();
     UtilsHyd(*this).writeFile(bathymetry_name, output_path, false);     // printing files for ParaView, AtmosphereDataTransfer and AtmospherePlotData
+    // Barotropic (rigid-lid Stommel) solve — the wind-driven barotropic transport
+    // the Chorin projection cannot build. Wind is fixed during a hyd run, so solve
+    // once here for u_bt (m.v_bt/w_bt); apply_barotropic_mode_split() then imposes it
+    // as the column depth-mean each iter (velocity mode split, not a force).
+    PressureSolverHyd(*this).project_barotropic();
     if(Ma == 0) run_3D_loop();                                          // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
 
 
@@ -407,6 +412,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     // first advection step (before the first heavy block) transports with them
     // rather than a zero field. Also projects the (restored, on restart) field.
     PressureSolverHyd(*this).project_velocity(60);
+    PressureSolverHyd(*this).apply_barotropic_mode_split();   // seed the barotropic mode into the IC
 
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
@@ -486,7 +492,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // the consistent source is blind to the cell checkerboard so it no longer
             // feeds back. See project_hydro_continuity_checkerboard.
             PressureSolverHyd(*this).project_velocity(60);
-            record_stage(2);   // stage 2: after the pressure projection
+            PressureSolverHyd(*this).apply_barotropic_mode_split();   // impose wind-driven barotropic mode
+            record_stage(2);   // stage 2: after the pressure projection + barotropic mode split
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 
             ThermoHyd(*this).SaltWaterDens();

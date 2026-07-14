@@ -39,6 +39,7 @@ public:
             &m.salinity_evaporation, &m.Evaporation_Dalton, &m.Evaporation_Penman, &m.Evaporation,
             &m.Precipitation_2D, &m.precipitation_NASA, &m.temperature_NASA,
             &m.temp_reconst, &m.c_fix, &m.t_surf_fix, &m.v_wind, &m.w_wind,
+            &m.psi_bt, &m.v_bt, &m.w_bt,
             &m.velocity_v_NASA, &m.velocity_w_NASA, &m.temp_landscape,
             &m.BuoyancyForce_2D,
             &m.vel_star     // friction velocity per (j,k) column — turbulence only

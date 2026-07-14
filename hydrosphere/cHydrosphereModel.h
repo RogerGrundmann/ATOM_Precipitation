@@ -290,6 +290,9 @@ public:
     Array_2D t_surf_fix;                                                // prescribed surface SST, fixed for iterations (sustained surface heat-flux forcing)
     Array_2D v_wind;                                                    // v-component of surface wind
     Array_2D w_wind;                                                    // w-component of surface wind
+    Array_2D psi_bt;                                                    // barotropic (rigid-lid Stommel) transport streamfunction
+    Array_2D v_bt;                                                     // barotropic (depth-mean) meridional velocity, non-dim (mode split)
+    Array_2D w_bt;                                                     // barotropic (depth-mean) zonal velocity, non-dim (mode split)
     Array_2D velocity_v_NASA;                                           // surface v-velocity from NASA
     Array_2D velocity_w_NASA;                                           // surface w-velocity from NASA
 
