@@ -212,7 +212,7 @@ void cHydrosphereModel::paraview_panorama_vts(const string &Name_Bathymetry_File
     Hydrosphere_panorama_vts_File <<  "<VTKFile type=\"StructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n"  << endl;
     Hydrosphere_panorama_vts_File <<  " <StructuredGrid WholeExtent=\"" << 1 << " "<< im << " "<< 1 << " " << jm << " "<< 1 << " " << km << "\">\n"  << endl;
     Hydrosphere_panorama_vts_File <<  "  <Piece Extent=\"" << 1 << " "<< im << " "<< 1 << " " << jm << " "<< 1 << " " << km << "\">\n"  << endl;
-    Hydrosphere_panorama_vts_File <<  "   <PointData Vectors=\"Velocity\" Scalars=\"Bathymetry Temperature u-velocity v-velocity w-velocity PressureDynamic PressureStatic Salinity DensityWater DensitySaltWater BuoyancyForce\">\n"  << endl;
+    Hydrosphere_panorama_vts_File <<  "   <PointData Vectors=\"Velocity\" Scalars=\"Bathymetry Temperature u-velocity v-velocity w-velocity PressureDynamic Salinity DensitySaltWater BuoyancyForce CoriolisForce PresGradForce\">\n"  << endl;
 
     Hydrosphere_panorama_vts_File <<  "    <DataArray type=\"Float32\" NumberOfComponents=\"3\" Name=\"Velocity\" format=\"ascii\">\n"  << endl;
 
@@ -242,12 +242,10 @@ void cHydrosphereModel::paraview_panorama_vts(const string &Name_Bathymetry_File
 //    dump_array("PressureHydro", p_hydro, 1.0, Hydrosphere_panorama_vts_File);
     dump_array("Salinity", c, c_35, Hydrosphere_panorama_vts_File);
 //    dump_array("DensityWater", r_water, 1.0, Hydrosphere_panorama_vts_File);
-    dump_array("DensSaltWater", r_salt_water, 1.0, Hydrosphere_panorama_vts_File);
-/*
+    dump_array("DensitySaltWater", r_salt_water, 1.0, Hydrosphere_panorama_vts_File);
     dump_array("BuoyancyForce", BuoyancyForce, 1.0, Hydrosphere_panorama_vts_File);
     dump_array("CoriolisForce", CoriolisForce, 1.0, Hydrosphere_panorama_vts_File);
     dump_array("PresGradForce", PresGradForce, 1.0, Hydrosphere_panorama_vts_File);
-*/
     if (turb_model != "laminar") {
         dump_array("TKE",           tke,        1.0, Hydrosphere_panorama_vts_File);
         dump_array("Dissipation",   dis,        1.0, Hydrosphere_panorama_vts_File);

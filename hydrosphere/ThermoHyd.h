@@ -212,7 +212,6 @@ public:
         const double dr_phys = m.L_hyd / i_max;                         // [m] uniform depth step
         const double two_omega = 2.0 * m.omega;                         // [rad/s]
         const double omega2    = m.omega * m.omega;
-        const double pres_coeff = 1e2 * m.p_0;  // [Pa] hPa→Pa; p_dyn is dimensionless, dpdr is [1/m]
         const double r_Earth_m = m.r_Earth * 1e3;      // [m]
 
         // precompute trig tables to avoid redundant sin/cos in the inner loop
@@ -259,17 +258,32 @@ public:
                         * m.r_water.x[i][j][k] * omega2 * rad_Earth
                         * (1.0 + abs_sinthe);                           // [N/m³]
 
+                    // Buoyancy = density ANOMALY from the Boussinesq reference (the
+                    // dynamically active part). The full weight -rho*g is a near-constant
+                    // ~-10 kN/m³ that swamps all structure and reads as a flat field.
                     m.BuoyancyForce.x[i][j][k] =
-                        - 1.0e-3 * m.buoyancy * m.r_salt_water.x[i][j][k] * m.g;  // [kN/m³]
+                        - 1.0e-3 * m.buoyancy
+                        * (m.r_salt_water.x[i][j][k] - m.r_0_saltwater) * m.g;  // [kN/m³]
 
-                    // pressure gradient (central differences)
-                    double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * inv_2dr; // [1/m]
-                    double dpdthe = (m.p_dyn.x[i][j+1][k] - m.p_dyn.x[i][j-1][k]) * inv_2dthe * inv_rm;
-                    double dpdphi = (m.p_dyn.x[i][j][k+1] - m.p_dyn.x[i][j][k-1]) * inv_2dphi * inv_rmsinthe;
+                    // Pressure gradient from the HYDROSTATIC pressure p_hydro [bar].
+                    // (p_dyn is only the per-step Chorin projection increment, ~0, so its
+                    // gradient was ~0 and PresGradForce read zero.) Land neighbours carry
+                    // p_hydro=0, so fall back to a one-sided difference at a land face to
+                    // avoid a spurious coast/bottom jump.
+                    const double pC = m.p_hydro.x[i][j][k];
+                    double pRp = is_land(m.h,i+1,j,k) ? pC : m.p_hydro.x[i+1][j][k];
+                    double pRm = is_land(m.h,i-1,j,k) ? pC : m.p_hydro.x[i-1][j][k];
+                    double pTp = is_land(m.h,i,j+1,k) ? pC : m.p_hydro.x[i][j+1][k];
+                    double pTm = is_land(m.h,i,j-1,k) ? pC : m.p_hydro.x[i][j-1][k];
+                    double pPp = is_land(m.h,i,j,k+1) ? pC : m.p_hydro.x[i][j][k+1];
+                    double pPm = is_land(m.h,i,j,k-1) ? pC : m.p_hydro.x[i][j][k-1];
+                    double dpdr   = (pRp - pRm) * inv_2dr;              // [bar/m]
+                    double dpdthe = (pTp - pTm) * inv_2dthe * inv_rm;
+                    double dpdphi = (pPp - pPm) * inv_2dphi * inv_rmsinthe;
 
                     m.PresGradForce.x[i][j][k] =
                         sqrt((dpdr * dpdr + dpdthe * dpdthe + dpdphi * dpdphi) / 3.0)
-                        * pres_coeff * 1.0e-3;                          // [kN/m³]
+                        * 1.0e2;                                        // bar/m -> kN/m³
                     if(j == 90)  m.PresGradForce.x[i][j][k] = 
                           0.5 * (m.PresGradForce.x[i][j+1][k] 
                                + m.PresGradForce.x[i][j-1][k]);
@@ -471,7 +485,6 @@ public:
         // 7a. Salt / force BCs at i = 0 (linear) and i = im-1 (cubic),
         //     plus surface forces at i_max — all (j,k)-independent.
         // ----------------------------------------------------------------
-        const double coeff_u_p = m.r_0_water * m.u_0 * m.u_0 / m.L_hyd;
         const double coeff_Cor = m.r_0_water * m.u_0 * m.omega;
 
         #pragma omp parallel for collapse(2) schedule(static)
@@ -502,16 +515,24 @@ public:
                 const double cor_phi =  2.0 * (sinthe * m.v.x[i_max][j][k]
                                              - costhe * m.u.x[i_max][j][k]);
 
-                double dpdr = m.p_hydro.x[i_max][j][k] = m.p_hydro.x[m.im-4][j][k] 
-                    - 3.0 * m.p_hydro.x[m.im-3][j][k] + 3.0 * m.p_hydro.x[m.im-2][j][k];  // extrapolation
+                // p_hydro surface value: cubic extrapolation from the interior column
+                m.p_hydro.x[i_max][j][k] = m.p_hydro.x[m.im-4][j][k]
+                    - 3.0 * m.p_hydro.x[m.im-3][j][k] + 3.0 * m.p_hydro.x[m.im-2][j][k];
 
                 m.CoriolisForce.x[i_max][j][k] = coeff_Cor
                     * sqrt((cor_r*cor_r + cor_the*cor_the + cor_phi*cor_phi) / 3.0);
 
+                // Same diagnostics as the interior forces() loop (buoyancy anomaly +
+                // p_hydro gradient in kN/m³), so the top row is consistent with the
+                // field below it instead of a different formula/units.
                 m.BuoyancyForce.x[i_max][j][k] =
-                    m.r_0_water * (m.t.x[i_max][j][k] - 1.0) * m.g;
+                    - 1.0e-3 * m.buoyancy
+                    * (m.r_salt_water.x[i_max][j][k] - m.r_0_saltwater) * m.g;   // [kN/m³]
 
-                m.PresGradForce.x[i_max][j][k] = -coeff_u_p * dpdr;
+                const double dr_m   = m.L_hyd / (double)i_max;                   // [m]
+                const double dpdr_s = (m.p_hydro.x[i_max][j][k]
+                                     - m.p_hydro.x[m.im-2][j][k]) / dr_m;         // [bar/m], one-sided
+                m.PresGradForce.x[i_max][j][k] = fabs(dpdr_s) * 1.0e2;           // bar/m -> kN/m³
 
                 if (is_land(m.h, i_max, j, k)) {
                     m.BuoyancyForce.x[i_max][j][k]         = 0.0;
