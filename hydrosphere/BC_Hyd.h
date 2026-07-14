@@ -276,7 +276,7 @@ public:
                         // non-dim T/t_0 convention.
                         m.t.x[i][j][k]                = 1.0;
 //                        m.c.x[i][j][k]                = 0.0;
-                        m.BuoyancyForce.x[i][j][k]    = m.r_0_saltwater * m.g;
+                        m.BuoyancyForce.x[i][j][k]    = 0.0;   // was r_0_saltwater*g (~10072): wrong scale + convention, swamped the diagnostic; zero like the sibling forces
                         m.CoriolisForce.x[i][j][k]    = 0.0;
                         m.CentrifugalForce.x[i][j][k] = 0.0;
                         m.PresGradForce.x[i][j][k]    = 0.0;
