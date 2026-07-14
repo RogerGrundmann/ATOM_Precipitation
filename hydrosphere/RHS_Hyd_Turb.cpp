@@ -621,9 +621,18 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // Warm (t > 1) rises; salty (c > 1) sinks.  alpha_S ≈ (β_S·S_0)/(α_T·T_0)
     // sets the haline / thermal weighting; see RHS_Hyd.cpp for derivation.
     constexpr double alpha_S = 0.5;
+    // NB the g*dt/u_0 scaling carries the spurious dt of the pre-5f71571 convention
+    // (~1e-7 too small), so buoyancy is effectively OFF and the ocean is dynamically
+    // barotropic (wind + Coriolis only). Repairing it to g*alpha_T*t_0*L/u_0^2 was
+    // TESTED (2026-07-14) and DESTABILISES: max radial velocity 0.04 -> 19.5 m/s in
+    // 30 iters, a polar vertical-velocity runaway (project_hydro_polar_blowup) — the
+    // vertical buoyancy has nothing to balance it (no baroclinic/hydrostatic PGF in
+    // the momentum eq). Left at the stable (barotropic) scaling; a real baroclinic
+    // ocean needs the horizontal grad(p_hydro) in rhs_v/rhs_w, not just this term.
+    const double buoy_nd = buoyancy * g * dt / u_0
+        * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoyancy * g * dt / u_0
-            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
+        + buoy_nd
         + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
 
     // Radial (u) momentum-budget capture — the DEEP polar blow-up is a
@@ -636,8 +645,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         ubud_pgf.x[i][j][k]  = -dpdr_exp;
         ubud_adv.x[i][j][k]  = -transport_u;
         ubud_diff.x[i][j][k] =  diffusion_u;
-        ubud_buoy.x[i][j][k] =  buoyancy * g * dt / u_0
-            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
+        ubud_buoy.x[i][j][k] =  buoy_nd;
         ubud_cor.x[i][j][k]  =  Coriolis * Coriolis_rad
                               - centrifugal * centrifugal_rad;
     }
