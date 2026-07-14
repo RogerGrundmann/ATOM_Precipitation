@@ -51,7 +51,7 @@ def main():
 
             ('time_start', 'start time', 'int', 0),
 #            ('time_end', 'end time', 'int', 10),
-            ('time_end', 'end time', 'int', 100),
+            ('time_end', 'end time', 'int', 0),
             ('time_step', 'step size between timeslices', 'int', 10),
 
             ('velocity_v_file', '' ,'string','../data/v_surface.txt'),
@@ -125,8 +125,8 @@ def main():
 
             ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 300),
 #            ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 200),
-#            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', -1),
-            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', 300),
+            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', -1),
+#            ('restart_from_iter', 'load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables', 'int', 300),
 
 #            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.001),
 #            ('dt_visc', 'non-dimensional time step used in the viscous (production) phase', 'double', 0.0005),
@@ -225,11 +225,11 @@ def main():
         'hydrosphere': [
             ('input_path', 'directory where Atmosphere output can be read(must end in /)', 'string', 'output_ATOM_Precipitation'),
 
-            ('nm', 'the maximum number of iterations', 'int', 400),
-            ('checkpoint', "control when to write output files", 'int', 10),
+            ('nm', 'the maximum number of iterations', 'int', 300),
+            ('checkpoint', "control when to write output files", 'int', 50),
             ('panorama_print', "control when to write panorama files", 'int', 100),
 
-            ('atm_transfer_iter', 'select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp', 'int', -1),
+            ('atm_transfer_iter', 'select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp', 'int', 400),
 
 
 

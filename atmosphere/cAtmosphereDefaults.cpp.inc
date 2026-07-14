@@ -18,7 +18,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   omega = 7.292e-05;
   g = 9.8066;
   time_start = 0;
-  time_end = 100;
+  time_end = 0;
   time_step = 10;
   velocity_v_file = "../data/v_surface.txt";
   velocity_w_file = "../data/w_surface.txt";
@@ -53,7 +53,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   inviscid_ramp_iters = 20;
   moist_phys_start_iter = 300;
   checkpoint_save_iter = 300;
-  restart_from_iter = 300;
+  restart_from_iter = -1;
   dt_visc = 0.0001;
   dt_inviscid = 2e-05;
 

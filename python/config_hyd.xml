@@ -12,7 +12,7 @@
         <omega>7.292e-05</omega>  <!-- rotation rate of the earth in rad/s(double) -->
         <g>9.8066</g>  <!-- gravitational acceleration of the earth in m/s²(double) -->
         <time_start>0</time_start>  <!-- start time(int) -->
-        <time_end>100</time_end>  <!-- end time(int) -->
+        <time_end>0</time_end>  <!-- end time(int) -->
         <time_step>10</time_step>  <!-- step size between timeslices(int) -->
         <velocity_v_file>../data/v_surface.txt</velocity_v_file>  <!-- (string) -->
         <velocity_w_file>../data/w_surface.txt</velocity_w_file>  <!-- (string) -->
@@ -47,16 +47,16 @@
         <inviscid_ramp_iters>20</inviscid_ramp_iters>  <!-- iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase(int) -->
         <moist_phys_start_iter>300</moist_phys_start_iter>  <!-- cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)(int) -->
         <checkpoint_save_iter>300</checkpoint_save_iter>  <!-- dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables(int) -->
-        <restart_from_iter>300</restart_from_iter>  <!-- load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables(int) -->
+        <restart_from_iter>-1</restart_from_iter>  <!-- load output_path/atm_restart_<iter>.bin and resume from it, skipping the dry spin-up (debug shortcut); -1 disables(int) -->
         <dt_visc>0.0001</dt_visc>  <!-- non-dimensional time step used in the viscous (production) phase(double) -->
         <dt_inviscid>2e-05</dt_inviscid>  <!-- non-dimensional time step used during the inviscid spin-up phase (smaller to absorb the missing diffusive damping)(double) -->
     </common>
     <hydrosphere>
         <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->
-        <nm>400</nm>  <!-- the maximum number of iterations(int) -->
-        <checkpoint>10</checkpoint>  <!-- control when to write output files(int) -->
+        <nm>300</nm>  <!-- the maximum number of iterations(int) -->
+        <checkpoint>50</checkpoint>  <!-- control when to write output files(int) -->
         <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
-        <atm_transfer_iter>-1</atm_transfer_iter>  <!-- select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp(int) -->
+        <atm_transfer_iter>400</atm_transfer_iter>  <!-- select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp(int) -->
         <ocean_depth_mode>shallow</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->
         <L_hyd>200.0</L_hyd>  <!-- extension of the hydrosphere shell in m; overridden by ocean_depth_mode when set to "shallow" or "deep"(double) -->
         <re>10.0</re>  <!-- Reynolds number: ratio viscous to inertia forces, Re = u * L/nue(double) -->
