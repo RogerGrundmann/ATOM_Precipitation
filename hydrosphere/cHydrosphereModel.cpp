@@ -586,9 +586,12 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             UtilsHyd(*this).writeFile(bathymetry_name, output_path, true);
             cout << endl << "      OGCM: write_file in run_3D_loop ......................." << endl;
 
-            // Binary restart checkpoint alongside the vtk/vts output, every
-            // `checkpoint` iters, so a long spin-up can be resumed.
-            save_state(total_iter_count);
+            // Binary restart checkpoint. Grouped with the panorama VTS cadence
+            // (every panorama_print iters) rather than the VTK cadence (`checkpoint`),
+            // so the large .bin + .vts share the coarser interval while the VTK
+            // slices write more often. Falls back to every checkpoint if disabled.
+            if (panorama_print <= 0 || iter_n % panorama_print == 0)
+                save_state(total_iter_count);
 
             // Zonal-mean w-momentum budget CSV (uses the wbud_* term split
             // captured this iter + the wbar_before snapshot for the net Δwbar).
