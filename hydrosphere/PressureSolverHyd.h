@@ -715,9 +715,36 @@ public:
                 m.w_bt.y[j][k] = eqf*gain*wbt / m.u_0;    // non-dim; imposed as column depth-mean
                 m.v_bt.y[j][k] = eqf*gain*vbt / m.u_0;    //          (velocity mode split)
                 mp=std::max(mp,std::fabs(Psi[j][k]));
-                mg=std::max(mg,std::max(std::fabs(m.w_bt.y[j][k]),std::fabs(m.v_bt.y[j][k])));
             }
         }
+        // Smooth u_bt to reduce grid-scale divergence. A barotropic mode is (by
+        // construction) nearly non-divergent, but the discrete d(Psi) + the cap +
+        // the tapers leave 2*dx noise in u_bt; since the imposed depth-mean sets
+        // the surface flow and EkmanPumping = div(surface velocity), that noise
+        // showed up as spurious pumping at the ACC/topography choke points
+        // (Kerguelen 50 S 66 E, Drake 64 S 57 W ~ +-600 cm/d). A few land-aware
+        // 1-2-1 passes over ocean cells (periodic in lon; land neighbours use the
+        // centre value so nothing leaks onto land) damp the 2*dx noise while
+        // preserving the large-scale gyre/ACC pattern.
+        {
+            const int n_smooth = 6;
+            std::vector<std::vector<double>> t(jm, std::vector<double>(km, 0.0));
+            auto smooth = [&](Array_2D& F){
+                for(int j=0;j<jm;j++) for(int k=0;k<km;k++) t[j][k]=F.y[j][k];
+                for(int j=1;j<jm-1;j++) for(int k=0;k<km;k++){
+                    if(!ocean(j,k)) continue;
+                    const double c = t[j][k];
+                    const double jp = ocean(j+1,k)      ? t[j+1][k]      : c;
+                    const double jn = ocean(j-1,k)      ? t[j-1][k]      : c;
+                    const double wp = ocean(j,kper(k+1))? t[j][kper(k+1)]: c;
+                    const double wn = ocean(j,kper(k-1))? t[j][kper(k-1)]: c;
+                    F.y[j][k] = 0.5*c + 0.125*(jp+jn+wp+wn);
+                }
+            };
+            for(int s=0;s<n_smooth;s++){ smooth(m.v_bt); smooth(m.w_bt); }
+        }
+        for (int j=1;j<jm-1;j++) for(int k=0;k<km;k++) if(ocean(j,k))
+            mg=std::max(mg,std::max(std::fabs(m.w_bt.y[j][k]),std::fabs(m.v_bt.y[j][k])));
         cout << "      OGCM: project_barotropic done  max|Psi|=" << mp
              << "  max|u_bt(nd)|=" << mg << "  (=" << mg*m.u_0*100.0 << " cm/s)" << endl;
     }
