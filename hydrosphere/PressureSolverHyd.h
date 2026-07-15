@@ -757,18 +757,26 @@ public:
                 for (int i = 0; i < m.im; i++)
                     if (is_water(m.h, i, j, k)) { mv += m.v.x[i][j][k]; mw += m.w.x[i][j][k]; ++c; }
                 if (c == 0) continue;
-                // coastal taper (2-cell radius): a thin/strait channel has full-
-                // strength u_bt at mid-channel with the coarse grid unable to carry
-                // the boundary-layer shear -> surface CFL runaway (Indonesian straits).
-                bool coast = false;
-                for (int dj=-2; dj<=2 && !coast; ++dj)
-                    for (int dk=-2; dk<=2; ++dk){
-                        int jj=j+dj; if (jj<0||jj>=m.jm) { coast=true; break; }
-                        if (!is_water(m.h, isurf, jj, kper(k+dk))) { coast=true; break; }
+                // coastal taper (graded, smoothstep to zero over N_taper cells):
+                // a thin/strait channel carrying full-strength u_bt shocks the coarse
+                // grid (CFL runaway, Indonesian straits). A HARD cutoff instead makes
+                // a surface-velocity step -> divergence spike -> spurious Ekman pumping
+                // (EkmanPumping = div of the surface velocity, ThermoHyd). So fade
+                // u_bt smoothly to zero: weight 0 at a land-adjacent column, ->1 at
+                // >=N_taper cells from land (Chebyshev distance).
+                const int N_taper = 3;
+                int dmin = N_taper + 1;
+                for (int dj=-N_taper; dj<=N_taper; ++dj)
+                    for (int dk=-N_taper; dk<=N_taper; ++dk){
+                        int jj=j+dj;
+                        bool land = (jj<0||jj>=m.jm) || !is_water(m.h, isurf, jj, kper(k+dk));
+                        if (land){ int d=std::max(std::abs(dj),std::abs(dk)); if(d<dmin)dmin=d; }
                     }
-                if (coast) continue;
-                const double dv = ramp * (m.v_bt.y[j][k] - mv / c);
-                const double dw = ramp * (m.w_bt.y[j][k] - mw / c);
+                double cw = std::min(1.0, std::max(0.0, (double)(dmin-1)/N_taper));
+                cw = cw*cw*(3.0-2.0*cw);                 // smoothstep
+                if (cw <= 0.0) continue;
+                const double dv = ramp * cw * (m.v_bt.y[j][k] - mv / c);
+                const double dw = ramp * cw * (m.w_bt.y[j][k] - mw / c);
                 for (int i = 0; i < m.im; i++)
                     if (is_water(m.h, i, j, k)) { m.v.x[i][j][k] += dv; m.w.x[i][j][k] += dw; }
             }
