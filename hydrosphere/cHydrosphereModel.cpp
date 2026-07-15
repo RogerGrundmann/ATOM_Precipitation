@@ -294,11 +294,11 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     // the Chorin projection cannot build. Wind is fixed during a hyd run, so solve
     // once here for u_bt (m.v_bt/w_bt); apply_barotropic_mode_split() then imposes it
     // as the column depth-mean each iter (velocity mode split, not a force).
-    // DEEP MODE ONLY: u_bt = transport/H blows up in shallow mode (H=200 m -> ~80 cm/s
-    // depth-mean, CFL runaway ~iter 65 on the 5 m grid). Shallow mode is the near-
-    // surface Ekman/thermohaline regime where the barotropic ACC is not the focus.
-    if (ocean_depth_mode == "deep")
-        PressureSolverHyd(*this).project_barotropic();
+    // Runs in BOTH depth modes: u_bt = transport/H now uses the true seafloor
+    // depth (Bathymetry), so shallow mode gets the same physical u_bt as deep
+    // (~38 cm/s, not the ~80 cm/s CFL runaway that came from dividing by the
+    // truncated 200 m column). See project_barotropic().
+    PressureSolverHyd(*this).project_barotropic();
     if(Ma == 0) run_3D_loop();                                          // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
 
 
@@ -416,8 +416,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     // first advection step (before the first heavy block) transports with them
     // rather than a zero field. Also projects the (restored, on restart) field.
     PressureSolverHyd(*this).project_velocity(60);
-    if (ocean_depth_mode == "deep")
-        PressureSolverHyd(*this).apply_barotropic_mode_split();   // seed the barotropic mode into the IC (deep only)
+    PressureSolverHyd(*this).apply_barotropic_mode_split();   // seed the barotropic mode into the IC (both depth modes)
 
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
@@ -497,8 +496,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // the consistent source is blind to the cell checkerboard so it no longer
             // feeds back. See project_hydro_continuity_checkerboard.
             PressureSolverHyd(*this).project_velocity(60);
-            if (ocean_depth_mode == "deep")
-                PressureSolverHyd(*this).apply_barotropic_mode_split();   // impose wind-driven barotropic mode (deep only)
+            PressureSolverHyd(*this).apply_barotropic_mode_split();   // impose wind-driven barotropic mode (both depth modes)
             record_stage(2);   // stage 2: after the pressure projection + barotropic mode split
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 

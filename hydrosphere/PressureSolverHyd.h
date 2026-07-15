@@ -628,7 +628,6 @@ public:
         const double omega = m.omega;                    // [rad/s]
         const double rho   = m.r_0_water;                // [kg/m^3]
         const double C_D   = 2.6e-3, r_air = m.r_air;
-        const double dz    = m.L_hyd / (m.im - 1);       // uniform layer thickness [m]
         const double dthe  = m.dthe, dphi = m.dphi;
         const int jm = m.jm, km = m.km, Kp = km - 1;     // longitude period = km-1
         auto kper = [&](int k){ k %= Kp; if (k < 0) k += Kp; return k; };
@@ -641,10 +640,17 @@ public:
         std::vector<std::vector<double>> H(jm,std::vector<double>(km,0.0)),
                                          W(jm,std::vector<double>(km,0.0)),
                                          Psi(jm,std::vector<double>(km,0.0));
-        for (int j=0;j<jm;j++) for(int k=0;k<km;k++){
-            int c=0; for(int i=0;i<m.im;i++) if(is_water(m.h,i,j,k)) c++;
-            H[j][k] = std::max((double)c*dz, 200.0);
-        }
+        // Barotropic transport is a FULL-DEPTH quantity, so convert it to a
+        // depth-mean velocity u_bt = transport/H with the TRUE seafloor depth
+        // (m.Bathymetry, metres — raw topo, populated for both modes), NOT the
+        // model column depth c*dz. In shallow mode c*dz caps at L_hyd = 200 m,
+        // which over-speeds u_bt ~20x (transport/200 vs transport/~4000) and
+        // drove the CFL runaway that forced the deep-only gate. Using the true
+        // depth makes u_bt mode-independent (deep mode is unchanged: c*dz there
+        // already ≈ Bathymetry over the resolved column). Floor 200 m keeps
+        // shelves/land from blowing up, matching the old floor.
+        for (int j=0;j<jm;j++) for(int k=0;k<km;k++)
+            H[j][k] = std::max(m.Bathymetry.y[j][k], 200.0);
         auto tauP=[&](int j,int k){ double v=m.v_wind.y[j][k], w=m.w_wind.y[j][k];
                                     return r_air*C_D*std::sqrt(v*v+w*w)*w; };   // east
         auto tauT=[&](int j,int k){ double v=m.v_wind.y[j][k], w=m.w_wind.y[j][k];
@@ -687,8 +693,27 @@ public:
                 double V_north=((Psi[j][kp]-Psi[j][kmn])/(2*dphi))/(a*st);        // dPsi/dx  [m2/s]
                 double wbt =  U_east / H[j][k];           // barotropic zonal  (E+) [m/s]
                 double vbt = -V_north / H[j][k];          // barotropic merid  (S+) [m/s]
-                m.w_bt.y[j][k] = gain*wbt / m.u_0;        // non-dim; imposed as column depth-mean
-                m.v_bt.y[j][k] = gain*vbt / m.u_0;        //          (velocity mode split)
+                // Cap the barotropic speed. The discrete wind-stress curl over
+                // coastal/shelf topography produces spurious transport gradients
+                // that, divided by the shallow floor depth, give unphysical u_bt
+                // (~80 cm/s) — the CFL runaway (~iter 65, SH shelves) that forced
+                // the deep-only gate. A real barotropic depth-mean current stays
+                // O(10-40 cm/s); deep mode's validated max was 37.6 cm/s, below
+                // this cap, so deep behaviour is unchanged and only the shelf
+                // spikes are clipped — letting the split run in shallow mode too.
+                const double u_bt_max = 0.40;             // m/s
+                double sp = std::sqrt(wbt*wbt + vbt*vbt);
+                if (sp > u_bt_max) { double fac = u_bt_max/sp; wbt *= fac; vbt *= fac; }
+                // Equatorial taper: the Sverdrup/Stommel barotropic balance is
+                // ill-posed as f->0 (geostrophy fails, the source ~1/f), and the
+                // wind-driven gyres + ACC we want are all extratropical. Fade u_bt
+                // to zero within |lat|<10 deg (full by 20 deg) — this also removes
+                // the tropical island-strait forcing (Indonesia/Timor) that drove
+                // the surface CFL runaway ~iter 230.
+                double al = std::fabs(latd(j));
+                double eqf = al <= 10.0 ? 0.0 : (al >= 20.0 ? 1.0 : (al-10.0)/10.0);
+                m.w_bt.y[j][k] = eqf*gain*wbt / m.u_0;    // non-dim; imposed as column depth-mean
+                m.v_bt.y[j][k] = eqf*gain*vbt / m.u_0;    //          (velocity mode split)
                 mp=std::max(mp,std::fabs(Psi[j][k]));
                 mg=std::max(mg,std::max(std::fabs(m.w_bt.y[j][k]),std::fabs(m.v_bt.y[j][k])));
             }
@@ -710,15 +735,40 @@ public:
     // ------------------------------------------------------------------------
     void apply_barotropic_mode_split()
     {
+        // Two stabilisers, needed once the split runs from a COLD START (the deep-
+        // mode validation only ever ran from a spun-up restart). Imposing the full
+        // depth-mean u_bt on the near-zero from-scratch field, or onto a coastal
+        // column, shocks the fine shallow grid -> CFL runaway ~iter 65-69, with the
+        // epicentre at land-adjacent cells (e.g. the Australian E coast, w->600 m/s):
+        //   (1) cold-start RAMP: bring the amplitude in linearly over N_ramp iters;
+        //   (2) coastal TAPER: skip land-adjacent columns — the Stommel western
+        //       boundary current is a thin jet the coarse grid cannot resolve at the
+        //       coast. The open-ocean interior, incl. the circumpolar ACC band (the
+        //       pass/fail signal), keeps the full barotropic mode.
+        const int    N_ramp = 120;
+        const double ramp   = std::min(1.0, (double)m.iter_n / (double)N_ramp);
+        if (ramp <= 0.0) return;                       // seed call (iter_n==0) is a no-op
+        const int km = m.km, Kp = km - 1, isurf = m.im - 2;
+        auto kper = [&](int k){ k %= Kp; if (k < 0) k += Kp; return k; };
         #pragma omp parallel for collapse(2) schedule(static)
         for (int j = 1; j < m.jm-1; j++) {
-            for (int k = 0; k < m.km; k++) {
+            for (int k = 0; k < km; k++) {
                 int c = 0; double mv = 0.0, mw = 0.0;
                 for (int i = 0; i < m.im; i++)
                     if (is_water(m.h, i, j, k)) { mv += m.v.x[i][j][k]; mw += m.w.x[i][j][k]; ++c; }
                 if (c == 0) continue;
-                const double dv = m.v_bt.y[j][k] - mv / c;
-                const double dw = m.w_bt.y[j][k] - mw / c;
+                // coastal taper (2-cell radius): a thin/strait channel has full-
+                // strength u_bt at mid-channel with the coarse grid unable to carry
+                // the boundary-layer shear -> surface CFL runaway (Indonesian straits).
+                bool coast = false;
+                for (int dj=-2; dj<=2 && !coast; ++dj)
+                    for (int dk=-2; dk<=2; ++dk){
+                        int jj=j+dj; if (jj<0||jj>=m.jm) { coast=true; break; }
+                        if (!is_water(m.h, isurf, jj, kper(k+dk))) { coast=true; break; }
+                    }
+                if (coast) continue;
+                const double dv = ramp * (m.v_bt.y[j][k] - mv / c);
+                const double dw = ramp * (m.w_bt.y[j][k] - mw / c);
                 for (int i = 0; i < m.im; i++)
                     if (is_water(m.h, i, j, k)) { m.v.x[i][j][k] += dv; m.w.x[i][j][k] += dw; }
             }
