@@ -515,9 +515,13 @@ void cHydrosphereModel::paraview_vtk_radial(const string &Name_Bathymetry_File,
     dump_radial("CentrifugalForce", CentrifugalForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("CentrifugalForce", CentrifugalForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
     dump_radial("PresGradForce", PresGradForce, 1.0, i_radial, Hydrosphere_vtk_radial_File);
-    dump_radial_2d("EkmanPumping", EkmanPumping, u_0 * 1e2, Hydrosphere_vtk_radial_File);
-    dump_radial_2d("Upwelling", Upwelling, u_0 * 1e2, Hydrosphere_vtk_radial_File);
-    dump_radial_2d("Downwelling", Downwelling, u_0 * 1e2, Hydrosphere_vtk_radial_File);
+    // EkmanPumping/Up/Downwelling are already a physical vertical velocity in
+    // cm/d (coeff_pumping in ThermoHyd.h). Dump with multiplier 1.0 like the
+    // other rate fields (Evaporation/Precipitation) — the old u_0*1e2 double-
+    // scaled them, so ParaView disagreed with the MinMax log by ~24x.
+    dump_radial_2d("EkmanPumping_cm_d", EkmanPumping, 1.0, Hydrosphere_vtk_radial_File);
+    dump_radial_2d("Upwelling_cm_d", Upwelling, 1.0, Hydrosphere_vtk_radial_File);
+    dump_radial_2d("Downwelling_cm_d", Downwelling, 1.0, Hydrosphere_vtk_radial_File);
     dump_radial_2d("Evaporation", Evaporation, 1.0, Hydrosphere_vtk_radial_File);
     dump_radial_2d("Precipitation", Precipitation_2D, 1.0, Hydrosphere_vtk_radial_File);
     dump_radial_2d("SalinityEvap", salinity_evaporation, c_35, Hydrosphere_vtk_radial_File);

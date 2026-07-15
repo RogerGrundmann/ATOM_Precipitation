@@ -47,10 +47,15 @@ void cHydrosphereModel::print_min_max_hyd(){
     searchMinMax_2D(" max evaporation ", " min evaporation ", "mm/d", Evaporation, 1.0);
     searchMinMax_2D(" max sal_evap ", " min sal_evap ", "psu", salinity_evaporation, c_35);
 
-    cout << endl << " mass flows like Ekman pumping, up- and downwelling near coasts: " << endl << endl;
-    searchMinMax_2D(" max EkmanPumping ", " min EkmanPumping ", "kg/m²s", EkmanPumping, 1.0);
-    searchMinMax_2D(" max upwelling ", " min upwelling ", "kg/m²s", Upwelling, 1.0);
-    searchMinMax_2D(" max downwelling ", " min downwelling ", "kg/m²s", Downwelling, 1.0);
+    cout << endl << " vertical velocity from Ekman pumping, up- and downwelling near coasts: " << endl << endl;
+    // EkmanPumping is a vertical VELOCITY in cm/d (coeff_pumping=864 folds the
+    // m/s->cm/d conversion into the field; ThermoHyd.h). It is NOT a mass flux —
+    // the old "kg/m²s" label was wrong (it made the values absurd, e.g. 1.66
+    // "kg/m²s" = 143 m/day). The ParaView dump must match this (multiplier 1.0,
+    // like Precipitation/Evaporation) — see Paraview_Hyd.cpp.
+    searchMinMax_2D(" max EkmanPumping ", " min EkmanPumping ", "cm/d", EkmanPumping, 1.0);
+    searchMinMax_2D(" max upwelling ", " min upwelling ", "cm/d", Upwelling, 1.0);
+    searchMinMax_2D(" max downwelling ", " min downwelling ", "cm/d", Downwelling, 1.0);
 
     cout << endl << " solid soil contours like sea mounts: " << endl << endl;
     searchMinMax_2D(" max bathymetry ", " min bathymetry ", "m", Bathymetry, 1.0);
