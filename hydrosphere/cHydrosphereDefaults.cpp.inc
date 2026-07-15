@@ -59,8 +59,8 @@ void cHydrosphereModel::SetDefaultConfig() {
 
   // hydrosphere section
   input_path = "output_ATOM_Precipitation";
-  nm = 300;
-  checkpoint = 50;
+  nm = 1000;
+  checkpoint = 100;
   panorama_print = 100;
   atm_transfer_iter = 400;
   ocean_depth_mode = "shallow";

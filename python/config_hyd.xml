@@ -53,8 +53,8 @@
     </common>
     <hydrosphere>
         <input_path>output_ATOM_Precipitation</input_path>  <!-- directory where Atmosphere output can be read(must end in /)(string) -->
-        <nm>300</nm>  <!-- the maximum number of iterations(int) -->
-        <checkpoint>50</checkpoint>  <!-- control when to write output files(int) -->
+        <nm>1000</nm>  <!-- the maximum number of iterations(int) -->
+        <checkpoint>100</checkpoint>  <!-- control when to write output files(int) -->
         <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
         <atm_transfer_iter>400</atm_transfer_iter>  <!-- select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp(int) -->
         <ocean_depth_mode>shallow</ocean_depth_mode>  <!-- depth mode: "shallow" (200 m, near-surface/Ekman flows) or "deep" (6000 m, thermohaline conveyor belt)(string) -->

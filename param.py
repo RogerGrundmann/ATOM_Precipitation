@@ -225,8 +225,8 @@ def main():
         'hydrosphere': [
             ('input_path', 'directory where Atmosphere output can be read(must end in /)', 'string', 'output_ATOM_Precipitation'),
 
-            ('nm', 'the maximum number of iterations', 'int', 300),
-            ('checkpoint', "control when to write output files", 'int', 50),
+            ('nm', 'the maximum number of iterations', 'int', 1000),
+            ('checkpoint', "control when to write output files", 'int', 100),
             ('panorama_print', "control when to write panorama files", 'int', 100),
 
             ('atm_transfer_iter', 'select which atmosphere surface-coupling snapshot to read as the hydrosphere surface BC: reads the iter-stamped <stem>_Transfer_Atm_<iter>.vwtp for this iteration; -1 = use the latest fixed-name <stem>_Transfer_Atm.vwtp', 'int', 400),
