@@ -202,10 +202,10 @@ private:
     void paraview_vtk_longal(const string &Name_Bathymetry_File, int j_longal, int n);
     void HydrospherePlotData(const string &Name_Bathymetry_File);
     void HydrosphereDataTransfer(const string &Name_Bathymetry_File);
-    void run_3D_loop();
+    void run_3D_loop(int Ma);
     std::vector<Array*> restart_arrays();
-    void save_state(int iter);
-    bool load_state(int iter);
+    void save_state(int iter, int Ma);
+    bool load_state(int iter, int Ma);
     void zonal_mean_w(std::vector<std::vector<double> >& wbar);
     void write_w_momentum_budget(int iter);
     void write_v_momentum_budget(int iter);

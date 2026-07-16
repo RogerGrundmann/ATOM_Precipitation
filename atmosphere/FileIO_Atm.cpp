@@ -551,7 +551,7 @@ std::vector<Array*> cAtmosphereModel::restart_arrays(){
              &P_rain, &P_snow, &P_rainn, &P_snown };
 }
 
-void cAtmosphereModel::save_state(int iter){
+void cAtmosphereModel::save_state(int iter, int Ma){
     const string fn = output_path + "/atm_restart_" + std::to_string(Ma) + "Ma_"
                       + std::to_string(iter) + ".bin";
     std::ofstream f(fn, std::ios::binary);
@@ -573,7 +573,7 @@ void cAtmosphereModel::save_state(int iter){
          << fn << " (total_iter_count " << total_iter_count << ")" << endl;
 }
 
-bool cAtmosphereModel::load_state(int iter){
+bool cAtmosphereModel::load_state(int iter, int Ma){
     const string fn = output_path + "/atm_restart_" + std::to_string(Ma) + "Ma_"
                       + std::to_string(iter) + ".bin";
     std::ifstream f(fn, std::ios::binary);

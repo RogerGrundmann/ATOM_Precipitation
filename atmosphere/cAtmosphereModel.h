@@ -353,8 +353,8 @@ private:
     void save_data();
     void save_array(const string& fn, const Array& a);
     std::vector<Array*> restart_arrays();   // the prognostic 3D fields a checkpoint serializes
-    void save_state(int iter);              // dump restart_arrays() + total_iter_count to a binary file
-    bool load_state(int iter);              // restore them; returns false (and runs from scratch) if absent/mismatched
+    void save_state(int iter, int Ma);      // dump restart_arrays() + total_iter_count to a binary file (name carries Ma+iter)
+    bool load_state(int iter, int Ma);      // restore them; returns false (and runs from scratch) if absent/mismatched
     void BC_pole();
     void print_welcome_msg();
     void print_final_remarks();

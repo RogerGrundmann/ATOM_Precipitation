@@ -647,7 +647,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
     // Restart shortcut: overwrite the just-built initial conditions with a saved 3D
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
-    const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter);
+    const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter, Ma);
 
     // On a successful restart, start the loop counter at the restart point so the
     // printed iter_n matches where the run actually resumed (not back at 1).
@@ -1174,7 +1174,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
         // Checkpoint the full 3D state once total_iter_count reaches the requested iter.
         if(checkpoint_save_iter >= 0 && total_iter_count == checkpoint_save_iter)
-            save_state(checkpoint_save_iter);
+            save_state(checkpoint_save_iter, Ma);
 
         // Periodic restart checkpoints every 100 iters, but ONLY once the run is clean
         // (no non-finite cell in any serialized prognostic field) so we never write a
@@ -1193,7 +1193,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                                 if(!AtomUtils::is_finite_safe(a->x[i][j][k])) clean = false;
                 }
                 if(clean)
-                    save_state(total_iter_count);
+                    save_state(total_iter_count, Ma);
                 else
                     cout << "      AGCM: restart checkpoint SKIPPED at iter "
                          << total_iter_count << " — non-finite cell present (not clean)" << endl;

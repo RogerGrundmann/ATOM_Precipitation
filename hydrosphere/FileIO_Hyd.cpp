@@ -415,7 +415,7 @@ std::vector<Array*> cHydrosphereModel::restart_arrays(){
              &tke, &dis, &tken, &disn, &nue };
 }
 
-void cHydrosphereModel::save_state(int iter){
+void cHydrosphereModel::save_state(int iter, int Ma){
     const string fn = output_path + "/hyd_restart_" + std::to_string(Ma) + "Ma_"
                       + std::to_string(iter) + ".bin";
     std::ofstream f(fn, std::ios::binary);
@@ -437,7 +437,7 @@ void cHydrosphereModel::save_state(int iter){
          << fn << " (total_iter_count " << total_iter_count << ")" << endl;
 }
 
-bool cHydrosphereModel::load_state(int iter){
+bool cHydrosphereModel::load_state(int iter, int Ma){
     const string fn = output_path + "/hyd_restart_" + std::to_string(Ma) + "Ma_"
                       + std::to_string(iter) + ".bin";
     std::ifstream f(fn, std::ios::binary);

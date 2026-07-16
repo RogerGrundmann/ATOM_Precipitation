@@ -299,11 +299,11 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     // (~38 cm/s, not the ~80 cm/s CFL runaway that came from dividing by the
     // truncated 200 m column). See project_barotropic().
     PressureSolverHyd(*this).project_barotropic();
-    if(Ma == 0) run_3D_loop();                                          // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
+    if(Ma == 0) run_3D_loop(Ma);                                        // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
 
 
     cout << endl << endl;
-    if(Ma > 0) run_3D_loop();                                           // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
+    if(Ma > 0) run_3D_loop(Ma);                                         // iterational 3D loop to solve variables in 4-step Runge-Kutta time scheme
     cout << endl << endl;
 
 /*
@@ -384,7 +384,7 @@ void cHydrosphereModel::Run(){
 /*
 *
 */
-void cHydrosphereModel::run_3D_loop(){
+void cHydrosphereModel::run_3D_loop(int Ma){
 
 cout << endl << endl << endl << "      OGCM: run_3D_loop ..........................." << endl;
 
@@ -401,7 +401,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     // continues from where the saved run left off; a missing/mismatched file is a
     // no-op and the run proceeds from the IC.
     if(restart_from_iter >= 0)
-        load_state(restart_from_iter);
+        load_state(restart_from_iter, Ma);
 
     // Project the initial velocity field divergence-free before time-stepping
     // (mirror of the atmosphere, cAtmosphereModel.cpp). The ocean IC (EkmanSpiral
@@ -595,7 +595,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // so the large .bin + .vts share the coarser interval while the VTK
             // slices write more often. Falls back to every checkpoint if disabled.
             if (panorama_print <= 0 || iter_n % panorama_print == 0)
-                save_state(total_iter_count);
+                save_state(total_iter_count, Ma);
 
             // Zonal-mean w-momentum budget CSV (uses the wbud_* term split
             // captured this iter + the wbar_before snapshot for the net Δwbar).
