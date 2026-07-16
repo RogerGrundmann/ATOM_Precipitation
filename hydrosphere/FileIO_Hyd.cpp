@@ -416,7 +416,8 @@ std::vector<Array*> cHydrosphereModel::restart_arrays(){
 }
 
 void cHydrosphereModel::save_state(int iter){
-    const string fn = output_path + "/hyd_restart_" + std::to_string(iter) + ".bin";
+    const string fn = output_path + "/hyd_restart_" + std::to_string(Ma) + "Ma_"
+                      + std::to_string(iter) + ".bin";
     std::ofstream f(fn, std::ios::binary);
     if(!f){
         cout << "      OGCM: save_state FAILED to open " << fn << endl;
@@ -437,7 +438,8 @@ void cHydrosphereModel::save_state(int iter){
 }
 
 bool cHydrosphereModel::load_state(int iter){
-    const string fn = output_path + "/hyd_restart_" + std::to_string(iter) + ".bin";
+    const string fn = output_path + "/hyd_restart_" + std::to_string(Ma) + "Ma_"
+                      + std::to_string(iter) + ".bin";
     std::ifstream f(fn, std::ios::binary);
     if(!f){
         cout << "      OGCM: load_state: no file " << fn

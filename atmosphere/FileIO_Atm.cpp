@@ -552,7 +552,8 @@ std::vector<Array*> cAtmosphereModel::restart_arrays(){
 }
 
 void cAtmosphereModel::save_state(int iter){
-    const string fn = output_path + "/atm_restart_" + std::to_string(iter) + ".bin";
+    const string fn = output_path + "/atm_restart_" + std::to_string(Ma) + "Ma_"
+                      + std::to_string(iter) + ".bin";
     std::ofstream f(fn, std::ios::binary);
     if(!f){
         cout << "      AGCM: save_state FAILED to open " << fn << endl;
@@ -573,7 +574,8 @@ void cAtmosphereModel::save_state(int iter){
 }
 
 bool cAtmosphereModel::load_state(int iter){
-    const string fn = output_path + "/atm_restart_" + std::to_string(iter) + ".bin";
+    const string fn = output_path + "/atm_restart_" + std::to_string(Ma) + "Ma_"
+                      + std::to_string(iter) + ".bin";
     std::ifstream f(fn, std::ios::binary);
     if(!f){
         cout << "      AGCM: load_state: no file " << fn

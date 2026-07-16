@@ -1179,7 +1179,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // Periodic restart checkpoints every 100 iters, but ONLY once the run is clean
         // (no non-finite cell in any serialized prognostic field) so we never write a
         // NaN state that would later poison restart_from_iter. Files land at
-        // output_path/atm_restart_<total_iter_count>.bin (per-iter names, no clobber).
+        // output_path/atm_restart_<Ma>Ma_<total_iter_count>.bin (Ma+iter stamped, so a
+        // paleo chain of several time-slices never clobbers another slice's restart).
         {
             constexpr int restart_save_stride = 100;
             if(restart_save_stride > 0 && total_iter_count > 0
