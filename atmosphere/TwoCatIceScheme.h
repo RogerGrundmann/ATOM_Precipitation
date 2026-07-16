@@ -124,39 +124,31 @@ private:
     void initArrays() {
         using namespace std;
 
-        if(m.Ma != 0){
-            #pragma omp parallel for collapse(2)
-            for(int k = 0; k < m.km; k++){
-                for(int j = 0; j < m.jm; j++){
-                    #pragma omp simd
-                    for(int i = 0; i < m.im; i++){
-                        m.P_rain.x[i][j][k] = m.P_rainn.x[i][j][k] = 0.0;
-                        m.P_snow.x[i][j][k] = m.P_snown.x[i][j][k] = 0.0;
+        // Enforce non-negativity of the water species and warm-start the falling
+        // precip flux from the previous iteration's accumulation each call. This
+        // was previously the else-arm of an `if(m.Ma != 0)` split whose paleo arm
+        // hard-zeroed the precip seed instead — but the member Ma is never assigned
+        // (always 0, see project_atm_member_ma_latent_bug), so this arm always ran.
+        // The two arms are equivalent for the precip field anyway (computeColumns
+        // rebuilds P_rain/P_snow from a top-down integration with an iter_prec
+        // fixed point each call, so the seed washes out); the only real difference
+        // is the c/cloud/ice >= 0 clamp below, which we want for every run. The
+        // dead paleo arm is dropped so a future Ma-member fix cannot silently
+        // resurrect it and lose this clamp on paleo runs.
+        #pragma omp parallel for collapse(2)
+        for(int k = 0; k < m.km; k++){
+            for(int j = 0; j < m.jm; j++){
+                #pragma omp simd
+                for(int i = 0; i < m.im; i++){
+                    m.c.x[i][j][k]     = std::max(0.0, m.c.x[i][j][k]);
+                    m.cloud.x[i][j][k] = std::max(0.0, m.cloud.x[i][j][k]);
+                    m.ice.x[i][j][k]   = std::max(0.0, m.ice.x[i][j][k]);
 
-                        m.S_v.x[i][j][k] = 0.0;
-                        m.S_c.x[i][j][k] = 0.0;
-                        m.S_i.x[i][j][k] = 0.0;
-                        m.S_r.x[i][j][k] = 0.0;
-                        m.S_s.x[i][j][k] = 0.0;
-                    }
-                }
-            }
-        }else{
-            #pragma omp parallel for collapse(2)
-            for(int k = 0; k < m.km; k++){
-                for(int j = 0; j < m.jm; j++){
-                    #pragma omp simd
-                    for(int i = 0; i < m.im; i++){
-                        m.c.x[i][j][k]     = std::max(0.0, m.c.x[i][j][k]);
-                        m.cloud.x[i][j][k] = std::max(0.0, m.cloud.x[i][j][k]);
-                        m.ice.x[i][j][k]   = std::max(0.0, m.ice.x[i][j][k]);
+                    m.P_rainn.x[i][j][k] = std::max(0.0, m.P_rainn.x[i][j][k]);
+                    m.P_snown.x[i][j][k] = std::max(0.0, m.P_snown.x[i][j][k]);
 
-                        m.P_rainn.x[i][j][k] = std::max(0.0, m.P_rainn.x[i][j][k]);
-                        m.P_snown.x[i][j][k] = std::max(0.0, m.P_snown.x[i][j][k]);
-
-                        m.P_rain.x[i][j][k] = m.P_rainn.x[i][j][k];
-                        m.P_snow.x[i][j][k] = m.P_snown.x[i][j][k];
-                    }
+                    m.P_rain.x[i][j][k] = m.P_rainn.x[i][j][k];
+                    m.P_snow.x[i][j][k] = m.P_snown.x[i][j][k];
                 }
             }
         }
