@@ -131,20 +131,33 @@ public:
         // it carries no RHS dynamics, so a "surface" plot at im-1 is just an
         // extrapolated echo of im-2 (appears one level low). im-2 is the real
         // wind-forced dynamical top. Also emit im-1 for the surface scalar fields.
-        m.paraview_vtk_radial(bathymetry_name, m.im - 2, m.iter_n);
-        m.paraview_vtk_radial(bathymetry_name, m.im - 1, m.iter_n);
+        // Files are STAMPED WITH total_iter_count, NOT iter_n. The hydrosphere loops
+        // `for(iter_n = 1; iter_n <= nm; ...)` (cHydrosphereModel.cpp:421) — iter_n RESTARTS
+        // AT 1 on a resume — so stamping with iter_n made a restart write ..._100/200/...
+        // straight ON TOP of the original run's files (resuming from 400 silently destroyed
+        // the 0->400 VTK; hit for real at Ma=100 and Ma=200 on 2026-07-17). total_iter_count
+        // is the true cumulative iteration, and is what save_state already stamps restarts
+        // with, so it never collides. On a FRESH run total_iter_count == iter_n, so filenames
+        // are unchanged — a no-op except on restarts, where it is the fix.
+        // (The ATMOSPHERE needs no such change: it loops `for(iter_n = iter_start; ...)` with
+        // iter_start = restart_from_iter, so ITS iter_n is already absolute. Same root
+        // asymmetry as the nm-semantics split: nm is ABSOLUTE for the atm, ADDITIONAL here.)
+        m.paraview_vtk_radial(bathymetry_name, m.im - 2, m.total_iter_count);
+        m.paraview_vtk_radial(bathymetry_name, m.im - 1, m.total_iter_count);
 
         int j_longal = 75;
-        m.paraview_vtk_longal(bathymetry_name, j_longal, m.iter_n);
+        m.paraview_vtk_longal(bathymetry_name, j_longal, m.total_iter_count);
 
         int k_zonal = 185;
-        m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.iter_n);
+        m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.total_iter_count);
 
         // Panorama VTS fires whenever iter_n is a multiple of panorama_print (see comment
-        // in UtilsAtm.h::writeFile for why the panorama_cnt counter was replaced).
+        // in UtilsAtm.h::writeFile for why the panorama_cnt counter was replaced). The FIRING
+        // stays on iter_n — that is the run-local cadence the caller asked for; only the
+        // STAMP becomes total_iter_count, per the note above.
         if (m.paraview_panorama_vts_flag && m.panorama_print > 0
             && m.iter_n > 0 && m.iter_n % m.panorama_print == 0)
-            m.paraview_panorama_vts(bathymetry_name, m.iter_n);
+            m.paraview_panorama_vts(bathymetry_name, m.total_iter_count);
 
         m.HydrospherePlotData(bathymetry_name);
 
