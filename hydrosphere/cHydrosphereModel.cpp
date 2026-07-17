@@ -403,6 +403,27 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     if(restart_from_iter >= 0)
         load_state(restart_from_iter, Ma);
 
+    // ---- Dump-only mode: regenerate a checkpoint's ParaView output, don't advance ----
+    // nm == 0 with a restart re-emits the VTK/panorama for the RESTORED state and returns.
+    // Placed immediately after load_state and BEFORE the pre-loop projections below, so
+    // what is written is exactly the saved field, untouched. The stamp is total_iter_count
+    // (restored by load_state), so the files carry their true cumulative iteration.
+    // iter_n is set to match only so writeFile's `iter_n % panorama_print` cadence test
+    // fires — writeFile itself stamps from total_iter_count (see UtilsHyd.h::writeFile).
+    // Exists because the old iter_n-based naming let a restart overwrite the original
+    // run's VTK, and the surviving restart .bin files are the only intact record; this
+    // rebuilds the lost/mislabelled output from them. nm == 0 was previously a no-op
+    // (`for(iter_n = 1; iter_n <= 0; ...)` never executes), so this steals nothing.
+    if(nm == 0 && restart_from_iter >= 0){
+        iter_n = total_iter_count;
+        cout << endl << "      OGCM: DUMP-ONLY — re-emitting ParaView output for restored"
+             << " total_iter_count " << total_iter_count << " (no time stepping)" << endl;
+        ThermoHyd(*this).runDataHyd();
+        print_min_max_hyd();
+        UtilsHyd(*this).writeFile(bathymetry_name, output_path, true);
+        return;
+    }
+
     // Project the initial velocity field divergence-free before time-stepping
     // (mirror of the atmosphere, cAtmosphereModel.cpp). The ocean IC (EkmanSpiral
     // + thermohaline currents) is NOT divergence-free, and the in-loop projection
