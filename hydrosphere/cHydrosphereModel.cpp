@@ -439,6 +439,79 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     PressureSolverHyd(*this).project_velocity(60);
     PressureSolverHyd(*this).apply_barotropic_mode_split();   // seed the barotropic mode into the IC (both depth modes)
 
+    // ---- Convergence monitor (report-only), mirror of the atmosphere's ------------
+    // Every conv_stride iters, sample two slow volume-integral metrics — mean ocean
+    // temperature (thermodynamics) and mean kinetic energy (circulation) — and report the
+    // drift of the last conv_window samples' mean vs the previous window's. Window
+    // averaging cancels per-iter wobble so the drift is the SECULAR trend. Never stops the
+    // run (nm is the hard ceiling); also logged to output_path/convergence.csv.
+    //
+    // Two deliberate DIFFERENCES from the atmosphere's monitor:
+    //  1. OCEAN MASK. Land/unused cells are excluded (is_water). The atmosphere averages
+    //     its whole domain; here land cells hold 0 and would drag both means.
+    //  2. TEMPERATURE DRIFT IS REPORTED IN ABSOLUTE K/window, and the converged flag uses
+    //     it. A PERCENT drift relative to Kelvin is meaningless for an ocean: the mean sits
+    //     near 287 K, so a real cooling of ~0.07 K/100 iters is only ~0.024 % — under the
+    //     atmosphere's 1 % tolerance, which would report CONVERGED while the ocean visibly
+    //     cools ~1 K over 900 iters. KE keeps the percent test (its zero IS physical, so a
+    //     relative drift is meaningful there). The percent T drift is still logged for
+    //     comparability with the atmosphere's CSV.
+    // NOTE the pinned surface row (t.x[im-1] = t_surf_fix every iter) is INCLUDED: it is
+    // ~1/41 of the column and constant, so it only damps the reported T drift by ~5%.
+    constexpr int    conv_stride   = 25;     // sample cadence [iters]
+    constexpr int    conv_window   = 4;      // samples per window (-> 100-iter trailing window)
+    constexpr double conv_tol_pct  = 1.0;    // KE convergence threshold [% drift per window]
+    constexpr double conv_tol_T_K  = 0.01;   // T convergence threshold [K drift per window]
+    std::vector<double> conv_histT, conv_histKE;
+    auto ocean_mean_T = [&]() -> double {
+        double sum = 0.0, wsum = 0.0;
+        #pragma omp parallel for reduction(+:sum,wsum) schedule(static)
+        for(int j = 0; j < jm; j++){
+            const double coslat = sin(the.z[j]);                 // the.z = colatitude
+            for(int i = 0; i < im; i++){
+                const double dz = (i < im-1) ? (rad.z[i+1] - rad.z[i]) * L_hyd : 0.0;
+                const double wt = coslat * dz;
+                for(int k = 0; k < km; k++)
+                    if(is_water(h, i, j, k)){ sum += wt * t.x[i][j][k] * t_0; wsum += wt; }
+            }
+        }
+        return (wsum > 0.0) ? sum / wsum : 0.0;                  // [K]
+    };
+    auto ocean_mean_KE = [&]() -> double {
+        double sum = 0.0, wsum = 0.0;
+        #pragma omp parallel for reduction(+:sum,wsum) schedule(static)
+        for(int j = 0; j < jm; j++){
+            const double coslat = sin(the.z[j]);
+            for(int i = 0; i < im; i++){
+                const double dz = (i < im-1) ? (rad.z[i+1] - rad.z[i]) * L_hyd : 0.0;
+                const double wt = coslat * dz;
+                for(int k = 0; k < km; k++){
+                    if(!is_water(h, i, j, k)) continue;
+                    const double uu = u.x[i][j][k], vv = v.x[i][j][k], ww = w.x[i][j][k];
+                    sum += wt * 0.5 * (uu*uu + vv*vv + ww*ww); wsum += wt;
+                }
+            }
+        }
+        return (wsum > 0.0) ? (sum / wsum) * (u_0 * u_0) : 0.0;  // [m2/s2] (velocities are /u_0)
+    };
+    // Returns the trailing-window drift of `metric`, or -1 while still warming up
+    // (fewer than 2 full windows). `abs_out` receives the drift in the metric's own units.
+    auto conv_drift = [&](std::vector<double>& hist, double metric, double& abs_out) -> double {
+        hist.push_back(metric);
+        const int n = (int)hist.size();
+        if(n < 2*conv_window){ abs_out = -1.0; return -1.0; }
+        double cur = 0.0, prev = 0.0;
+        for(int i = n-conv_window;   i < n;             i++) cur  += hist[i];
+        for(int i = n-2*conv_window; i < n-conv_window; i++) prev += hist[i];
+        cur /= conv_window; prev /= conv_window;
+        abs_out = std::fabs(cur - prev);
+        return 100.0 * abs_out / std::max(1e-12, std::fabs(cur));
+    };
+    if(restart_from_iter < 0){                                   // fresh run: (re)create with header
+        std::ofstream cf(output_path + "/convergence_hyd.csv");
+        if(cf) cf << "iter,mean_T_K,drift_T_pct,drift_T_K,mean_KE_m2s2,drift_KE_pct,converged\n";
+    }
+
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
         print_loop_3D_headings();
@@ -602,6 +675,29 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
 //        UtilsHyd(*this).findResiduumHyd();
 
         UtilsHyd(*this).storeIntermediateData3D(1.0);
+
+        // Convergence monitor: sample the slow integral metrics and report secular drift.
+        // Report-only — never stops the run. See the setup block before the loop for why
+        // T is gated on an ABSOLUTE K drift while KE keeps the percent test.
+        if(conv_stride > 0 && total_iter_count > 0 && total_iter_count % conv_stride == 0){
+            double dT_K = 0.0, dKE_abs = 0.0;
+            const double mT   = ocean_mean_T();
+            const double mKE  = ocean_mean_KE();
+            const double dT   = conv_drift(conv_histT,  mT,  dT_K);
+            const double dKE  = conv_drift(conv_histKE, mKE, dKE_abs);
+            const bool warming = (dT < 0.0) || (dKE < 0.0);      // < 2 windows of samples yet
+            const bool converged = !warming && dT_K < conv_tol_T_K && dKE < conv_tol_pct;
+            cout << "      [conv] iter " << total_iter_count
+                 << "  T=" << mT << " K  KE=" << mKE << " m2/s2";
+            if(warming) cout << "  (warming up)";
+            else cout << "  drift: T=" << dT_K << " K (" << dT << "%)  KE=" << dKE
+                      << "%/window" << (converged ? "  -> CONVERGED (both < tol)" : "");
+            cout << std::endl;
+            std::ofstream cf(output_path + "/convergence_hyd.csv", std::ios::app);
+            if(cf) cf << total_iter_count << "," << mT << "," << (warming?0.0:dT) << ","
+                      << (warming?0.0:dT_K) << "," << mKE << "," << (warming?0.0:dKE) << ","
+                      << (converged?1:0) << "\n";
+        }
 
 //        print_min_max_hyd();
 
