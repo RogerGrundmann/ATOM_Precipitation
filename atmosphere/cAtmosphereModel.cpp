@@ -663,9 +663,15 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // tracked alongside T because a run can look thermally settled while still spinning
     // down. Report-only (never auto-stops; nm is the hard ceiling); also logged to
     // output_path/convergence.csv. Cost: one grid reduction per conv_stride iters.
+    // T convergence is gated on an ABSOLUTE K drift, not a percent of Kelvin: the mean sits
+    // near 260 K, so the old 1 %-of-Kelvin test (~2.6 K/window) reported CONVERGED while the
+    // circulation was still visibly evolving — i.e. the flag was effectively KE-only. KE
+    // keeps the percent test (its zero IS physical, so a relative drift is meaningful there).
+    // The percent T drift is still logged for continuity. Mirrors the hydro monitor.
     constexpr int    conv_stride  = 25;    // sample cadence [iters]
     constexpr int    conv_window  = 4;     // samples per window (-> 100-iter trailing window)
-    constexpr double conv_tol_pct = 1.0;   // convergence threshold [% drift per window]
+    constexpr double conv_tol_pct = 1.0;   // KE convergence threshold [% drift per window]
+    constexpr double conv_tol_T_K = 0.01;  // T  convergence threshold [K drift per window]
     std::vector<double> conv_histT, conv_histKE;
     auto domain_mean_T = [&]() -> double {
         double sum = 0.0, wsum = 0.0;
@@ -696,19 +702,21 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         }
         return (wsum > 0.0) ? (sum / wsum) * (u_0 * u_0) : 0.0;  // [m2/s2] (velocities are /u_0)
     };
-    // returns drift %/window, or -1.0 while still warming up (< 2 windows of samples)
-    auto conv_drift = [&](std::vector<double>& hist, double metric) -> double {
+    // returns drift %/window (or -1.0 while still warming up, < 2 windows of samples);
+    // abs_out receives the drift in the metric's own units (K for T, m2/s2 for KE).
+    auto conv_drift = [&](std::vector<double>& hist, double metric, double& abs_out) -> double {
         hist.push_back(metric);
         const int n = (int)hist.size();
-        if(n < 2*conv_window) return -1.0;
+        if(n < 2*conv_window){ abs_out = -1.0; return -1.0; }
         double cur = 0.0, prev = 0.0;
         for(int i = n-conv_window;   i < n;             i++) cur  += hist[i];
         for(int i = n-2*conv_window; i < n-conv_window; i++) prev += hist[i];
         cur /= conv_window; prev /= conv_window;
-        return 100.0 * std::fabs(cur - prev) / std::max(1e-12, std::fabs(cur));
+        abs_out = std::fabs(cur - prev);
+        return 100.0 * abs_out / std::max(1e-12, std::fabs(cur));
     };
     { std::ofstream cf(output_path + "/convergence.csv");         // (re)create with header
-      if(cf) cf << "iter,mean_T_K,drift_T_pct,mean_KE_m2s2,drift_KE_pct,converged\n"; }
+      if(cf) cf << "iter,mean_T_K,drift_T_pct,drift_T_K,mean_KE_m2s2,drift_KE_pct,converged\n"; }
     // --------------------------------------------------------------------------------
 
     for(iter_n = iter_start; iter_n <= nm; iter_n++){
@@ -1155,21 +1163,23 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
         // Convergence monitor: sample the slow integral metrics and report secular drift.
         if(conv_stride > 0 && total_iter_count > 0 && total_iter_count % conv_stride == 0){
+            double dT_K = 0.0, dKE_abs = 0.0;
             const double mT  = domain_mean_T();
             const double mKE = domain_mean_KE();
-            const double dT  = conv_drift(conv_histT,  mT);
-            const double dKE = conv_drift(conv_histKE, mKE);
+            const double dT  = conv_drift(conv_histT,  mT,  dT_K);
+            const double dKE = conv_drift(conv_histKE, mKE, dKE_abs);
             const bool warming = (dT < 0.0) || (dKE < 0.0);
-            const bool converged = !warming && dT < conv_tol_pct && dKE < conv_tol_pct;
+            const bool converged = !warming && dT_K < conv_tol_T_K && dKE < conv_tol_pct;
             cout << "      [conv] iter " << total_iter_count
                  << "  T=" << mT << " K  KE=" << mKE << " m2/s2";
             if(warming) cout << "  (warming up)";
-            else cout << "  drift: T=" << dT << "%  KE=" << dKE << "%/window"
-                      << (converged ? "  -> CONVERGED (both < tol)" : "");
+            else cout << "  drift: T=" << dT_K << " K (" << dT << "%)  KE=" << dKE
+                      << "%/window" << (converged ? "  -> CONVERGED (both < tol)" : "");
             cout << std::endl;
             std::ofstream cf(output_path + "/convergence.csv", std::ios::app);
             if(cf) cf << total_iter_count << "," << mT << "," << (warming?0.0:dT) << ","
-                      << mKE << "," << (warming?0.0:dKE) << "," << (converged?1:0) << "\n";
+                      << (warming?0.0:dT_K) << "," << mKE << "," << (warming?0.0:dKE) << ","
+                      << (converged?1:0) << "\n";
         }
 
         // Checkpoint the full 3D state once total_iter_count reaches the requested iter.
