@@ -85,20 +85,34 @@ public:
                     xf[iml][j][k] = xf[iml-3][j][k]   - 3.0 * xf[iml-2][j][k]   + 3.0 * xf[iml-1][j][k];
                 }
 
-                // Radial velocity: no-normal-flow (zero-gradient) at BOTH the
+                // Radial velocity: no-normal-flow = u VANISHES (Dirichlet u=0) at BOTH the
                 // impermeable seafloor (i=0) and the rigid-lid sea surface (i=im-1),
                 // overriding the cubic above. The cubic u[end]=u[e-3]-3u[e-2]+3u[e-1]
-                // (condition ~7) AMPLIFIES the boundary radial velocity ~2x per level.
-                // Harmless while u was painted/inert, but once the face-consistent
-                // projection made the vertical dynamics active it ran away at whichever
-                // boundary stayed cubic: seafloor (i0/1 -> 45 m/s @42S/139W by ~iter150)
-                // and — after the bottom was fixed — the sea surface (i40 -> 9 m/s
-                // @53N/153E by ~iter500, NaN ~595). The radial velocity vanishes at an
-                // impermeable floor AND a rigid lid, so zero-gradient (factor 1) is both
-                // physical and breaks the feedback. v,w keep the cubic (boundary
-                // horizontal currents are real; the instability is radial only).
-                m.u.x[0][j][k]   = m.u.x[1][j][k];
-                m.u.x[iml][j][k] = m.u.x[iml-1][j][k];
+                // (condition ~7) AMPLIFIES the boundary radial velocity ~2x per level and
+                // ran away fast once the face-consistent projection made the vertical
+                // dynamics active (seafloor -> 45 m/s @42S/139W ~iter150; sea surface ->
+                // 9 m/s @53N/153E ~iter500, NaN ~595).
+                //
+                // ⚠ This BC was previously ZERO-GRADIENT (u[0]=u[1], u[im-1]=u[im-2]),
+                // mislabeled "no-normal-flow." Zero-gradient is NOT no-normal-flow: it sets
+                // the boundary velocity EQUAL to the interior (non-zero), which leaves the
+                // column's constant-in-depth vertical-velocity mode UNPINNED. That mode has
+                // ∂u/∂z≈0, so it adds no divergence and is invisible to the divergence-based
+                // projection -> never removed, no restoring -> it drifts up every iter (a
+                // slow global radial-velocity runaway: radial KE and u_rms ramp over hundreds
+                // of iters = the whole ocean-KE non-convergence; see
+                // project_hydro_radial_velocity_runaway). Zero-gradient killed the FAST cubic
+                // blow-up but not this SLOW drift. The radial velocity genuinely VANISHES at
+                // an impermeable floor and a rigid lid, so Dirichlet u=0 is the physical
+                // no-normal-flow BC; it pins the vertical mode and pairs consistently with
+                // the projection's Neumann pressure BC. VALIDATED (A/B from the Ma=200 iter-400
+                // restart, +200 iters): radial KE 1.75->2.87 (zero-grad) vs 1.75->1.33 (u=0),
+                // and total KE +14% vs -2.5% (u=0 ~converges). At the truncated bottom in
+                // shallow mode this imposes a rigid bottom at the truncation depth (standard
+                // for a truncated model). v,w keep the cubic (boundary horizontal currents are
+                // real; the instability is radial only).
+                m.u.x[0][j][k]   = 0.0;
+                m.u.x[iml][j][k] = 0.0;
             }
         }
     }
