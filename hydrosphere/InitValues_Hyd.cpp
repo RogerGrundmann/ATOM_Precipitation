@@ -1031,15 +1031,23 @@ void cHydrosphereModel::initSalinity() {
                     for (int j = 0; j < jm; j++)
                         c.x[i_max][j][k] = sss.y[j][k] / c_35 + c_paleo_nd;
             } else {
-                // zonal-mean latitude profile over ocean cells
+                // zonal-mean latitude profile over ocean cells with VALID data.
+                // The NASA SSS file uses -32767 as its missing-data sentinel over
+                // ice-masked ocean (increasingly poleward of ~60°: ~70% of cells at
+                // 65-80°, 100% at the poles). Those cells are is_water=true in the
+                // paleo geography, so averaging them in poisoned zmean to hugely
+                // negative values -> the surface-salinity IC clamped to 0 poleward of
+                // ±60° (fresh-cap artefact + wrong polar density/buoyancy). Require
+                // sss > 0 to skip the sentinel; a fully ice-masked latitude then gets
+                // n=0 -> zmean=0 and is filled from the nearest valid row below.
                 std::vector<double> zmean(jm, 0.0);
                 for (int j = 0; j < jm; j++) {
                     double sum = 0.0; int n = 0;
                     for (int k = 0; k < km; k++)
-                        if (is_water(h, i_max, j, k)) { sum += sss.y[j][k]; ++n; }
+                        if (is_water(h, i_max, j, k) && sss.y[j][k] > 0.0) { sum += sss.y[j][k]; ++n; }
                     zmean[j] = (n > 0) ? sum / (double)n : 0.0;
                 }
-                // fill all-land latitude rows from the nearest valid neighbour
+                // fill all-land / all-ice-masked latitude rows from the nearest valid neighbour
                 for (int j = 0; j < jm; j++) if (zmean[j] == 0.0)
                     for (int d = 1; d < jm; d++) {
                         if (j-d >= 0   && zmean[j-d] > 0.0) { zmean[j] = zmean[j-d]; break; }
