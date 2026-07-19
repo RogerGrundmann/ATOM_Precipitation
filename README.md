@@ -105,6 +105,79 @@ Key parameters for the atmosphere:
 
 The full parameter set and documentation are in `param.py`. The build step auto-generates C++ and Python stubs from this file.
 
+> **Note:** editing `param.py` regenerates `*Params.h.inc`, which changes the C++ class
+> layout. Always `make clean` afterwards — an incremental build links object files with
+> mixed old/new layouts and corrupts memory.
+
+## Atmosphere ⇄ ocean SST coupling
+
+Beyond the one-way hand-off (the atmosphere writes a surface wind/temperature transfer
+file that the hydrosphere reads as its surface boundary condition), the models can be
+coupled **both ways**, so the ocean's own sea-surface temperature (SST) feeds back into
+the next atmosphere solve instead of the atmosphere always dictating a frozen SST. Three
+pieces make this possible; all default to the classic one-way behaviour and are opt-in.
+
+### 1. Ocean surface thermal boundary condition — `sst_relax_alpha` (hydrosphere)
+
+Controls how strongly the ocean surface temperature is relaxed toward the prescribed
+atmospheric SST each iteration:
+
+| `sst_relax_alpha` | Behaviour |
+|---|---|
+| `1.0` (default) | Hard Dirichlet re-pin — the surface is reset to the atmospheric SST every iteration (the long-standing behaviour, bit-identical) |
+| `< 1` | Haney-type flux BC — the surface keeps a fraction of its own tendency, so ocean dynamics can build a real SST anomaly instead of having it erased |
+| `0` | Unforced (cold-collapse regime — do not use) |
+
+This is a numerical knob, not a physical restoring timescale (see the note in `param.py`).
+A value `< 1` is what lets the ocean carry structure that the coupling below can return.
+
+### 2. Reverse channel — hydrosphere SST → atmosphere `t.x[0]`
+
+The hydrosphere writes its surface SST to an iteration-stamped file
+`<slice>_Transfer_Hyd_SST_<iter>.vwtp`. The atmosphere can read it and blend it into its
+ocean surface temperature at initialisation:
+
+```
+t.x[0] ← (1 − sst_coupling_alpha)·t.x[0] + sst_coupling_alpha·SST_ocean
+```
+
+| Parameter (atmosphere) | Default | Effect |
+|---|---|---|
+| `sst_coupling_alpha` | `0.0` (OFF) | Blend fraction of the ocean SST into the atmospheric surface. `0` = no read (bit-identical to the one-way chain) |
+| `hyd_sst_iter` | `-1` | Which hydrosphere SST snapshot to read; `-1` = the latest one present |
+
+The blend is ocean-only, finite-checked, SST-clamped to `[-1.8, 40] °C`, and
+**ocean-mean-anchored** (the global ocean-mean is preserved, so the coupling moves SST
+*structure* without shifting ocean energy). It is applied before the Held-Suarez
+relaxation target is snapshotted, so the returned SST also shapes that target.
+
+### 3. Picard outer loop — `python/run_picard_sst.py`
+
+Wraps the two directions in a fixed-point (Picard) iteration: the initial guess is the
+frozen zonal parabola; each round re-runs **both** models and blends the ocean SST back
+into the atmosphere until it stops changing.
+
+```
+round 0:  ATM (no SST yet) → winds ;  HYD → SST₀
+round r:  ATM (blends SSTᵣ₋₁) → winds ;  HYD → SSTᵣ ;  report max|SSTᵣ − SSTᵣ₋₁|
+```
+
+```bash
+python python/run_picard_sst.py <Ma> --rounds 3 --alpha 0.4 --hyd-relax 0.5 --nm 400
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--rounds` | `4` | Number of Picard rounds (round 0 = the plain one-way chain) |
+| `--alpha` | `0.4` | Atmosphere-side blend fraction (`sst_coupling_alpha`) for rounds ≥ 1 |
+| `--hyd-relax` | `0.5` | Hydrosphere `sst_relax_alpha`; **must be `< 1`** or the loop is trivial (the surface is re-pinned and the channel returns the same field) |
+| `--nm` | `400` | Iterations per atmosphere/hydrosphere run |
+| `--checkpoint` | `100` | VTK/panorama printout stride, and the convergence-monitor sampling cadence |
+| `--tol` | `0.05` | Stop when `max|ΔSST|` between rounds drops below this (K) |
+
+Each round runs from scratch in its own sub-directory; the report-only convergence
+monitor writes a `convergence.csv` (ocean-mean-T and kinetic-energy drift) per round.
+
 ## Output
 
 Each run writes output files to `output/`:
