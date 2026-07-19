@@ -171,9 +171,11 @@ python python/run_picard_sst.py <Ma> --rounds 3 --alpha 0.4 --hyd-relax 0.5 --nm
 | `--rounds` | `4` | Number of Picard rounds (round 0 = the plain one-way chain) |
 | `--alpha` | `0.4` | Atmosphere-side blend fraction (`sst_coupling_alpha`) for rounds ≥ 1 |
 | `--hyd-relax` | `0.5` | Hydrosphere `sst_relax_alpha`; **must be `< 1`** or the loop is trivial (the surface is re-pinned and the channel returns the same field) |
+| `--anderson` | `0` | Anderson-acceleration history depth `m` (`0` = plain Picard). `m ≈ 2–3` mixes past iterates to reach the fixed point in fewer rounds; engages from round 3 on |
+| `--anderson-beta` | `1.0` | Anderson mixing/damping (`1.0` = none; `< 1` adds under-relaxation) |
 | `--nm` | `400` | Iterations per atmosphere/hydrosphere run |
 | `--checkpoint` | `100` | VTK/panorama printout stride, and the convergence-monitor sampling cadence |
-| `--tol` | `0.05` | Stop when `max|ΔSST|` between rounds drops below this (K) |
+| `--tol` | `0.05` | Stop when the fixed-point residual `max|gᵣ − uᵣ|` drops below this (K); equals the round-to-round `max|ΔSST|` in plain-Picard mode |
 
 Each round runs from scratch in its own sub-directory; the report-only convergence
 monitor writes a `convergence.csv` (ocean-mean-T and kinetic-energy drift) per round.
