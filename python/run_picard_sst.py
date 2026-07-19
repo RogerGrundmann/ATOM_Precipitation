@@ -1,34 +1,47 @@
 #!/usr/bin/env python
 # ---------------------------------------------------------------------------
-# atm<->hyd SST Picard outer loop (scaffold).
+# atm<->hyd SST Picard outer loop, with optional Anderson acceleration.
 #
 # Fixed-point iteration on the ocean sea-surface temperature. The frozen Scotese
 # zonal parabola is the round-0 initial guess; each round re-runs BOTH models and
 # blends the hydrosphere's SST back into the atmosphere until the SST stops moving.
 #
-#   round 0:  ATM (alpha=0, no SST file yet) -> winds
-#             HYD (reads winds)              -> SST_0
-#   round r:  copy SST_{r-1} into round dir
-#             ATM (sst_coupling_alpha=alpha, reads SST_{r-1}, blends into t.x[0]) -> winds
-#             HYD (reads winds)                                                   -> SST_r
-#             convergence:  max|SST_r - SST_{r-1}|  (over ocean, reported in K)
+#   round 0:  ATM (alpha=0, no SST file yet) -> winds ;  HYD (reads winds) -> SST_0 = g_0
+#   round r:  form the input field u_r (below) and write it where the atm reads it
+#             ATM (sst_coupling_alpha=alpha, reads u_r, blends into t.x[0]) -> winds
+#             HYD (reads winds)                                             -> g_r
+#             fixed-point residual:  max|g_r - u_r|  (over ocean, reported in K)
+#
+# Define the round map G by g_r = G(u_r): "atm blends u_r, runs; hyd runs; returns SST".
+# The fixed point u* = g* (the round returns the SST it was given) is a self-consistent
+# atm<->ocean state. Two ways to pick u_r:
+#
+#   * PLAIN PICARD (--anderson 0, default): u_r = g_{r-1}. This is exactly the loop
+#     validated at Ma=100 (round-delta contraction ~9x/round). numpy is not used.
+#
+#   * ANDERSON(m) (--anderson m>0): u_{k+1} = u_k + beta*f_k - (dU + beta*dF) gamma,
+#     f_k = g_k - u_k, gamma = argmin || f_k - dF gamma ||_2, where dF/dU are the last
+#     m residual/input differences (Walker & Ni 2011). It mixes a short history of past
+#     iterates to cancel the leading error modes, so a well-behaved loop reaches the
+#     fixed point in fewer rounds. With m=0 or too little history it falls back to the
+#     damped Picard step u_k + beta*f_k (== plain Picard at beta=1). Anderson genuinely
+#     engages once >=2 residuals exist (round 3+), so run --rounds 4-5 to benefit.
+#     Overshoot is safe: the C++ read_Hydrosphere_SST clamps SST to [-1.8,40] C and
+#     re-anchors the ocean-mean before blending.
 #
 # The reverse channel is the C++ pair HydrosphereSSTTransfer (writes
-# <stem>_Transfer_Hyd_SST_<iter>.vwtp) / read_Hydrosphere_SST (blends it in). Each
-# round runs from scratch, so total_iter_count restarts and the SST stamp repeats;
-# rounds are therefore isolated in their own sub-directories and the previous
-# round's SST is copied forward explicitly (below), rather than relying on the
-# in-dir "latest snapshot" auto-select.
+# <stem>_Transfer_Hyd_SST_<iter>.vwtp) / read_Hydrosphere_SST (blends it in). Each round
+# runs from scratch (total_iter_count restarts, so the SST stamp repeats); rounds are
+# isolated in their own sub-directories and the input field is placed there explicitly.
 #
-# Safety: round 0 is EXACTLY the existing one-way chain (alpha forced to 0, no SST
-# file present). The C++ blend is ocean-only, finite-checked, SST-clamped and
-# ocean-mean-anchored, so it moves SST structure without shifting ocean energy.
+# Safety: round 0 is EXACTLY the existing one-way chain (alpha forced to 0, no SST file).
 #
 # Usage:
-#   python run_picard_sst.py <Ma> [--rounds N] [--alpha A] [--nm ITERS]
-#                                  [--tol K] [--base DIR]
+#   python run_picard_sst.py <Ma> [--rounds N] [--alpha A] [--hyd-relax R] [--nm ITERS]
+#                                  [--anderson M] [--anderson-beta B]
+#                                  [--checkpoint C] [--tol K] [--base DIR]
 # Example:
-#   python run_picard_sst.py 100 --rounds 4 --alpha 0.4 --nm 400
+#   python run_picard_sst.py 100 --rounds 5 --alpha 0.4 --hyd-relax 0.5 --anderson 2
 # ---------------------------------------------------------------------------
 import sys, os, glob, shutil, argparse
 from pyatom import Atmosphere, Hydrosphere
@@ -37,7 +50,7 @@ T_0 = 273.15  # non-dim temperature reference: T_C = (t_nd - 1) * T_0, so dT_C =
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="atm<->hyd SST Picard outer loop")
+    p = argparse.ArgumentParser(description="atm<->hyd SST Picard outer loop (+ Anderson accel)")
     p.add_argument("Ma", type=int, help="paleo time slice in Ma")
     p.add_argument("--rounds", type=int, default=4, help="number of Picard rounds (incl. round 0)")
     p.add_argument("--alpha", type=float, default=0.4, help="atm-side SST blend fraction for rounds >= 1")
@@ -46,11 +59,17 @@ def parse_args():
                         "non-trivial loop: at 1.0 the ocean surface is hard re-pinned to the atm SST, "
                         "so the reverse channel just returns the same field and the loop converges "
                         "trivially. 0 = unforced cold-collapse (do not use).")
+    p.add_argument("--anderson", type=int, default=0,
+                   help="Anderson acceleration history depth m (0 = plain Picard). m~2-3 is typical; "
+                        "engages from round 3 on. Needs numpy.")
+    p.add_argument("--anderson-beta", type=float, default=1.0,
+                   help="Anderson mixing/damping (1.0 = none; <1 adds under-relaxation for robustness).")
     p.add_argument("--nm", type=int, default=400, help="iterations per atm/hyd run")
     p.add_argument("--checkpoint", type=int, default=100,
                    help="VTK/panorama printout stride within each run (also the report-only "
                         "convergence-monitor sampling cadence; convergence.csv is written per round dir)")
-    p.add_argument("--tol", type=float, default=0.05, help="Picard convergence tol on max|dSST| in K")
+    p.add_argument("--tol", type=float, default=0.05,
+                   help="stop when the fixed-point residual max|g_r - u_r| drops below this (K)")
     p.add_argument("--base", default=None, help="base output dir (default output_picard_<Ma>Ma)")
     return p.parse_args()
 
@@ -78,11 +97,42 @@ def read_sst(path):
     return vals
 
 
-def max_dsst_kelvin(path_a, path_b):
-    """max|a - b| over cells, in K. Land is 0 in both files so contributes 0."""
-    a, b = read_sst(path_a), read_sst(path_b)
-    n = min(len(a), len(b))
-    return max((abs(a[i] - b[i]) for i in range(n)), default=0.0) * T_0
+def write_sst(path, vals):
+    """Write a non-dim SST field in the format read_Hydrosphere_SST expects
+    (one value per row, a leading '# iter_n' headline). Matches the C++ writer's
+    6-decimal format so the atm reads a driver-supplied field just like a hyd one."""
+    with open(path, "w") as f:
+        f.write("# iter_n = picard_input\n")
+        f.write("\n".join("%.6f" % v for v in vals))
+        f.write("\n")
+
+
+def max_resid_kelvin(g_vals, u_vals):
+    """Fixed-point residual max|g - u| in K. Land is 0 in both, so it drops out."""
+    n = min(len(g_vals), len(u_vals))
+    return max((abs(g_vals[i] - u_vals[i]) for i in range(n)), default=0.0) * T_0
+
+
+def anderson_next(U, G, m, beta):
+    """Anderson(m) next input field. U, G are lists of value-lists (inputs actually
+    used, and the hyd outputs they produced), most recent last. Returns a value-list.
+    Walker & Ni (2011): with f_i = g_i - u_i,
+        gamma = argmin || f_k - dF gamma ||,   dF = [f_{i+1}-f_i] over the last min(m,k) steps
+        u_next = u_k + beta*f_k - (dU + beta*dF) gamma
+    Falls back to the damped Picard step u_k + beta*f_k when there is no history."""
+    import numpy as np
+    Ua = [np.asarray(u) for u in U]
+    Ga = [np.asarray(g) for g in G]
+    F = [g - u for u, g in zip(Ua, Ga)]
+    k = len(F) - 1
+    u_k, f_k = Ua[k], F[k]
+    hist = min(m, k)
+    if hist == 0:
+        return (u_k + beta * f_k).tolist()
+    dF = np.column_stack([F[i + 1] - F[i] for i in range(k - hist, k)])
+    dU = np.column_stack([Ua[i + 1] - Ua[i] for i in range(k - hist, k)])
+    gamma, *_ = np.linalg.lstsq(dF, f_k, rcond=None)
+    return (u_k + beta * f_k - (dU + beta * dF) @ gamma).tolist()
 
 
 def run_atm(Ma, outdir, nm, alpha, ckpt):
@@ -113,19 +163,28 @@ def main():
     args = parse_args()
     base = args.base or ("output_picard_%dMa" % args.Ma)
     os.makedirs(base, exist_ok=True)
-    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f nm=%d tol=%.3fK base=%s ###"
-          % (args.Ma, args.rounds, args.alpha, args.nm, args.tol, base), flush=True)
+    accel = "Anderson(%d, beta=%.2f)" % (args.anderson, args.anderson_beta) if args.anderson > 0 else "plain Picard"
+    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f hyd_relax=%.3f nm=%d tol=%.3fK %s base=%s ###"
+          % (args.Ma, args.rounds, args.alpha, args.hyd_relax, args.nm, args.tol, accel, base), flush=True)
 
-    prev_sst = None
+    prev_sst = None       # path to g_{r-1}'s SST file
+    U_hist = []           # value-lists: input fields actually used (rounds >= 1)
+    G_hist = []           # value-lists: hyd outputs g_r (aligned with U_hist)
     for r in range(args.rounds):
         rdir = os.path.join(base, "round_%d" % r) + "/"
         os.makedirs(rdir, exist_ok=True)
         alpha = 0.0 if r == 0 else args.alpha
 
-        # Carry the previous round's SST into this round's dir so the atm reader
-        # (which scans its own output_path) can find and blend it.
-        if r >= 1 and prev_sst is not None:
-            shutil.copy(prev_sst, rdir)
+        # Build the input field u_r and place it where round r's atm will read it.
+        if r >= 1:
+            name = os.path.basename(prev_sst)   # keep the stem/iter so the atm's scan selects it
+            if args.anderson > 0 and len(U_hist) >= 1:
+                u_vals = anderson_next(U_hist, G_hist, args.anderson, args.anderson_beta)
+                write_sst(os.path.join(rdir, name), u_vals)
+            else:
+                shutil.copy(prev_sst, rdir)     # plain Picard: input = previous output (byte-identical)
+                u_vals = read_sst(prev_sst)
+            U_hist.append(u_vals)
 
         print("=== round %d/%d (alpha=%.3f) ===" % (r, args.rounds - 1, alpha), flush=True)
         run_atm(args.Ma, rdir, args.nm, alpha, args.checkpoint)
@@ -135,12 +194,14 @@ def main():
         if cur_sst is None:
             print("    !! no SST snapshot produced in %s — hyd run failed? stopping." % rdir, flush=True)
             return 2
+        g_vals = read_sst(cur_sst)
 
-        if prev_sst is not None:
-            d = max_dsst_kelvin(cur_sst, prev_sst)
-            print("    >> round %d: max|dSST| = %.4f K (tol %.4f K)" % (r, d, args.tol), flush=True)
-            if d < args.tol:
-                print("### CONVERGED at round %d (max|dSST|=%.4f K < %.4f K) ###" % (r, d, args.tol), flush=True)
+        if r >= 1:
+            G_hist.append(g_vals)
+            resid = max_resid_kelvin(g_vals, U_hist[-1])
+            print("    >> round %d: max|dSST| (residual) = %.4f K (tol %.4f K)" % (r, resid, args.tol), flush=True)
+            if resid < args.tol:
+                print("### CONVERGED at round %d (residual=%.4f K < %.4f K) ###" % (r, resid, args.tol), flush=True)
                 return 0
         prev_sst = cur_sst
 
