@@ -613,7 +613,43 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double dpdthe_invrm = dpdthe * inv_rm;
     double dpdphi_invrs = dpdphi * inv_rmsinthe;
 
-    rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t;
+    // ----- Shear (velocity-gradient) dissipation heating -----
+    // Dissipation function Φ = ν|S|² built DIRECTLY from the RESOLVED strain-rate tensor
+    // (the velocity gradients), not the parameterized ε. This is the KE→internal-energy
+    // return that the k-ε closure computed but never gave back to T, so the energy budget
+    // was not closed. Converted to a temperature tendency by the same KE→T coefficient the
+    // pressure-work term uses (coeff_energy_p = u_0²/(cp_w·t_0)). Strain invariant, same
+    // spherical components as the turbulence `prod` (the gradients are already to hand, so
+    // this costs ~a dozen multiply-adds):
+    //   |S|² = 2(S_rr² + S_θθ² + S_φφ²) + S_rθ² + S_rφ² + S_θφ²      (Φ/ν, ≥0)
+    // ⚠ resolved (∇u)² is noisiest exactly at coasts (the known checkerboard/seam zones),
+    // hence two guardrails: floor nue at 0, and hard-cap the tendency (dissip_cap).
+    //
+    // MAGNITUDE (measured 2026-07-17, Ma=200 A/B from the iter-400 restart, single-threaded
+    // so the noise floor is exactly zero): at a 1e5× gain the peak ΔT is 7.9e-5 K after 20
+    // iters, i.e. **~1e-9 K at the physical strength used here** — correct, and far below
+    // anything observable. It is kept because it closes the budget, not because it does
+    // work: the term never approaches dissip_cap (peak is ~10× under it). The SST lever is
+    // ADVECTION, whose tendency is O(1) nondim against this term's ~1e-7. A Python-settable
+    // C_dissip gain used to sit here to force an artificial coastal warming for a Picard
+    // sweep; it was removed once measurement showed amplification buys nothing (and that the
+    // surface is re-pinned every iter anyway, so surface ΔT is identically 0 by construction
+    // — see cHydrosphereModel.cpp and project_dissipation_heating).
+    constexpr double dissip_cap = 1.0e-3;             // guardrail cap on the nondim tendency
+
+    // resolved strain-rate components (metric-scaled), matching the `prod` block
+    const double Srr = dudr   * exp_rm;
+    const double Stt = dvdthe * inv_rm;
+    const double Spp = dwdphi * inv_rmsinthe;
+    const double Srt = dudthe * inv_rm       + dvdr   * exp_rm;
+    const double Srp = dudphi * inv_rmsinthe + dwdr   * exp_rm;
+    const double Stp = dvdphi * inv_rmsinthe + dwdthe * inv_rm;
+    const double strain2 = 2.0 * (Srr*Srr + Stt*Stt + Spp*Spp)
+                         + Srt*Srt + Srp*Srp + Stp*Stp;
+    const double nue_here = std::max(nue.x[i][j][k], 0.0);
+    const double dissip_heat_t = std::min(coeff_energy_p * nue_here * strain2, dissip_cap);
+
+    rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t + dissip_heat_t;
 
     // Boussinesq buoyancy with thermal + haline anomaly.  Only the anomaly
     // relative to the reference state (t = 1, c = 1) drives radial motion;
