@@ -34,6 +34,20 @@
 # runs from scratch (total_iter_count restarts, so the SST stamp repeats); rounds are
 # isolated in their own sub-directories and the input field is placed there explicitly.
 #
+# WARM-START (--warm-start): by default every round re-spins the OCEAN from its IC, so
+# only ~nm iters of ocean adjustment ever accumulate — and since the ocean is far from
+# equilibrium at nm~400 (KE still drifting), the rounds are near-identical partial
+# spin-downs and the loop converges to the fixed point of the *nm-iter* map, not the true
+# ocean equilibrium. --warm-start instead resumes each round's hydrosphere from the
+# previous round's restart .bin, so ocean iterations ACCUMULATE (R rounds -> R*nm effective
+# ocean iters, progressively approaching equilibrium) -- the asynchronous Manabe-Bryan
+# style of paleo coupling. This is safe because restart_arrays() restores only the ocean
+# interior (t,u,v,w,c,...); the wind forcing (v_wind/w_wind) and SST target (t_surf_fix)
+# are re-captured at init from THIS round's atmosphere, so the ocean carries over while the
+# forcing is refreshed. The ATMOSPHERE still runs from scratch each round (it is the fast
+# component and must re-init to blend the new SST). Needs nm a multiple of --checkpoint so
+# the final iter is checkpointed.
+#
 # Safety: round 0 is EXACTLY the existing one-way chain (alpha forced to 0, no SST file).
 #
 # Usage:
@@ -64,6 +78,10 @@ def parse_args():
                         "engages from round 3 on. Needs numpy.")
     p.add_argument("--anderson-beta", type=float, default=1.0,
                    help="Anderson mixing/damping (1.0 = none; <1 adds under-relaxation for robustness).")
+    p.add_argument("--warm-start", action="store_true",
+                   help="resume each round's hydrosphere from the previous round's restart .bin, so "
+                        "ocean iterations accumulate across rounds (R*nm effective) instead of "
+                        "re-spinning from the IC every round. The atmosphere still runs from scratch.")
     p.add_argument("--nm", type=int, default=400, help="iterations per atm/hyd run")
     p.add_argument("--checkpoint", type=int, default=100,
                    help="VTK/panorama printout stride within each run (also the report-only "
@@ -83,6 +101,17 @@ def latest_sst_file(d):
         stem = f[:-len(".vwtp")]
         return int(stem.rsplit("_", 1)[1])
     return max(files, key=iter_of)
+
+
+def latest_restart(d, Ma):
+    """Newest hydrosphere restart checkpoint in dir d as (path, iter), or (None, -1)."""
+    files = glob.glob(os.path.join(d, "hyd_restart_%dMa_*.bin" % Ma))
+    if not files:
+        return None, -1
+    def iter_of(f):
+        return int(os.path.basename(f)[:-len(".bin")].rsplit("_", 1)[1])
+    f = max(files, key=iter_of)
+    return f, iter_of(f)
 
 
 def read_sst(path):
@@ -147,15 +176,18 @@ def run_atm(Ma, outdir, nm, alpha, ckpt):
     a.run_time_slice(Ma)
 
 
-def run_hyd(Ma, outdir, nm, hyd_relax, ckpt):
+def run_hyd(Ma, outdir, nm, hyd_relax, ckpt, restart_from_iter=-1):
     h = Hydrosphere()
     h.output_path = outdir.encode()
     h.input_path = outdir.encode()
-    h.nm = nm
+    h.nm = nm                                  # ADDITIONAL iters on a restart (total_iter_count accumulates)
     h.checkpoint = ckpt                        # VTK/MinMax printouts every ckpt iters
-    h.panorama_print = ckpt                    # panorama every ckpt iters
+    h.panorama_print = ckpt                    # panorama + restart .bin every ckpt iters
     h.sst_relax_alpha = hyd_relax             # < 1 => Haney flux BC, ocean carries its own SST anomaly
-    print("    [HYD] Ma=%d nm=%d ckpt=%d sst_relax_alpha=%.3f -> %s" % (Ma, nm, ckpt, hyd_relax, outdir), flush=True)
+    h.restart_from_iter = restart_from_iter    # >=0 => warm-start the ocean from that checkpoint
+    tag = (" restart@%d" % restart_from_iter) if restart_from_iter >= 0 else ""
+    print("    [HYD] Ma=%d nm=%d ckpt=%d sst_relax_alpha=%.3f%s -> %s"
+          % (Ma, nm, ckpt, hyd_relax, tag, outdir), flush=True)
     h.run_time_slice(Ma)
 
 
@@ -164,10 +196,12 @@ def main():
     base = args.base or ("output_picard_%dMa" % args.Ma)
     os.makedirs(base, exist_ok=True)
     accel = "Anderson(%d, beta=%.2f)" % (args.anderson, args.anderson_beta) if args.anderson > 0 else "plain Picard"
-    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f hyd_relax=%.3f nm=%d tol=%.3fK %s base=%s ###"
-          % (args.Ma, args.rounds, args.alpha, args.hyd_relax, args.nm, args.tol, accel, base), flush=True)
+    ocean = "warm-start" if args.warm_start else "from-scratch/round"
+    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f hyd_relax=%.3f nm=%d tol=%.3fK %s ocean=%s base=%s ###"
+          % (args.Ma, args.rounds, args.alpha, args.hyd_relax, args.nm, args.tol, accel, ocean, base), flush=True)
 
     prev_sst = None       # path to g_{r-1}'s SST file
+    prev_rdir = None      # previous round's dir (source of the ocean restart .bin)
     U_hist = []           # value-lists: input fields actually used (rounds >= 1)
     G_hist = []           # value-lists: hyd outputs g_r (aligned with U_hist)
     for r in range(args.rounds):
@@ -186,9 +220,22 @@ def main():
                 u_vals = read_sst(prev_sst)
             U_hist.append(u_vals)
 
+        # Warm-start: carry the previous round's ocean restart into this round's dir so the
+        # hydrosphere resumes from it (ocean iters accumulate). The atmosphere stays fresh.
+        restart_iter = -1
+        if args.warm_start and r >= 1 and prev_rdir is not None:
+            src_bin, src_iter = latest_restart(prev_rdir, args.Ma)
+            if src_bin is not None:
+                shutil.copy(src_bin, rdir)
+                restart_iter = src_iter
+                print("    [warm-start] ocean resumes from %s (total_iter %d)"
+                      % (os.path.basename(src_bin), src_iter), flush=True)
+            else:
+                print("    [warm-start] no restart .bin in %s — ocean starts fresh this round" % prev_rdir, flush=True)
+
         print("=== round %d/%d (alpha=%.3f) ===" % (r, args.rounds - 1, alpha), flush=True)
         run_atm(args.Ma, rdir, args.nm, alpha, args.checkpoint)
-        run_hyd(args.Ma, rdir, args.nm, args.hyd_relax, args.checkpoint)
+        run_hyd(args.Ma, rdir, args.nm, args.hyd_relax, args.checkpoint, restart_from_iter=restart_iter)
 
         cur_sst = latest_sst_file(rdir)
         if cur_sst is None:
@@ -204,6 +251,7 @@ def main():
                 print("### CONVERGED at round %d (residual=%.4f K < %.4f K) ###" % (r, resid, args.tol), flush=True)
                 return 0
         prev_sst = cur_sst
+        prev_rdir = rdir
 
     print("### reached round limit (%d) without hitting tol ###" % (args.rounds - 1), flush=True)
     return 0
