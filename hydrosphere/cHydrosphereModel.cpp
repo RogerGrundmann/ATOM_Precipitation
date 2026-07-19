@@ -657,20 +657,40 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         // axes (the deep mode is not purely vertical), like the p_dyn treatment.
         AtomUtils::damp_wiggles(t, &i_bathymetry, true, true, true);
 
-        // Sustained surface heat-flux forcing: re-pin the ocean surface temperature
-        // to the prescribed atmospheric SST (snapshot in t_surf_fix at init) every
-        // iteration — a Dirichlet surface data BC. rhs_t carries no surface heat
-        // source and the surface BC never re-pins t.x[im-1], so without this the
-        // ocean thermal state is unforced and drifts (cold collapse / hot runaway,
-        // the corvalid/windtest failure). Applied after damp_wiggles so the warm
-        // surface is the final word each iter; the smoother then only mixes the
-        // interior (deep-checkerboard protection). Ocean cells only — land surface
-        // temperature is handled by bcSolidGround. Thermal analogue of the wind-stress
-        // forcing (see project_hydro_no_surface_heat_flux).
+        // Sustained surface heat-flux forcing: relax the ocean surface temperature
+        // toward the prescribed atmospheric SST (snapshot in t_surf_fix at init) every
+        // iteration. rhs_t carries no surface heat source and the surface BC never
+        // re-pins t.x[im-1], so without this the ocean thermal state is unforced and
+        // drifts (cold collapse / hot runaway, the corvalid/windtest failure). Applied
+        // after damp_wiggles so the surface forcing is the final word each iter; the
+        // smoother then only mixes the interior (deep-checkerboard protection). Ocean
+        // cells only — land surface temperature is handled by bcSolidGround. Thermal
+        // analogue of the wind-stress forcing (see project_hydro_no_surface_heat_flux).
+        //
+        // sst_relax_alpha selects the BC strength:
+        //   1.0 (default) = hard Dirichlet re-pin, i.e. exactly t.x = t_surf_fix — the
+        //                   long-standing behaviour, reproduced BIT-IDENTICALLY.
+        //   <1            = Haney-type flux BC. The surface keeps a fraction of its own
+        //                   advective/diffusive tendency, so ocean dynamics can build an
+        //                   SST anomaly instead of having it erased every iteration. The
+        //                   steady anomaly scales as ~dt*tendency/alpha.
+        //   0             = unforced; this is the cold-collapse regime, do not ship it.
+        // NOTE this is a NUMERICAL knob, not a physical restoring timescale. A calibrated
+        // Haney tau (~59 d at 40 W/m^2/K over a 50 m mixed layer) is tau_nd ~6.1e3 given
+        // L_hyd/u_0 = 833 s, hence alpha = dt/tau_nd ~1.6e-8 with dt = 1e-4 — numerically
+        // identical to unforced. Physical restoring is unreachable in this model's
+        // iteration budget, so alpha is tuned for stability like the atmosphere's
+        // omega_teq (which exists for exactly the same reason: Held-Suarez at physical
+        // k_s is inert here).
         for (int j = 0; j < jm; j++)
             for (int k = 0; k < km; k++)
-                if (is_water(h, im-1, j, k))
-                    t.x[im-1][j][k] = t_surf_fix.y[j][k];
+                if (is_water(h, im-1, j, k)){
+                    if (sst_relax_alpha >= 1.0)
+                        t.x[im-1][j][k] = t_surf_fix.y[j][k];       // exact legacy path
+                    else
+                        t.x[im-1][j][k] += sst_relax_alpha
+                                         * (t_surf_fix.y[j][k] - t.x[im-1][j][k]);
+                }
 
 //        UtilsHyd(*this).findResiduumHyd();
 

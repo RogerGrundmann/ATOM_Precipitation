@@ -1656,6 +1656,15 @@ cdef class Hydrosphere:
             self._check_alive()
             self._thisptr.cp_w = <double> value
     
+    property sst_relax_alpha:
+        def __get__(Hydrosphere self):
+            self._check_alive()
+            return self._thisptr.sst_relax_alpha
+    
+        def __set__(Hydrosphere self, value):
+            self._check_alive()
+            self._thisptr.sst_relax_alpha = <double> value
+    
     property c_35:
         def __get__(Hydrosphere self):
             self._check_alive()

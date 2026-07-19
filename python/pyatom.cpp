@@ -2007,6 +2007,8 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_2pr___get__(struct __pyx_obj_6py
 static int __pyx_pf_6pyatom_11Hydrosphere_2pr_2__set__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self, PyObject *__pyx_v_value); /* proto */
 static PyObject *__pyx_pf_6pyatom_11Hydrosphere_4cp_w___get__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self); /* proto */
 static int __pyx_pf_6pyatom_11Hydrosphere_4cp_w_2__set__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self, PyObject *__pyx_v_value); /* proto */
+static PyObject *__pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha___get__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self); /* proto */
+static int __pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha_2__set__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self, PyObject *__pyx_v_value); /* proto */
 static PyObject *__pyx_pf_6pyatom_11Hydrosphere_4c_35___get__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self); /* proto */
 static int __pyx_pf_6pyatom_11Hydrosphere_4c_35_2__set__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self, PyObject *__pyx_v_value); /* proto */
 static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8u_0_wind___get__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self); /* proto */
@@ -27345,7 +27347,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_4cp_w_2__set__(struct __pyx_obj_6pyato
  *             self._check_alive()
  *             self._thisptr.cp_w = <double> value             # <<<<<<<<<<<<<<
  * 
- *     property c_35:
+ *     property sst_relax_alpha:
  */
   __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1657, __pyx_L1_error)
   __pyx_v_self->_thisptr->cp_w = ((double)__pyx_t_2);
@@ -27370,6 +27372,148 @@ static int __pyx_pf_6pyatom_11Hydrosphere_4cp_w_2__set__(struct __pyx_obj_6pyato
 }
 
 /* "pyatom.pyx":1660
+ * 
+ *     property sst_relax_alpha:
+ *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
+ *             self._check_alive()
+ *             return self._thisptr.sst_relax_alpha
+ */
+
+/* Python wrapper */
+static PyObject *__pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_1__get__(PyObject *__pyx_v_self); /*proto*/
+static PyObject *__pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_1__get__(PyObject *__pyx_v_self) {
+  PyObject *__pyx_r = 0;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("__get__ (wrapper)", 0);
+  __pyx_r = __pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha___get__(((struct __pyx_obj_6pyatom_Hydrosphere *)__pyx_v_self));
+
+  /* function exit code */
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static PyObject *__pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha___get__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self) {
+  PyObject *__pyx_r = NULL;
+  __Pyx_RefNannyDeclarations
+  int __pyx_t_1;
+  PyObject *__pyx_t_2 = NULL;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("__get__", 0);
+
+  /* "pyatom.pyx":1661
+ *     property sst_relax_alpha:
+ *         def __get__(Hydrosphere self):
+ *             self._check_alive()             # <<<<<<<<<<<<<<
+ *             return self._thisptr.sst_relax_alpha
+ * 
+ */
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1661, __pyx_L1_error)
+
+  /* "pyatom.pyx":1662
+ *         def __get__(Hydrosphere self):
+ *             self._check_alive()
+ *             return self._thisptr.sst_relax_alpha             # <<<<<<<<<<<<<<
+ * 
+ *         def __set__(Hydrosphere self, value):
+ */
+  __Pyx_XDECREF(__pyx_r);
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->sst_relax_alpha); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1662, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_2);
+  __pyx_r = __pyx_t_2;
+  __pyx_t_2 = 0;
+  goto __pyx_L0;
+
+  /* "pyatom.pyx":1660
+ * 
+ *     property sst_relax_alpha:
+ *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
+ *             self._check_alive()
+ *             return self._thisptr.sst_relax_alpha
+ */
+
+  /* function exit code */
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_2);
+  __Pyx_AddTraceback("pyatom.Hydrosphere.sst_relax_alpha.__get__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = NULL;
+  __pyx_L0:;
+  __Pyx_XGIVEREF(__pyx_r);
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "pyatom.pyx":1664
+ *             return self._thisptr.sst_relax_alpha
+ * 
+ *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
+ *             self._check_alive()
+ *             self._thisptr.sst_relax_alpha = <double> value
+ */
+
+/* Python wrapper */
+static int __pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_3__set__(PyObject *__pyx_v_self, PyObject *__pyx_v_value); /*proto*/
+static int __pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_3__set__(PyObject *__pyx_v_self, PyObject *__pyx_v_value) {
+  int __pyx_r;
+  __Pyx_RefNannyDeclarations
+  __Pyx_RefNannySetupContext("__set__ (wrapper)", 0);
+  __pyx_r = __pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha_2__set__(((struct __pyx_obj_6pyatom_Hydrosphere *)__pyx_v_self), ((PyObject *)__pyx_v_value));
+
+  /* function exit code */
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+static int __pyx_pf_6pyatom_11Hydrosphere_15sst_relax_alpha_2__set__(struct __pyx_obj_6pyatom_Hydrosphere *__pyx_v_self, PyObject *__pyx_v_value) {
+  int __pyx_r;
+  __Pyx_RefNannyDeclarations
+  int __pyx_t_1;
+  double __pyx_t_2;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("__set__", 0);
+
+  /* "pyatom.pyx":1665
+ * 
+ *         def __set__(Hydrosphere self, value):
+ *             self._check_alive()             # <<<<<<<<<<<<<<
+ *             self._thisptr.sst_relax_alpha = <double> value
+ * 
+ */
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1665, __pyx_L1_error)
+
+  /* "pyatom.pyx":1666
+ *         def __set__(Hydrosphere self, value):
+ *             self._check_alive()
+ *             self._thisptr.sst_relax_alpha = <double> value             # <<<<<<<<<<<<<<
+ * 
+ *     property c_35:
+ */
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1666, __pyx_L1_error)
+  __pyx_v_self->_thisptr->sst_relax_alpha = ((double)__pyx_t_2);
+
+  /* "pyatom.pyx":1664
+ *             return self._thisptr.sst_relax_alpha
+ * 
+ *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
+ *             self._check_alive()
+ *             self._thisptr.sst_relax_alpha = <double> value
+ */
+
+  /* function exit code */
+  __pyx_r = 0;
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_AddTraceback("pyatom.Hydrosphere.sst_relax_alpha.__set__", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = -1;
+  __pyx_L0:;
+  __Pyx_RefNannyFinishContext();
+  return __pyx_r;
+}
+
+/* "pyatom.pyx":1669
  * 
  *     property c_35:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27400,16 +27544,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_4c_35___get__(struct __pyx_obj_6
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1661
+  /* "pyatom.pyx":1670
  *     property c_35:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.c_35
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1661, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1670, __pyx_L1_error)
 
-  /* "pyatom.pyx":1662
+  /* "pyatom.pyx":1671
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.c_35             # <<<<<<<<<<<<<<
@@ -27417,13 +27561,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_4c_35___get__(struct __pyx_obj_6
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->c_35); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1662, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->c_35); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1671, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1660
+  /* "pyatom.pyx":1669
  * 
  *     property c_35:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27442,7 +27586,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_4c_35___get__(struct __pyx_obj_6
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1664
+/* "pyatom.pyx":1673
  *             return self._thisptr.c_35
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27473,26 +27617,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_4c_35_2__set__(struct __pyx_obj_6pyato
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1665
+  /* "pyatom.pyx":1674
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.c_35 = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1665, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1674, __pyx_L1_error)
 
-  /* "pyatom.pyx":1666
+  /* "pyatom.pyx":1675
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.c_35 = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property u_0_wind:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1666, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1675, __pyx_L1_error)
   __pyx_v_self->_thisptr->c_35 = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1664
+  /* "pyatom.pyx":1673
  *             return self._thisptr.c_35
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27511,7 +27655,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_4c_35_2__set__(struct __pyx_obj_6pyato
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1669
+/* "pyatom.pyx":1678
  * 
  *     property u_0_wind:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27542,16 +27686,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8u_0_wind___get__(struct __pyx_o
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1670
+  /* "pyatom.pyx":1679
  *     property u_0_wind:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.u_0_wind
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1670, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1679, __pyx_L1_error)
 
-  /* "pyatom.pyx":1671
+  /* "pyatom.pyx":1680
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.u_0_wind             # <<<<<<<<<<<<<<
@@ -27559,13 +27703,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8u_0_wind___get__(struct __pyx_o
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->u_0_wind); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1671, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->u_0_wind); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1680, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1669
+  /* "pyatom.pyx":1678
  * 
  *     property u_0_wind:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27584,7 +27728,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8u_0_wind___get__(struct __pyx_o
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1673
+/* "pyatom.pyx":1682
  *             return self._thisptr.u_0_wind
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27615,26 +27759,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_8u_0_wind_2__set__(struct __pyx_obj_6p
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1674
+  /* "pyatom.pyx":1683
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.u_0_wind = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1674, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1683, __pyx_L1_error)
 
-  /* "pyatom.pyx":1675
+  /* "pyatom.pyx":1684
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.u_0_wind = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property u_0:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1675, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1684, __pyx_L1_error)
   __pyx_v_self->_thisptr->u_0_wind = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1673
+  /* "pyatom.pyx":1682
  *             return self._thisptr.u_0_wind
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27653,7 +27797,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_8u_0_wind_2__set__(struct __pyx_obj_6p
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1678
+/* "pyatom.pyx":1687
  * 
  *     property u_0:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27684,16 +27828,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_3u_0___get__(struct __pyx_obj_6p
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1679
+  /* "pyatom.pyx":1688
  *     property u_0:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.u_0
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1679, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1688, __pyx_L1_error)
 
-  /* "pyatom.pyx":1680
+  /* "pyatom.pyx":1689
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.u_0             # <<<<<<<<<<<<<<
@@ -27701,13 +27845,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_3u_0___get__(struct __pyx_obj_6p
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->u_0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1680, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->u_0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1689, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1678
+  /* "pyatom.pyx":1687
  * 
  *     property u_0:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27726,7 +27870,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_3u_0___get__(struct __pyx_obj_6p
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1682
+/* "pyatom.pyx":1691
  *             return self._thisptr.u_0
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27757,26 +27901,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_3u_0_2__set__(struct __pyx_obj_6pyatom
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1683
+  /* "pyatom.pyx":1692
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.u_0 = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1683, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1692, __pyx_L1_error)
 
-  /* "pyatom.pyx":1684
+  /* "pyatom.pyx":1693
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.u_0 = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property r_0_saltwater:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1684, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1693, __pyx_L1_error)
   __pyx_v_self->_thisptr->u_0 = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1682
+  /* "pyatom.pyx":1691
  *             return self._thisptr.u_0
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27795,7 +27939,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_3u_0_2__set__(struct __pyx_obj_6pyatom
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1687
+/* "pyatom.pyx":1696
  * 
  *     property r_0_saltwater:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27826,16 +27970,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_13r_0_saltwater___get__(struct _
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1688
+  /* "pyatom.pyx":1697
  *     property r_0_saltwater:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.r_0_saltwater
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1688, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1697, __pyx_L1_error)
 
-  /* "pyatom.pyx":1689
+  /* "pyatom.pyx":1698
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.r_0_saltwater             # <<<<<<<<<<<<<<
@@ -27843,13 +27987,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_13r_0_saltwater___get__(struct _
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->r_0_saltwater); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1689, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->r_0_saltwater); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1698, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1687
+  /* "pyatom.pyx":1696
  * 
  *     property r_0_saltwater:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27868,7 +28012,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_13r_0_saltwater___get__(struct _
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1691
+/* "pyatom.pyx":1700
  *             return self._thisptr.r_0_saltwater
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27899,26 +28043,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_13r_0_saltwater_2__set__(struct __pyx_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1692
+  /* "pyatom.pyx":1701
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.r_0_saltwater = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1692, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1701, __pyx_L1_error)
 
-  /* "pyatom.pyx":1693
+  /* "pyatom.pyx":1702
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.r_0_saltwater = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property t_pole_salt:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1693, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1702, __pyx_L1_error)
   __pyx_v_self->_thisptr->r_0_saltwater = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1691
+  /* "pyatom.pyx":1700
  *             return self._thisptr.r_0_saltwater
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -27937,7 +28081,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_13r_0_saltwater_2__set__(struct __pyx_
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1696
+/* "pyatom.pyx":1705
  * 
  *     property t_pole_salt:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -27968,16 +28112,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_11t_pole_salt___get__(struct __p
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1697
+  /* "pyatom.pyx":1706
  *     property t_pole_salt:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.t_pole_salt
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1697, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1706, __pyx_L1_error)
 
-  /* "pyatom.pyx":1698
+  /* "pyatom.pyx":1707
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.t_pole_salt             # <<<<<<<<<<<<<<
@@ -27985,13 +28129,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_11t_pole_salt___get__(struct __p
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->t_pole_salt); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1698, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->t_pole_salt); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1707, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1696
+  /* "pyatom.pyx":1705
  * 
  *     property t_pole_salt:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28010,7 +28154,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_11t_pole_salt___get__(struct __p
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1700
+/* "pyatom.pyx":1709
  *             return self._thisptr.t_pole_salt
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28041,26 +28185,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_11t_pole_salt_2__set__(struct __pyx_ob
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1701
+  /* "pyatom.pyx":1710
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.t_pole_salt = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1701, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1710, __pyx_L1_error)
 
-  /* "pyatom.pyx":1702
+  /* "pyatom.pyx":1711
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.t_pole_salt = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property co2_vegetation:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1702, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1711, __pyx_L1_error)
   __pyx_v_self->_thisptr->t_pole_salt = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1700
+  /* "pyatom.pyx":1709
  *             return self._thisptr.t_pole_salt
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28079,7 +28223,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_11t_pole_salt_2__set__(struct __pyx_ob
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1705
+/* "pyatom.pyx":1714
  * 
  *     property co2_vegetation:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28110,16 +28254,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14co2_vegetation___get__(struct 
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1706
+  /* "pyatom.pyx":1715
  *     property co2_vegetation:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.co2_vegetation
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1706, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1715, __pyx_L1_error)
 
-  /* "pyatom.pyx":1707
+  /* "pyatom.pyx":1716
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.co2_vegetation             # <<<<<<<<<<<<<<
@@ -28127,13 +28271,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14co2_vegetation___get__(struct 
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_vegetation); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1707, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_vegetation); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1716, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1705
+  /* "pyatom.pyx":1714
  * 
  *     property co2_vegetation:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28152,7 +28296,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14co2_vegetation___get__(struct 
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1709
+/* "pyatom.pyx":1718
  *             return self._thisptr.co2_vegetation
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28183,26 +28327,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_14co2_vegetation_2__set__(struct __pyx
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1710
+  /* "pyatom.pyx":1719
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.co2_vegetation = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1710, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1719, __pyx_L1_error)
 
-  /* "pyatom.pyx":1711
+  /* "pyatom.pyx":1720
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.co2_vegetation = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property co2_ocean:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1711, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1720, __pyx_L1_error)
   __pyx_v_self->_thisptr->co2_vegetation = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1709
+  /* "pyatom.pyx":1718
  *             return self._thisptr.co2_vegetation
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28221,7 +28365,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_14co2_vegetation_2__set__(struct __pyx
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1714
+/* "pyatom.pyx":1723
  * 
  *     property co2_ocean:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28252,16 +28396,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_9co2_ocean___get__(struct __pyx_
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1715
+  /* "pyatom.pyx":1724
  *     property co2_ocean:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.co2_ocean
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1715, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1724, __pyx_L1_error)
 
-  /* "pyatom.pyx":1716
+  /* "pyatom.pyx":1725
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.co2_ocean             # <<<<<<<<<<<<<<
@@ -28269,13 +28413,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_9co2_ocean___get__(struct __pyx_
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_ocean); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1716, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_ocean); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1725, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1714
+  /* "pyatom.pyx":1723
  * 
  *     property co2_ocean:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28294,7 +28438,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_9co2_ocean___get__(struct __pyx_
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1718
+/* "pyatom.pyx":1727
  *             return self._thisptr.co2_ocean
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28325,26 +28469,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_9co2_ocean_2__set__(struct __pyx_obj_6
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1719
+  /* "pyatom.pyx":1728
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.co2_ocean = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1719, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1728, __pyx_L1_error)
 
-  /* "pyatom.pyx":1720
+  /* "pyatom.pyx":1729
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.co2_ocean = <double> value             # <<<<<<<<<<<<<<
  * 
  *     property co2_land:
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1720, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1729, __pyx_L1_error)
   __pyx_v_self->_thisptr->co2_ocean = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1718
+  /* "pyatom.pyx":1727
  *             return self._thisptr.co2_ocean
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28363,7 +28507,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_9co2_ocean_2__set__(struct __pyx_obj_6
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1723
+/* "pyatom.pyx":1732
  * 
  *     property co2_land:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28394,16 +28538,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8co2_land___get__(struct __pyx_o
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__get__", 0);
 
-  /* "pyatom.pyx":1724
+  /* "pyatom.pyx":1733
  *     property co2_land:
  *         def __get__(Hydrosphere self):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             return self._thisptr.co2_land
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1724, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1733, __pyx_L1_error)
 
-  /* "pyatom.pyx":1725
+  /* "pyatom.pyx":1734
  *         def __get__(Hydrosphere self):
  *             self._check_alive()
  *             return self._thisptr.co2_land             # <<<<<<<<<<<<<<
@@ -28411,13 +28555,13 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8co2_land___get__(struct __pyx_o
  *         def __set__(Hydrosphere self, value):
  */
   __Pyx_XDECREF(__pyx_r);
-  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_land); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1725, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(__pyx_v_self->_thisptr->co2_land); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1734, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_r = __pyx_t_2;
   __pyx_t_2 = 0;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1723
+  /* "pyatom.pyx":1732
  * 
  *     property co2_land:
  *         def __get__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28436,7 +28580,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_8co2_land___get__(struct __pyx_o
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1727
+/* "pyatom.pyx":1736
  *             return self._thisptr.co2_land
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28467,26 +28611,26 @@ static int __pyx_pf_6pyatom_11Hydrosphere_8co2_land_2__set__(struct __pyx_obj_6p
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__set__", 0);
 
-  /* "pyatom.pyx":1728
+  /* "pyatom.pyx":1737
  * 
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()             # <<<<<<<<<<<<<<
  *             self._thisptr.co2_land = <double> value
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1728, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1737, __pyx_L1_error)
 
-  /* "pyatom.pyx":1729
+  /* "pyatom.pyx":1738
  *         def __set__(Hydrosphere self, value):
  *             self._check_alive()
  *             self._thisptr.co2_land = <double> value             # <<<<<<<<<<<<<<
  * 
  * 
  */
-  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1729, __pyx_L1_error)
+  __pyx_t_2 = __pyx_PyFloat_AsDouble(__pyx_v_value); if (unlikely((__pyx_t_2 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 1738, __pyx_L1_error)
   __pyx_v_self->_thisptr->co2_land = ((double)__pyx_t_2);
 
-  /* "pyatom.pyx":1727
+  /* "pyatom.pyx":1736
  *             return self._thisptr.co2_land
  * 
  *         def __set__(Hydrosphere self, value):             # <<<<<<<<<<<<<<
@@ -28505,7 +28649,7 @@ static int __pyx_pf_6pyatom_11Hydrosphere_8co2_land_2__set__(struct __pyx_obj_6p
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1740
+/* "pyatom.pyx":1749
  *     # the Python garbage collection.
  * 
  *     def __enter__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28535,16 +28679,16 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_12__enter__(struct __pyx_obj_6py
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("__enter__", 0);
 
-  /* "pyatom.pyx":1741
+  /* "pyatom.pyx":1750
  * 
  *     def __enter__(Hydrosphere self):
  *         self._check_alive()             # <<<<<<<<<<<<<<
  *         return self
  * 
  */
-  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1741, __pyx_L1_error)
+  __pyx_t_1 = ((struct __pyx_vtabstruct_6pyatom_Hydrosphere *)__pyx_v_self->__pyx_vtab)->_check_alive(__pyx_v_self); if (unlikely(__pyx_t_1 == ((int)-1))) __PYX_ERR(0, 1750, __pyx_L1_error)
 
-  /* "pyatom.pyx":1742
+  /* "pyatom.pyx":1751
  *     def __enter__(Hydrosphere self):
  *         self._check_alive()
  *         return self             # <<<<<<<<<<<<<<
@@ -28556,7 +28700,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_12__enter__(struct __pyx_obj_6py
   __pyx_r = ((PyObject *)__pyx_v_self);
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1740
+  /* "pyatom.pyx":1749
  *     # the Python garbage collection.
  * 
  *     def __enter__(Hydrosphere self):             # <<<<<<<<<<<<<<
@@ -28574,7 +28718,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_12__enter__(struct __pyx_obj_6py
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1744
+/* "pyatom.pyx":1753
  *         return self
  * 
  *     def __exit__(Hydrosphere self, exc_tp, exc_val, exc_tb):             # <<<<<<<<<<<<<<
@@ -28619,17 +28763,17 @@ static PyObject *__pyx_pw_6pyatom_11Hydrosphere_15__exit__(PyObject *__pyx_v_sel
         case  1:
         if (likely((values[1] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_exc_val)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, 1); __PYX_ERR(0, 1744, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, 1); __PYX_ERR(0, 1753, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
         if (likely((values[2] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_exc_tb)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, 2); __PYX_ERR(0, 1744, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, 2); __PYX_ERR(0, 1753, __pyx_L3_error)
         }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__exit__") < 0)) __PYX_ERR(0, 1744, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__exit__") < 0)) __PYX_ERR(0, 1753, __pyx_L3_error)
       }
     } else if (PyTuple_GET_SIZE(__pyx_args) != 3) {
       goto __pyx_L5_argtuple_error;
@@ -28644,7 +28788,7 @@ static PyObject *__pyx_pw_6pyatom_11Hydrosphere_15__exit__(PyObject *__pyx_v_sel
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 1744, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__exit__", 1, 3, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 1753, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("pyatom.Hydrosphere.__exit__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
@@ -28663,7 +28807,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
   int __pyx_t_1;
   __Pyx_RefNannySetupContext("__exit__", 0);
 
-  /* "pyatom.pyx":1745
+  /* "pyatom.pyx":1754
  * 
  *     def __exit__(Hydrosphere self, exc_tp, exc_val, exc_tb):
  *         if self._thisptr != NULL:             # <<<<<<<<<<<<<<
@@ -28673,7 +28817,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
   __pyx_t_1 = ((__pyx_v_self->_thisptr != NULL) != 0);
   if (__pyx_t_1) {
 
-    /* "pyatom.pyx":1746
+    /* "pyatom.pyx":1755
  *     def __exit__(Hydrosphere self, exc_tp, exc_val, exc_tb):
  *         if self._thisptr != NULL:
  *             del self._thisptr             # <<<<<<<<<<<<<<
@@ -28682,7 +28826,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
  */
     delete __pyx_v_self->_thisptr;
 
-    /* "pyatom.pyx":1747
+    /* "pyatom.pyx":1756
  *         if self._thisptr != NULL:
  *             del self._thisptr
  *             self._thisptr = NULL # inform __dealloc__             # <<<<<<<<<<<<<<
@@ -28691,7 +28835,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
  */
     __pyx_v_self->_thisptr = NULL;
 
-    /* "pyatom.pyx":1745
+    /* "pyatom.pyx":1754
  * 
  *     def __exit__(Hydrosphere self, exc_tp, exc_val, exc_tb):
  *         if self._thisptr != NULL:             # <<<<<<<<<<<<<<
@@ -28700,7 +28844,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
  */
   }
 
-  /* "pyatom.pyx":1748
+  /* "pyatom.pyx":1757
  *             del self._thisptr
  *             self._thisptr = NULL # inform __dealloc__
  *         return False # propagate exceptions             # <<<<<<<<<<<<<<
@@ -28712,7 +28856,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_14__exit__(struct __pyx_obj_6pya
   __pyx_r = Py_False;
   goto __pyx_L0;
 
-  /* "pyatom.pyx":1744
+  /* "pyatom.pyx":1753
  *         return self
  * 
  *     def __exit__(Hydrosphere self, exc_tp, exc_val, exc_tb):             # <<<<<<<<<<<<<<
@@ -28840,7 +28984,7 @@ static PyObject *__pyx_pf_6pyatom_11Hydrosphere_18__setstate_cython__(CYTHON_UNU
   return __pyx_r;
 }
 
-/* "pyatom.pyx":1753
+/* "pyatom.pyx":1762
  * 
  * 
  * cdef public void PythonPrint(const char *s):             # <<<<<<<<<<<<<<
@@ -28858,33 +29002,33 @@ void PythonPrint(char const *__pyx_v_s) {
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("PythonPrint", 0);
 
-  /* "pyatom.pyx":1754
+  /* "pyatom.pyx":1763
  * 
  * cdef public void PythonPrint(const char *s):
  *     print s,             # <<<<<<<<<<<<<<
  *     sys.stdout.flush()
  */
-  __pyx_t_1 = __Pyx_PyBytes_FromString(__pyx_v_s); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1754, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyBytes_FromString(__pyx_v_s); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1763, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1754, __pyx_L1_error)
+  __pyx_t_2 = PyTuple_New(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1763, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_GIVEREF(__pyx_t_1);
   PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_1);
   __pyx_t_1 = 0;
-  if (__Pyx_Print(0, __pyx_t_2, 0) < 0) __PYX_ERR(0, 1754, __pyx_L1_error)
+  if (__Pyx_Print(0, __pyx_t_2, 0) < 0) __PYX_ERR(0, 1763, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "pyatom.pyx":1755
+  /* "pyatom.pyx":1764
  * cdef public void PythonPrint(const char *s):
  *     print s,
  *     sys.stdout.flush()             # <<<<<<<<<<<<<<
  */
-  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_sys); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1755, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_1, __pyx_n_s_sys); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1764, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_stdout); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 1755, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_1, __pyx_n_s_stdout); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 1764, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
-  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_flush); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1755, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_n_s_flush); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 1764, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __pyx_t_3 = NULL;
@@ -28899,12 +29043,12 @@ void PythonPrint(char const *__pyx_v_s) {
   }
   __pyx_t_2 = (__pyx_t_3) ? __Pyx_PyObject_CallOneArg(__pyx_t_1, __pyx_t_3) : __Pyx_PyObject_CallNoArg(__pyx_t_1);
   __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
-  if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1755, __pyx_L1_error)
+  if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 1764, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "pyatom.pyx":1753
+  /* "pyatom.pyx":1762
  * 
  * 
  * cdef public void PythonPrint(const char *s):             # <<<<<<<<<<<<<<
@@ -31860,6 +32004,20 @@ static int __pyx_setprop_6pyatom_11Hydrosphere_cp_w(PyObject *o, PyObject *v, CY
   }
 }
 
+static PyObject *__pyx_getprop_6pyatom_11Hydrosphere_sst_relax_alpha(PyObject *o, CYTHON_UNUSED void *x) {
+  return __pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_1__get__(o);
+}
+
+static int __pyx_setprop_6pyatom_11Hydrosphere_sst_relax_alpha(PyObject *o, PyObject *v, CYTHON_UNUSED void *x) {
+  if (v) {
+    return __pyx_pw_6pyatom_11Hydrosphere_15sst_relax_alpha_3__set__(o, v);
+  }
+  else {
+    PyErr_SetString(PyExc_NotImplementedError, "__del__");
+    return -1;
+  }
+}
+
 static PyObject *__pyx_getprop_6pyatom_11Hydrosphere_c_35(PyObject *o, CYTHON_UNUSED void *x) {
   return __pyx_pw_6pyatom_11Hydrosphere_4c_35_1__get__(o);
 }
@@ -32046,6 +32204,7 @@ static struct PyGetSetDef __pyx_getsets_6pyatom_Hydrosphere[] = {
   {(char *)"sc", __pyx_getprop_6pyatom_11Hydrosphere_sc, __pyx_setprop_6pyatom_11Hydrosphere_sc, (char *)0, 0},
   {(char *)"pr", __pyx_getprop_6pyatom_11Hydrosphere_pr, __pyx_setprop_6pyatom_11Hydrosphere_pr, (char *)0, 0},
   {(char *)"cp_w", __pyx_getprop_6pyatom_11Hydrosphere_cp_w, __pyx_setprop_6pyatom_11Hydrosphere_cp_w, (char *)0, 0},
+  {(char *)"sst_relax_alpha", __pyx_getprop_6pyatom_11Hydrosphere_sst_relax_alpha, __pyx_setprop_6pyatom_11Hydrosphere_sst_relax_alpha, (char *)0, 0},
   {(char *)"c_35", __pyx_getprop_6pyatom_11Hydrosphere_c_35, __pyx_setprop_6pyatom_11Hydrosphere_c_35, (char *)0, 0},
   {(char *)"u_0_wind", __pyx_getprop_6pyatom_11Hydrosphere_u_0_wind, __pyx_setprop_6pyatom_11Hydrosphere_u_0_wind, (char *)0, 0},
   {(char *)"u_0", __pyx_getprop_6pyatom_11Hydrosphere_u_0, __pyx_setprop_6pyatom_11Hydrosphere_u_0, (char *)0, 0},

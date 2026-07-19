@@ -68,6 +68,7 @@ double re;
 double sc;
 double pr;
 double cp_w;
+double sst_relax_alpha;
 double c_35;
 double u_0_wind;
 double u_0;

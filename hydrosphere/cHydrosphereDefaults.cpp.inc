@@ -69,6 +69,7 @@ void cHydrosphereModel::SetDefaultConfig() {
   sc = 1.7329;
   pr = 6.957;
   cp_w = 4182.0;
+  sst_relax_alpha = 1.0;
   c_35 = 34.6;
   u_0_wind = 8.0;
   u_0 = 0.24;

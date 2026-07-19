@@ -73,6 +73,7 @@
     Config::FillDoubleWithElement(elem_hydrosphere, "sc", sc);
     Config::FillDoubleWithElement(elem_hydrosphere, "pr", pr);
     Config::FillDoubleWithElement(elem_hydrosphere, "cp_w", cp_w);
+    Config::FillDoubleWithElement(elem_hydrosphere, "sst_relax_alpha", sst_relax_alpha);
     Config::FillDoubleWithElement(elem_hydrosphere, "c_35", c_35);
     Config::FillDoubleWithElement(elem_hydrosphere, "u_0_wind", u_0_wind);
     Config::FillDoubleWithElement(elem_hydrosphere, "u_0", u_0);

@@ -243,6 +243,8 @@ def main():
             ('pr', 'Prandtl number for water', 'double', 6.957),
             ('cp_w', 'specific heat capacity of water at constant pressure and 20°C in J/(kg K)', 'double', 4182.0),
 
+            ('sst_relax_alpha', 'per-iteration relaxation fraction of the ocean surface temperature toward the prescribed atmospheric SST (t_surf_fix): 1.0 = hard Dirichlet re-pin (the long-standing behaviour, bit-identical), <1 = Haney-type flux BC that lets the ocean surface carry its own advective anomaly, 0 = unforced (WILL cold-collapse). NOT a physical timescale: a physically calibrated Haney tau (~59 d) maps to alpha ~1.6e-8 here (L_hyd/u_0 = 833 s, dt = 1e-4), i.e. indistinguishable from unforced, so this is a numerical knob like the atmosphere omega_teq. Steady surface anomaly scales as dt*tendency/alpha', 'double', 1.0),
+
             ('c_35', 'rate of salt in psu at temperature t_0 in g/kg or psu', 'double', 34.6),
             ('u_0_wind', 'annual mean of surface wind velocity in m/s', 'double', 8.0),
             ('u_0', 'annual mean of surface water velocity in m/s', 'double', 0.24),
