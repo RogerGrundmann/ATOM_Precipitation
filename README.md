@@ -187,22 +187,46 @@ Each run writes output files to `output/`:
 
 ## Python interface
 
-Install the Python bindings:
+Build the Cython bindings (this also rebuilds `libatom.a`):
 
 ```bash
-pip install -e python/
+make python
 ```
 
-Then use the `Atmosphere` and `Hydrosphere` classes:
+This produces `python/pyatom.<platform>.so` in place. Import it from the `python/`
+directory (or add that directory to `PYTHONPATH`):
 
 ```python
-from atom import Atmosphere
+from pyatom import Atmosphere, Hydrosphere
 
-atm = Atmosphere("cli/config_atm.xml")
-atm.run()
+atm = Atmosphere()                       # no-argument constructor
+atm.load_config("config_atm.xml")        # optional: load an XML config
+atm.run()                                # run every time slice in the config
 ```
 
-See `benchmark/run.py` for a fuller example and `benchmark/Demo.ipynb` for visualisation.
+The models can also be configured directly through properties and driven one paleo
+time slice at a time — this is what the run scripts do:
+
+```python
+atm = Atmosphere()
+atm.nm = 400                             # iterations for this slice
+atm.checkpoint = 100                     # VTK/MinMax printout stride
+atm.output_path = b"output_100Ma/"       # note: paths are bytes in Python 3
+atm.run_time_slice(100)                  # run the Ma = 100 slice
+```
+
+Every parameter in `param.py` is exposed as a read/write property of the same name.
+`run()` iterates all slices defined by the config; `run_time_slice(Ma)` runs a single
+slice. `Hydrosphere` has the same interface (plus an `input_path` for the atmosphere
+transfer files it reads).
+
+Example drivers in `python/`:
+
+| Script | What it does |
+|---|---|
+| `run_atm_ma.py` / `run_hyd_ma.py` | Run a single atmosphere / hydrosphere paleo slice |
+| `run_chain.sh` / `run_paleo_chain.sh` | Atmosphere → hydrosphere one-way chain |
+| `run_picard_sst.py` | Two-way SST Picard loop (see the coupling section above) |
 
 ## Input data
 
