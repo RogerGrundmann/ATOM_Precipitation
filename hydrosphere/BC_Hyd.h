@@ -99,18 +99,15 @@ public:
                 // column's constant-in-depth vertical-velocity mode UNPINNED. That mode has
                 // ∂u/∂z≈0, so it adds no divergence and is invisible to the divergence-based
                 // projection -> never removed, no restoring -> it drifts up every iter (a
-                // slow global radial-velocity runaway: radial KE and u_rms ramp over hundreds
-                // of iters = the whole ocean-KE non-convergence; see
-                // project_hydro_radial_velocity_runaway). Zero-gradient killed the FAST cubic
-                // blow-up but not this SLOW drift. The radial velocity genuinely VANISHES at
-                // an impermeable floor and a rigid lid, so Dirichlet u=0 is the physical
-                // no-normal-flow BC; it pins the vertical mode and pairs consistently with
-                // the projection's Neumann pressure BC. VALIDATED (A/B from the Ma=200 iter-400
-                // restart, +200 iters): radial KE 1.75->2.87 (zero-grad) vs 1.75->1.33 (u=0),
-                // and total KE +14% vs -2.5% (u=0 ~converges). At the truncated bottom in
-                // shallow mode this imposes a rigid bottom at the truncation depth (standard
-                // for a truncated model). v,w keep the cubic (boundary horizontal currents are
-                // real; the instability is radial only).
+                // slow global radial-velocity runaway: u_rms 1.7->3.2 cm/s over iters
+                // 400->1000, the whole ocean-KE ramp; see project_hydro_radial_velocity_
+                // runaway). Zero-gradient killed the FAST cubic blow-up but not this SLOW
+                // drift. The radial velocity genuinely VANISHES at an impermeable floor and a
+                // rigid lid, so Dirichlet u=0 is the physical no-normal-flow BC; it pins the
+                // vertical mode and pairs consistently with the projection's Neumann pressure
+                // BC. (At the truncated bottom in shallow mode this imposes a rigid bottom at
+                // the truncation depth — standard for a truncated model.) v,w keep the cubic
+                // (boundary horizontal currents are real; the instability is radial only).
                 m.u.x[0][j][k]   = 0.0;
                 m.u.x[iml][j][k] = 0.0;
             }
@@ -426,54 +423,63 @@ public:
         constexpr double coeff   = 0.1;
         constexpr double coeff_5 = 5.0 * coeff;
 
-        #pragma omp parallel for collapse(3)
-        for (int i = 1; i < m.im-1; i++) {
-            for (int j = 1; j < m.jm-1; j++) {
-                for (int k = 1; k < m.km-1; k++) {
+        // Each block scatters into ONE axis only: the u-block writes [i±][j][k], the
+        // w-block writes [i][j][k±].  A single collapse(3) loop over all three axes
+        // therefore lets several source cells hit the same target, and `omp atomic`
+        // makes each read-modify-write indivisible WITHOUT ordering them — so the
+        // product a cell accumulates was applied in a thread-scheduling-dependent
+        // order.  The maths is order-independent (the decisions read only the constant
+        // land mask h, and every write is a plain multiply), but the FP ROUNDING is
+        // not, so the model was not bit-reproducible run-to-run (measured: up to
+        // 4.7e-4 K drift over 60 iters on 24 threads, which exceeded the signals we
+        // were trying to A/B).
+        //
+        // Fix: split per axis and parallelise over the two axes each block does NOT
+        // write across, so every target cell is owned by exactly one thread and its
+        // sources are visited in ascending order.  No atomics, and the result now
+        // matches the serial one bit-for-bit.  The blocks are independent (they touch
+        // u and w respectively, and only read h), so splitting the fused loop is
+        // semantics-preserving.
 
-                    // i-direction: damp u near vertical land walls
-                    if (i < m.im-2 && is_land(m.h, i, j, k) && is_water(m.h, i+1, j, k)) {
-                        #pragma omp atomic
+        // i-direction: damp u near vertical land walls.
+        // Targets share (j,k) with their source, so own a whole column per thread.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int j = 1; j < m.jm-1; j++) {
+            for (int k = 1; k < m.km-1; k++) {
+                for (int i = 1; i < m.im-2; i++) {
+                    if (is_land(m.h, i, j, k) && is_water(m.h, i+1, j, k)) {
                         m.u.x[i+1][j][k] *= coeff;
-                        #pragma omp atomic
                         m.u.x[i+2][j][k] *= coeff_5;
-                    }
-
-                    // j-direction: damp v near meridional land walls
-                    if (j == 0 && j < m.jm-1) {
-                        if (is_land(m.h, i, j, k) && is_water(m.h, i, j+1, k) && is_water(m.h, i, j+2, k)) {
-                            #pragma omp atomic
-                            m.v.x[i][j+1][k] *= coeff;
-                            #pragma omp atomic
-                            m.v.x[i][j+2][k] *= coeff_5;
-                        }
-                        if (is_land(m.h, i, j, k) && is_water(m.h, i, j-1, k) && is_water(m.h, i, j-2, k)) {
-                            #pragma omp atomic
-                            m.v.x[i][j-1][k] *= coeff;
-                            #pragma omp atomic
-                            m.v.x[i][j-2][k] *= coeff_5;
-                        }
-                    }
-
-                    // k-direction: damp w near zonal land walls
-                    // need k-2 >= 0 and k+2 <= m.km-1 for the two-cell reach below
-                    if (k >= 2 && k < m.km-2) {
-                        if (is_land(m.h, i, j, k) && is_water(m.h, i, j, k+1) && is_water(m.h, i, j, k+2)) {
-                            #pragma omp atomic
-                            m.w.x[i][j][k+1] *= coeff;
-                            #pragma omp atomic
-                            m.w.x[i][j][k+2] *= coeff_5;
-                        }
-                        if (is_land(m.h, i, j, k) && is_water(m.h, i, j, k-1) && is_water(m.h, i, j, k-2)) {
-                            #pragma omp atomic
-                            m.w.x[i][j][k-1] *= coeff;
-                            #pragma omp atomic
-                            m.w.x[i][j][k-2] *= coeff_5;
-                        }
                     }
                 }
             }
         }
+
+        // k-direction: damp w near zonal land walls.
+        // Targets share (i,j) with their source, so own a whole zonal line per thread.
+        // Need k-2 >= 0 and k+2 <= m.km-1 for the two-cell reach.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                for (int k = 2; k < m.km-2; k++) {
+                    if (is_land(m.h, i, j, k) && is_water(m.h, i, j, k+1) && is_water(m.h, i, j, k+2)) {
+                        m.w.x[i][j][k+1] *= coeff;
+                        m.w.x[i][j][k+2] *= coeff_5;
+                    }
+                    if (is_land(m.h, i, j, k) && is_water(m.h, i, j, k-1) && is_water(m.h, i, j, k-2)) {
+                        m.w.x[i][j][k-1] *= coeff;
+                        m.w.x[i][j][k-2] *= coeff_5;
+                    }
+                }
+            }
+        }
+
+        // NOTE: a j-direction v-damping block used to sit between these two, guarded by
+        // `if (j == 0 && ...)` inside a loop starting at j = 1 — it could never execute,
+        // so it is removed here rather than left as dead weight (removing it is exactly
+        // behaviour-preserving).  Restoring it is a PHYSICS change, not a cleanup: v has
+        // never been wall-damped while u and w always have.  See the separate change that
+        // reinstates it with the correct `j >= 2 && j < m.jm-2` bound.
         cout << "      OGCM: BoundaryCondition ended" << endl;
     }
 
