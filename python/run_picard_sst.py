@@ -47,7 +47,10 @@ def parse_args():
                         "so the reverse channel just returns the same field and the loop converges "
                         "trivially. 0 = unforced cold-collapse (do not use).")
     p.add_argument("--nm", type=int, default=400, help="iterations per atm/hyd run")
-    p.add_argument("--tol", type=float, default=0.05, help="convergence tol on max|dSST| in K")
+    p.add_argument("--checkpoint", type=int, default=100,
+                   help="VTK/panorama printout stride within each run (also the report-only "
+                        "convergence-monitor sampling cadence; convergence.csv is written per round dir)")
+    p.add_argument("--tol", type=float, default=0.05, help="Picard convergence tol on max|dSST| in K")
     p.add_argument("--base", default=None, help="base output dir (default output_picard_<Ma>Ma)")
     return p.parse_args()
 
@@ -82,27 +85,27 @@ def max_dsst_kelvin(path_a, path_b):
     return max((abs(a[i] - b[i]) for i in range(n)), default=0.0) * T_0
 
 
-def run_atm(Ma, outdir, nm, alpha):
+def run_atm(Ma, outdir, nm, alpha, ckpt):
     a = Atmosphere()
     a.output_path = outdir.encode()          # std::string binding wants bytes in py3
     a.nm = nm
-    a.checkpoint = nm                         # one printout at the end of the round
-    a.panorama_print = nm
+    a.checkpoint = ckpt                       # VTK/MinMax printouts every ckpt iters
+    a.panorama_print = ckpt                   # panorama every ckpt iters
     a.sst_coupling_alpha = alpha              # 0.0 in round 0 -> no SST read
     a.hyd_sst_iter = -1                       # latest snapshot in outdir
-    print("    [ATM] Ma=%d nm=%d alpha=%.3f -> %s" % (Ma, nm, alpha, outdir), flush=True)
+    print("    [ATM] Ma=%d nm=%d ckpt=%d alpha=%.3f -> %s" % (Ma, nm, ckpt, alpha, outdir), flush=True)
     a.run_time_slice(Ma)
 
 
-def run_hyd(Ma, outdir, nm, hyd_relax):
+def run_hyd(Ma, outdir, nm, hyd_relax, ckpt):
     h = Hydrosphere()
     h.output_path = outdir.encode()
     h.input_path = outdir.encode()
     h.nm = nm
-    h.checkpoint = nm
-    h.panorama_print = nm
+    h.checkpoint = ckpt                        # VTK/MinMax printouts every ckpt iters
+    h.panorama_print = ckpt                    # panorama every ckpt iters
     h.sst_relax_alpha = hyd_relax             # < 1 => Haney flux BC, ocean carries its own SST anomaly
-    print("    [HYD] Ma=%d nm=%d sst_relax_alpha=%.3f -> %s" % (Ma, nm, hyd_relax, outdir), flush=True)
+    print("    [HYD] Ma=%d nm=%d ckpt=%d sst_relax_alpha=%.3f -> %s" % (Ma, nm, ckpt, hyd_relax, outdir), flush=True)
     h.run_time_slice(Ma)
 
 
@@ -125,8 +128,8 @@ def main():
             shutil.copy(prev_sst, rdir)
 
         print("=== round %d/%d (alpha=%.3f) ===" % (r, args.rounds - 1, alpha), flush=True)
-        run_atm(args.Ma, rdir, args.nm, alpha)
-        run_hyd(args.Ma, rdir, args.nm, args.hyd_relax)
+        run_atm(args.Ma, rdir, args.nm, alpha, args.checkpoint)
+        run_hyd(args.Ma, rdir, args.nm, args.hyd_relax, args.checkpoint)
 
         cur_sst = latest_sst_file(rdir)
         if cur_sst is None:
