@@ -173,12 +173,17 @@ python python/run_picard_sst.py <Ma> --rounds 3 --alpha 0.4 --hyd-relax 0.5 --nm
 | `--hyd-relax` | `0.5` | Hydrosphere `sst_relax_alpha`; **must be `< 1`** or the loop is trivial (the surface is re-pinned and the channel returns the same field) |
 | `--anderson` | `0` | Anderson-acceleration history depth `m` (`0` = plain Picard). `m ≈ 2–3` mixes past iterates to reach the fixed point in fewer rounds; engages from round 3 on |
 | `--anderson-beta` | `1.0` | Anderson mixing/damping (`1.0` = none; `< 1` adds under-relaxation) |
+| `--warm-start` | off | Resume each round's **ocean** from the previous round's restart `.bin` so ocean iterations *accumulate* (`R·nm` effective) instead of re-spinning from the IC every round (async Manabe–Bryan style). Winds/SST target stay fresh; the atmosphere still runs from scratch. Needs `nm` a multiple of `--checkpoint` |
 | `--nm` | `400` | Iterations per atmosphere/hydrosphere run |
 | `--checkpoint` | `100` | VTK/panorama printout stride, and the convergence-monitor sampling cadence |
 | `--tol` | `0.05` | Stop when the fixed-point residual `max|gᵣ − uᵣ|` drops below this (K); equals the round-to-round `max|ΔSST|` in plain-Picard mode |
 
-Each round runs from scratch in its own sub-directory; the report-only convergence
-monitor writes a `convergence.csv` (ocean-mean-T and kinetic-energy drift) per round.
+Each round runs in its own sub-directory. Two different convergences matter: the Picard
+**residual** `max|gᵣ − uᵣ|` measures atm↔ocean *self-consistency* (the models agreeing),
+while the per-round `convergence.csv` (report-only ocean-mean-T and kinetic-energy drift)
+measures *physical steadiness* (each model reaching its own equilibrium). The ocean is
+slow, so at moderate `nm` the residual can be small while the ocean is still spinning up —
+`--warm-start` is the lever that lets ocean iterations accumulate toward equilibrium.
 
 ## Output
 
