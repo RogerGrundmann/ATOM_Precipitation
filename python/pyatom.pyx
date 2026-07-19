@@ -1020,6 +1020,24 @@ cdef class Atmosphere:
             self._check_alive()
             self._thisptr.c_ocean = <double> value
     
+    property sst_coupling_alpha:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.sst_coupling_alpha
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.sst_coupling_alpha = <double> value
+    
+    property hyd_sst_iter:
+        def __get__(Atmosphere self):
+            self._check_alive()
+            return self._thisptr.hyd_sst_iter
+    
+        def __set__(Atmosphere self, value):
+            self._check_alive()
+            self._thisptr.hyd_sst_iter = <int> value
+    
 
 
     # The context manager protocol allows us to precisely

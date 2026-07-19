@@ -113,4 +113,6 @@
     Config::FillDoubleWithElement(elem_atmosphere, "co2_scale", co2_scale);
     Config::FillDoubleWithElement(elem_atmosphere, "c_land", c_land);
     Config::FillDoubleWithElement(elem_atmosphere, "c_ocean", c_ocean);
+    Config::FillDoubleWithElement(elem_atmosphere, "sst_coupling_alpha", sst_coupling_alpha);
+    Config::FillIntWithElement(elem_atmosphere, "hyd_sst_iter", hyd_sst_iter);
   }

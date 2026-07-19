@@ -3,6 +3,8 @@
 
 #include <cmath>
 #include <dirent.h>
+#include <vector>
+#include <sstream>
 
 using namespace std;
 using namespace AtomUtils;
@@ -194,6 +196,69 @@ void cHydrosphereModel::HydrosphereDataTransfer(const string &Name_Bathymetry_Fi
 
     Transfer_File.close();
     cout << "      OGCM: HydrosphereDataTransfer ended" << endl;
+}
+/*
+*
+*/
+// Reverse coupling channel (hydrosphere -> atmosphere). Writes the ocean surface
+// SST (t.x[im-1], non-dimensional) so a subsequent atmosphere run can blend it into
+// its ocean surface temperature (read_Hydrosphere_SST / sst_coupling_alpha), closing
+// the atm<->hyd Picard loop. Mirrors AtmosphereDataTransfer:
+//   - iter-stamped file <stem>_Transfer_Hyd_SST_<total_iter_count>.vwtp, never clobbered
+//     (total_iter_count, like the VTK stamp, so a restart cannot overwrite an earlier
+//     round's snapshot; the atmosphere reader picks the highest-iter file = latest);
+//   - one SST value per (j,k) row, land cells written 0, a "# iter_n = ..." headline;
+//   - NaN/Inf guard: if any surface value is non-finite the file is NOT written, so the
+//     last clean snapshot stays on disk (a corrupt SST must never seed the atmosphere).
+// This is a pure OUTPUT of the current ocean state; it does not touch any field.
+void cHydrosphereModel::HydrosphereSSTTransfer(const string &Name_Bathymetry_File){
+    cout << endl << "      OGCM: HydrosphereSSTTransfer   total_iter_count = "
+         << total_iter_count << endl;
+
+    string stem_t = Name_Bathymetry_File;
+    { auto dot = stem_t.rfind('.'); if(dot != string::npos) stem_t = stem_t.substr(0, dot); }
+    string base_t = output_path;
+    if(!base_t.empty() && base_t.back() == '/') base_t.pop_back();
+    const string stamped_name = base_t + "/" + stem_t + "_Transfer_Hyd_SST_"
+                              + std::to_string(total_iter_count) + ".vwtp";
+
+    // Build the buffer first, checking every value for NaN/Inf before touching disk.
+    std::vector<std::string> line_buffer(jm * km);
+    bool has_nonfinite = false;
+
+    #pragma omp parallel for collapse(2) schedule(static) reduction(||: has_nonfinite)
+    for(int j = 0; j < jm; j++){
+        for(int k = 0; k < km; k++){
+            std::stringstream ss;
+            ss.precision(6);
+            ss.setf(ios::fixed);
+            if(is_land(h, im-1, j, k)){
+                ss << "0.000000";
+            }else{
+                double sst = t.x[im-1][j][k];                          // non-dimensional
+                if(!is_finite_safe(sst)) has_nonfinite = true;
+                ss << sst;
+            }
+            line_buffer[j * km + k] = ss.str();
+        }
+    }
+
+    if(has_nonfinite){
+        cout << "      OGCM: HydrosphereSSTTransfer SKIPPED — non-finite surface SST present;"
+             << " previous snapshot left intact" << endl;
+        return;
+    }
+
+    ofstream SST_File(stamped_name);
+    if(!SST_File.is_open()){
+        cerr << "ERROR: could not open hydrosphere SST transfer file: " << stamped_name << "\n";
+        abort();
+    }
+    SST_File << "# iter_n = " << total_iter_count << "\n";
+    for(int i = 0; i < jm * km; i++)
+        SST_File << line_buffer[i] << "\n";
+    SST_File.close();
+    cout << "      OGCM: HydrosphereSSTTransfer ended (wrote " << stamped_name << ")" << endl;
 }
 /*
 *

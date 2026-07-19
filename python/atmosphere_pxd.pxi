@@ -113,3 +113,5 @@ cdef extern from "cAtmosphereModel.h":
         double co2_scale
         double c_land
         double c_ocean
+        double sst_coupling_alpha
+        int hyd_sst_iter

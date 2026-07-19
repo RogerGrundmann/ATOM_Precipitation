@@ -160,6 +160,7 @@ public:
             m.paraview_panorama_vts(bathymetry_name, m.total_iter_count);
 
         m.HydrospherePlotData(bathymetry_name);
+        m.HydrosphereSSTTransfer(bathymetry_name);   // reverse coupling channel for the atm<->hyd Picard loop
 
         cout << endl << "      OGCM: write_file ended" << endl;
     }

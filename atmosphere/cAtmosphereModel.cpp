@@ -198,6 +198,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 //    BC_Atm(*this).coastalCurrents();
 
     initTemperatureData(Ma);                                            // initialization of temperature, hydrostatic pressure and density of dry air, reconstruction of potential surface values
+    read_Hydrosphere_SST(Ma);                                           // reverse coupling: blend a prior hydrosphere run's SST into t.x[0] (Picard loop; no-op unless sst_coupling_alpha > 0). Before damp_wiggles + t_eq snapshot so the blend is smoothed and becomes the H-S target.
     AtomUtils::damp_wiggles(t, &i_topography, true, true, true);
 
     // Snapshot the lid temperature (i=im-1) from the IC. bcRadius pins t at the lid

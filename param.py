@@ -218,6 +218,9 @@ def main():
 
             ('c_land', 'water vapour reduction on land(60% of the saturation value)', 'double', 66),
             ('c_ocean', 'water vapour reduction on sea surface(64% of the saturation value)', 'double', 70),
+
+            ('sst_coupling_alpha', 'outer-loop (Picard) hydrosphere->atmosphere SST coupling strength: blend fraction of the hydrosphere surface SST (read from <stem>_Transfer_Hyd_SST_<iter>.vwtp) into the atmospheric ocean surface temperature t.x[0] at init, t.x[0] <- (1-alpha)*t.x[0] + alpha*SST_hyd, before the t_eq snapshot so it propagates into the Held-Suarez target. 0.0 = OFF (no read; identical to the one-way chain and to round 0 of a Picard loop, which has no SST file yet). Ocean-only, finite-checked, SST-clamped to [-1.8,40] C, ocean-mean-anchored so total energy does not drift. Under-relax across rounds (e.g. 0.3-0.5)', 'double', 0.0),
+            ('hyd_sst_iter', 'which hydrosphere SST snapshot to read for sst_coupling_alpha: reads <stem>_Transfer_Hyd_SST_<iter>.vwtp for this iteration; -1 = use the latest (highest-iter) snapshot present in the output dir', 'int', -1),
         ],
 
 

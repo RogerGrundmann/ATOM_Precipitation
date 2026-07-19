@@ -202,6 +202,7 @@ private:
     void paraview_vtk_longal(const string &Name_Bathymetry_File, int j_longal, int n);
     void HydrospherePlotData(const string &Name_Bathymetry_File);
     void HydrosphereDataTransfer(const string &Name_Bathymetry_File);
+    void HydrosphereSSTTransfer(const string &Name_Bathymetry_File);   // reverse coupling: write ocean SST for the atmosphere (Picard loop)
     void run_3D_loop(int Ma);
     std::vector<Array*> restart_arrays();
     void save_state(int iter, int Ma);

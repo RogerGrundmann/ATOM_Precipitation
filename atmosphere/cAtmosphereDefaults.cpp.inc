@@ -109,4 +109,6 @@ void cAtmosphereModel::SetDefaultConfig() {
   co2_scale = 1.0;
   c_land = 66;
   c_ocean = 70;
+  sst_coupling_alpha = 0.0;
+  hyd_sst_iter = -1;
 }

@@ -367,6 +367,7 @@ private:
     void AtmospherePlotData(const string &Name_Bathymetry_File);
     void AtmosphereDataTransfer(const string &Name_Bathymetry_File);
     void read_Atmosphere_Surface_Data(int Ma);
+    void read_Hydrosphere_SST(int Ma);   // reverse coupling: blend hydrosphere SST into t.x[0] (Picard loop)
     void searchMinMax_2D(const string &, const string &,
         const string &, Array_2D &, double coeff = 1.0);
 
