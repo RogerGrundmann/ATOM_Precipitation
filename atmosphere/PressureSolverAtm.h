@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <cstdlib>   // getenv/atof for the ATM_POISSON_METRIC_FIX A/B knob
 #include <cmath>
 #include <chrono>
 #include <cstdio>
@@ -100,6 +101,22 @@ public:
         // the primary stabiliser for the steep-orography CFL mode, not this clamp.
         constexpr double p_dyn_cap = 2.0;
 
+        // ⚠️ A/B KNOB 2026-07-21 (ATM_POISSON_METRIC_FIX, default 0 = bit-identical). The θ/φ
+        // Poisson Laplacian coefficients (num2/num3/denom) use SINGLE-power inv_rm /
+        // inv_rmsinthe, which is inconsistent with this solver's own divergence source and
+        // gradient correction (both single-power). The consistent discrete div·grad needs
+        // inv_rm² (θ) and inv_rm²/sin²θ (φ) — exactly the pattern the RADIAL term already
+        // uses (exp_2_rm in the Laplacian vs single exp_rm in the divergence). The ocean
+        // diagnosed this single-power form as the non-idempotent collocated projection and
+        // moved its per-iter solve to project_velocity with inv_rm2 / inv_rm2sinthe2
+        // (PressureSolverHyd.h:428). This knob brings the atm θ/φ Laplacian to the same
+        // consistent metric so it can be A/B tested against the tuned steep-orography
+        // stabilisers (p_dyn_cap, p_dyn_ceiling, topo Dirichlet pins) that were calibrated on
+        // the old operator. NB: this repairs the metric POWER only; the collocated checkerboard
+        // (Rhie-Chow face reconstruction) is a separate, larger port not done here.
+        const bool poisson_metric_fix = [](){ const char* e = getenv("ATM_POISSON_METRIC_FIX");
+                                              return e ? (atof(e) != 0.0) : false; }();
+
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         #pragma omp parallel for collapse(2) schedule(dynamic, 4)
         for (int i = 1; i < m.im-1; i++) {
@@ -128,13 +145,17 @@ public:
                 geo.inv_dthe2 = inv_dthe2;
                 geo.inv_dphi2 = inv_dphi2;
 
-                const double denom = 2.0 * geo.exp_2_rm    * inv_dr2
-                                   + 2.0 * geo.inv_rm       * inv_dthe2
-                                   + 2.0 * geo.inv_rmsinthe * inv_dphi2;
+                // θ/φ Laplacian metric: single-power (legacy) or the consistent double-power
+                // (inv_rm2, inv_rm2sinthe2) when ATM_POISSON_METRIC_FIX is set. See knob note above.
+                const double m_the = poisson_metric_fix ? geo.inv_rm2        : geo.inv_rm;
+                const double m_phi = poisson_metric_fix ? geo.inv_rm2sinthe2 : geo.inv_rmsinthe;
+                const double denom = 2.0 * geo.exp_2_rm * inv_dr2
+                                   + 2.0 * m_the * inv_dthe2
+                                   + 2.0 * m_phi * inv_dphi2;
                 const double inv_denom = 1.0 / denom;
-                const double num1 = geo.exp_2_rm    * inv_dr2;
-                const double num2 = geo.inv_rm      * inv_dthe2;
-                const double num3 = geo.inv_rmsinthe * inv_dphi2;
+                const double num1 = geo.exp_2_rm * inv_dr2;
+                const double num2 = m_the * inv_dthe2;
+                const double num3 = m_phi * inv_dphi2;
 
                 const bool i_in_range = (i < m.im-2);
                 const bool j_inner    = (j > 2) && (j < m.jm-2);
