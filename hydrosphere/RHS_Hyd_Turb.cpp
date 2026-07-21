@@ -573,7 +573,13 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // ===== Diffusion =====
     double two_over_rm_exp = 2.0 * inv_rm * exp_rm;
     double cos_rm2sin      = costhe_inv_rm2sinthe;
-    double v_metric        = (1.0 + costhe / sinthe2) * inv_rm2;
+    // v_metric = csc²θ/r² = (1 + cot²θ)/r² = (1 + cos²θ/sin²θ)/r². 2026-07-21: this hyd
+    // turbulent core still carried the pre-fix costhe (not costhe²) form of the
+    // project_vmetric_antidiffusion bug — the same error corrected in RHS_Atm_Turb.cpp on
+    // 2026-06-19 but never propagated here. With bare costhe the metric under-damps v,w in
+    // one hemisphere and anti-diffuses poleward of ~38° in the other. A/B validated from the
+    // Ma=100 iter-1000 restart (150 steps): stable, 0 NaN, KE differs ~0.01% (T bit-identical).
+    double v_metric        = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
     double diffusion_t = (d2tdr2 * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
