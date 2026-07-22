@@ -197,7 +197,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
 //    dump_array("PressureDynamic", p_dyn, p_0, Atmosphere_panorama_vts_File);
 //    dump_array("r_humid", r_humid, 1.0, Atmosphere_panorama_vts_File);
 
-//    dump_array("CO2-Concentration", co2, co2_0, Atmosphere_panorama_vts_File);
+    dump_array("CO2-Concentration", co2, co2_0, Atmosphere_panorama_vts_File);
 //    dump_array("Q_Latent", Q_Latent, 1.0, Atmosphere_panorama_vts_File);
 //    dump_array("Q_Radiation", radiation, 1.0, Atmosphere_panorama_vts_File);
 //    dump_array("Q_Sensible", Q_Sensible, 1.0, Atmosphere_panorama_vts_File);
@@ -524,10 +524,10 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     dump_radial_2d("Q_sensible_2D", Q_sensible, 1e-3, Atmosphere_vtk_radial_File);
 */
 
-//    dump_radial("BuoyancyForce", BuoyancyForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("CoriolisForce", CoriolisForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("CentrifugalForce", CentrifugalForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("PresGradForce", PresGradForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("BuoyancyForce", BuoyancyForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("CoriolisForce", CoriolisForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("CentrifugalForce", CentrifugalForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("PresGradForce", PresGradForce, 1.0, i_radial, Atmosphere_vtk_radial_File);
 //    dump_radial("LorentzForce", LorentzForce, 1e9, i_radial, Atmosphere_vtk_radial_File);
 //    dump_radial("Q_Radiation", radiation, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
@@ -736,12 +736,12 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     dump_zonal("S_s", S_s, 1e3, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("S_c_c", S_c_c, 1e3, k_zonal, Atmosphere_vtk_zonal_File);
 
-/*
+
     dump_zonal("BuoyancyForce", BuoyancyForce, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("CoriolisForce", CoriolisForce, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("CentrifugalForce", CentrifugalForce, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PresGradForce", PresGradForce, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
-*/
+
 //    dump_zonal("Q_Latent", Q_Latent, 1e-3, k_zonal, Atmosphere_vtk_zonal_File);
 //    dump_zonal("Q_Sensible", Q_Sensible, 1e-3, k_zonal, Atmosphere_vtk_zonal_File);
 
@@ -918,12 +918,12 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
 //    dump_longal("HumidityRel", HumidityRel, 1.0, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("TempDewPoint", TempDewPoint, 1.0, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("TempStand", TempStand, 1.0, j_longal, Atmosphere_vtk_longal_File);
-/*
+
     dump_longal("BuoyancyForce", BuoyancyForce, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("CoriolisForce", CoriolisForce, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("CentrifugalForce", CentrifugalForce, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("PresGradForce", PresGradForce, 1.0, j_longal, Atmosphere_vtk_longal_File);
-*/
+
 //    dump_longal("Q_Latent", Q_Latent, 1e-3, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("Q_Sensible", Q_Sensible, 1e-3, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("Q_Radiation", radiation, 1.0, j_longal, Atmosphere_vtk_longal_File);

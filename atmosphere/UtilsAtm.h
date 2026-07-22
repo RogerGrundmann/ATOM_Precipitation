@@ -304,7 +304,7 @@ public:
         if (m.paraview_panorama_vts_flag && m.panorama_print > 0
             && m.iter_n > 0 && m.iter_n % m.panorama_print == 0) {
             m.paraview_panorama_vts(bathymetry_name, m.iter_n);
-            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
+//            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
         }
 
         m.AtmosphereDataTransfer(bathymetry_name);
@@ -356,6 +356,7 @@ public:
             &m.Q_Latent, &m.Q_Sensible,
             &m.BuoyancyForce, &m.CoriolisForce, &m.CentrifugalForce, &m.PresGradForce,
             &m.vbud_pgf, &m.vbud_cor, &m.vbud_advv, &m.vbud_advh, &m.vbud_diff, &m.vbud_other,
+            &m.wbud_pgf, &m.wbud_cor, &m.wbud_advv, &m.wbud_advh, &m.wbud_diff, &m.wbud_other,
             &m.epsilon, &m.radiation,
             &m.P_rain, &m.P_snow, &m.P_rainn, &m.P_snown, &m.P_graupel,
             &m.P_conv,

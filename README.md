@@ -174,6 +174,7 @@ python python/run_picard_sst.py <Ma> --rounds 3 --alpha 0.4 --hyd-relax 0.5 --nm
 | `--anderson` | `0` | Anderson-acceleration history depth `m` (`0` = plain Picard). `m ≈ 2–3` mixes past iterates to reach the fixed point in fewer rounds; engages from round 3 on |
 | `--anderson-beta` | `1.0` | Anderson mixing/damping (`1.0` = none; `< 1` adds under-relaxation) |
 | `--warm-start` | off | Resume each round's **ocean** from the previous round's restart `.bin` so ocean iterations *accumulate* (`R·nm` effective) instead of re-spinning from the IC every round (async Manabe–Bryan style). Winds/SST target stay fresh; the atmosphere still runs from scratch. Needs `nm` a multiple of `--checkpoint` |
+| `--atm-warm-start` | off | **Experimental / A-B only.** Also resume the **atmosphere** from the previous round's `atm_restart` `.bin`, so atm iterations accumulate too (round *r* runs from *r·nm* up to *(r+1)·nm*). Off by default on purpose: unlike the ocean, the surface wind the ocean consumes is best fresh at `nm ≈ 400` and *spins down* with accumulated iterations (trades decay, the westerly-everywhere collapse sets in ~1000→1600), so accumulating past ~1000 total iters can **degrade** the forcing. Use only to measure that effect |
 | `--nm` | `400` | Iterations per atmosphere/hydrosphere run |
 | `--checkpoint` | `100` | VTK/panorama printout stride, and the convergence-monitor sampling cadence |
 | `--tol` | `0.05` | Stop when the fixed-point residual `max|gᵣ − uᵣ|` drops below this (K); equals the round-to-round `max|ΔSST|` in plain-Picard mode |
@@ -184,6 +185,52 @@ while the per-round `convergence.csv` (report-only ocean-mean-T and kinetic-ener
 measures *physical steadiness* (each model reaching its own equilibrium). The ocean is
 slow, so at moderate `nm` the residual can be small while the ocean is still spinning up —
 `--warm-start` is the lever that lets ocean iterations accumulate toward equilibrium.
+
+## Atmosphere diagnostics and A/B knobs
+
+A few atmosphere-model behaviours can be probed at run time without recompiling. These are
+research/debugging aids aimed at the circulation spin-down problem (the trades and the
+extratropical jet weakening over a run). All are **off / bit-identical by default** — set the
+environment variable before launching the atmosphere to change behaviour.
+
+### Environment A/B knobs
+
+| Env variable | Default | Effect |
+|---|---|---|
+| `ATM_CORIOLIS_SCALE` | `1.0` | Multiplies the non-dimensional Coriolis coefficient `force_nd = ω·L_atm/u₀`. The nondimensionalisation uses `L_atm` (the ~400 m radial grid step) rather than the `r_Earth`-scaled horizontal metric the Coriolis term must balance, so as-is it lands orders of magnitude too weak and the initial-condition trades decay unregenerated. Values `> 1` sweep toward the length-consistent `ω·r_Earth/u₀` (≈ 58, i.e. ~16000×) to find where Coriolis balances horizontal advection and the trades stop decaying. Coriolis is rotational (energy-conserving), so the CFL coefficient stays `≪ 1` even at large scale |
+| `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
+
+Example — run the atmosphere with a stronger Coriolis and a gentler radial filter:
+
+```bash
+ATM_CORIOLIS_SCALE=1000 ATM_RADIAL_SHAPIRO_STRENGTH=0.5 ./cli/atm cli/config_atm.xml
+```
+
+Each knob is read once (first use) via `getenv`, so it applies to the whole run.
+
+### Momentum-budget diagnostics
+
+Every `checkpoint` iterations the atmosphere writes zonal-mean momentum budgets that
+attribute each per-iteration velocity change to a specific term, so a spin-down can be
+pinned to a source (e.g. weakening Coriolis) or a sink (a specific filter / diffusion):
+
+- `v_momentum_budget_<iter>.csv` — **meridional** wind (Hadley/Ferrel branches)
+- `w_momentum_budget_<iter>.csv` — **zonal** wind (the trades / Walker component)
+
+Each row is one `(latitude, height)` cell. The columns split the net Δ into the RK4 dynamics
+(`dw_dyn`) versus each post-RK4 filter (`dw_polar`, `dw_orog`, `dw_radial`), and further break
+the RK4 net into its physical terms (`pgf`, `coriolis`, `adv_vert`, `adv_horiz`, `diffusion`,
+`drag_mc`) in m/s per iteration. A one-line tropical trade-layer summary is also echoed to
+stdout each time.
+
+### ParaView field dumps
+
+The atmosphere's ParaView writers (`atmosphere/Paraview_Atm.cpp`) expose many optional fields
+as commented-out `dump_*` lines — force components (`BuoyancyForce`, `CoriolisForce`,
+`CentrifugalForce`, `PresGradForce`), `CO2-Concentration`, latent/sensible/radiative heat, and
+more. Uncomment the ones you need for a given investigation and rebuild. The pole-singular
+`paraview_sphere_vts` output can be skipped in favour of the `panorama` `.vts` (whose
+derivatives are well-behaved away from the poles).
 
 ## Output
 

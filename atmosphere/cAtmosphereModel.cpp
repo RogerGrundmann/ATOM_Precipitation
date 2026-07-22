@@ -13,6 +13,8 @@
 
 #include "cAtmosphereModel.h"
 
+#include <cstdlib>   // getenv/atof for the ATM_RADIAL_SHAPIRO_STRENGTH A/B knob
+
 #include "MoistConvection.h"
 
 #include "ZeroCatIceScheme.h"
@@ -998,6 +1000,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             for(int i = 0; i < im; i++)
                 for(int j = 0; j < jm; j++){ dst[i][j] = vb_stage[i][j] - vb_prev[i][j]; vb_prev[i][j] = vb_stage[i][j]; }
         };
+        // Parallel ZONAL-wind (w) budget — same per-stage differencing, for the trades/Walker.
+        std::vector<std::vector<double> > wb_dyn, wb_polar, wb_orog, wb_radial, wb_stage, wb_prev;
+        auto wb_diff = [&](std::vector<std::vector<double> >& dst){
+            zonal_mean_w(wb_stage);
+            for(int i = 0; i < im; i++)
+                for(int j = 0; j < jm; j++){ dst[i][j] = wb_stage[i][j] - wb_prev[i][j]; wb_prev[i][j] = wb_stage[i][j]; }
+        };
         if(do_vbudget){
             vb_stage.assign(im, std::vector<double>(jm, 0.0));
             vb_prev .assign(im, std::vector<double>(jm, 0.0));
@@ -1006,9 +1015,17 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             vb_orog .assign(im, std::vector<double>(jm, 0.0));
             vb_radial.assign(im, std::vector<double>(jm, 0.0));
             zonal_mean_v(vb_prev);   // vbar before RK4
+            wb_stage.assign(im, std::vector<double>(jm, 0.0));
+            wb_prev .assign(im, std::vector<double>(jm, 0.0));
+            wb_dyn  .assign(im, std::vector<double>(jm, 0.0));
+            wb_polar.assign(im, std::vector<double>(jm, 0.0));
+            wb_orog .assign(im, std::vector<double>(jm, 0.0));
+            wb_radial.assign(im, std::vector<double>(jm, 0.0));
+            zonal_mean_w(wb_prev);   // wbar before RK4
         }
 
         vbudget_capture = do_vbudget;     // have rhs_v store its per-term split this RK4 (turbulent path)
+        wbudget_capture = do_vbudget;     // have rhs_w store its per-term split this RK4 (turbulent path)
         // Single dynamical core (2026-07-08): the turbulent RHS reduces to LAMINAR when
         // use_turbulence_model is false (molecular diffusion, zeroed turbulence) and to EULER
         // when diffusion_ramp=0 (inviscid spin-up). The former separate laminar
@@ -1016,7 +1033,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // independent switch (diffusion_ramp), decoupled from the turbulence selection.
         solveRungeKutta_Atmosphere_Turb();
         vbudget_capture = false;
-        if(do_vbudget) vb_diff(vb_dyn);   // RK4 net (PGF+Coriolis+advection+diffusion+drag+MC)
+        wbudget_capture = false;
+        if(do_vbudget){ vb_diff(vb_dyn); wb_diff(wb_dyn); }   // RK4 net (PGF+Coriolis+advection+diffusion+drag+MC)
 
         // Polar zonal (φ) filter — root-cause stabiliser for the high-latitude blow-up.
         // Near the poles the zonal cell width rm·sinθ·dφ → 0, so the explicit zonal CFL
@@ -1031,7 +1049,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::polar_zonal_filter(u, the.z, &i_topography, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(v, the.z, &i_topography, 30.0, 12, 3.0);
         AtomUtils::polar_zonal_filter(w, the.z, &i_topography, 30.0, 12, 3.0);
-        if(do_vbudget) vb_diff(vb_polar);   // polar zonal (φ) filter
+        if(do_vbudget){ vb_diff(vb_polar); wb_diff(wb_polar); }   // polar zonal (φ) filter
 
         // Orographic Shapiro filter — same purpose as the polar filter, but for the
         // steep-orography CFL hot-spots (Andes/Atlas/NZ Alps) the latitude-keyed polar
@@ -1045,7 +1063,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::orographic_shapiro_filter(u, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
         AtomUtils::orographic_shapiro_filter(v, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
         AtomUtils::orographic_shapiro_filter(w, i_topography, /*steep_threshold=*/2, /*n_layers_above=*/3, /*passes=*/3);
-        if(do_vbudget) vb_diff(vb_orog);   // orographic Shapiro filter
+        if(do_vbudget){ vb_diff(vb_orog); wb_diff(wb_orog); }   // orographic Shapiro filter
 
         // NOTE (2026-06-08): an orographic Shapiro filter on the SCALAR fields was
         // tested here and REVERTED. Energy-budget tracing of the cliff cell (5,28,209,
@@ -1067,11 +1085,22 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // A 1-2-1 on v,w run EVERY iteration measurably erodes the jet's thermal-wind shear and
         // the Hadley/Ferrel cells' two-branch v structure, spinning the circulation down despite
         // a steady baroclinic (equator-pole) temperature gradient; the 4th-order filter does not.
-        AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2);
-        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2);
-        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2);
-        if(do_vbudget){ vb_diff(vb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
+        // ⚠️ A/B KNOB 2026-07-21 (ATM_RADIAL_SHAPIRO_STRENGTH, default 1.0 = bit-identical).
+        // The column-integrated w-momentum budget (scratchpad/column_radial_budget.py) showed
+        // these radial Shapiro passes on v,w are the DOMINANT net sink of extratropical-jet
+        // momentum (~85% of Mdot_net at 30-60°, ~6x the resolved dynamics; the ocean has no
+        // radial velocity Shapiro at all). The 4th-order _ho variant was already chosen for v,w
+        // to spare the resolved shear, but it still dominates. This scales the filter STRENGTH so
+        // we can A/B whether easing it slows the jet spin-down WITHOUT re-triggering the radial 2Δ
+        // checkerboard / near-surface CFL blow-up it guards against. 0 = filter off (CFL risk).
+        static const double radial_shapiro_strength = [](){
+            const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH"); return e ? atof(e) : 1.0; }();
+        AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2, radial_shapiro_strength);
+        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength);
+        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength);
+        if(do_vbudget){ vb_diff(vb_radial); wb_diff(wb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
             write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
+            write_w_momentum_budget(iter_n, wb_dyn, wb_polar, wb_orog, wb_radial);
         }
 
         // Radial de-checkerboarding for the SCALARS at orographic columns. The earlier

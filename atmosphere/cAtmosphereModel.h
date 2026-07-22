@@ -224,6 +224,7 @@ private:
     double diffusion_ramp = 1.0;
     bool inviscid_phase = false;
     bool vbudget_capture = false;   // when true, rhs_v stores its per-term split into vbud_* (set on checkpoint iters)
+    bool wbudget_capture = false;   // when true, rhs_w stores its per-term split into wbud_* (set on checkpoint iters)
 
     // Buoyancy ramp ∈ [0,1] — linearly increases the Boussinesq body force in rhs_u
     // from 0 at iter 0 to 1 at iter buoyancy_ramp_iters.  Set ramp_iters = 0 to
@@ -319,6 +320,17 @@ private:
         const std::vector<std::vector<double> >& dv_polar,
         const std::vector<std::vector<double> >& dv_orog,
         const std::vector<std::vector<double> >& dv_radial);
+    // Zonal-mean ZONAL-wind (w) momentum budget — the trade / Walker component that the
+    // meridional (v) budget cannot see. zonal_mean_w fills wbar[i][j] in m/s; the writer
+    // attributes the per-iteration Δw̄ to RK4 dynamics + each post-RK4 filter, so the
+    // trade-easterly spin-down can be pinned to a source (weakening Coriolis) or a sink
+    // (a specific filter / diffusion). Same masking + scaling as the v budget.
+    void zonal_mean_w(std::vector<std::vector<double> >& wbar);
+    void write_w_momentum_budget(int iter,
+        const std::vector<std::vector<double> >& dw_dyn,
+        const std::vector<std::vector<double> >& dw_polar,
+        const std::vector<std::vector<double> >& dw_orog,
+        const std::vector<std::vector<double> >& dw_radial);
     void run_3D_loop(int Ma);
     void load_global_temperature_curve();
     void load_equat_temperature_curve();
@@ -467,6 +479,15 @@ public:
     Array vbud_advh;                                                    // horizontal advection -(v/rm)∂v/∂θ -(w/rmsinθ)∂v/∂φ
     Array vbud_diff;                                                    // diffusion (molecular + turbulent, + metric terms)
     Array vbud_other;                                                   // surface drag + moist-convection momentum
+    // Zonal-mean w (zonal-wind / trade) momentum-budget term capture — mirror of vbud_*,
+    // stored when wbudget_capture is set so write_w_momentum_budget can attribute the
+    // trade-easterly spin-down to a specific rhs_w term.
+    Array wbud_pgf;                                                     // -∂p/∂φ /(rm·sinθ) (zonal pressure gradient)
+    Array wbud_cor;                                                     // Coriolis term (coupling to radial/meridional wind)
+    Array wbud_advv;                                                    // vertical advection  -u·∂w/∂r
+    Array wbud_advh;                                                    // horizontal advection -(v/rm)∂w/∂θ -(w/rmsinθ)∂w/∂φ
+    Array wbud_diff;                                                    // diffusion (molecular + turbulent, + metric terms)
+    Array wbud_other;                                                   // surface drag + moist-convection momentum
     Array epsilon;                                                      // emissivity/ absorptivity
     Array radiation;                                                    // radiation
     Array P_rain;                                                       // rain precipitation mass rate

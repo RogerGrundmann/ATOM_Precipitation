@@ -82,6 +82,13 @@ def parse_args():
                    help="resume each round's hydrosphere from the previous round's restart .bin, so "
                         "ocean iterations accumulate across rounds (R*nm effective) instead of "
                         "re-spinning from the IC every round. The atmosphere still runs from scratch.")
+    p.add_argument("--atm-warm-start", action="store_true",
+                   help="EXPERIMENTAL / A-B ONLY. Also resume the ATMOSPHERE from the previous round's "
+                        "atm_restart .bin, so atm iters accumulate too (round r runs r*nm -> (r+1)*nm). "
+                        "CAVEAT: the atm surface wind (the ocean's forcing) is best fresh at ~nm=400 and "
+                        "spins DOWN with accumulated iters (trades decay, westerly-everywhere collapse sets "
+                        "in ~1000->1600); accumulating past ~1000 total iters can DEGRADE the very wind the "
+                        "ocean consumes. Off by default on purpose — use only to measure the effect.")
     p.add_argument("--nm", type=int, default=400, help="iterations per atm/hyd run")
     p.add_argument("--checkpoint", type=int, default=100,
                    help="VTK/panorama printout stride within each run (also the report-only "
@@ -103,9 +110,9 @@ def latest_sst_file(d):
     return max(files, key=iter_of)
 
 
-def latest_restart(d, Ma):
-    """Newest hydrosphere restart checkpoint in dir d as (path, iter), or (None, -1)."""
-    files = glob.glob(os.path.join(d, "hyd_restart_%dMa_*.bin" % Ma))
+def latest_restart(d, Ma, kind="hyd"):
+    """Newest {hyd,atm} restart checkpoint in dir d as (path, iter), or (None, -1)."""
+    files = glob.glob(os.path.join(d, "%s_restart_%dMa_*.bin" % (kind, Ma)))
     if not files:
         return None, -1
     def iter_of(f):
@@ -164,15 +171,20 @@ def anderson_next(U, G, m, beta):
     return (u_k + beta * f_k - (dU + beta * dF) @ gamma).tolist()
 
 
-def run_atm(Ma, outdir, nm, alpha, ckpt):
+def run_atm(Ma, outdir, nm, alpha, ckpt, restart_from_iter=-1, save_iter=-1):
     a = Atmosphere()
     a.output_path = outdir.encode()          # std::string binding wants bytes in py3
-    a.nm = nm
+    a.nm = nm                                  # for the atm, nm is a TOTAL ceiling (iter_n = restart..nm)
     a.checkpoint = ckpt                       # VTK/MinMax printouts every ckpt iters
     a.panorama_print = ckpt                   # panorama every ckpt iters
     a.sst_coupling_alpha = alpha              # 0.0 in round 0 -> no SST read
     a.hyd_sst_iter = -1                       # latest snapshot in outdir
-    print("    [ATM] Ma=%d nm=%d ckpt=%d alpha=%.3f -> %s" % (Ma, nm, ckpt, alpha, outdir), flush=True)
+    a.restart_from_iter = restart_from_iter    # >=0 => warm-start the atm from that checkpoint
+    if save_iter >= 0:
+        a.checkpoint_save_iter = save_iter     # dump atm_restart_<Ma>Ma_<save_iter>.bin at the ceiling
+    tag = (" restart@%d save@%d" % (restart_from_iter, save_iter)) if restart_from_iter >= 0 else ""
+    print("    [ATM] Ma=%d nm=%d ckpt=%d alpha=%.3f%s -> %s"
+          % (Ma, nm, ckpt, alpha, tag, outdir), flush=True)
     a.run_time_slice(Ma)
 
 
@@ -197,8 +209,9 @@ def main():
     os.makedirs(base, exist_ok=True)
     accel = "Anderson(%d, beta=%.2f)" % (args.anderson, args.anderson_beta) if args.anderson > 0 else "plain Picard"
     ocean = "warm-start" if args.warm_start else "from-scratch/round"
-    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f hyd_relax=%.3f nm=%d tol=%.3fK %s ocean=%s base=%s ###"
-          % (args.Ma, args.rounds, args.alpha, args.hyd_relax, args.nm, args.tol, accel, ocean, base), flush=True)
+    atm = "warm-start" if args.atm_warm_start else "fresh/round"
+    print("### SST Picard loop: Ma=%d rounds=%d alpha=%.3f hyd_relax=%.3f nm=%d tol=%.3fK %s ocean=%s atm=%s base=%s ###"
+          % (args.Ma, args.rounds, args.alpha, args.hyd_relax, args.nm, args.tol, accel, ocean, atm, base), flush=True)
 
     prev_sst = None       # path to g_{r-1}'s SST file
     prev_rdir = None      # previous round's dir (source of the ocean restart .bin)
@@ -233,8 +246,29 @@ def main():
             else:
                 print("    [warm-start] no restart .bin in %s — ocean starts fresh this round" % prev_rdir, flush=True)
 
+        # Atm warm-start (EXPERIMENTAL): carry the previous round's atm restart into this dir and
+        # resume from it. Unlike the ocean, the atm loop treats nm as a TOTAL ceiling, so round r
+        # resumes at r*nm and runs up to (r+1)*nm, saving the ceiling for the next round.
+        atm_restart_iter = -1
+        atm_nm = args.nm
+        atm_save_iter = -1
+        if args.atm_warm_start and r >= 1 and prev_rdir is not None:
+            src_bin, src_iter = latest_restart(prev_rdir, args.Ma, kind="atm")
+            if src_bin is not None:
+                shutil.copy(src_bin, rdir)
+                atm_restart_iter = src_iter
+                atm_nm = src_iter + args.nm          # ceiling = resume point + one more nm block
+                atm_save_iter = atm_nm
+                print("    [atm-warm-start] atm resumes from %s (total_iter %d) -> ceiling %d"
+                      % (os.path.basename(src_bin), src_iter, atm_nm), flush=True)
+            else:
+                print("    [atm-warm-start] no atm_restart .bin in %s — atm starts fresh this round" % prev_rdir, flush=True)
+        elif args.atm_warm_start and r == 0:
+            atm_save_iter = args.nm                  # round 0: save the ceiling so round 1 can resume
+
         print("=== round %d/%d (alpha=%.3f) ===" % (r, args.rounds - 1, alpha), flush=True)
-        run_atm(args.Ma, rdir, args.nm, alpha, args.checkpoint)
+        run_atm(args.Ma, rdir, atm_nm, alpha, args.checkpoint,
+                restart_from_iter=atm_restart_iter, save_iter=atm_save_iter)
         run_hyd(args.Ma, rdir, args.nm, args.hyd_relax, args.checkpoint, restart_from_iter=restart_iter)
 
         cur_sst = latest_sst_file(rdir)

@@ -340,3 +340,99 @@ void cAtmosphereModel::write_v_momentum_budget(int iter,
          << "   -> " << fname.str() << endl;
 }
 
+
+void cAtmosphereModel::zonal_mean_w(std::vector<std::vector<double> >& wbar){
+    for(int i = 0; i < im; i++){
+        for(int j = 0; j < jm; j++){
+            double sum = 0.0; int n = 0;
+            for(int k = 0; k < km; k++){
+                if(i < i_topography[j][k]) continue;            // inside terrain
+                double ww = w.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(ww)) continue;
+                sum += ww; n++;
+            }
+            wbar[i][j] = (n > 0) ? (sum / n) * u_0 : 0.0;
+        }
+    }
+}
+
+
+// Zonal-mean ZONAL-wind (w) momentum budget — the trade / Walker component the v budget
+// cannot see. Mirror of write_v_momentum_budget: the four step contributions difference to
+// the net Δwbar/iter, and the RK4 split (pgf+cor+advv+advh+diff+other) ≈ dw_dyn.
+//   dw_dyn    — RK4 net of all rhs_w physics (PGF + Coriolis + advection + diffusion + drag + MC)
+//   dw_polar  — polar zonal (φ) filter   (starts at 30° — reaches the poleward trade edge)
+//   dw_orog   — orographic Shapiro filter
+//   dw_radial — radial (vertical) Shapiro filter  [prime spin-down suspect]
+// Units: m/s per iteration. Trades are EASTERLY (wbar<0 in the tropics): a term POSITIVE
+// where wbar<0 ERODES the trades; NEGATIVE there SUSTAINS them. wbud_cor is the trade
+// source (Coriolis on the meridional Hadley inflow).
+void cAtmosphereModel::write_w_momentum_budget(int iter,
+    const std::vector<std::vector<double> >& dw_dyn,
+    const std::vector<std::vector<double> >& dw_polar,
+    const std::vector<std::vector<double> >& dw_orog,
+    const std::vector<std::vector<double> >& dw_radial){
+
+    std::vector<std::vector<double> > wbar(im, std::vector<double>(jm, 0.0));
+    zonal_mean_w(wbar);   // current (post-iteration) wbar
+
+    auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };
+
+    const double term_scale = dt * u_0;
+    auto zmean = [&](const Array& A, std::vector<std::vector<double> >& out){
+        for(int i = 0; i < im; i++)
+            for(int j = 0; j < jm; j++){
+                double sum = 0.0; int n = 0;
+                for(int k = 0; k < km; k++){
+                    if(i < i_topography[j][k]) continue;
+                    double a = A.x[i][j][k];
+                    if(!AtomUtils::is_finite_safe(a)) continue;
+                    sum += a; n++;
+                }
+                out[i][j] = (n > 0) ? (sum / n) * term_scale : 0.0;
+            }
+    };
+    std::vector<std::vector<double> > t_pgf(im, std::vector<double>(jm,0.0)), t_cor=t_pgf,
+        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf;
+    zmean(wbud_pgf, t_pgf);   zmean(wbud_cor, t_cor);     zmean(wbud_advv, t_advv);
+    zmean(wbud_advh, t_advh); zmean(wbud_diff, t_diff);   zmean(wbud_other, t_other);
+
+    ostringstream fname;
+    fname << output_path << "w_momentum_budget_" << iter << ".csv";
+    ofstream f(fname.str().c_str());
+    if(f.is_open()){
+        f << "lat_deg,height_m,wbar_mps,dw_dyn,dw_polar,dw_orog,dw_radial,dw_net,"
+          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_mc,dyn_sum\n";
+        for(int j = 0; j < jm; j++){
+            const double lat = lat_of(j);
+            for(int i = 0; i < im; i++){
+                const double net = dw_dyn[i][j] + dw_polar[i][j] + dw_orog[i][j] + dw_radial[i][j];
+                const double dyn_sum = t_pgf[i][j] + t_cor[i][j] + t_advv[i][j]
+                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j];
+                f << lat << "," << get_layer_height(i) << "," << wbar[i][j] << ","
+                  << dw_dyn[i][j] << "," << dw_polar[i][j] << "," << dw_orog[i][j] << ","
+                  << dw_radial[i][j] << "," << net << ","
+                  << t_pgf[i][j] << "," << t_cor[i][j] << "," << t_advv[i][j] << ","
+                  << t_advh[i][j] << "," << t_diff[i][j] << "," << t_other[i][j] << ","
+                  << dyn_sum << "\n";
+            }
+        }
+        f.close();
+    }
+
+    // Log the budget in the tropical lower-troposphere trade layer (lat ~18°, z ~500 m),
+    // where the easterly trades live and decay. Report the RK4 dynamical split there.
+    int jp = (int)round((90.0 - 18.0) * (jm - 1) / 180.0);   // ~lat 18°N
+    int ip = get_layer_index(500.0);                         // ~500 m AGL (sea level)
+    if(ip < 1) ip = 1;
+    cout << "      [wbudget] iter=" << iter << fixed << setprecision(5)
+         << "  @lat=" << setprecision(0) << lat_of(jp) << " z=" << get_layer_height(ip) << "m"
+         << setprecision(5) << "  wbar=" << wbar[ip][jp]
+         << "  | dw_dyn=" << dw_dyn[ip][jp] << " (radial=" << dw_radial[ip][jp]
+         << " polar=" << dw_polar[ip][jp] << ")"
+         << "  || split: pgf=" << t_pgf[ip][jp] << " cor=" << t_cor[ip][jp]
+         << " advV=" << t_advv[ip][jp] << " advH=" << t_advh[ip][jp]
+         << " diff=" << t_diff[ip][jp] << " drag/mc=" << t_other[ip][jp]
+         << "   -> " << fname.str() << endl;
+}
+

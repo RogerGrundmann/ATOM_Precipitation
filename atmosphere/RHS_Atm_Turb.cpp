@@ -11,6 +11,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <cstdlib>   // getenv/atof for the ATM_CORIOLIS_SCALE A/B knob
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -408,7 +409,17 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // coefficient (2*force_nd*dt ~ 7e-7), so this does NOT re-trigger the thermal
     // polar-runaway the *dt was added to tame (that is buoyancy, scaled separately
     // by g*dt/u_0). Advective-time nondim: Coriolis coeff = 2 Omega L/u0.
-    const double force_nd = omega * L_atm / u_0;
+    // ⚠️ A/B KNOB 2026-07-20 (ATM_CORIOLIS_SCALE, default 1.0 = bit-identical): force_nd uses
+    // L_atm=400 m (the RADIAL grid step), but the horizontal advection it must balance uses the
+    // r_Earth-scaled spherical metric (inv_rm≈1, dt≈2.83·dr_phys/u_0). The zonal (w) momentum
+    // budget shows Coriolis lands ~1000× too weak → the IC trades decay unregenerated (generation
+    // failure; [[project_atm_coriolis_forcend_trade_scaling]]). The length-consistent value would
+    // be omega·r_Earth/u_0 ≈ 58 (~16000×). This env multiplier sweeps force_nd to find where cor
+    // balances advH and the trades stop decaying, without re-triggering instability. Coriolis is
+    // rotational (energy-conserving) with CFL coeff 2·force_nd·scale·dt ≪ 1 even at ×16000.
+    static const double coriolis_scale = [](){ const char* e = getenv("ATM_CORIOLIS_SCALE");
+                                               return e ? atof(e) : 1.0; }();
+    const double force_nd = coriolis_scale * omega * L_atm / u_0;
 
     // Acting forces
     CoriolisForce.x[i][j][k] = coriolis * coeff_Coriolis
@@ -959,6 +970,20 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + coriolis * force_nd * coriolis_phi
         + coeff_MC_vel * MC_w.x[i][j][k]
         - surf_drag * w_ijk;
+
+    // ---- zonal-mean w (zonal-wind / trade) momentum-budget term capture ----
+    // Mirror of the vbud_* block above, for the ZONAL wind: attributes the trade-easterly
+    // spin-down. wbud_cor (Coriolis) is the trade SOURCE (turns the meridional Hadley inflow
+    // into easterlies); a growing wbud_diff / wbud_other (diffusion / drag) or the post-RK4
+    // filters (captured separately in run_3D_loop) would be the SINK.
+    if(wbudget_capture){
+        wbud_pgf.x[i][j][k]   = -dpdphi_invrs;
+        wbud_cor.x[i][j][k]   =  coriolis * force_nd * coriolis_phi;
+        wbud_advv.x[i][j][k]  = -(u_exp * dwdr_adv);
+        wbud_advh.x[i][j][k]  = -(v_invrm * dwdthe_adv + w_invrs * dwdphi_adv);
+        wbud_diff.x[i][j][k]  =  diffusion_w;
+        wbud_other.x[i][j][k] =  coeff_MC_vel * MC_w.x[i][j][k] - surf_drag * w_ijk;
+    }
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c
         + coeff_trans * S_v.x[i][j][k] * r_humid.x[i][j][k]
