@@ -290,10 +290,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // with NO dt (RK4 supplies the timestep); the old coefficient's extra *dt made
     // Coriolis ~1/dt too weak vs advection/diffusion -> SH gyre spin-down. Test:
     // drop the *dt. Active (turbulent) path. See project_hydro_coriolis_dt_scaling.
+    // ATOM_CORIOLIS_NONTRAD (AtomUtils::coriolis_nontraditional, lib/Utils.h) — the SAME switch
+    // the atmosphere reads, so the two spheres can no longer disagree about which approximation
+    // they are making. Default 0 = traditional: F_r drops and F_phi keeps only its cos(theta)
+    // part. The two dropped terms are one energetically consistent pair and go together.
+    const double nontrad = AtomUtils::coriolis_nontraditional() ? 1.0 : 0.0;
     double two_omega_Lhyd_over_u0 = 2.0 * omega * L_hyd / u_0;
-    double Coriolis_rad =  two_omega_Lhyd_over_u0 * sinthe * w_ijk;
+    double Coriolis_rad =  nontrad * two_omega_Lhyd_over_u0 * sinthe * w_ijk;
     double Coriolis_the =  two_omega_Lhyd_over_u0 * costhe * w_ijk;
-    double Coriolis_phi = -two_omega_Lhyd_over_u0 * (costhe * v_ijk + sinthe * u_ijk);
+    double Coriolis_phi = -two_omega_Lhyd_over_u0 * (costhe * v_ijk + nontrad * sinthe * u_ijk);
 
     double rad_dist     = (double)i * L_hyd * exp_rm;
     double rad_Earth_m  = rad_dist + r_Earth * 1e3;

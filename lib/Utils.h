@@ -11,6 +11,7 @@
 #include <limits>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>   // getenv/atoi for coriolis_nontraditional()
 
 #include "Array.h"
 #include "Array_1D.h"
@@ -22,6 +23,38 @@ else get_logger()
 
 namespace AtomUtils{
     using namespace std;
+
+    // ---- Which Coriolis approximation BOTH spheres use (ATOM_CORIOLIS_NONTRAD) ----
+    //
+    // The two used to disagree, silently, in a coupled model that exchanges momentum at the sea
+    // surface. The full acceleration -2*Omega x u in (r, theta, phi) with theta = colatitude is
+    //     F_r   = +2*Omega*sin(theta)*w
+    //     F_the = +2*Omega*cos(theta)*w
+    //     F_phi = -2*Omega*cos(theta)*v - 2*Omega*sin(theta)*u
+    // RHS_Hyd_Turb carried all of it; RHS_Atm_Turb carried only the cos(theta) pair, dropping
+    // F_r entirely and the sin(theta)*u part of F_phi. That truncation is the TRADITIONAL
+    // approximation, and the atmosphere's own comment records why it got there: the +2*Omega*
+    // sin(theta)*w term drove the eastward jets steadily upward under the lagging pressure
+    // projection. It is also the textbook-correct way to truncate, because the two dropped terms
+    // form one energetically consistent pair — dropping only one of them injects energy.
+    //
+    // DEFAULT 0 = traditional in BOTH spheres. That is the standard for hydrostatic, shallow
+    // models (a 16 km atmosphere over a 200 m ocean is as shallow as it gets), it is what the
+    // atmosphere already did, and it is the only choice consistent with the curvature terms this
+    // model actually has — namely none: the uv/r, uw/r and cot(theta) metric terms are absent from
+    // both advection operators, and the non-traditional Coriolis terms conserve energy only
+    // together with them.
+    //
+    // ATOM_CORIOLIS_NONTRAD=1 restores the full non-traditional set in both spheres, which is the
+    // hydrosphere's previous behaviour. This is an env knob and not a config entry on purpose:
+    // atm and hyd are separate executables with separate XML files, and a duplicated setting is
+    // exactly the kind of thing that drifts apart.
+    inline bool coriolis_nontraditional(){
+        static const bool v = [](){
+            const char* e = getenv("ATOM_CORIOLIS_NONTRAD");
+            return e ? (atoi(e) != 0) : false; }();
+        return v;
+    }
 
     struct HemisphereCoords{
         double lat, lon;

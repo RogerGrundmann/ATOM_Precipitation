@@ -384,9 +384,14 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // had sin↔cos swapped + wrong signs (the active k_omega_SST bug); after the
     // sign fix the kept +2Ω sinθ w drove the eastward jets steadily upward under
     // the lagging pressure projection, so it is dropped here.
-    double coriolis_rad =  0.0;
+    // ATOM_CORIOLIS_NONTRAD (AtomUtils::coriolis_nontraditional, lib/Utils.h) — the SAME switch
+    // the ocean reads. Default 0 keeps exactly what stood here; =1 restores the non-traditional
+    // pair, which is what the hydrosphere used to carry unilaterally. The pair goes together:
+    // dropping only one of the two injects energy.
+    const double nontrad = AtomUtils::coriolis_nontraditional() ? 1.0 : 0.0;
+    double coriolis_rad =  nontrad * 2.0 * sinthe * w_ijk;
     double coriolis_the =  2.0 * costhe * w_ijk;
-    double coriolis_phi = -2.0 * costhe * v_ijk;
+    double coriolis_phi = -2.0 * (costhe * v_ijk + nontrad * sinthe * u_ijk);
 
     // NONDIM-CONVENTION FIX (2026-06-19). This turbulent path had written its forcing
     // terms (Coriolis "2"=2Ω, surf_drag/HS as k/omega, buoyancy g/(omega*L_atm)) in an
