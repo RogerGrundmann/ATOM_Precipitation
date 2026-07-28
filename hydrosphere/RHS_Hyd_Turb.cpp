@@ -299,8 +299,43 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double rad_Earth_m  = rad_dist + r_Earth * 1e3;
     double dt_over_u0_sq = (dt / u_0) * (dt / u_0);
     double omega2       = omega * omega;
-    double centrifugal_rad = omega2 * rad_Earth_m * dt_over_u0_sq;
-    double centrifugal_the = omega2 * rad_Earth_m * fabs(sinthe) * dt_over_u0_sq;
+
+    // ----- Centrifugal acceleration. Three separate errors, all in this one term. -----
+    //
+    // The centrifugal acceleration in a frame rotating about the polar axis points AWAY from that
+    // axis, and the unit vector away from the axis is sin(theta)*e_r + cos(theta)*e_theta, so
+    //     a_r     = +Omega^2 * r * sin^2(theta)
+    //     a_theta = +Omega^2 * r * sin(theta) * cos(theta)
+    // What stood here was Omega^2*r and Omega^2*r*|sin(theta)|, entering rhs_u/rhs_v with a MINUS:
+    //   sign   the force pointed toward the rotation axis instead of away from it;
+    //   sin^2  the radial part had no sin(theta) at all, so it was at full strength at the poles,
+    //          where the true centrifugal force is exactly zero;
+    //   |sin|  the meridional part cannot change sign at the equator, so it pushed the same way in
+    //          both hemispheres instead of pointing toward the equator in each. cos(theta) is what
+    //          carries that hemispheric sign, and it was missing.
+    // Identical to the ATJUP defect fixed in 8649675; the two models share this lineage.
+    //
+    // sinthe is CLAMPED to >= 0.4 (RungeKutta_Hyd_Turb.cpp:54) for the 1/sin^2 metric divisions.
+    // That floor is a metric stabiliser and has no business in a body force — with it the term
+    // stays finite at the pole. The true sine is recovered from the (unclamped) cosine instead;
+    // theta runs 0..pi, so sin(theta) >= 0 and the positive root is the right one.
+    const double sinthe_true = sqrt(std::max(0.0, 1.0 - costhe * costhe));
+
+    // NOT changed here: the magnitude scaling (dt/u_0)^2. Whether that is the right
+    // nondimensionalisation is the separate, model-wide body-force unit-system question; this
+    // fixes the direction and the angular structure only, so the two can be judged apart.
+    //
+    // A WARNING that no coefficient can fix, and the reason to watch what this does to the
+    // meridional circulation. On the real planet nothing has to balance these: they are absorbed
+    // into the geopotential, and the answer is the Earth's oblateness — the surfaces of constant
+    // effective gravity ARE that shape. This model has a spherical grid, a spherical bottom
+    // boundary and a constant radial g, so the meridional part has nothing to work against and
+    // will drive a permanent pole-to-equator acceleration that is entirely an artefact. The
+    // physical way to carry it is to fold it into an effective gravity and never write it as a
+    // force at all. Until that is done, <centrifugal>0</centrifugal> is the more defensible
+    // setting than the present 1 — but that is a modelling decision and is left alone here.
+    double centrifugal_rad = omega2 * rad_Earth_m * sinthe_true * sinthe_true * dt_over_u0_sq;
+    double centrifugal_the = omega2 * rad_Earth_m * sinthe_true * costhe      * dt_over_u0_sq;
 
     double coeff_energy_p = u_0 * u_0 / (cp_w * t_0);
 
@@ -675,7 +710,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
         + buoy_nd
-        + Coriolis * Coriolis_rad - centrifugal * centrifugal_rad;
+        + Coriolis * Coriolis_rad + centrifugal * centrifugal_rad;
 
     // Radial (u) momentum-budget capture — the DEEP polar blow-up is a
     // radial-velocity runaway, so split rhs_u into its five contributions on
@@ -689,11 +724,11 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         ubud_diff.x[i][j][k] =  diffusion_u;
         ubud_buoy.x[i][j][k] =  buoy_nd;
         ubud_cor.x[i][j][k]  =  Coriolis * Coriolis_rad
-                              - centrifugal * centrifugal_rad;
+                              + centrifugal * centrifugal_rad;
     }
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
-        + Coriolis * Coriolis_the - centrifugal * centrifugal_the;
+        + Coriolis * Coriolis_the + centrifugal * centrifugal_the;
 
     // v-momentum-budget capture (meridional). Attributes why the subtropical
     // gyres form their boundary current on the EASTERN coast instead of a
@@ -702,7 +737,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     if (wbudget_capture) {
         vbud_pgf.x[i][j][k]  = -dpdthe_invrm;
         vbud_cor.x[i][j][k]  =  Coriolis * Coriolis_the
-                              - centrifugal * centrifugal_the;
+                              + centrifugal * centrifugal_the;
         vbud_adv.x[i][j][k]  = -transport_v;
         vbud_diff.x[i][j][k] =  diffusion_v;
         vbud_wind.x[i][j][k] =  0.0;   // set below at i=im-2
