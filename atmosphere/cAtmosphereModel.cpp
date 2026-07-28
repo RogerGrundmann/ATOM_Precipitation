@@ -160,17 +160,47 @@ void cAtmosphereModel::initGridCoordinates(){
 //
 // Set ATM_METRIC_STRICT=1 to make the mismatch fatal instead of merely loud — for use AFTER the
 // metric is made consistent, so it cannot drift back apart unnoticed.
+// ATM_METRIC_RADIUS=<km> — opt-in, default off (bit-identical when unset).
+//
+// Gives the HORIZONTAL metric the planetary radius it is supposed to have. What it does NOT do is
+// move rad.z, and that restraint is the whole design: rad.z is not only a radius, it is also the
+// stretched radial coordinate that exp_rm = 1/(rm+1) and init_layer_heights are built on. Shifting
+// it to 397.5 would divide every radial derivative by ~200 and send exp(zeta*(rad.z-1)) to
+// overflow. Only the 1/r factors move; exp_rm stays a function of the grid coordinate.
+//
+// The value is the radius in km, so ATM_METRIC_RADIUS=6370 is the Earth. Converted to rad.z units
+// with metricShellLength(), which is ~16 km per unit, so r0 lands at ~397.5 instead of 1.0.
+void cAtmosphereModel::initMetricRadius(){
+    static const double r_km = [](){
+        const char* e = getenv("ATM_METRIC_RADIUS"); return e ? atof(e) : 0.0; }();
+    if(r_km <= 0.0){ m_metric_r0 = 0.0; return; }
+
+    const double L_unit = metricShellLength();
+    m_metric_r0 = (L_unit > 0.0) ? (r_km * 1.0e3 / L_unit) : 0.0;
+
+    cout << "      AGCM: ATM_METRIC_RADIUS = " << r_km << " km, one rad.z unit = "
+         << L_unit << " m  ->  metric r0 = " << m_metric_r0
+         << " (grid r0 stays " << rad.z[0] << ")" << endl;
+}
+/*
+*
+*/
 void cAtmosphereModel::checkMetricConsistency() const {
-    const double r_metric_m = rad.z[0] * L_atm;      // radius the core metric implies [m]
-    const double r_planet_m = r_Earth * 1.0e3;       // radius the physics uses        [m]
-    const double r0_consistent = r_planet_m / L_atm; // what r0 would have to be
+    // ONE rad.z unit in metres — the shell thickness (~16 km), NOT L_atm. See metricShellLength().
+    // An earlier version of this check used L_atm and therefore reported 15925 instead of 397.5;
+    // the two readings differ by exactly 1/dr = 40.
+    const double L_unit = metricShellLength();
+    const double r_metric_m = metricRadius(rad.z[0]) * L_unit;   // radius the core metric implies [m]
+    const double r_planet_m = r_Earth * 1.0e3;                   // radius the physics uses        [m]
+    const double r0_consistent = r_planet_m / L_unit;            // what the metric r0 would have to be
     const double ratio = (r_metric_m > 0.0) ? r_planet_m / r_metric_m : 0.0;
 
     // 1 per mille is well inside anything a deliberate choice would produce.
     const bool consistent = std::fabs(ratio - 1.0) < 1.0e-3;
 
     cout << endl
-         << "      AGCM: metric check - core radius rad.z[0]*L_atm = " << r_metric_m << " m"
+         << "      AGCM: metric check - core radius = " << r_metric_m << " m"
+         << " (metric r0 " << metricRadius(rad.z[0]) << " x " << L_unit << " m per rad.z unit)"
          << ", physics radius r_Earth = " << r_planet_m << " m" << endl;
 
     if(consistent){
@@ -183,8 +213,9 @@ void cAtmosphereModel::checkMetricConsistency() const {
          << " (ThermoAtm, MoistConvection, MinMax_Atm) are using different planetary radii." << endl
          << "            Horizontal metric terms are too large and force_nd too small by that"
          << " factor; ATM_CORIOLIS_SCALE compensates for the second half of it." << endl
-         << "            r0 would have to be " << r0_consistent
-         << " instead of " << r0 << " for the two to agree." << endl;
+         << "            The metric r0 would have to be " << r0_consistent
+         << " instead of " << metricRadius(rad.z[0])
+         << " - set ATM_METRIC_RADIUS=" << (r_planet_m / 1.0e3) << " to do that." << endl;
 
     static const bool strict = [](){
         const char* e = getenv("ATM_METRIC_STRICT"); return e && atoi(e) != 0; }();
@@ -243,6 +274,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     use_k_omega_SST_turbulence_model = (turb_model == "k_omega_SST");
 
     initGridCoordinates();
+    initMetricRadius();
     checkMetricConsistency();
 
     #pragma omp parallel sections

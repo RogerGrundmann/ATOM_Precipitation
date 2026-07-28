@@ -346,8 +346,11 @@ private:
                     const double inv_2dr      = 1.0 / (2.0 * m.dr);
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
-                    const double inv_rm2dthe      = inv_2dthe / rm;
-                    const double inv_rmsinthe2dphi = inv_2dphi / rmsinthe;
+                    // ATM_METRIC_RADIUS — the 1/r in a horizontal derivative is the planetary
+                    // radius, not the grid coordinate. Identity when the knob is off.
+                    const double rmet             = m.metricRadius(rm);
+                    const double inv_rm2dthe      = inv_2dthe / rmet;
+                    const double inv_rmsinthe2dphi = inv_2dphi / (rmet * sinthe);
 
                     // Enforce floors on this cell before any reads — the RK4 can push
                     // tke or dis below their safe limits between compute_sources calls.
@@ -559,7 +562,8 @@ private:
         // cosθ/(rm sinθ) rather than cosθ/(rm² sinθ).
         const double exp_rm   = 1.0 / (rm + 1.0);
         const double exp_2_rm = exp_rm * exp_rm;
-        const double inv_rm   = 1.0 / rm;
+        // ATM_METRIC_RADIUS — identity when off. See RungeKutta_Atm_Turb for the rationale.
+        const double inv_rm   = 1.0 / m.metricRadius(rm);
         const double inv_rm2  = inv_rm * inv_rm;
 
         // Neumann BC at all six faces: replace a land neighbour's tke/dis with the
@@ -687,7 +691,8 @@ private:
         // Geometry factors matching compute_k_omega convention
         const double exp_rm   = 1.0 / (rm + 1.0);
         const double exp_2_rm = exp_rm * exp_rm;
-        const double inv_rm   = 1.0 / rm;
+        // ATM_METRIC_RADIUS — identity when off. See RungeKutta_Atm_Turb for the rationale.
+        const double inv_rm   = 1.0 / m.metricRadius(rm);
         const double inv_rm2  = inv_rm * inv_rm;
         const double costhe   = (j <= m.jm / 2) ? cos(m.the.z[j]) : -cos(m.the.z[j]);
 

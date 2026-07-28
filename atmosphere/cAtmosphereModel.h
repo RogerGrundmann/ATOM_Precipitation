@@ -203,8 +203,20 @@ public:
     void initGridCoordinates();
 
     // Startup check that the radius the CORE metric uses and the radius the PHYSICS uses are the
-    // same length. They currently are not; see the definition for the numbers and the reasoning.
+    // same length. See the definition for the numbers and the reasoning.
     void checkMetricConsistency() const;
+
+    // ATM_METRIC_RADIUS: reads the knob once and fills m_metric_r0. Call after the coordinates.
+    void initMetricRadius();
+
+    // The radius the HORIZONTAL metric should use, in rad.z units, given a grid coordinate rm.
+    // Identity when the knob is off, so every call site is bit-identical by default.
+    double metricRadius(double rm) const {
+        return (m_metric_r0 > 0.0) ? (m_metric_r0 + (rm - rad.z[0])) : rm;
+    }
+
+    // Planetary radius in rad.z units when ATM_METRIC_RADIUS is on; 0.0 means off.
+    double m_metric_r0 = 0.0;
 
 private:
 
@@ -360,15 +372,39 @@ private:
     void cloudiness_backup();
     void init_Maxwell();
 
+    // Stretching exponent of the radial coordinate. Was a local `const float zeta` here and a
+    // magic 3.715 nowhere else; it is now a named constant because metricShellLength() below
+    // needs the SAME value to invert this map, and two copies would drift.
+    static constexpr double zeta_stretch = 3.715;
+
     void init_layer_heights(){
-        const float zeta = 3.715;
         float h = L_atm;
+        m_layer_heights.clear();
         for(int i=0; i<im; i++){
-            m_layer_heights.push_back((exp(zeta 
-            * (rad.z[i] - 1.0)) - 1) * h);                              // in m      local atmospheric shell thickness
+            // rad.z[0] instead of a hardcoded 1.0: the surface is wherever the radial coordinate
+            // starts, which ATM_METRIC_RADIUS may move.
+            m_layer_heights.push_back((exp(zeta_stretch
+            * (rad.z[i] - rad.z[0])) - 1) * h);                         // in m      local atmospheric shell thickness
 //            std::cout << m_layer_heights.back() << std::endl;
-        } 
+        }
         return;
+    }
+
+    // Physical length that ONE unit of rad.z represents, in metres.
+    //
+    // This is the number the metric needs and the one that is easy to get wrong. rad.z runs
+    // 1.0 .. 2.0 and init_layer_heights above maps that span onto 0 .. 16.02 km, so one rad.z
+    // unit is the SHELL THICKNESS, ~16 km — NOT L_atm. L_atm = 400 m is the amplitude of the
+    // exponential stretch, not a grid step: the actual layer spacing runs from 39 m at the
+    // surface to 1457 m at the top, and the "400 m for 1 radial step" in the dr comment
+    // (cAtmosphereModel.cpp) is nominal only.
+    //
+    // The two readings differ by exactly 1/dr = 40, which is why the planetary radius expressed
+    // in rad.z units is 6370/16.02 = 397.5 and not 6.37e6/400 = 15925.
+    double metricShellLength() const {
+        const double span = rad.z[im-1] - rad.z[0];
+        if(!(span > 0.0)) return L_atm;
+        return (exp(zeta_stretch * span) - 1.0) * L_atm / span;
     }
 
     void init_topography(const string &topo_filename);

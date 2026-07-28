@@ -112,9 +112,17 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
             geo.sinthe2 = geo.sinthe * geo.sinthe;
             geo.costhe  = costhe_tbl[j];
 
-            geo.inv_rm               = 1.0 / geo.rm;
-            geo.inv_rm2              = 1.0 / geo.rm2;
-            geo.inv_rmsinthe         = 1.0 / (geo.rm * geo.sinthe);
+            // The 1/r factors carry the PLANETARY radius; exp_rm above carries the stretched grid
+            // coordinate. Those are two different things and ATM_METRIC_RADIUS separates them.
+            // Identity when the knob is off (metricRadius returns rm), so this is bit-identical
+            // by default. Keep in sync with PressureSolverAtm and TurbulenceAtm: a solver that
+            // disagrees with the RHS about the metric is the defect class this repo keeps finding.
+            const double rmet  = metricRadius(geo.rm);
+            const double rmet2 = rmet * rmet;
+
+            geo.inv_rm               = 1.0 / rmet;
+            geo.inv_rm2              = 1.0 / rmet2;
+            geo.inv_rmsinthe         = 1.0 / (rmet * geo.sinthe);
             geo.inv_rm2sinthe        = geo.inv_rm2 / geo.sinthe;
             geo.inv_rm2sinthe2       = geo.inv_rm2 / geo.sinthe2;
             geo.costhe_inv_rm2sinthe = geo.costhe * geo.inv_rm2sinthe;

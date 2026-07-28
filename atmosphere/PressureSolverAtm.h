@@ -132,9 +132,12 @@ public:
                 geo.sinthe       = sinthe_table[j];
                 geo.sinthe2      = geo.sinthe * geo.sinthe;
                 geo.costhe       = cos(m.the.z[j]);
-                geo.inv_rm       = 1.0 / geo.rm;
-                geo.inv_rm2      = 1.0 / geo.rm2;
-                geo.inv_rmsinthe         = 1.0 / (geo.rm * geo.sinthe);
+                // ATM_METRIC_RADIUS — must match RungeKutta_Atm_Turb exactly; identity when off.
+                const double rmet  = m.metricRadius(geo.rm);
+                const double rmet2 = rmet * rmet;
+                geo.inv_rm       = 1.0 / rmet;
+                geo.inv_rm2      = 1.0 / rmet2;
+                geo.inv_rmsinthe         = 1.0 / (rmet * geo.sinthe);
                 geo.inv_rm2sinthe        = geo.inv_rm2 / geo.sinthe;
                 geo.inv_rm2sinthe2       = geo.inv_rm2 / geo.sinthe2;
                 geo.costhe_inv_rm2sinthe = geo.costhe * geo.inv_rm2sinthe;
@@ -516,9 +519,12 @@ public:
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
                 const double rm           = m.rad.z[i];
-                const double exp_rm       = 1.0 / (rm + 1.0);
-                const double inv_rm       = 1.0 / rm;
-                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                const double exp_rm       = 1.0 / (rm + 1.0);   // grid coordinate, not the radius
+                // The gradient correction must use the SAME metric the source and the RHS use,
+                // or the projection stops being a projection. ATM_METRIC_RADIUS; identity when off.
+                const double rmet         = m.metricRadius(rm);
+                const double inv_rm       = 1.0 / rmet;
+                const double inv_rmsinthe = 1.0 / (rmet * sinthe_tab[j]);
 
                 for (int k = 1; k < m.km-1; k++) {
                     const double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * inv_2dr;
