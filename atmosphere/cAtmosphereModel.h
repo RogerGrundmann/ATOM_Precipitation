@@ -372,18 +372,13 @@ private:
     void cloudiness_backup();
     void init_Maxwell();
 
-    // Stretching exponent of the radial coordinate. Was a local `const float zeta` here and a
-    // magic 3.715 nowhere else; it is now a named constant because metricShellLength() below
-    // needs the SAME value to invert this map, and two copies would drift.
-    static constexpr double zeta_stretch = 3.715;
-
     void init_layer_heights(){
         float h = L_atm;
         m_layer_heights.clear();
         for(int i=0; i<im; i++){
             // rad.z[0] instead of a hardcoded 1.0: the surface is wherever the radial coordinate
             // starts, which ATM_METRIC_RADIUS may move.
-            m_layer_heights.push_back((exp(zeta_stretch
+            m_layer_heights.push_back((exp(zeta
             * (rad.z[i] - rad.z[0])) - 1) * h);                         // in m      local atmospheric shell thickness
 //            std::cout << m_layer_heights.back() << std::endl;
         }
@@ -404,7 +399,7 @@ private:
     double metricShellLength() const {
         const double span = rad.z[im-1] - rad.z[0];
         if(!(span > 0.0)) return L_atm;
-        return (exp(zeta_stretch * span) - 1.0) * L_atm / span;
+        return (exp(zeta * span) - 1.0) * L_atm / span;
     }
 
     void init_topography(const string &topo_filename);

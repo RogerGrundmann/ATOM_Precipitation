@@ -170,10 +170,31 @@ void cAtmosphereModel::initGridCoordinates(){
 //
 // The value is the radius in km, so ATM_METRIC_RADIUS=6370 is the Earth. Converted to rad.z units
 // with metricShellLength(), which is ~16 km per unit, so r0 lands at ~397.5 instead of 1.0.
+// DEFAULT SINCE 2026-07-28: on, at the configured r_Earth. Unset means "use the real radius";
+// ATM_METRIC_RADIUS=0 restores the old rad.z ~ 1.5 metric for A/B work.
+//
+// The evidence for flipping it, all measured at 20 iterations against the old default:
+//   the radial wind stops being pumped   rms(u) 0.01816 -> 0.00124, p_dyn max 0.2452 -> 0.00108
+//   the zonal wind is untouched          rms(w) 0.848 -> 0.858, temperature within 0.3 %
+//   the eddy viscosity becomes physical  mean nu_T 1.45 -> 6.33 m2/s, max 22 -> 279 m2/s, and the
+//                                        nue_max cap (1000 m2/s) goes from 2.2 % to 27.9 % used,
+//                                        so it still does not bind. k is unchanged (-3 %); what
+//                                        changed is omega, which fell 7.4x once the ~400x
+//                                        inflated horizontal shear stopped feeding its production
+//                                        and stopped holding the SST limiter down (median
+//                                        nue/(k/omega) 0.026 -> 0.144).
+// A mean eddy viscosity of 6 m2/s with boundary-layer peaks near 280 is the right order for the
+// atmosphere; 1.45 was too small. The rise is a suppression being removed, not energy appearing.
 void cAtmosphereModel::initMetricRadius(){
-    static const double r_km = [](){
-        const char* e = getenv("ATM_METRIC_RADIUS"); return e ? atof(e) : 0.0; }();
-    if(r_km <= 0.0){ m_metric_r0 = 0.0; return; }
+    static const double r_km = [this](){
+        const char* e = getenv("ATM_METRIC_RADIUS");
+        return e ? atof(e) : r_Earth; }();
+    if(r_km <= 0.0){
+        m_metric_r0 = 0.0;
+        cout << "      AGCM: ATM_METRIC_RADIUS = 0 - horizontal metric left on the grid"
+             << " coordinate (pre-2026-07-28 behaviour)" << endl;
+        return;
+    }
 
     const double L_unit = metricShellLength();
     m_metric_r0 = (L_unit > 0.0) ? (r_km * 1.0e3 / L_unit) : 0.0;

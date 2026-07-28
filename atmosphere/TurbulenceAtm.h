@@ -157,7 +157,6 @@ private:
     // ABL model constants
     static constexpr double C_nue   = 0.028;
     static constexpr double Karman  = 0.42;
-    static constexpr double zeta    = 3.715;                            // coordinate-stretching factor
     // Safety floors / caps (dimensionless)
     static constexpr double dis_min = 1.0e-10;                          // minimum dis* to avoid nue → ∞
 
