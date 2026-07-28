@@ -56,6 +56,50 @@ namespace AtomUtils{
         return v;
     }
 
+    // ---- The two missing halves of the spherical metric (both spheres, both default 0) ----
+    //
+    // ATOM_METRIC_CURVATURE — the curvature terms of the advection operator. transport_u/v/w are
+    // the plain (u.grad) and the material derivative in spherical coordinates is not:
+    //     D u_r  /Dt - (v^2 + w^2)/r
+    //     D u_the/Dt + (u*v)/r - w^2*cot(theta)/r
+    //     D u_phi/Dt + (u*w)/r + v*w*cot(theta)/r
+    // Note this is NOT the shallow-atmosphere approximation, which drops uv/r and uw/r but KEEPS
+    // the cot(theta) pair — and vw*cot(theta)/r is the meridian-convergence term that conserves
+    // the zonal wind's angular momentum, i.e. the one that makes jets. ATJUP carries all of them
+    // (RHS_Jup_Turb.cpp:405-411); these two spheres carry none.
+    //
+    // ATOM_METRIC_DIVERGENCE — the Poisson source. The solvers form
+    //     du/dr + (1/r)dv/dthe + (1/(r sin)) dw/dphi
+    // and the divergence in spherical coordinates also has +2u/r and +v*cot(theta)/r. Without
+    // them the projection makes the field divergence-free with respect to an operator that is not
+    // the divergence, so a real divergence survives it and the pressure is not the pressure that
+    // would remove it.
+    //
+    // ⚠️ BOTH BELONG WITH A CORRECT METRIC RADIUS. Every term added here carries 1/r, and with the
+    // default rad.z ~ 1.5 that r is ~400x too small, so the terms themselves come in ~400x too
+    // strong. Pair them with ATM_METRIC_RADIUS=6370 (atmosphere).
+    //
+    // MEASURED at 20 iterations, so nobody has to guess how much that matters in practice:
+    //   with the radius on   max relative change  u 3.6e-02, p_dyn 1.4e+00, everything else < 5e-04
+    //   with the radius off  max relative change  u 4.8e-02, p_dyn 1.3e-01, nue 7.4e-02
+    // So the wrong-radius case is percent-level rather than catastrophic — these terms are small
+    // corrections, not dominant ones. p_dyn moves most in both cases because the divergence source
+    // is what changed and p_dyn is small. That is a reason to pair them, not a reason to panic.
+    //
+    // The hydrosphere has no radius knob yet, so there these are for measurement only.
+    inline bool metric_curvature(){
+        static const bool v = [](){
+            const char* e = getenv("ATOM_METRIC_CURVATURE");
+            return e ? (atoi(e) != 0) : false; }();
+        return v;
+    }
+    inline bool metric_divergence(){
+        static const bool v = [](){
+            const char* e = getenv("ATOM_METRIC_DIVERGENCE");
+            return e ? (atoi(e) != 0) : false; }();
+        return v;
+    }
+
     struct HemisphereCoords{
         double lat, lon;
         string east_or_west, north_or_south;

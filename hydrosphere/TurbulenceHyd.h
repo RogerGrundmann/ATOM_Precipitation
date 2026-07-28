@@ -572,7 +572,6 @@ private:
 
         const double rmsinthe = rm * sinthe;
         const double exp_rm   = 1.0 / (rm + 1.0);
-        const double costhe   = (j <= m.jm / 2) ? cos(m.the.z[j]) : -cos(m.the.z[j]);
 
         const bool neumann_bot = (i > 0      && is_land(m.h, i-1, j, k));
         const bool neumann_jm1 = (j > 0      && is_land(m.h, i, j-1, k));

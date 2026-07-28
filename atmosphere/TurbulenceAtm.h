@@ -551,7 +551,6 @@ private:
         const double rm2       = rm * rm;
         const double sinthe2   = sinthe * sinthe;
         const double rm2sinthe = rm2 * sinthe;
-        const double costhe    = (j <= m.jm / 2) ? cos(m.the.z[j]) : -cos(m.the.z[j]);
 
         // Geometry for exp-stretching — placed here so Neumann corrections below can use exp_rm.
         // exp_rm = 1/(rm+1) is the Jacobian of the radial coordinate transformation;
@@ -694,7 +693,6 @@ private:
         // ATM_METRIC_RADIUS — identity when off. See RungeKutta_Atm_Turb for the rationale.
         const double inv_rm   = 1.0 / m.metricRadius(rm);
         const double inv_rm2  = inv_rm * inv_rm;
-        const double costhe   = (j <= m.jm / 2) ? cos(m.the.z[j]) : -cos(m.the.z[j]);
 
         // Neumann BC at all six faces: replace a land neighbour's tke/dis with the
         // current cell's value (zero-gradient) so that CD_kw, D_w, and the diffusion

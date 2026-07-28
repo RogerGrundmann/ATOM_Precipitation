@@ -40,6 +40,9 @@ public:
 
         auto begin = std::chrono::high_resolution_clock::now();
 
+        // ATOM_METRIC_DIVERGENCE — hoisted out of the cell loop; see lib/Utils.h.
+        const bool metric_div = AtomUtils::metric_divergence();
+
         // ====================================================================
         // Precompute sin(the) table — avoids redundant sin() calls inside loops
         // ====================================================================
@@ -259,6 +262,14 @@ public:
                         dw_dphi = (m.aux_w.x[i][j][k+1]
                                   - m.aux_w.x[i][j][k-1]) * inv_2dphi;
 
+                    // ATOM_METRIC_DIVERGENCE (lib/Utils.h) — the spherical divergence also carries
+                    // +2u/r and +v*cot(theta)/r, formed from the provisional velocity aux_*. Enters
+                    // with the same minus sign as the three terms below it.
+                    const double div_metric = metric_div
+                        ? (2.0 * m.aux_u.x[i][j][k]
+                           + m.aux_v.x[i][j][k] * geo.costhe / geo.sinthe) * geo.inv_rm
+                        : 0.0;
+
                     // ---- Pressure update --------------------------------
                     m.p_dyn.x[i][j][k] =
                         ( num1m * m.p_dyn.x[i-1][j][k] + num1p * m.p_dyn.x[i+1][j][k]
@@ -266,7 +277,8 @@ public:
                        + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
                        - du_dr   * geo.exp_rm
                        - dv_dthe * geo.inv_rm
-                       - dw_dphi * geo.inv_rmsinthe) * inv_denom;
+                       - dw_dphi * geo.inv_rmsinthe
+                       - div_metric) * inv_denom;
 
                 }  // k
             }  // j

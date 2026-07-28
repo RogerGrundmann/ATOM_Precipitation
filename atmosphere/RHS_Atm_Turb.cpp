@@ -790,6 +790,16 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double transport_u     = u_exp * dudr_adv     + v_invrm * dudthe_adv     + w_invrs * dudphi_adv;
     double transport_v     = u_exp * dvdr_adv     + v_invrm * dvdthe_adv     + w_invrs * dvdphi_adv;
     double transport_w     = u_exp * dwdr_adv     + v_invrm * dwdthe_adv     + w_invrs * dwdphi_adv;
+
+    // ATOM_METRIC_CURVATURE (AtomUtils, lib/Utils.h) — see there for the form and for why these
+    // must not be switched on without ATM_METRIC_RADIUS. Signs follow from rhs_x = ... - transport_x,
+    // and the expressions are ATJUP's (RHS_Jup_Turb.cpp:405-411) term for term.
+    if(AtomUtils::metric_curvature()){
+        const double cotanthe = costhe / sinthe;
+        transport_u += -(v_ijk * v_ijk + w_ijk * w_ijk) * inv_rm;
+        transport_v +=  (u_ijk * v_ijk - w_ijk * w_ijk * cotanthe) * inv_rm;
+        transport_w +=  (w_ijk * u_ijk + v_ijk * w_ijk * cotanthe) * inv_rm;
+    }
     double transport_t     = u_exp * dtdr_adv     + v_invrm * dtdthe_adv     + w_invrs * dtdphi_adv;
     double transport_c     = u_exp * dcdr_adv     + v_invrm * dcdthe_adv     + w_invrs * dcdphi_adv;
     double transport_cloud = u_exp * dclouddr_adv + v_invrm * dclouddthe_adv + w_invrs * dclouddphi_adv;

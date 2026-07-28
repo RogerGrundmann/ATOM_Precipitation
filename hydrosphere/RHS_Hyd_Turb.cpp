@@ -595,6 +595,15 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double transport_u   = u_exp * dudr   + v_invrm * dudthe   + w_invrs * dudphi;
     double transport_v   = u_exp * dvdr   + v_invrm * dvdthe   + w_invrs * dvdphi;
     double transport_w   = u_exp * dwdr   + v_invrm * dwdthe   + w_invrs * dwdphi;
+
+    // ATOM_METRIC_CURVATURE — same terms and the same warning as the atmosphere; see lib/Utils.h.
+    // The hydrosphere has no metric-radius knob yet, so here this is a measurement tool, not a fix.
+    if(AtomUtils::metric_curvature()){
+        const double cotanthe = costhe / sinthe;
+        transport_u += -(v_ijk * v_ijk + w_ijk * w_ijk) * inv_rm;
+        transport_v +=  (u_ijk * v_ijk - w_ijk * w_ijk * cotanthe) * inv_rm;
+        transport_w +=  (w_ijk * u_ijk + v_ijk * w_ijk * cotanthe) * inv_rm;
+    }
     double transport_c   = u_exp * dcdr   + v_invrm * dcdthe   + w_invrs * dcdphi;
     double transport_tke = u_exp * dtkedr + v_invrm * dtkedthe + w_invrs * dtkedphi;
     double transport_dis = u_exp * ddisdr + v_invrm * ddisdthe + w_invrs * ddisdphi;

@@ -117,6 +117,9 @@ public:
         const bool poisson_metric_fix = [](){ const char* e = getenv("ATM_POISSON_METRIC_FIX");
                                               return e ? (atof(e) != 0.0) : false; }();
 
+        // ATOM_METRIC_DIVERGENCE — hoisted out of the cell loop; see lib/Utils.h.
+        const bool metric_div = AtomUtils::metric_divergence();
+
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         #pragma omp parallel for collapse(2) schedule(dynamic, 4)
         for (int i = 1; i < m.im-1; i++) {
@@ -326,6 +329,16 @@ public:
                         double div_src = du_dr   * geo.exp_rm
                                        + dv_dthe * geo.inv_rm
                                        + dw_dphi * geo.inv_rmsinthe;
+
+                        // ATOM_METRIC_DIVERGENCE (lib/Utils.h) — the spherical divergence also
+                        // carries +2u/r and +v*cot(theta)/r. Formed from aux_*, because the source
+                        // is the divergence of the PROVISIONAL velocity that the projection has to
+                        // remove. Read the warning in lib/Utils.h before switching this on.
+                        if (metric_div) {
+                            div_src += (2.0 * m.aux_u.x[i][j][k]
+                                        + m.aux_v.x[i][j][k] * geo.costhe / geo.sinthe)
+                                       * geo.inv_rm;
+                        }
                         const double src_max = denom * p_dyn_cap;
 
                         if (!is_finite_safe(div_src))   div_src = 0.0;
