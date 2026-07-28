@@ -319,10 +319,12 @@ public:
         using namespace std;
         cout << endl << endl << endl << "      AGCM: reset_arrays" << endl;
 
-        // 1D arrays
-        m.rad.initArray_1D(m.im, 1.0);
-        m.the.initArray_1D(m.jm, 2.0);
-        m.phi.initArray_1D(m.km, 3.0);
+        // 1D arrays.
+        // rad/the/phi are NOT reset to the old 1.0/2.0/3.0 sentinels here. Those were overwritten
+        // moments later by RunTimeSlice anyway, and rad's sentinel was exactly r0 = 1.0, so a
+        // reordering would have left the metric at r = 1 everywhere while still looking sane.
+        // They now come from the single definition instead.
+        m.initGridCoordinates();
         m.aux_grad_v.initArray_1D(m.im, 4.0);
 
         // 2D arrays — all initialized to 0.0

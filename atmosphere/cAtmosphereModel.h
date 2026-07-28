@@ -196,6 +196,16 @@ public:
     void Run();
     void RunTimeSlice(int time_slice);
 
+    // THE definition of the grid coordinates. rad/the/phi are filled here and nowhere else;
+    // every other site that used to write them (UtilsAtm::resetArrays, MoistConvection::precompute,
+    // test/rad_selftest) calls this instead, so there is one place to change and no way for two
+    // definitions to drift apart. See checkMetricConsistency() for why that matters.
+    void initGridCoordinates();
+
+    // Startup check that the radius the CORE metric uses and the radius the PHYSICS uses are the
+    // same length. They currently are not; see the definition for the numbers and the reasoning.
+    void checkMetricConsistency() const;
+
 private:
 
     static cAtmosphereModel* m_model;

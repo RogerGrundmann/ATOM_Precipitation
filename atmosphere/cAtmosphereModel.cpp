@@ -118,6 +118,84 @@ void cAtmosphereModel::LoadConfig(const char *filename){
 /*
 *
 */
+// THE definition of the grid coordinates — see the declaration in cAtmosphereModel.h.
+//
+// This used to be written in three places with two different meanings, which is a trap rather
+// than a redundancy:
+//   cAtmosphereModel::RunTimeSlice   rad.Coordinates(im, r0, dr)      the real coordinate
+//   UtilsAtm::resetArrays            rad.initArray_1D(im, 1.0)        a debug sentinel
+//   MoistConvection::precompute      rad.Coordinates(im, r0, dr)      the real coordinate, again
+// The order saved it: resetArrays runs before RunTimeSlice sets the coordinate, so the sentinel
+// was always overwritten. But the sentinel value 1.0 is exactly r0, so had the order ever changed
+// the metric would have collapsed to r = 1 everywhere and still looked plausible. And the
+// MoistConvection copy re-imposes r0/dr on every call, so a change made at the RunTimeSlice site
+// alone would have been silently undone once per iteration.
+void cAtmosphereModel::initGridCoordinates(){
+    rad.Coordinates(im, r0, dr);
+    the.Coordinates(jm, the0, dthe);
+    phi.Coordinates(km, phi0, dphi);
+}
+/*
+*
+*/
+// Does the radius the CORE metric uses equal the radius the PHYSICS uses?
+//
+// Right now it does not, and this reports by how much rather than aborting, because the mismatch
+// is the model's present state and not a fresh regression:
+//
+//   The core. RungeKutta_Atm_Turb sets geo.rm = rad.z[i] and inv_rm = 1/rm, and RHS_Atm_Turb uses
+//   that as the PLANETARY radius in v/r d/dthe, 1/(r sinthe) d/dphi and in every Laplacian. With
+//   r0 = 1.0 and dr = 0.025 over im = 41, rad.z runs 1.0 .. 2.0.
+//
+//   The physics. ThermoAtm (r_Earth_m, rad_Earth), MoistConvection ((r_Earth*1e3 + height)*costhe)
+//   and MinMax_Atm (a = r_Earth*1000) all use the configured r_Earth = 6370.001 km.
+//
+//   The scaling. Every nondimensional coefficient in RHS_Atm_Turb — coeff_u_p, coeff_MC_*, coeff_S,
+//   coeff_L, nue_max, force_nd — divides by L_atm, the 400 m RADIAL GRID STEP.
+//
+// In units of L_atm the Earth's radius is 6.370e6/400 = 15925, and the core puts 1.0 there. So the
+// horizontal metric terms are ~16000x too large, and force_nd = omega*L_atm/u_0 is the same factor
+// too small against the length-consistent omega*r_Earth/u_0 ~ 58. That is the arithmetic behind the
+// note at RHS_Atm_Turb.cpp:413 and behind ATM_CORIOLIS_SCALE existing at all.
+//
+// Set ATM_METRIC_STRICT=1 to make the mismatch fatal instead of merely loud — for use AFTER the
+// metric is made consistent, so it cannot drift back apart unnoticed.
+void cAtmosphereModel::checkMetricConsistency() const {
+    const double r_metric_m = rad.z[0] * L_atm;      // radius the core metric implies [m]
+    const double r_planet_m = r_Earth * 1.0e3;       // radius the physics uses        [m]
+    const double r0_consistent = r_planet_m / L_atm; // what r0 would have to be
+    const double ratio = (r_metric_m > 0.0) ? r_planet_m / r_metric_m : 0.0;
+
+    // 1 per mille is well inside anything a deliberate choice would produce.
+    const bool consistent = std::fabs(ratio - 1.0) < 1.0e-3;
+
+    cout << endl
+         << "      AGCM: metric check - core radius rad.z[0]*L_atm = " << r_metric_m << " m"
+         << ", physics radius r_Earth = " << r_planet_m << " m" << endl;
+
+    if(consistent){
+        cout << "      AGCM: metric check - consistent." << endl;
+        return;
+    }
+
+    cout << "      AGCM: metric check - MISMATCH by a factor of " << ratio << "." << endl
+         << "            The core metric (inv_rm in RHS_Atm_Turb) and the physics modules"
+         << " (ThermoAtm, MoistConvection, MinMax_Atm) are using different planetary radii." << endl
+         << "            Horizontal metric terms are too large and force_nd too small by that"
+         << " factor; ATM_CORIOLIS_SCALE compensates for the second half of it." << endl
+         << "            r0 would have to be " << r0_consistent
+         << " instead of " << r0 << " for the two to agree." << endl;
+
+    static const bool strict = [](){
+        const char* e = getenv("ATM_METRIC_STRICT"); return e && atoi(e) != 0; }();
+    if(strict){
+        cout << "      AGCM: metric check - ATM_METRIC_STRICT is set, stopping." << endl;
+        std::exit(1);
+    }
+}
+/*
+*
+*/
 void cAtmosphereModel::RunTimeSlice(int Ma){
 
     #ifdef _OPENMP
@@ -164,9 +242,8 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     use_k_omega_turbulence_model     = (turb_model == "k_omega");
     use_k_omega_SST_turbulence_model = (turb_model == "k_omega_SST");
 
-    rad.Coordinates(im, r0, dr);
-    the.Coordinates(jm, the0, dthe);
-    phi.Coordinates(km, phi0, dphi);
+    initGridCoordinates();
+    checkMetricConsistency();
 
     #pragma omp parallel sections
     {

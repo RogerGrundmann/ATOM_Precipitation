@@ -26,8 +26,10 @@ public:
         cAtmosphereModel m;                         // ctor: SetDefaultConfig + rad/the/phi alloc
         const int im = m.im, jm = m.jm, km = m.km;
 
-        // radial coordinate rad.z[i] = 1 + i*dr (dr = 0.025), then layer heights
-        for (int i = 0; i < im; i++) m.rad.z[i] = 1.0 + i * 0.025;
+        // radial coordinate, then layer heights. Was a third hardcoded copy of r0 = 1.0 and
+        // dr = 0.025; it now takes whatever the model's single definition says, so the test keeps
+        // exercising the real grid if that definition ever changes.
+        m.initGridCoordinates();
         m.init_layer_heights();                     // private -> reachable via friend
 
         // allocate the fields the scheme reads / writes (ctor leaves these unallocated)

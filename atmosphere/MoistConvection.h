@@ -342,7 +342,11 @@ private:
             }
         }
 
-        m.rad.Coordinates(m.im, m.r0, m.dr);
+        // Was a second, independent copy of the radial coordinate definition, re-imposing r0/dr on
+        // every precompute() call — which would have silently undone any change made at the one
+        // real definition site. Routed through that definition instead; the defensive intent is
+        // kept, the duplication is not.
+        m.initGridCoordinates();
     }
 /*
 *
