@@ -197,13 +197,13 @@ environment variable before launching the atmosphere to change behaviour.
 
 | Env variable | Default | Effect |
 |---|---|---|
-| `ATM_CORIOLIS_SCALE` | `1.0` | Multiplies the non-dimensional Coriolis coefficient `force_nd = ω·L_atm/u₀`. The nondimensionalisation uses `L_atm` (the ~400 m radial grid step) rather than the `r_Earth`-scaled horizontal metric the Coriolis term must balance, so as-is it lands orders of magnitude too weak and the initial-condition trades decay unregenerated. Values `> 1` sweep toward the length-consistent `ω·r_Earth/u₀` (≈ 58, i.e. ~16000×) to find where Coriolis balances horizontal advection and the trades stop decaying. Coriolis is rotational (energy-conserving), so the CFL coefficient stays `≪ 1` even at large scale |
+| `ATM_METRIC_RADIUS` | `r_Earth` (on) | Planetary radius, in km, for the HORIZONTAL metric. Since 2026-07-28 the default is the configured `r_Earth`; `0` restores the old `rad.z ~ 1.5` metric for A/B work. It replaced `ATM_CORIOLIS_SCALE`, which was a multiplier compensating for the same length error: that error factorised as 397.5 (the metric, fixed by this knob) x 40 (`force_nd` dividing by `L_atm` = 400 m instead of the ~16023 m one `rad.z` unit represents, now fixed in RHS_Atm_Turb). With both corrected there is nothing left to sweep |
 | `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
 
 Example — run the atmosphere with a stronger Coriolis and a gentler radial filter:
 
 ```bash
-ATM_CORIOLIS_SCALE=1000 ATM_RADIAL_SHAPIRO_STRENGTH=0.5 ./cli/atm cli/config_atm.xml
+ATM_RADIAL_SHAPIRO_STRENGTH=0.5 ./cli/atm cli/config_atm.xml
 ```
 
 Each knob is read once (first use) via `getenv`, so it applies to the whole run.

@@ -156,7 +156,7 @@ void cAtmosphereModel::initGridCoordinates(){
 // In units of L_atm the Earth's radius is 6.370e6/400 = 15925, and the core puts 1.0 there. So the
 // horizontal metric terms are ~16000x too large, and force_nd = omega*L_atm/u_0 is the same factor
 // too small against the length-consistent omega*r_Earth/u_0 ~ 58. That is the arithmetic behind the
-// note at RHS_Atm_Turb.cpp:413 and behind ATM_CORIOLIS_SCALE existing at all.
+// note at RHS_Atm_Turb.cpp and behind ATM_CORIOLIS_SCALE having existed at all (now removed).
 //
 // Set ATM_METRIC_STRICT=1 to make the mismatch fatal instead of merely loud — for use AFTER the
 // metric is made consistent, so it cannot drift back apart unnoticed.
@@ -233,7 +233,7 @@ void cAtmosphereModel::checkMetricConsistency() const {
          << "            The core metric (inv_rm in RHS_Atm_Turb) and the physics modules"
          << " (ThermoAtm, MoistConvection, MinMax_Atm) are using different planetary radii." << endl
          << "            Horizontal metric terms are too large and force_nd too small by that"
-         << " factor; ATM_CORIOLIS_SCALE compensates for the second half of it." << endl
+         << " factor." << endl
          << "            The metric r0 would have to be " << r0_consistent
          << " instead of " << metricRadius(rad.z[0])
          << " - set ATM_METRIC_RADIUS=" << (r_planet_m / 1.0e3) << " to do that." << endl;

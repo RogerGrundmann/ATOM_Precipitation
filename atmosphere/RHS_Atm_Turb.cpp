@@ -11,7 +11,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
-#include <cstdlib>   // getenv/atof for the ATM_CORIOLIS_SCALE A/B knob
+#include <cstdlib>   // getenv/atof for the remaining A/B knobs
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -414,17 +414,34 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // coefficient (2*force_nd*dt ~ 7e-7), so this does NOT re-trigger the thermal
     // polar-runaway the *dt was added to tame (that is buoyancy, scaled separately
     // by g*dt/u_0). Advective-time nondim: Coriolis coeff = 2 Omega L/u0.
-    // ⚠️ A/B KNOB 2026-07-20 (ATM_CORIOLIS_SCALE, default 1.0 = bit-identical): force_nd uses
-    // L_atm=400 m (the RADIAL grid step), but the horizontal advection it must balance uses the
-    // r_Earth-scaled spherical metric (inv_rm≈1, dt≈2.83·dr_phys/u_0). The zonal (w) momentum
-    // budget shows Coriolis lands ~1000× too weak → the IC trades decay unregenerated (generation
-    // failure; [[project_atm_coriolis_forcend_trade_scaling]]). The length-consistent value would
-    // be omega·r_Earth/u_0 ≈ 58 (~16000×). This env multiplier sweeps force_nd to find where cor
-    // balances advH and the trades stop decaying, without re-triggering instability. Coriolis is
-    // rotational (energy-conserving) with CFL coeff 2·force_nd·scale·dt ≪ 1 even at ×16000.
-    static const double coriolis_scale = [](){ const char* e = getenv("ATM_CORIOLIS_SCALE");
-                                               return e ? atof(e) : 1.0; }();
-    const double force_nd = coriolis_scale * omega * L_atm / u_0;
+    // ATM_CORIOLIS_SCALE IS GONE (2026-07-28). It was a multiplier for sweeping force_nd toward
+    // the value that would make Coriolis balance horizontal advection, because force_nd was
+    // ~16000x too weak and nobody knew where the factor lived. It is now known, and it factorises:
+    //
+    //     16000  =  397.5   x   40
+    //               ^metric     ^this
+    //
+    // The 397.5 was the horizontal metric using rad.z ~ 1.5 as the planetary radius; that is fixed
+    // and is now the default (ATM_METRIC_RADIUS). The 40 is here, and it is exactly 1/dr: force_nd
+    // divided by L_atm = 400 m, while the gradients it must balance are expressed per rad.z unit,
+    // and one rad.z unit is metricShellLength() ~ 16023 m, not 400 m (L_atm is the amplitude of
+    // the exponential stretch, not a grid step — see metricShellLength in cAtmosphereModel.h).
+    //
+    // So the length-consistent coefficient is omega * metricShellLength() / u_0 = 1.46e-01 against
+    // the old 3.65e-03, and the knob has nothing left to sweep. Tuning a multiplier was the right
+    // move while the factor was unexplained; keeping it now would only hide the fix.
+    //
+    // This puts Coriolis on the SAME length as the two terms it has to balance — horizontal
+    // advection and the pressure gradient — both of which take their length from the metric
+    // (inv_rm) rather than from a coefficient. Geostrophy is that three-way balance, so making
+    // this one consistent is not the piecemeal rescaling that ATJUP measured going wrong; it is
+    // the term that was out of step with the other two.
+    //
+    // STILL ON L_atm, and therefore still 40x too weak: the Held-Suarez relaxation (k_T*L_atm/u_0),
+    // the Rayleigh surface drag (rayleigh_kf*L_atm/u_0), coeff_MC_*, coeff_S, coeff_L and nue_max.
+    // Those are damping and forcing terms rather than members of the geostrophic balance, and
+    // fixing them is the remaining piece of one coherent nondimensionalisation.
+    const double force_nd = omega * metricShellLength() / u_0;
 
     // Acting forces
     CoriolisForce.x[i][j][k] = coriolis * coeff_Coriolis
