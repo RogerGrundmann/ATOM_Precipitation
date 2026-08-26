@@ -176,14 +176,27 @@ void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string
 *     const double rho = r_air;               // Boussinesq reference density
 *     coeff = two_pi * a * cosphi * rho;      // ... applied at EVERY level
 *
-* i.e. one constant, the SURFACE density, used from the ground to the lid -- a volume flux
-* with a kg/s label. Over this shell rho spans about 6x, so it does not invert a cell the
-* way it did in ATHAD's 250 bar column (four orders of magnitude there, and it hid a cell
-* outright); here it OVERWEIGHTS the thin upper air by up to ~6x and distorts the vertical
-* position and strength of the maximum. That matters because this is the tree that uses
-* this diagnostic to judge exactly that question -- 24ff23a "revive Hadley/Ferrel cells",
-* 1e59daa jet spin-down -- so an instrument used to measure cell strength should not be
-* ~2x overweight at the cell core.
+* i.e. one constant, the SURFACE density, used from the ground to the lid, on an integral
+* labelled kg/s. That is a volume flux, and the meridional MASS streamfunction is the
+* mass-weighted one.
+*
+* ON THIS SHELL THE ERROR DISTORTS RATHER THAN INVERTS, and the honest statement is that it
+* is a factor of ~6 (rho ~1.2 at the surface against ~0.2 at 16 km), about 2x at the Hadley
+* cell's own core near 500 hPa and worse above it. It moves the reported Psi_max and can move
+* the height it is reported at; it will not manufacture a cell. Measured on landing:
+* Psi_max 851.68 -> 373.84 (1e9 kg/s), 2.28x, with the location unmoved.
+*
+* Repaired anyway, because this diagnostic is what 24ff23a ("revive Hadley/Ferrel cells") and
+* 1e59daa (jet spin-down) judge cell strength WITH, and an instrument used to decide whether
+* a circulation is spinning down should not be 2x overweight at the branch it is measuring.
+*
+* AND IN ATHAD (dabbc94) THE SAME LINE HID A CLOSED CELL OUTRIGHT, because rho spans four
+* orders of magnitude over its 300 km shell: corrected there, the peak moved from
+* +45 deg / 44.9 km to +15 deg / surface and a return branch appeared at ~60 km, while what
+* the old weighting had reported as the Hadley cell was a one-signed drift with NO RETURN
+* FLOW. That is the difference between an instrument that is inaccurate and one that is
+* lying, and which of the two you have depends on how far rho spans -- worth knowing before
+* trusting this diagnostic in a new tree.
 *
 * EVERY Psi NUMBER RECORDED IN THIS TREE BEFORE 2026-08-26 IS THE OLD, VOLUME-FLUX-LIKE
 * QUANTITY. They are not comparable with what this function prints now.
