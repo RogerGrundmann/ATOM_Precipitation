@@ -249,6 +249,7 @@ private:
     int total_iter_count = 0;
     double diffusion_ramp = 1.0;
     bool inviscid_phase = false;
+    bool ubudget_capture = false;   // when true, rhs_u stores its per-term split into ubud_* (set on checkpoint iters)
     bool vbudget_capture = false;   // when true, rhs_v stores its per-term split into vbud_* (set on checkpoint iters)
     bool wbudget_capture = false;   // when true, rhs_w stores its per-term split into wbud_* (set on checkpoint iters)
 
@@ -515,6 +516,19 @@ public:
     Array CoriolisForce;                                                // Coriolis force terms
     Array CentrifugalForce;                                             // centrifugal force terms
     Array PresGradForce;                                                // Force caused by normal pressure gradient
+    // RADIAL momentum-budget term capture (diagnostic): per-cell rhs_u contributions,
+    // stored when ubudget_capture is set. Ported from ATHAD (README item 42): the vertical
+    // component was the one with NO instrument, so a spurious radial acceleration is
+    // invisible until something decomposes rhs_u. Two things the split makes checkable at a
+    // glance -- with coriolis_nontraditional() false, ubud_cor must be identically zero, and
+    // ubud_buoy is the size of the buoyancy body force, which is the prior question behind
+    // ATM_BUOY_TREF / ATM_BUOY_CONSISTENT. Diagnostic only: no physics reads these.
+    Array ubud_pgf;                                                     // -∂p/∂r ·exp_rm (radial pressure gradient)
+    Array ubud_cor;                                                     // Coriolis (non-traditional; off by default)
+    Array ubud_advv;                                                    // vertical advection  -u·∂u/∂r
+    Array ubud_advh;                                                    // horizontal advection
+    Array ubud_diff;                                                    // diffusion (molecular + turbulent, + metric)
+    Array ubud_buoy;                                                    // buoyancy body force
     // Zonal-mean v momentum-budget term capture (diagnostic): per-cell rhs_v
     // contributions, stored when vbudget_capture is set so write_v_momentum_budget
     // can attribute the Hadley/Ferrel spin-down to a specific dynamical term.

@@ -1010,6 +1010,29 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + buoyancy_term
         + coriolis * force_nd * coriolis_rad;
 
+    // ---- RADIAL momentum-budget term capture (checkpoint iters only) ----
+    // Mirror of the vbud_*/wbud_* blocks below, for the VERTICAL wind -- the component that
+    // had no instrument. Ported from ATHAD README item 42, where a spurious radial
+    // acceleration of rms 293 went unseen for exactly this reason.
+    //
+    // ubud_advv + ubud_advh == -transport_u exactly, so the six terms sum to rhs_u and the
+    // split can be checked rather than trusted. Two things it makes readable at a glance:
+    // ubud_cor must be identically ZERO while coriolis_nontraditional() is false, so a
+    // nonzero value means a term assumed inert is live; and ubud_buoy is the SIZE of the
+    // buoyancy body force, which is the prior question behind ATM_BUOY_TREF and
+    // ATM_BUOY_CONSISTENT -- a 5 % correction to a term that contributes 1e-6 of the
+    // pressure gradient is not worth a 300-iteration A/B.
+    //
+    // The four RK4 stages overwrite the same cell; the last wins, as in the v and w blocks.
+    if(ubudget_capture){
+        ubud_pgf.x[i][j][k]  = -dpdr_exp;
+        ubud_cor.x[i][j][k]  =  coriolis * force_nd * coriolis_rad;
+        ubud_advv.x[i][j][k] = -(u_exp * dudr_adv);
+        ubud_advh.x[i][j][k] = -(v_invrm * dudthe_adv + w_invrs * dudphi_adv);
+        ubud_diff.x[i][j][k] =  diffusion_u;
+        ubud_buoy.x[i][j][k] =  buoyancy_term;   // exactly what rhs_u received, either branch
+    }
+
     // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----
     // See RHS_Atm.cpp for the rationale: the free-slip wall (bcSolidGround) + init-only
     // bcVelSurfSur leave the near-surface tangential wind with NO momentum sink, so the

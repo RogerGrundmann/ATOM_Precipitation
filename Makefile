@@ -91,6 +91,16 @@ DEPS = $(LIB_OBJ:.o=.d) $(ATM_OBJ:.o=.d) $(HYD_OBJ:.o=.d) $(XML_OBJ:.o=.d) \
        $(ATM_CLI_OBJ:.o=.d) $(HYD_CLI_OBJ:.o=.d)
 -include $(DEPS)
 
+# EVERY OBJECT DEPENDS ON THIS MAKEFILE, and the reason is a bug that got past the -MMD
+# repair above. Header tracking only covers objects that have ALREADY been compiled with
+# -MMD; an object built before it has no .d, so make sees only its .cpp and never rebuilds
+# it. cli/atm.o was in exactly that state, and because it holds `cAtmosphereModel model;` as
+# a STACK LOCAL, main reserved the OLD sizeof while libatom.a constructed the NEW one --
+# the constructor ran off the end of main's frame and tripped the stack canary at exit
+# (*** stack smashing detected ***), with no compiler warning anywhere. A Makefile change is
+# exactly the moment that hazard exists, so tie every object to it.
+$(LIB_OBJ) $(ATM_OBJ) $(HYD_OBJ) $(XML_OBJ) $(ATM_CLI_OBJ) $(HYD_CLI_OBJ): Makefile
+
 .PHONY: clean
 clean:
 	\rm -vf $(LIB_OBJ) $(ATM_OBJ) $(HYD_OBJ) $(XML_OBJ) $(ATM_CLI_OBJ) $(HYD_CLI_OBJ) $(DEPS) $(PARAM_OUTPUTS) atm hyd libatom.a

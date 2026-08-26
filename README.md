@@ -217,6 +217,23 @@ And one build fix that is the reason the others were worth doing:
   `make` saw only `.cpp` timestamps, and nearly all the physics in this tree lives in headers —
   so a header edit produced a link of stale objects that looked like a successful build.
 
+  **AND THAT REPAIR HAD A HOLE, WHICH BIT ON THE SAME DAY** (2026-08-26). Header tracking only
+  covers objects that have already been compiled *with* `-MMD`; an object built before it has
+  no `.d`, so `make` still sees only its `.cpp` and never rebuilds it. `cli/atm.o` was in
+  exactly that state — dated 2026-07-28 through every build of the port — and it is the one
+  object that matters most, because it holds `cAtmosphereModel model;` as a **stack local**.
+  Adding six diagnostic `Array` members to the class made `main` reserve the OLD `sizeof`
+  while `libatom.a` constructed the NEW one: the constructor ran off the end of `main`'s frame
+  and tripped the stack canary at exit — `*** stack smashing detected ***`, after a complete
+  and apparently successful run, with no compiler warning anywhere. Diagnosed by
+  disassembling `main` (object at `rbp-0x1600`, canary at `rbp-0x18`, object 0x1678 long).
+  AddressSanitizer found nothing, because an object overrunning its own stack slot by ODR
+  mismatch is not an out-of-bounds access to anything ASAN tracks.
+
+  The durable fix is one line: **every object now depends on the `Makefile` itself**, so a
+  build-flag change forces the full rebuild that generates the missing `.d` files. Worth
+  porting to ATHAD, ATHAD_COND and ATHAD_PERID, which have `-MMD` but not this.
+
 **Verification, measured on this tree rather than argued from ATHAD's.** A worktree of the
 pre-fix `HEAD` was built beside the fixed tree and each ran the same 4-iteration case twice at
 4 threads:
@@ -300,6 +317,40 @@ streamlines by construction. `u-v-Cell` is kept, now correctly dimensional.
 
 **The longitudinal writer is still on index space** in this tree and in ATHAD. ATHAD fixed the
 zonal one only, and this port does not go beyond what was measured there.
+
+## The radial momentum budget (`ubud_*`), ported 2026-08-26
+
+`vbud_*` and `wbud_*` decompose the meridional and zonal momentum equations; the RADIAL one
+had no instrument in either tree until ATHAD's README item 42, where a spurious radial
+acceleration of rms 293 went unseen for exactly that reason. Six arrays, captured on
+checkpoint iterations only, summing to `rhs_u`: `ubud_advv + ubud_advh` is `-transport_u`
+exactly, so the split can be checked rather than trusted. Print-only.
+
+Measured here at 4 iterations, 8 threads (domain maxima of |term|, nondimensional):
+
+    ubud_pgf   = 0.000e+00
+    ubud_cor   = 0.000e+00
+    ubud_advv  = 1.144e-03   (0.216 of the largest)
+    ubud_advh  = 3.058e-03   (0.577)
+    ubud_diff  = 5.304e-03   (1.000)
+    ubud_buoy  = 1.464e-07   (2.8e-05)
+
+**`ubud_cor` being identically zero is the check the split exists for**: the non-traditional
+Coriolis is genuinely off, not merely documented off. ATHAD gets the same.
+
+**`ubud_buoy` answers the question `ATM_BUOY_TREF` was waiting on.** The buoyancy body force is
+**2.8e-5 of the dominant term**, and even scaled to full strength (`buoyancy_ramp` is 0.013 at
+iteration 4) it would be ~2e-3 of the diffusion — 0.2 %. A **5 % correction to that term is
+worth ~0.01 % of the radial momentum balance**, so the 300-iteration A/B item 11 was waiting
+for is not worth its wall clock. That is what the budget was ported to decide, and it decided
+it in one 40-second run instead of fifty minutes. ATHAD reached the same conclusion from the
+other side: `ubud_buoy` ~1e-6 against a pressure gradient of 1.15.
+
+**One caveat on `ubud_pgf = 0`, so it is not over-read.** The capture happens inside RK4, which
+runs before the pressure solver in each iteration, and at iterations 2 and 4 `p_dyn` is still
+identically zero at that moment (it reaches 0.117 hPa by the end of iteration 4). This is a
+spin-up snapshot, not a claim that the radial pressure gradient is absent — in ATHAD it is the
+dominant term. Only the buoyancy/diffusion ratio should be read from the table above.
 
 ## Tier C knobs ported from ATHAD (2026-08-26)
 

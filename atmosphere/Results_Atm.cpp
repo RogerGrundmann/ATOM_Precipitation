@@ -54,6 +54,59 @@ void cAtmosphereModel::print_min_max_atm(){
     searchMinMax_3D(" max w-component ", " min w-component ", 
         "m/s", w, u_0);
 
+    // Radial momentum budget, nondimensional, six terms summing to rhs_u. See the capture
+    // block in RHS_Atm_Turb.cpp: ubud_cor must be identically 0 with the default switches,
+    // and ubud_buoy against ubud_pgf is how large the buoyancy body force actually is.
+    searchMinMax_3D(" max ubud_pgf ", " min ubud_pgf ", 
+        " nd ", ubud_pgf, 1.0);
+    searchMinMax_3D(" max ubud_cor ", " min ubud_cor ", 
+        " nd ", ubud_cor, 1.0);
+    searchMinMax_3D(" max ubud_advv ", " min ubud_advv ", 
+        " nd ", ubud_advv, 1.0);
+    searchMinMax_3D(" max ubud_advh ", " min ubud_advh ", 
+        " nd ", ubud_advh, 1.0);
+    searchMinMax_3D(" max ubud_diff ", " min ubud_diff ", 
+        " nd ", ubud_diff, 1.0);
+    searchMinMax_3D(" max ubud_buoy ", " min ubud_buoy ", 
+        " nd ", ubud_buoy, 1.0);
+
+    // The six above are printed at coefficient 1.0 for parity with ATHAD, where they are
+    // O(1). HERE THEY ARE NOT: Earth's nondimensional forcing is orders of magnitude
+    // smaller, so several of them print as 0.000000 and the diagnostic would be unreadable
+    // exactly where it matters. This block restates the same arrays as domain maxima of
+    // |term| in scientific notation, with the ratio each bears to the largest of them --
+    // which is the form the question "is this term large enough to be worth correcting"
+    // actually needs. Print-only, like everything else in this block.
+    {
+        auto max_abs = [&](Array& a){
+            double m_ = 0.0;
+            for(int i = 0; i < im; i++)
+                for(int j = 0; j < jm; j++)
+                    for(int k = 0; k < km; k++){
+                        const double v = std::fabs(a.x[i][j][k]);
+                        if(std::isfinite(v) && v > m_) m_ = v;
+                    }
+            return m_;
+        };
+        const char* nm[6] = {"pgf", "cor", "advv", "advh", "diff", "buoy"};
+        double mx[6] = {max_abs(ubud_pgf),  max_abs(ubud_cor),  max_abs(ubud_advv),
+                        max_abs(ubud_advh), max_abs(ubud_diff), max_abs(ubud_buoy)};
+        double big = 0.0;
+        for(int n = 0; n < 6; n++) big = std::max(big, mx[n]);
+
+        const std::ios::fmtflags saved = cout.flags();
+        const std::streamsize    prec  = cout.precision();
+        cout << endl << " radial momentum budget, max|term| over the domain [nd]:" << endl;
+        for(int n = 0; n < 6; n++){
+            cout << "      ubud_" << setw(5) << left << nm[n] << right
+                 << " = " << scientific << setprecision(3) << mx[n]
+                 << "   (" << fixed << setprecision(4)
+                 << ((big > 0.0) ? mx[n] / big : 0.0) << " of the largest)" << endl;
+        }
+        cout.flags(saved);
+        cout.precision(prec);
+    }
+
 
 
 
