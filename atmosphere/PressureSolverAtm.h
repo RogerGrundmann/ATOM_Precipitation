@@ -184,7 +184,8 @@ public:
 
                 geo.rm           = m.rad.z[i];
                 geo.rm2          = geo.rm * geo.rm;
-                geo.exp_rm       = 1.0 / (geo.rm + 1.0);
+                geo.exp_rm       = m.metricExpRm(geo.rm);
+                geo.curv         = m.metricCurv(geo.rm);
                 geo.exp_2_rm     = geo.exp_rm * geo.exp_rm;
                 geo.sinthe       = sinthe_table[j];
                 geo.sinthe2      = geo.sinthe * geo.sinthe;
@@ -214,6 +215,14 @@ public:
                                    + 2.0 * m_phi * inv_dphi2;
                 const double inv_denom = 1.0 / denom;
                 const double num1 = geo.exp_2_rm * inv_dr2;
+                // README item 80's second half (ported from ATHAD): the radial Laplacian on a
+                // stretched grid is exp_2_rm*(p'' - curv*p'), so the operator needs a
+                // FIRST-derivative coefficient of -curv that this stencil never had. curv is 0
+                // on the legacy metric, so the added term is exactly +0.0 there and the branch
+                // is bit-identical; under ATM_METRIC_EXACT it is the same order as the term it
+                // sits beside. Diagonal dominance is unaffected -- the ratio to num1 is
+                // curv*dr/2, which is 0.046 at zeta = 3.715.
+                const double num_a = geo.exp_2_rm * (-geo.curv) * geo.inv_2dr;
                 const double num2 = m_the * inv_dthe2;
                 const double num3 = m_phi * inv_dphi2;
 
@@ -407,6 +416,7 @@ public:
                             ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
                            + (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]) * num2
                            + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
+                           + (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * num_a
                            - div_src) * inv_denom;
                     }
                 } // k
@@ -612,7 +622,7 @@ public:
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
                 const double rm           = m.rad.z[i];
-                const double exp_rm       = 1.0 / (rm + 1.0);   // grid coordinate, not the radius
+                const double exp_rm       = m.metricExpRm(rm);   // grid coordinate, not the radius
                 // The gradient correction must use the SAME metric the source and the RHS use,
                 // or the projection stops being a projection. ATM_METRIC_RADIUS; identity when off.
                 const double rmet         = m.metricRadius(rm);

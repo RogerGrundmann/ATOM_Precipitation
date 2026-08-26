@@ -388,6 +388,63 @@ divergence and gradient not being adjoint on a collocated stencil, with Rhie-Cho
 reconstruction named as the un-done repair. In ATHAD roughly half the non-closure was
 convergence and the rest structural; here it looks like all of it.
 
+### `ATM_METRIC_EXACT` — and ATHAD's result does NOT reproduce here
+
+`exp_rm = 1/(rm+1)` is documented as the Jacobian of the radial stretch and is the Jacobian of a
+QUADRATIC one, while `init_layer_heights` builds an EXPONENTIAL one — the defect
+`checkRadialMetric` reports as a **23.21x** spread above. `ATM_METRIC_EXACT=1` replaces it with
+the true `metricShellLength()/J`, `J = zeta*L_atm*exp(zeta*(r-r0))`, at all twelve sites that
+computed it. **Default off; unset is bit-identical** (verified: twelve rerouted call sites,
+eleven modified diffusion terms and a new Poisson stencil term, and the only difference against
+the pre-refactor binary is a timing line).
+
+**A second defect comes with the first, exactly as in ATHAD.** The radial Laplacian on a
+stretched grid is `exp_2_rm*(f'' - (J'/J)*f')` and the core computes `f'' * exp_2_rm` and stops,
+so the curvature term is missing under BOTH metrics — small under the legacy one
+(`J'/J = 1/(rm+1) <= 0.5`), the same order as the retained term under the true one
+(`J'/J = zeta = 3.715`). It is added at the eleven diffusion terms and as a first-derivative
+off-diagonal in the Poisson operator. `metricCurv()` returns 0 on the legacy branch, so the
+missing legacy term is recorded rather than silently fixed.
+
+With the knob on, `checkRadialMetric` reports the core length unit as **16046 m at every level,
+spread 1.00x** — the unit-free test passing by construction.
+
+**Measured at 40 iterations, 8 threads, each arm in its own output directory:**
+
+| | legacy | exact | change |
+|---|---|---|---|
+| RMS Psi(ground) | 1.6414e11 kg/s | 1.6404e11 | **-0.06 %** |
+| max abs Psi above 2 km | 3.6363e11 | 3.6360e11 | -0.008 % |
+| closure ratio | 0.4514 | 0.4512 | -0.04 % |
+| `residuum_atm` | 22.36153 | 22.34504 | -0.07 % |
+| mean T / KE | 254.379 K / 36.160 | 254.378 / 36.159 | ~0 |
+| **max radial wind** | **0.061202 m/s** | **0.019108 m/s** | **-69 %** |
+
+**ATHAD's item 80 finding does not reproduce in this tree.** There, making the metric exact left
+the OLR untouched but drove `div(rho u)/rho` rms from 2.739e-02 to 7.722e-02 and threw `Psi_max`
+from 36 km to the ground — 2.8x worse, and the reason its default is off. Here the same repair
+is a **null on every integrated quantity, and marginally in the RIGHT direction**: the residuum
+and the closure ratio both fall slightly. Two trees, measured the same way, opposite outcomes —
+so *"the correct Jacobian makes the projection worse"* is an ATHAD property and not a family
+law. This tree has the WORSE metric (23.2x against 11.8x) and pays nothing to fix it.
+
+The one thing that does move is the **radial-wind extremum, -69 %**. Read it as a spike being
+suppressed rather than as a change in the circulation: it is a max over the domain, it sits at a
+different cell in the two arms, and everything integrated is unmoved at the 1e-3 level. The
+radial component is exactly what a radial metric rescales, so a localised vertical spike
+responding while the mass circulation does not is the expected shape.
+
+**The default stays OFF, and the reason is run length, not the result.** Forty iterations is a
+spin-up: this tree's own history is full of differences that appear later, and ATHAD's item 54
+watched a 4.4 % gap grow to 9.1 % between iterations 20 and 40. What can be said is that the
+principled metric is CHEAP here, which makes this the natural tree to test it in properly —
+the opposite of the situation in ATHAD.
+
+**Note also what is missing to judge it well.** ATHAD reads this question through
+`div(rho u)/rho`, printed every iteration; this tree has no such diagnostic, so the closure
+above is the Psi(ground) RMS computed from the CSV. Porting that print is the obvious
+follow-on if the question is pursued.
+
 ### `ATM_BUOY_TREF`, `ATM_BUOY_CONSISTENT` — implemented, UNMEASURED in this tree
 
 The Boussinesq buoyancy divides its temperature anomaly by `t_0` = 273.15 K, the

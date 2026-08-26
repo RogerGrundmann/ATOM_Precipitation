@@ -99,7 +99,8 @@ public:
 
 
     struct CellGeometry {                                                                                                                                                                                            
-        double rm, rm2, exp_rm, exp_2_rm;                                                                                                                                                                              
+        double rm, rm2, exp_rm, exp_2_rm;
+        double curv;            // J'/J, the curvature term in d2f/dz2; 0 on the legacy metric                                                                                                                                                                              
         double sinthe, sinthe2, costhe;                                                                                                                                                                                
         double inv_rm, inv_rm2;
         double inv_rmsinthe, inv_rm2sinthe, inv_rm2sinthe2;
@@ -388,6 +389,57 @@ private:
 //            std::cout << m_layer_heights.back() << std::endl;
         }
         return;
+    }
+
+    // ==================================================================
+    // IS exp_rm THE JACOBIAN OF THE RADIAL STRETCH? It is documented as one in
+    // TurbulenceAtm.h and written as one in PressureSolverAtm.h, and it is not. Ported from
+    // ATHAD README item 80; checkRadialMetric() has printed the spread at every startup since
+    // the instruments went in, and in THIS tree it is 23.21x -- the worst in the family.
+    //
+    // exp_rm = 1/(rm+1) is the Jacobian of a QUADRATIC stretch z ~ (rm+1)^2/2, while
+    // init_layer_heights() builds an EXPONENTIAL one, z = (exp(zeta*(r-r0)) - 1)*L_atm. The
+    // true Jacobian is J(r) = dz/d(rad.z) = zeta*L_atm*exp(zeta*(r-r0)) [m per rad.z unit],
+    // and the core wants it as a DIMENSIONLESS factor against its own length unit, which is
+    // metricShellLength() -- the metres one rad.z unit represents on average.
+    //
+    // AND THE SECOND DERIVATIVE NEEDS A TERM THE CODE DOES NOT HAVE. With e = U/J,
+    //     U^2 * d2f/dz2 = e^2 * ( d2f/dr2 - (J'/J) * df/dr )
+    // and J'/J is `zeta` for an exponential stretch. The core computes d2f/dr2 * exp_2_rm and
+    // stops, so the curvature term is missing in BOTH metrics -- small under the legacy one
+    // (J'/J = 1/(rm+1) <= 0.5) and the same order as the retained term under the true one,
+    // since zeta = 3.715 here. metricCurv() returns 0 on the legacy branch so that branch
+    // stays bit-identical; the missing legacy term is a separate, smaller defect, recorded
+    // rather than silently fixed.
+    //
+    // ATM_METRIC_EXACT=1 switches to the true Jacobian. DEFAULT OFF, and in ATHAD it is
+    // default off for a MEASURED reason rather than caution: making the metric exact there
+    // left the OLR untouched but made the pressure projection WORSE (div(rho u)/rho rms
+    // 2.739e-02 -> 7.722e-02, Psi_max jumping to the ground). Whatever this tree does with
+    // it, it must be measured here before any flip.
+    // ==================================================================
+    static bool metricExact(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_METRIC_EXACT"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
+    // dz/d(rad.z) at rm, in metres per rad.z unit. Analytic: this tree has one grid.
+    double metricJ(double rm) const {
+        return zeta * L_atm * exp(zeta * (rm - rad.z[0]));
+    }
+
+    // The dimensionless radial Jacobian factor a FIRST derivative is multiplied by.
+    double metricExpRm(double rm) const {
+        if(!metricExact()) return 1.0 / (rm + 1.0);
+        const double J = metricJ(rm);
+        return (J > 0.0) ? (metricShellLength() / J) : (1.0 / (rm + 1.0));
+    }
+
+    // J'/J, the coefficient of the curvature term in d2f/dz2 = e^2*(f'' - curv*f').
+    // Zero on the legacy branch, so the legacy operator is unchanged to the bit.
+    double metricCurv(double rm) const {
+        return metricExact() ? zeta : 0.0;
     }
 
     // Physical length that ONE unit of rad.z represents, in metres.

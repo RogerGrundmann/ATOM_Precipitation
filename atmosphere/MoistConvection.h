@@ -1222,7 +1222,7 @@ void findCloudBaseLFS() {
                     double t_vir_env = std::max(t_u * (1.0 + alf * m.c.x[i_base][j][k]
                                        - cloud.x[i_base][j][k]), 1.0);
                     double rm        = m.rad.z[i_base];
-                    double exp_rm    = 1.0 / (rm + 1.0);
+                    double exp_rm    = m.metricExpRm(rm);
                     m.CAPE[i_base]   = m.g * step[i_base]
                                        / exp_rm * (t_vir - t_vir_env) / t_vir_env;
                 }
@@ -1236,7 +1236,7 @@ void findCloudBaseLFS() {
                     double t_vir_env = std::max(t_u * (1.0 + alf * m.c.x[i][j][k]
                                        - cloud.x[i][j][k]), 1.0);
                     double rm        = m.rad.z[i];
-                    double exp_rm    = 1.0 / (rm + 1.0);
+                    double exp_rm    = m.metricExpRm(rm);
                     m.CAPE[i+1]      = m.CAPE[i] + m.g * step[i]
                                        / exp_rm * (t_vir - t_vir_env) / t_vir_env;
                 }
