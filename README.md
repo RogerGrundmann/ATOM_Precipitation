@@ -388,6 +388,59 @@ divergence and gradient not being adjoint on a collocated stencil, with Rhie-Cho
 reconstruction named as the un-done repair. In ATHAD roughly half the non-closure was
 convergence and the rest structural; here it looks like all of it.
 
+### `ATM_GRID_PRESSURE` — ported with two REFITTED constants, and it has nothing to give
+
+Levels placed uniformly in `ln p` on a reference hydrostatic column instead of exponentially in
+height. **Default off, unset bit-identical.** Two constants had to be refitted for this tree,
+and the first would have been a silent disaster if copied:
+
+| | ATHAD ships | this tree |
+|---|---|---|
+| `ATM_GRID_PTOP` | 1e-6 | **0.08538** |
+| `ATM_GRID_BETA` | 4.33 | **3.988** |
+
+`p_top = 1e-6 p_0` on Earth's column sits at **81.9 km**. Importing ATHAD's default would not
+have regridded this model, it would have **extended the shell 5.1x** and made it a different
+model while looking like a grid option. 0.08538 is the pressure at this tree's own legacy lid
+(16023 m, 86.5 hPa). `beta = 3.988` is then fitted so the bottom layer matches the legacy
+38.9 m; at `beta = zeta = 3.715` it comes out 1.23x coarser.
+
+`buildReferenceColumn` also had to be rewritten rather than copied. ATHAD integrates a **dry
+adiabat** because its column is one by construction; on Earth that law puts the 16 km lid at
+117 K, and the ladder would be built for an atmosphere this model does not have. It integrates
+this tree's own initialisation law instead — the 6.5 K/km reference lapse of
+`InitValues_Atm.cpp`, isothermal above the mean tropopause.
+
+**THE OUTCOME WAS PREDICTED ANALYTICALLY BEFORE ANY CODE WAS WRITTEN, AND THE PREDICTION HELD.**
+For an isothermal column a `ln p` ladder IS a height ladder; the two differ only through the
+temperature contrast up the column, and this tree has the mildest in the family. The ladder has
+**Lambda = 2.46 e-foldings** to redistribute across the shell against ATHAD's 13.8, because
+**shell/H = 2.01** here (ATHAD 5.06, ATHAD_COND 7.74, ATHAD_PERID 15.54 — and PERID is the one
+tree where this branch paid).
+
+Measured at 40 iterations, 8 threads, against the legacy grid:
+
+| | legacy | pressure grid | change |
+|---|---|---|---|
+| closure ratio | 0.4514 | 0.4570 | **+1.2 % WORSE** |
+| max abs Psi(ground) | 3.9454e11 | 3.9968e11 | +1.3 % |
+| max abs Psi above 2 km | 3.6363e11 | 3.5678e11 | **-1.9 %** (weaker circulation) |
+| `residuum_atm` | 22.3615 | 22.4690 | +0.48 % |
+| mean T / KE | 254.379 K / 36.160 | 254.338 / 36.707 | -0.04 K / +1.5 % |
+| max radial wind | 0.061202 m/s | 0.060951 | -0.4 % |
+| `checkRadialMetric` spread | 23.21x | **21.87x** | -5.8 % |
+| bottom layer / lid | 38.9 m / 16023 m | matched / 16023 m | by construction |
+
+**About one percent, and the sign is against it**: the streamfunction closes slightly worse and
+the interior circulation is slightly weaker. **ATHAD's free side-benefit does not appear either**
+— there the ln-p grid cut the metric spread 11.77x -> 2.19x, a 5.4x improvement that item 82
+called a third route to item 39's open decision; here 23.21x -> 21.87x, which is nothing.
+
+So the branch is available, correct, and **not recommended for this tree**. That is a result
+about geometry rather than about tuning: a shell two scale heights deep has almost no mass
+redistribution available to it, and no choice of `beta` changes that — `beta` moves where the
+levels sit within the ladder, and the ladder itself is nearly the legacy one.
+
 ### `ATM_METRIC_EXACT` — and ATHAD's result does NOT reproduce here
 
 `exp_rm = 1/(rm+1)` is documented as the Jacobian of the radial stretch and is the Jacobian of a

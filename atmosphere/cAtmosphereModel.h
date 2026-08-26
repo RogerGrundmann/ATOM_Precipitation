@@ -322,6 +322,7 @@ private:
     std::vector<double> lapse_rate;
 
     std::vector<float> m_layer_heights;
+    std::vector<double> m_layer_J;   // dz/d(rad.z) per level; only filled for the pressure grid
 
     // Per-level horizontal-mean (non-dim) temperature, used as the Boussinesq
     // buoyancy base state so the body force has zero mean at every height and
@@ -378,7 +379,142 @@ private:
     void cloudiness_backup();
     void init_Maxwell();
 
+    // ==================================================================
+    // ATM_GRID_PRESSURE -- place the levels uniformly in ln p on a reference hydrostatic
+    // column instead of exponentially in height. Ported from ATHAD (README items 82/83),
+    // DEFAULT OFF, and the two constants below are FITTED FOR THIS TREE: they are not
+    // ATHAD's and must not be copied between trees.
+    //
+    //   ATM_GRID_PTOP  p_top/p_0, default 0.08538 -- the pressure at THIS tree's own legacy
+    //                  lid (16023 m, 86.5 hPa). ATHAD ships 1e-6, which on Earth's column
+    //                  sits at 81.9 km: importing that default would not regrid this model,
+    //                  it would EXTEND the shell 5.1x and quietly make it a different model.
+    //   ATM_GRID_BETA  ln-p stretch, default 3.988 -- fitted so the bottom layer matches the
+    //                  legacy 38.9 m. At beta = zeta = 3.715 the bottom is 1.23x coarser.
+    //
+    // EXPECT NO PAYOFF HERE, and the reason is structural rather than a matter of tuning.
+    // The ladder has only Lambda = -ln(p_top/p_0) = 2.46 e-foldings to redistribute across
+    // this shell, against ATHAD's 13.8, because shell/H = 2.01 here (ATHAD 5.06, ATHAD_COND
+    // 7.74, ATHAD_PERID 15.54, and PERID is the one tree where the branch paid). For an
+    // ISOTHERMAL column a ln-p ladder IS a height ladder; the two differ only through the
+    // temperature contrast up the column, and Earth's (288 -> 214 K) is the mildest in the
+    // family. Measured beta table for this tree, dz_0 relative to legacy:
+    //
+    //     beta      1.0    2.0    3.0    3.715   4.5
+    //     dz_0     7.42x  4.05x  2.06x   1.23x  0.68x       (matched at beta = 3.988)
+    //
+    // The lid is invariant under beta -- only ATM_GRID_PTOP moves it.
+    // ==================================================================
+    static bool gridPressure(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_GRID_PRESSURE"); return e && atoi(e) != 0; }();
+        return v;
+    }
+    static double gridPTop(){
+        static const double v = [](){
+            const char* e = getenv("ATM_GRID_PTOP");
+            const double d = e ? atof(e) : 0.08538;
+            return (d > 0.0 && d < 1.0) ? d : 0.08538; }();
+        return v;
+    }
+    static double gridBeta(){
+        static const double v = [](){
+            const char* e = getenv("ATM_GRID_BETA");
+            const double d = e ? atof(e) : 3.988;
+            return (d > 0.0) ? d : 3.988; }();
+        return v;
+    }
+
+    // A dry hydrostatic reference column: ln(p/p_0) against height, on THIS tree's own
+    // initialisation law -- the 6.5 K/km reference lapse of InitValues_Atm.cpp, isothermal
+    // above the mean tropopause. ATHAD integrates a DRY ADIABAT here because its column is
+    // one by construction; using that law on Earth would put the 16 km lid at 117 K and the
+    // ladder would be built for an atmosphere this model does not have.
+    bool buildReferenceColumn(std::vector<double>& z_ref,
+                              std::vector<double>& lnp_ref) const {
+        const double T_s    = 0.5 * ((t_equat_modern + t_0) + (t_pole_modern + t_0));
+        const double lapse  = 0.0065;                                  // LAPSE_RATE_REF [K/m]
+        const double z_trop = 0.5 * (tropopause_equator + tropopause_pole);
+        const double T_trop = T_s - lapse * z_trop;
+        if(!(T_s > 0.0) || !(R_Air > 0.0) || !(p_0 > 0.0) || !(g > 0.0) || !(T_trop > 0.0))
+            return false;
+
+        const double dz      = 25.0;          // m, fine enough that the ladder is smooth
+        const double z_limit = 2.0e5;         // m, a guard and nothing more
+        const double lnp_target = std::log(gridPTop());
+
+        z_ref.clear(); lnp_ref.clear();
+        z_ref.push_back(0.0); lnp_ref.push_back(0.0);        // ln(p/p_0) = 0 at the ground
+
+        double T = T_s, lnp = 0.0, z = 0.0;
+        while(z < z_limit && lnp > lnp_target){
+            double T_next = T_s - lapse * (z + dz);
+            if(T_next < T_trop) T_next = T_trop;             // isothermal stratosphere
+            const double T_mid = 0.5 * (T + T_next);
+            if(!(T_mid > 0.0)) break;
+            lnp -= g * dz / (R_Air * T_mid);                 // d(ln p) = -g dz /(R T)
+            z   += dz;
+            T    = T_next;
+            z_ref.push_back(z); lnp_ref.push_back(lnp);
+        }
+        return (lnp <= lnp_target) && (z_ref.size() > 2);
+    }
+
+    // dz/d(rad.z) per level, central-differenced from the height table. A pressure-placed
+    // grid has no closed-form Jacobian; the legacy branch keeps its analytic one, so that
+    // branch stays bit-identical.
+    void buildMetricTable(){
+        m_layer_J.assign(im, 0.0);
+        const double dr_loc = (im > 1) ? (rad.z[im-1] - rad.z[0]) / (double)(im - 1) : 1.0;
+        for(int i = 0; i < im; i++){
+            const int lo = (i == 0) ? 0 : i - 1;
+            const int hi = (i == im - 1) ? im - 1 : i + 1;
+            const double dz = (double)m_layer_heights[hi] - (double)m_layer_heights[lo];
+            const double dn = (double)(hi - lo) * dr_loc;
+            m_layer_J[i] = (dn > 0.0) ? (dz / dn) : 1.0;
+        }
+    }
+
     void init_layer_heights(){
+        m_layer_heights.clear();
+        m_layer_J.clear();
+
+        if(gridPressure()){
+            std::vector<double> z_ref, lnp_ref;
+            if(buildReferenceColumn(z_ref, lnp_ref)){
+                const double Lambda = -std::log(gridPTop());       // e-foldings, > 0
+                const double beta   = gridBeta();
+                const double denom  = std::exp(beta) - 1.0;
+                std::size_t k = 0;
+                for(int i = 0; i < im; i++){
+                    const double t = (double)i / (double)(im - 1);
+                    const double x = (denom > 0.0)
+                                   ? (std::exp(beta * t) - 1.0) / denom : t;
+                    const double want = -x * Lambda;               // target ln(p/p_0), <= 0
+                    while(k + 1 < lnp_ref.size() && lnp_ref[k + 1] > want) k++;
+                    double zi = z_ref.back();
+                    if(k + 1 < lnp_ref.size()){
+                        const double d = lnp_ref[k] - lnp_ref[k + 1];
+                        const double f = (d > 0.0) ? (lnp_ref[k] - want) / d : 0.0;
+                        zi = z_ref[k] + f * (z_ref[k + 1] - z_ref[k]);
+                    }
+                    m_layer_heights.push_back((float)zi);
+                }
+                // Strictly increasing, or every radial derivative divides by zero.
+                bool ok = true;
+                for(int i = 1; i < im; i++)
+                    if(!(m_layer_heights[i] > m_layer_heights[i-1])) ok = false;
+                if(ok){ buildMetricTable(); return; }
+                std::cout << "      AGCM: ATM_GRID_PRESSURE produced a non-monotonic grid"
+                          << " - falling back to the legacy stretch" << std::endl;
+                m_layer_heights.clear();
+            } else {
+                std::cout << "      AGCM: ATM_GRID_PRESSURE could not reach p_top = "
+                          << gridPTop() << " p_0 - falling back to the legacy stretch"
+                          << std::endl;
+            }
+        }
+
         float h = L_atm;
         m_layer_heights.clear();
         for(int i=0; i<im; i++){
@@ -425,7 +561,15 @@ private:
     }
 
     // dz/d(rad.z) at rm, in metres per rad.z unit. Analytic: this tree has one grid.
+    int metricLevelOf(double rm) const {
+        const double dr_loc = (im > 1) ? (rad.z[im-1] - rad.z[0]) / (double)(im - 1) : 1.0;
+        int i = (dr_loc > 0.0) ? (int)std::lround((rm - rad.z[0]) / dr_loc) : 0;
+        if(i < 0) i = 0;
+        if(i > im - 1) i = im - 1;
+        return i;
+    }
     double metricJ(double rm) const {
+        if(gridPressure() && (int)m_layer_J.size() == im) return m_layer_J[metricLevelOf(rm)];
         return zeta * L_atm * exp(zeta * (rm - rad.z[0]));
     }
 
@@ -439,7 +583,17 @@ private:
     // J'/J, the coefficient of the curvature term in d2f/dz2 = e^2*(f'' - curv*f').
     // Zero on the legacy branch, so the legacy operator is unchanged to the bit.
     double metricCurv(double rm) const {
-        return metricExact() ? zeta : 0.0;
+        if(!metricExact()) return 0.0;
+        if(gridPressure() && (int)m_layer_J.size() == im){
+            // J'/J by central difference on the same table, in rad.z units.
+            const int i = metricLevelOf(rm);
+            const int lo = (i == 0) ? 0 : i - 1, hi = (i == im - 1) ? im - 1 : i + 1;
+            const double dr_loc = (im > 1) ? (rad.z[im-1] - rad.z[0]) / (double)(im - 1) : 1.0;
+            const double dn = (double)(hi - lo) * dr_loc;
+            const double Ji = m_layer_J[i];
+            return (dn > 0.0 && Ji > 0.0) ? ((m_layer_J[hi] - m_layer_J[lo]) / dn) / Ji : 0.0;
+        }
+        return zeta;
     }
 
     // Physical length that ONE unit of rad.z represents, in metres.
