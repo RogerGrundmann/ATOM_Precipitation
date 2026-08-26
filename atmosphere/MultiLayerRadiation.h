@@ -245,6 +245,25 @@ public:
                     double tau = tau_dry * dp_col[i] * inv_dp + tau_wv * vpath_col[i] * inv_vp
                                + tau_co2 + tau_cloud;
                     m.epsilon.x[i][j][k] = 1.0 - exp(-tau);
+
+                    // Stash the LAYER optical depth; the downward pass below turns tau_above
+                    // into the cumulative-from-the-lid value. Not recoverable from epsilon
+                    // afterwards, which saturates at tau ~ 37.
+                    m.tau_above.x[i][j][k] = tau;
+                    m.tau_layer.x[i][j][k] = tau;
+                }
+
+                // tau_above: walk DOWNWARD from the lid, accumulating, so tau_above[i] is the
+                // optical depth of everything ABOVE level i -- 0 at the lid, increasing
+                // downward, and tau_above = 1 is the photosphere. One thread owns this whole
+                // column (the parallel for is over j, k inner), so this is race-free.
+                {
+                    double acc = 0.0;
+                    for (int i = i_trop; i >= i_mount; i--) {
+                        const double layer = m.tau_above.x[i][j][k];
+                        m.tau_above.x[i][j][k] = acc;
+                        acc += layer;
+                    }
                 }
                 m.epsilon_2D.y[j][k] = m.epsilon.x[i_mount][j][k];
 

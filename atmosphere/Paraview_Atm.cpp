@@ -353,6 +353,11 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
     dump_array("v-component", aux_v, u_0, Atmosphere_panorama_vts_File);
     dump_array("w-component", aux_w, u_0, Atmosphere_panorama_vts_File);
 
+    // BruntVaisala_N2, not "N2": ATHAD item 61 renamed it because "N2" sat in the same
+    // file as nitrogen and was read as the gas more than once.
+    dump_array("tau_above", tau_above, 1.0, Atmosphere_panorama_vts_File);
+    dump_array("tau_layer", tau_layer, 1.0, Atmosphere_panorama_vts_File);
+    dump_array("BruntVaisala_N2", brunt_N2, 1.0, Atmosphere_panorama_vts_File);
     dump_array("PressureDynamic", p_dyn, p_0, Atmosphere_panorama_vts_File);
 
     dump_array("WaterVapour", c, 1e3, Atmosphere_panorama_vts_File);
@@ -597,6 +602,11 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     dump_radial("u_d", u_d, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("v_d", v_d, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("w_d", w_d, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    // BruntVaisala_N2, not "N2": ATHAD item 61 renamed it because "N2" sat in the same
+    // file as nitrogen and was read as the gas more than once.
+    dump_radial("tau_above", tau_above, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("tau_layer", tau_layer, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("BruntVaisala_N2", brunt_N2, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
 
     buf << "VECTORS v-w-Updraft float\n";
@@ -752,6 +762,11 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     }
 
 
+    // BruntVaisala_N2, not "N2": ATHAD item 61 renamed it because "N2" sat in the same
+    // file as nitrogen and was read as the gas more than once.
+    dump_zonal("tau_above", tau_above, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("tau_layer", tau_layer, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("BruntVaisala_N2", brunt_N2, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("Radiation", radiation, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("Epsilon", epsilon, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
@@ -1048,6 +1063,11 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     dump_longal("D_u", D_u, 1.0e3, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("E_d", E_d, 1.0e3, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("D_d", D_d, 1.0e3, j_longal, Atmosphere_vtk_longal_File);
+    // BruntVaisala_N2, not "N2": ATHAD item 61 renamed it because "N2" sat in the same
+    // file as nitrogen and was read as the gas more than once.
+    dump_longal("tau_above", tau_above, 1.0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("tau_layer", tau_layer, 1.0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("BruntVaisala_N2", brunt_N2, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
 
     buf << "VECTORS u-w-Updraft float\n";

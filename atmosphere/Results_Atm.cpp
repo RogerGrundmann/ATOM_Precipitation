@@ -57,6 +57,22 @@ void cAtmosphereModel::print_min_max_atm(){
     // Radial momentum budget, nondimensional, six terms summing to rhs_u. See the capture
     // block in RHS_Atm_Turb.cpp: ubud_cor must be identically 0 with the default switches,
     // and ubud_buoy against ubud_pgf is how large the buoyancy body force actually is.
+    // Brunt-Vaisala frequency squared. THE ONE FIELD IN THIS TREE WITH AN EXTERNALLY KNOWN
+    // ANSWER: Earth's troposphere is near 1e-4 s^-2 and the stratosphere near 4e-4, so this
+    // can be judged against reality instead of against another arm of the same model. A
+    // NEGATIVE value is statically unstable air, which convection should be removing.
+    // Long-wave optical depth. tau_above = 1 is the PHOTOSPHERE -- the level this atmosphere
+    // actually radiates to space from -- and tau_layer is the resolution measure: a layer
+    // carrying d(tau) of order 1 means the two-stream sweep, which is first order in d(tau),
+    // is resolving the emission level with a single cell. ATHAD README items 39 and 42.
+    searchMinMax_3D(" max tau_above ", " min tau_above ", 
+        " 1 ", tau_above, 1.0);
+    searchMinMax_3D(" max tau_layer ", " min tau_layer ", 
+        " 1 ", tau_layer, 1.0);
+
+    searchMinMax_3D(" max BruntVaisala_N2 ", " min BruntVaisala_N2 ", 
+        " 1/s2 ", brunt_N2, 1.0);
+
     searchMinMax_3D(" max ubud_pgf ", " min ubud_pgf ", 
         " nd ", ubud_pgf, 1.0);
     searchMinMax_3D(" max ubud_cor ", " min ubud_cor ", 

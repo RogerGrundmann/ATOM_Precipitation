@@ -537,6 +537,7 @@ public:
 
         auto end = std::chrono::high_resolution_clock::now();
         if (verbose) {
+            reportDivergence("at pressure solve");
             auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
             printf(" time measured: %.3f seconds for PressureSolverAtm\n", elapsed.count() * 1e-9);
             cout << "      ATOM: PressureSolverAtm ended" << endl;
@@ -572,6 +573,85 @@ public:
     // so a single knob would have made "10 sweeps in the time loop" mean 2000 relaxations at
     // startup as well, and the arms of any comparison would have differed in their INITIAL
     // STATE as well as in the quantity under test. ATHAD lost an attribution that way.
+
+    // ==================================================================
+    // div(u), PRINTED AT THE POINTS WHERE IT MEANS SOMETHING. Ported from ATHAD
+    // (PressureSolverAtm.h), which prints it every iteration and judges the projection by it;
+    // this tree had no divergence diagnostic at all, so the closure question had to be
+    // answered offline from the streamfunction CSV -- which is circular, because Psi does not
+    // close at the ground either.
+    //
+    // READ THE CALL SITES, NOT JUST THE NUMBER. In the TIME LOOP `run()` computes p_dyn and
+    // NOTHING ELSE: the velocity is never explicitly projected there, it feels the pressure
+    // through the -dp/dr term of the next RK4 stage, and `pressure_stride = 4` means even that
+    // happens on one iteration in four. The only place a velocity correction v <- v - grad(p)
+    // is actually applied is project_initial_velocity, Step 3. So:
+    //
+    //   "after initial projection"  tests whether the projection ACHIEVES div(u) = 0;
+    //   "at pressure solve"         is the working level of divergence during the run, after
+    //                               RK4 and the polar / orographic / radial filters have had
+    //                               it -- a different question, and not the solver's fault.
+    //
+    // The divergence is formed in the model's OWN metric, term for term as the Poisson source
+    // is, so a small number here means the solver hit its own target rather than a target
+    // rewritten by the diagnostic. Print-only.
+    // ==================================================================
+    void reportDivergence(const char* tag) const {
+        using namespace std;
+        const double inv_2dr   = 1.0 / (2.0 * m.dr);
+        const double inv_2dthe = 1.0 / (2.0 * m.dthe);
+        const double inv_2dphi = 1.0 / (2.0 * m.dphi);
+        const bool metric_div  = AtomUtils::metric_divergence();
+
+        double d2 = 0.0, dmax = 0.0, rad2 = 0.0;
+        long   n  = 0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:d2,rad2,n) reduction(max:dmax)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm       = m.rad.z[i];
+                const double exp_rm   = m.metricExpRm(rm);
+                const double rmet     = m.metricRadius(rm);
+                double sinthe = sin(m.the.z[j]);
+                if (sinthe < 0.55) sinthe = 0.55;          // the model's own metric floor
+                const double inv_rm   = 1.0 / rmet;
+                const double inv_rms  = 1.0 / (rmet * sinthe);
+                const double cotanthe = cos(m.the.z[j]) / sinthe;
+
+                for (int k = 1; k < m.km-1; k++) {
+                    // fluid cells with fluid neighbours only -- a one-sided difference across
+                    // a coast is a different operator and would be counted as divergence
+                    if (m.h.x[i][j][k] == 1.0 || m.h.x[i+1][j][k] == 1.0 || m.h.x[i-1][j][k] == 1.0
+                     || m.h.x[i][j+1][k] == 1.0 || m.h.x[i][j-1][k] == 1.0
+                     || m.h.x[i][j][k+1] == 1.0 || m.h.x[i][j][k-1] == 1.0) continue;
+                    const double d_r = (m.u.x[i+1][j][k] - m.u.x[i-1][j][k]) * inv_2dr * exp_rm;
+                    double d = d_r
+                             + (m.v.x[i][j+1][k] - m.v.x[i][j-1][k]) * inv_2dthe * inv_rm
+                             + (m.w.x[i][j][k+1] - m.w.x[i][j][k-1]) * inv_2dphi * inv_rms;
+                    if (metric_div)
+                        d += (2.0 * m.u.x[i][j][k] + m.v.x[i][j][k] * cotanthe) * inv_rm;
+                    if (!is_finite_safe(d)) continue;
+                    d2 += d * d; rad2 += d_r * d_r;
+                    if (fabs(d) > dmax) dmax = fabs(d);
+                    n++;
+                }
+            }
+        }
+        const double rms  = (n > 0) ? sqrt(d2 / n)   : 0.0;
+        const double rrad = (n > 0) ? sqrt(rad2 / n) : 0.0;
+        const ios::fmtflags f = cout.flags();
+        const streamsize    p = cout.precision();
+        cout << "      ATOM: div(u) " << setw(24) << left << tag << right
+             << " rms = " << scientific << setprecision(3) << rms
+             << "   max = " << dmax
+             << "   radial term = " << rrad
+             << fixed << setprecision(3)
+             << "   ratio rms/radial = " << ((rrad > 0.0) ? rms / rrad : 0.0)
+             << "   (" << n << " cells)" << endl;
+        cout.flags(f); cout.precision(p);
+    }
+
     void project_initial_velocity(int n_sweeps = 200)
     {
         static const int proj_sweeps = [](){
@@ -640,6 +720,9 @@ public:
                 }
             }
         }
+
+        // THE test of the projection: this is the one place a velocity correction is applied.
+        reportDivergence("after initial projection");
 
         // Step 4 — clear p_dyn and aux so the time loop starts fresh.
         #pragma omp parallel for collapse(2) schedule(static)

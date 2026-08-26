@@ -734,6 +734,30 @@ public:
     Array CoriolisForce;                                                // Coriolis force terms
     Array CentrifugalForce;                                             // centrifugal force terms
     Array PresGradForce;                                                // Force caused by normal pressure gradient
+    // Brunt-Vaisala frequency squared, N^2 = (g/theta) d(theta)/dz. Ported from ATHAD, and
+    // it is the FIRST diagnostic in this tree with an externally known right answer: Earth's
+    // troposphere sits near 1e-4 s^-2 and the stratosphere near 4e-4, so this can be checked
+    // against reality rather than against another arm of the same model.
+    //
+    // THE VERTICAL DERIVATIVE USES TRUE HEIGHTS, get_layer_height(), NOT the core's exp_rm.
+    // That is deliberate: it makes the field a PHYSICAL quantity, comparable with the numbers
+    // above, and therefore usable as a check ON the metric instead of a victim of it. See
+    // checkRadialMetric() for the 23.2x spread that would otherwise contaminate it.
+    // Long-wave optical depth, ported from ATHAD (README item 42, where the photosphere had
+    // been quoted for months from an offline Python column because the model computed it
+    // NOWHERE). Both are already formed inside MultiLayerRadiation and were being thrown away
+    // after conversion to epsilon -- and they cannot be recovered from epsilon afterwards,
+    // because epsilon saturates at tau ~ 37.
+    //
+    //   tau_layer  per-layer d(tau). THE RESOLUTION MEASURE: if one layer carries d(tau) of
+    //              order 1 or more, the two-stream sweep (first order in d(tau)) is resolving
+    //              the emission level with a single cell.
+    //   tau_above  cumulative optical depth of everything ABOVE a level: 0 at the lid,
+    //              increasing downward. tau_above = 1 is the photosphere, i.e. where the
+    //              atmosphere actually radiates to space.
+    Array tau_above;
+    Array tau_layer;
+    Array brunt_N2;
     // RADIAL momentum-budget term capture (diagnostic): per-cell rhs_u contributions,
     // stored when ubudget_capture is set. Ported from ATHAD (README item 42): the vertical
     // component was the one with NO instrument, so a spurious radial acceleration is

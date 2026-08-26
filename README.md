@@ -352,6 +352,90 @@ identically zero at that moment (it reaches 0.117 hPa by the end of iteration 4)
 spin-up snapshot, not a claim that the radial pressure gradient is absent — in ATHAD it is the
 dominant term. Only the buoyancy/diffusion ratio should be read from the table above.
 
+## Three more instruments, and what they said (2026-08-26)
+
+All print-only or field-only. `brunt_N2`, `tau_above` and `tau_layer` are dumped by all four
+ParaView writers (panorama, zonal, longitudinal, radial) and printed by `print_min_max_atm`;
+`div(u)` prints at two call sites in the pressure solver.
+
+### `brunt_N2` — the first ABSOLUTE check this tree has ever had
+
+`N^2 = (g/theta) d(theta)/dz`, potential temperature from `T*(p_0/p)^kappa` with
+`kappa = R_Air/cp_l`. **The vertical derivative uses `get_layer_height()`, not the core's
+`exp_rm`** — deliberately, so the field is physical and can be judged against reality rather
+than inheriting the 23.2x metric error `checkRadialMetric` reports.
+
+Every other test in this README compares the model against itself. This one has an external
+answer: Earth's troposphere is near 1e-4 s^-2, its stratosphere near 4e-4.
+
+    level   height    median N^2      statically unstable
+        0        0    -3.20e-05           54.1 %      superadiabatic surface layer
+        6      298     1.544e-04           0.0 %
+       12      819     1.542e-04           0.0 %
+       24     3316     1.537e-04           7.2 %
+       30     6088     1.695e-04           0.0 %
+       33     8173     2.867e-04           0.0 %
+       36    10927     4.383e-04           0.0 %
+       39    14567     5.161e-04           0.0 %
+
+    whole slice: median 1.547e-04,  3.5 % statically unstable
+
+**It passes.** The troposphere sits at 1.54e-4, flat from 300 m to 6 km; the tropopause appears
+without being told where it is, N^2 climbing through 2.9e-4 at 8 km to **4.4e-4 at 10.9 km**,
+which is the textbook stratospheric value at the textbook height; and the 3.5 % of statically
+unstable air is concentrated at the surface, where a superadiabatic layer belongs.
+
+**Read the printed min/max as boundary-layer values**, not as the field: they are ±0.03-0.047
+at 0 m every time. The interior is the signal.
+
+### `tau_above`, `tau_layer` — exposure, not new physics
+
+`MultiLayerRadiation` already computed the per-layer optical depth and threw it away after
+converting to `epsilon`. It cannot be recovered afterwards, because `epsilon` saturates at
+`tau ~ 37`, which is why ATHAD stores both (README items 39, 42).
+
+    max tau_layer = 0.254 at 3316 m       min 0.0099
+    max tau_above = 4.40 at the surface   min 0.000 at the lid
+    photosphere (tau_above = 1): 181 of 181 columns, median 3692 m, range 2637-4894 m
+
+**No layer here carries `d(tau)` of order 1**, so the emission level is spread over ~4 layers
+and the two-stream sweep — first order in `d(tau)` — resolves it. The same instrument in ATHAD
+found **one cell carrying `d(tau)` = 55**, and later `tau_above` going 1626 -> 0.497 across a
+single layer. That difference is a property of the atmospheres, not of the code: 250 bar of
+water vapour puts the opaque-to-transparent transition where no reasonable grid resolves it.
+Every column here has its photosphere inside the domain, against ATHAD's arms where **100 % of
+columns radiate from the prescribed lid**.
+
+### `div(u)` — and the projection does not achieve its target
+
+**Read the call sites before the numbers.** In the TIME LOOP `PressureSolverAtm::run()` computes
+`p_dyn` and **nothing else** — it never touches the velocity. The wind feels the pressure
+through the `-dp/dr` term of the NEXT RK4 stage, and `pressure_stride = 4`
+(`cAtmosphereModel.cpp:1020`) means even that happens on one iteration in four. The only place
+an explicit correction `v <- v - grad(p)` is applied is `project_initial_velocity`, Step 3.
+
+Measured there, in the model's own metric, term for term as the Poisson source builds it:
+
+| `ATM_PROJ_SWEEPS` | div(u) rms | radial term | rms / radial |
+|---|---|---|---|
+| 1 (default) | 3.114e-03 | 3.633e-03 | **0.857** |
+| 10 | 3.521e-03 | 4.090e-03 | **0.861** |
+| 100 | 3.843e-03 | 4.393e-03 | **0.875** |
+
+**The projection removes about 14 % of the divergence, and 100x the relaxation does not help.**
+This is ATHAD item 72's finding — "converged to a fixed point that is not divergence-free" —
+reproduced here with the direct instrument instead of inferred from `Psi`, and it explains why
+`ATM_PROJ_SWEEPS` was inert on `Psi(ground)` above: the knob is not failing to reach a good
+projection, the projection converges to something that is not divergence-free.
+
+**Consequence for any vertical-velocity question.** The saved velocity field has been through a
+full RK4 step plus the polar, orographic and radial filters since it was last projected, so its
+divergence measures the filters rather than the solver, and **the vertical wind in the output is
+not slaved to the horizontal flow**. A continuity test on saved output — the obvious way to ask
+"is this vertical velocity right" — cannot answer the question here. That also accounts for a
+3-5x mismatch found between the model's zonal-mean vertical wind and the wind its own
+streamfunction implies, without needing the metric to explain it.
+
 ## Tier C knobs ported from ATHAD (2026-08-26)
 
 These change physics, so all of them are **default-off / default-1 and bit-identical when

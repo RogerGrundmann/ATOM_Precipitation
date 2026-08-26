@@ -863,6 +863,46 @@ public:
             }
         }
 
+        // ---- Brunt-Vaisala frequency squared -------------------------------------------
+        //
+        // N^2 = (g/theta) d(theta)/dz, potential temperature theta = T*(p0/p)^(R/cp).
+        // Ported from ATHAD, where it was written to test a claim of neutral stratification
+        // that had no instrument. Here it has a use that tree could not make of it: Earth's
+        // troposphere is near 1e-4 s^-2 and the stratosphere near 4e-4, so this is an ABSOLUTE
+        // check, not a comparison between two arms of the same model.
+        //
+        // kappa = R_Air/cp_l = 0.2855, the dry-air value. ATHAD builds it from the local
+        // mixture because its cp varies ~2x across 300-1500 K; here the variation is small
+        // enough that a constant is honest, and saying so is better than importing machinery
+        // this tree does not have.
+        //
+        // dz FROM get_layer_height(), NOT from the core's exp_rm -- the point of the field is
+        // that it is physical and can be checked against the numbers above, which it could not
+        // be if it inherited the 23.2x metric error checkRadialMetric() reports. Centred
+        // difference inside, one-sided at the ends.
+        {
+            const double kap = (m.cp_l > 0.0) ? m.R_Air / m.cp_l : 0.2855;
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int j = 0; j < m.jm; j++) {
+                for (int k = 0; k < m.km; k++) {
+                    std::vector<double> theta(m.im, 0.0);
+                    for (int i = 0; i < m.im; i++) {
+                        const double T_i = m.t.x[i][j][k] * m.t_0;
+                        const double p_i = m.p_stat.x[i][j][k];
+                        theta[i] = (T_i > 0.0 && p_i > 0.0) ? T_i * pow(m.p_0 / p_i, kap) : 0.0;
+                    }
+                    for (int i = 0; i < m.im; i++) {
+                        const int il = (i > 0)         ? i - 1 : i;
+                        const int iu = (i < m.im - 1)  ? i + 1 : i;
+                        const double dz = m.get_layer_height(iu) - m.get_layer_height(il);
+                        const double th = theta[i];
+                        m.brunt_N2.x[i][j][k] = (dz > 0.0 && th > 0.0)
+                                        ? (m.g / th) * (theta[iu] - theta[il]) / dz : 0.0;
+                    }
+                }
+            }
+        }
+
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
         printf(" time measured: %.3f seconds for PressureDensity\n", elapsed.count() * 1e-9);
