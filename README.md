@@ -507,22 +507,50 @@ the projection worse"* is an ATHAD property and not a family law. This tree has 
 > metric governs. Same trap as ATHAD item 81's `Psi_max` false null, and the same lesson as its
 > item 74: before believing a field did not move, check that the instrument reads it.
 >
-> **WHAT IS STILL UNKNOWN is whether the halving is correct.** Two candidates, not yet
-> separated:
+> **AND THE ATTRIBUTION QUESTION HAS NO ANSWER, BECAUSE IT PRESUMES A SPLIT THAT DOES NOT
+> EXIST.** This block first named two candidates — (a) the exact Jacobian, `exp_rm` being 21.8x
+> larger at the surface, and (b) the curvature term `-curv * df/dr` added with it — and called
+> for one arm with the curvature forced off to separate them. `ATM_METRIC_NOCURV` was built and
+> the arm was run. **Both the framing and the test design were wrong, and the run says so.**
 >
->   (a) the exact Jacobian itself — `exp_rm` is 21.8x larger at the surface here, so vertical
->       diffusion is genuinely scaled differently and a weaker vertical wind may be the RIGHT
->       answer; or
->   (b) the curvature term added with it — `-curv * df/dr` with `curv = zeta = 3.715` entering
->       all eleven diffusion terms, which is new damping introduced by this commit.
+> Difference RMS against the legacy arm, as a percentage of the legacy field, iteration 1:
 >
-> The discriminating run is one arm with the exact Jacobian and the curvature term forced off,
-> ~12 minutes at 8 threads. **IT HAS NOT BEEN MADE.**
+> | | zonal | longitudinal |
+> |---|---|---|
+> | Jacobian only (`nocurv − legacy`) | 92.7 % | 83.1 % |
+> | curvature only (`exact − nocurv`) | 72.8 % | 65.3 % |
+> | **both together (`exact − legacy`)** | **60.8 %** | **51.8 %** |
+>
+> **The combined change is SMALLER than either piece alone, on both slices.** The two halves
+> partially cancel, so there is no additive split to attribute — that is a statement about the
+> arithmetic, not a hedge about the noise.
+>
+> **A second premise failed too, and it was mine.** The test was justified by "all three arms
+> start from an identical state, so step 1 isolates the operator". They do not:
+> `project_initial_velocity` uses `exp_rm` in the Poisson operator AND in the gradient
+> correction, so **the arms already differ at iteration 0, before any time step** — by 95 % of
+> the field, with RMS ratios 0.71 and 0.67. The metric acts through the INITIAL PROJECTION
+> first, and the 40-iteration comparison above was never measuring divergence from a shared
+> state either.
+>
+> **What the run does establish, and it is more useful than the attribution would have been:**
+> the difference is **50–95 % of the field while the field's own RMS changes only 20–48 %**.
+> Fields of comparable size, different SHAPE. `ATM_METRIC_EXACT` does not damp the vertical
+> wind; it produces a **different vertical velocity field**, from iteration 0 onward, and the
+> RMS halving is a downstream consequence rather than the effect. That is what the strange
+> per-level profile was saying — 0.068 at one level and 1.20 at another is a RELOCATED
+> structure, not a damped one.
+>
+> **This is therefore not decidable by more A/B runs.** It is a physics judgement — which field
+> is right — and this tree has no instrument that can make it: `Psi` is built from the
+> meridional wind, KE from the horizontal components, and the vertical wind is exactly what
+> nothing integrates. Porting ATHAD's `div(rho u)/rho` print is the prerequisite for going
+> further, not another arm.
 
-**The default stays OFF, and the reason is no longer run length.** It is that a prognostic field
-halves and nothing in the integrated diagnostics registers it, with the cause unattributed
-between the Jacobian and the curvature term. Forty iterations being a spin-up is a second reason
-and now the smaller one — ATHAD's item 54 watched a 4.4 % gap grow to 9.1 % between iterations
+**The default stays OFF, and the reason is no longer run length.** It is that the knob produces
+a DIFFERENT vertical velocity field from iteration 0 onward, that no integrated diagnostic in
+this tree registers it, and that the tree has no instrument able to say which field is right.
+Forty iterations being a spin-up is a second reason and now the smaller one — ATHAD's item 54 watched a 4.4 % gap grow to 9.1 % between iterations
 20 and 40.
 
 **Note also what is missing to judge it well.** ATHAD reads this question through

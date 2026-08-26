@@ -580,10 +580,22 @@ private:
         return (J > 0.0) ? (metricShellLength() / J) : (1.0 / (rm + 1.0));
     }
 
+    // ATM_METRIC_NOCURV -- exact Jacobian, curvature term OFF. An ATTRIBUTION knob, not a
+    // physics option: ATM_METRIC_EXACT changes two things at once (the first-derivative factor
+    // and the second-derivative curvature term), and measuring it showed the vertical wind
+    // halving with no integrated diagnostic registering it. This isolates which half does that.
+    // Inert unless ATM_METRIC_EXACT is also set, since metricCurv is 0 on the legacy branch
+    // anyway.
+    static bool metricNoCurv(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_METRIC_NOCURV"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     // J'/J, the coefficient of the curvature term in d2f/dz2 = e^2*(f'' - curv*f').
     // Zero on the legacy branch, so the legacy operator is unchanged to the bit.
     double metricCurv(double rm) const {
-        if(!metricExact()) return 0.0;
+        if(!metricExact() || metricNoCurv()) return 0.0;
         if(gridPressure() && (int)m_layer_J.size() == im){
             // J'/J by central difference on the same table, in rad.z units.
             const int i = metricLevelOf(rm);
