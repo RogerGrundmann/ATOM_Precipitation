@@ -476,22 +476,54 @@ spread 1.00x** — the unit-free test passing by construction.
 **ATHAD's item 80 finding does not reproduce in this tree.** There, making the metric exact left
 the OLR untouched but drove `div(rho u)/rho` rms from 2.739e-02 to 7.722e-02 and threw `Psi_max`
 from 36 km to the ground — 2.8x worse, and the reason its default is off. Here the same repair
-is a **null on every integrated quantity, and marginally in the RIGHT direction**: the residuum
-and the closure ratio both fall slightly. Two trees, measured the same way, opposite outcomes —
-so *"the correct Jacobian makes the projection worse"* is an ATHAD property and not a family
-law. This tree has the WORSE metric (23.2x against 11.8x) and pays nothing to fix it.
+is a **null on every integrated quantity**: the residuum and the closure ratio both fall
+slightly. Two trees, measured the same way, opposite outcomes — so *"the correct Jacobian makes
+the projection worse"* is an ATHAD property and not a family law. This tree has the WORSE metric
+(23.2x against 11.8x) and its INTEGRATED diagnostics do not notice the repair at all.
 
-The one thing that does move is the **radial-wind extremum, -69 %**. Read it as a spike being
-suppressed rather than as a change in the circulation: it is a max over the domain, it sits at a
-different cell in the two arms, and everything integrated is unmoved at the 1e-3 level. The
-radial component is exactly what a radial metric rescales, so a localised vertical spike
-responding while the mass circulation does not is the expected shape.
+> ### CORRECTION, 2026-08-26, and it changes what the table above means
+>
+> The commit that landed this section (`5d46fb1`) read the -69 % radial-wind extremum as *"a
+> spike being suppressed rather than a change in the circulation"*. **THAT IS WITHDRAWN. It was
+> wrong, and the check that caught it was asked for by the reader of the write-up, not by its
+> author.**
+>
+> The two arms were re-run with the full field dumped and the radial wind compared on two
+> orthogonal slices (zonal, 41 levels x 181 latitudes; longitudinal, 41 x 361), ratios
+> exact/legacy:
+>
+> | slice | RMS | p50 | p90 | p99 | max |
+> |---|---|---|---|---|---|
+> | zonal | **0.611** | **0.460** | 0.626 | 0.637 | 0.631 |
+> | longitudinal | **0.537** | **0.597** | 0.506 | 0.493 | 0.491 |
+>
+> **The MEDIAN falls as far as the maximum, on both cuts, and every level between the
+> boundaries falls by 0.50-0.69.** That is not a clipped extremum; the vertical-wind field is
+> **40-50 % weaker everywhere**.
+>
+> So `ATM_METRIC_EXACT` is **not a null** — it is a change that the diagnostics used to judge it
+> cannot see. `Psi` is built from the MERIDIONAL wind, KE is dominated by the horizontal
+> components, and neither looks at the vertical wind, which is precisely the field a RADIAL
+> metric governs. Same trap as ATHAD item 81's `Psi_max` false null, and the same lesson as its
+> item 74: before believing a field did not move, check that the instrument reads it.
+>
+> **WHAT IS STILL UNKNOWN is whether the halving is correct.** Two candidates, not yet
+> separated:
+>
+>   (a) the exact Jacobian itself — `exp_rm` is 21.8x larger at the surface here, so vertical
+>       diffusion is genuinely scaled differently and a weaker vertical wind may be the RIGHT
+>       answer; or
+>   (b) the curvature term added with it — `-curv * df/dr` with `curv = zeta = 3.715` entering
+>       all eleven diffusion terms, which is new damping introduced by this commit.
+>
+> The discriminating run is one arm with the exact Jacobian and the curvature term forced off,
+> ~12 minutes at 8 threads. **IT HAS NOT BEEN MADE.**
 
-**The default stays OFF, and the reason is run length, not the result.** Forty iterations is a
-spin-up: this tree's own history is full of differences that appear later, and ATHAD's item 54
-watched a 4.4 % gap grow to 9.1 % between iterations 20 and 40. What can be said is that the
-principled metric is CHEAP here, which makes this the natural tree to test it in properly —
-the opposite of the situation in ATHAD.
+**The default stays OFF, and the reason is no longer run length.** It is that a prognostic field
+halves and nothing in the integrated diagnostics registers it, with the cause unattributed
+between the Jacobian and the curvature term. Forty iterations being a spin-up is a second reason
+and now the smaller one — ATHAD's item 54 watched a 4.4 % gap grow to 9.1 % between iterations
+20 and 40.
 
 **Note also what is missing to judge it well.** ATHAD reads this question through
 `div(rho u)/rho`, printed every iteration; this tree has no such diagnostic, so the closure
