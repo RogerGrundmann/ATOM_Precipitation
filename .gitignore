@@ -2,6 +2,9 @@
 *.o
 *.a
 
+# Header dependency files emitted by -MMD -MP (see Makefile)
+*.d
+
 # Compiled binaries
 cli/atm
 cli/hyd

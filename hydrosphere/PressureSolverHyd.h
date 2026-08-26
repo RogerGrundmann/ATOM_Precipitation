@@ -109,7 +109,32 @@ public:
         // mask are fixed across sweeps, so only the p_dyn update + its BCs repeat.
         // ====================================================================
         for (int sweep = 0; sweep < n_sweeps; sweep++) {
-        #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+
+        // ====================================================================
+        // THE RELAXATION IS RED-BLACK, AND WAS NOT ALWAYS. Same defect and same cure as
+        // the atmosphere's PressureSolverAtm.h; ported from ATHAD.
+        //
+        // Two passes over a checkerboard colouring of (i+j+k): every cell of one colour has
+        // all six stencil neighbours in the other, so within a pass nothing is read while it
+        // is being written. What was here wrote p_dyn IN PLACE under
+        // `collapse(2) schedule(dynamic, 4)` over (i,j) -- the very two indices the stencil
+        // reads across -- so cell (i,j,k) could be read by the thread owning (i+1,j) while
+        // its owner was writing it, and schedule(dynamic) made which thread got which chunk
+        // depend on timing: the SAME binary at the SAME thread count gave different answers
+        // run to run.
+        //
+        // Red-black rather than Jacobi because k runs serially inside a thread (k-1 current,
+        // k+1 one sweep old), i.e. lexicographic Gauss-Seidel -- correct in serial, broken
+        // only by the (i,j) parallelism. The colour is selected with a `continue` rather
+        // than by striding k, because the k loop carries a sliding window over the land mask
+        // that assumes consecutive k.
+        //
+        // NOTE this does not reproduce the old 1-thread answer: red-black is a different
+        // sweep order, converging to the same solution by a different path.
+        // ====================================================================
+        for (int colour = 0; colour < 2; colour++) {
+
+        #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
 
@@ -173,6 +198,10 @@ public:
 
                     lnd_k0 = lnd_k1;
                     lnd_k1 = lnd_kp1;
+
+                    // Cells of the other colour are skipped AFTER the window bookkeeping
+                    // above -- lnd_k0/lnd_k1 slide with k and assume every k is visited.
+                    if (((i + j + k) & 1) != colour) continue;
 
                     double du_dr, dv_dthe, dw_dphi;
                     bool r_flag   = false;
@@ -283,6 +312,8 @@ public:
                 }  // k
             }  // j
         }  // i
+
+        }  // colour
 
         // ====================================================================
         // Boundary conditions on p_dyn (re-applied after every sweep)

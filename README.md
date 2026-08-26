@@ -186,6 +186,59 @@ measures *physical steadiness* (each model reaching its own equilibrium). The oc
 slow, so at moderate `nm` the residual can be small while the ocean is still spinning up —
 `--warm-start` is the lever that lets ocean iterations accumulate toward equilibrium.
 
+## Correctness fixes ported from ATHAD (2026-08-26)
+
+ATHAD (the Hadean fork of this model) found five defects that are **live here and were latent
+on Earth** — three data races and two memory-safety defects — and verifying them here
+turned up a sixth, in the ocean's own min/max reporter. They are fixed in this tree as of 2026-08-26.
+
+**EVERY NUMBER RECORDED IN THIS README OR IN A RUN LOG BEFORE THAT DATE WAS PRODUCED BY A
+RACY BINARY**, and a re-run will not reproduce it. The races themselves moved the last digits;
+**the cure moves more than that**, because red-black is a different sweep order from
+lexicographic Gauss-Seidel and converges to the same solution by a different path. Measured at
+4 iterations, 4 threads, before against after: `residuum_atm` 21.48903401 -> 21.48908287
+(2.3e-6), but **max u-component 1.310076 -> 1.321737 m/s, 0.89 %**, at the same cell. Nothing
+here is retracted -- the old runs were not wrong, they were not repeatable -- but a figure
+quoted to better than ~1 % from before this date should be re-measured, not cited.
+
+| # | Site | Defect |
+|---|---|---|
+| 1 | `atmosphere/PressureSolverAtm.h`, `hydrosphere/PressureSolverHyd.h` | The Poisson relaxation wrote `p_dyn` **in place** under `collapse(2) schedule(dynamic, 4)` over (i,j) — the two indices its own stencil reads across. Cured with a red-black colouring of (i+j+k); `schedule(static)`. The family's third encounter with this defect (ATURAN `ffd0e0e` cured it in the shared `PressureSolver.h` by serialising, which is affordable there and is not here) |
+| 2 | `atmosphere/UtilsAtm.h`, `hydrosphere/UtilsHyd.h` | `residuum_old` — a shared model member — was written from inside every thread's loop. The reported "old" residuum was whichever thread wrote last, and it drives the *declining / too high* line a human reads to judge convergence. Now captured at entry and written once after the reduction. The reported error **location** got a deterministic (i,j,k) tie-break at the same time |
+| 3 | `lib/Utils.cpp` | `m_node_weights` was built lazily inside `GetMean_2D/3D`, which `printDataAtm()` calls from ~9 concurrent `omp sections`. Latent here **by accident** — an earlier single-threaded `GetMean_2D(temperature_NASA)` in `initTemperatureData` happens to populate the table first. ATHAD has no NASA field, so `printDataAtm` became the first caller and the race went live (heap corruption). Now a function-local static, which C++11 guarantees is initialised exactly once |
+| 4 | `atmosphere/MoistConvection.h` | `findCloudBaseLFS` indexed `m.t.x[-1][j][k]` when neither pressure scan fired, leaving the index at its `-1` sentinel. Latent here because `p_surf ~1013 hPa` always trips the 1000 hPa threshold by level 1; live in ATHAD, whose column sits entirely above the absolute-hPa thresholds |
+| 5 | `atmosphere/InitValues_Atm.cpp`, `hydrosphere/FileIO_Hyd.cpp` | `get_temperatures_from_curve` dereferenced `m.begin()` and decremented `m.end()` **before** the `m.size() < 2` guard — undefined behaviour on an empty map. The guard written to catch a too-small map could not run until after the code it was guarding. The order is now the other way round |
+
+| 6 | `hydrosphere/MinMax_Hyd.cpp` | `searchMinMax_2D/3D` reduce over threads with `#pragma omp critical` and a plain `>`, so the first thread into the section won an equal extremum and **the reported location of a tied max/min depended on thread arrival order**. Found by the smoke test written to verify #1-#5, not by inspection. Ties are what a cap or a floor produces, so the fields most likely to tie are the ones worth watching: `min water density = 997.000000` (the floor), `min salinity = 0.000000`, `max temperature = 0.000000`. Now broken toward the lexicographically smallest (i,j,k), in the per-thread scan and in the merge. The atmosphere's `searchMinMax_*` is a serial loop and never had this |
+
+And one build fix that is the reason the others were worth doing:
+
+- **`Makefile` now passes `-MMD -MP` and `-include`s the generated `.d` files.** Without them
+  `make` saw only `.cpp` timestamps, and nearly all the physics in this tree lives in headers —
+  so a header edit produced a link of stale objects that looked like a successful build.
+
+**Verification, measured on this tree rather than argued from ATHAD's.** A worktree of the
+pre-fix `HEAD` was built beside the fixed tree and each ran the same 4-iteration case twice at
+4 threads:
+
+| | pre-fix, run A | pre-fix, run B | fixed, run A | fixed, run B |
+|---|---|---|---|---|
+| `residuum_atm` (1st call) | 21.48903401 | **21.48903394** | 21.48908287 | 21.48908287 |
+| `residuum_old` (1st call) | 19.33304066 | **19.33304053** | **0.00001000** | 0.00001000 |
+| max u-component | 1.310076 m/s | **1.310122 m/s** | 1.321737 m/s | 1.321737 m/s |
+
+Read the `residuum_old` row first: on the FIRST call there is no previous residuum, so the
+correct value is the `1.0e-5` initialiser. The racy binary printed 19.3 — a value from inside
+the call it was supposed to precede, and a different one each run. The `max u-component` row is
+the one that matters for results: **a printed physical quantity differed run to run on the same
+binary at the same thread count**, by 4.6e-5 m/s.
+
+After the fix the two runs are **bit-identical** (only wall-clock timings differ), and a 2-thread
+run gives the identical residuum series as well. What remains is floating-point reduction order,
+inherited and not addressed here: a tropical precipitation probe differs 4e-6 relative between 2
+and 4 threads (`P_rain[i_check]` 15.4734034 against 15.4734603). ATHAD documents the same residue
+and traces its amplification to the convective triggers.
+
 ## Atmosphere diagnostics and A/B knobs
 
 A few atmosphere-model behaviours can be probed at run time without recompiling. These are

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <stdexcept>
 
 #include <Utils.h>
 #include "cAtmosphereModel.h"
@@ -13,6 +14,39 @@ using namespace AtomUtils;
 using namespace std;
 
 std::vector<std::vector<double> > m_node_weights;
+
+// Cosine-of-latitude area weights, built once on first use. Ported from ATHAD.
+//
+// These used to be built lazily inside GetMean_2D/GetMean_3D by the sequence
+// "if(size != jm) CalculateNodeWeights()", which clears and re-push_backs the global
+// vector. printDataAtm() calls those means from ~9 concurrent #pragma omp sections, so if
+// any of those is the FIRST caller, every thread sees the size mismatch and races into the
+// same clear() + push_back() -- reallocating one vector from several threads at once and
+// corrupting the heap ("double free or corruption"). It is latent HERE only because an
+// earlier single-threaded GetMean_2D(temperature_NASA) call in initTemperatureData happens
+// to populate the weights first; ATHAD has no NASA field, so printDataAtm became the first
+// caller and the race went live there. The ordering is an accident, not a guarantee.
+//
+// A function-local static is initialised exactly once, and concurrent callers block until
+// that completes (C++11 [stmt.dcl]/4), which is precisely the guarantee needed.
+static const std::vector<std::vector<double> >& node_weights(int jm, int km){
+    static const std::vector<std::vector<double> > w = [jm, km]{
+        std::vector<std::vector<double> > v;
+        v.reserve(jm);
+        for(int i = 0; i < jm; i++){
+            const double weight = (i <= 90) ? cos((90 - i) * M_PI / 180.0)
+                                            : cos((i - 90) * M_PI / 180.0);
+            v.emplace_back(km, weight);
+        }
+        return v;
+    }();
+    // Atmosphere and hydrosphere both declare jm = 181, km = 361 as static consts, so the
+    // one build serves both. If that ever stops being true, say so instead of indexing off
+    // the end of a table sized for the other model.
+    if((int)w.size() != jm || (jm > 0 && (int)w[0].size() != km))
+        throw std::runtime_error("node_weights: grid dimensions changed between callers");
+    return w;
+}
 
 std::ofstream& AtomUtils::get_logger(){
     static std::ofstream o("atom_log.txt", std::ofstream::out);
@@ -263,15 +297,12 @@ void AtomUtils::load_map_from_file(const std::string& fn,
 *
 */
 double AtomUtils::GetMean_3D(int jm, int km, Array &val_3D){
-    if(m_node_weights.size() != (unsigned)jm){
-        CalculateNodeWeights(jm, km);
-    }
+    const std::vector<std::vector<double> >& nw = node_weights(jm, km);
     double ret=0.0, weight=0.0;
     for(int j=0; j<jm; j++){
         for(int k=0; k<km; k++){
-            //std::cout << (val_3D.x[0][j][k]-1)*t_0 << "  " << m_node_weights[j][k] << std::endl;
-            ret += val_3D.x[0][j][k] * m_node_weights[j][k];
-            weight += m_node_weights[j][k];
+            ret += val_3D.x[0][j][k] * nw[j][k];
+            weight += nw[j][k];
         }
     }
     return ret/weight;
@@ -280,15 +311,12 @@ double AtomUtils::GetMean_3D(int jm, int km, Array &val_3D){
 *
 */
 double AtomUtils::GetMean_2D(int jm, int km, Array_2D &val_2D){
-    if(m_node_weights.size() != (unsigned)jm){
-        CalculateNodeWeights(jm, km);
-    }
+    const std::vector<std::vector<double> >& nw = node_weights(jm, km);
     double ret=0.0, weight=0.0;
     for(int j=0; j<jm; j++){
         for(int k=0; k<km; k++){
-            //std::cout << (val_2D.y[j][k]-1)*t_0 << "  " << m_node_weights[j][k] << std::endl;
-            ret += val_2D.y[j][k] * m_node_weights[j][k];
-            weight += m_node_weights[j][k];
+            ret += val_2D.y[j][k] * nw[j][k];
+            weight += nw[j][k];
         }
     }
     return ret/weight;
@@ -297,19 +325,10 @@ double AtomUtils::GetMean_2D(int jm, int km, Array_2D &val_2D){
 *
 */
 void AtomUtils::CalculateNodeWeights(int jm, int km){
-    //use cosine of latitude as weights for now
-    //longitudes: 0-360(km) latitudes: 90-(-90)(jm)
-    double weight = 0.0;
-    m_node_weights.clear();
-    for(int i=0; i<jm; i++){
-        if(i<=90){
-            weight = cos((90-i) * M_PI/180.0);
-        }else{
-            weight = cos((i-90) * M_PI/180.0);
-        }
-        m_node_weights.push_back(std::vector<double>());
-        m_node_weights[i].resize(km, weight);
-    }
+    // Kept as the public entry point, but it no longer mutates shared state: it just
+    // forces the one-time, thread-safe build in node_weights(). Callers may still invoke
+    // it eagerly before a parallel region; they no longer have to.
+    (void)node_weights(jm, km);
     return;
 }
 /*

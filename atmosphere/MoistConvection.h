@@ -621,6 +621,16 @@ void findCloudBaseLFS() {
 
 
 
+                // Both scans above may find nothing, leaving the index at its -1 sentinel,
+                // and the two loops below then index m.t.x[-1][j][k] and q_sat_col[-1].
+                // The two other consumers of this index (initUpdraft, CloudBaseUpdate)
+                // already guard the sentinel; these did not. On Earth the first scan fires
+                // by level 1 (p_surf ~1013 hPa against a 1000 hPa threshold) so the read is
+                // latent here -- it went live in ATHAD, whose column sits entirely above the
+                // absolute-hPa thresholds. A bounds guard should not rest on an argument
+                // about the physics above it. Ported from ATHAD.
+                if (i_deep_beg_local[j][k] < 0 || i_deep_end_local[j][k] < 0) continue;
+
                 for (int i = i_deep_beg_local[j][k]; i < m.im; i++) {
                     const double t_u     = m.t.x[i][j][k] * m.t_0;
                     const double t_u_add = t_u + t_add_u;

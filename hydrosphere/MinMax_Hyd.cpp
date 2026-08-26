@@ -40,6 +40,26 @@ namespace{
 /*
 *
 */
+// Deterministic tie-break for the parallel min/max reporters below.
+//
+// Both searchMinMax_2D and searchMinMax_3D reduce over threads with `#pragma omp critical`
+// and a plain `>`, so whichever thread reached the section FIRST won an equal extremum: the
+// reported LOCATION of a tied max/min depended on thread arrival order while its value did
+// not. Measured 2026-08-26 over two 4-iteration runs of the same binary at the same 4
+// threads: `max temperature = 0.000000` reported at 0N 80W in one run and 45N 91E in the
+// other, and likewise `min water density = 997.000000` (the density floor) and
+// `min salinity = 0.000000`. Ties are not rare -- they are what a CAP or a floor produces,
+// so the fields most likely to tie are exactly the ones worth watching.
+//
+// Preferring the lexicographically smallest (i,j,k) -- in the per-thread scan AND in the
+// merge -- makes the reported cell a property of the field rather than of the schedule, at
+// any thread count. The atmosphere's searchMinMax_* is a serial loop and never had this.
+static inline bool lex_less(int i, int j, int k, int i0, int j0, int k0){
+    if(i != i0) return i < i0;
+    if(j != j0) return j < j0;
+    return k < k0;
+}
+
 void cHydrosphereModel::searchMinMax_3D(string name_maxValue, string name_minValue, 
       string name_unitValue, Array &value_D, double coeff, 
       std::function< double(double) > lambda, bool print_heading){                                                                                                                   
@@ -61,10 +81,15 @@ void cHydrosphereModel::searchMinMax_3D(string name_maxValue, string name_minVal
               for(int k = 0; k < km; k++){
                   for(int i = 0; i < im; i++){
                       double val = value_D.x[i][j][k];
-                      if(val > localMax){
+                      // Ties are broken toward the lexicographically smallest (i,j,k), here
+                      // and in the merge below. See the note above this function.
+                      if(val > localMax || (val == localMax
+                              && lex_less(i, j, k, li_max, lj_max, lk_max))){
                           localMax = val;
                           li_max = i; lj_max = j; lk_max = k;
-                      }else if(val < localMin){
+                      }
+                      if(val < localMin || (val == localMin
+                              && lex_less(i, j, k, li_min, lj_min, lk_min))){
                           localMin = val;
                           li_min = i; lj_min = j; lk_min = k;
                       }
@@ -74,11 +99,13 @@ void cHydrosphereModel::searchMinMax_3D(string name_maxValue, string name_minVal
 
           #pragma omp critical
           {
-              if(localMax > maxValue){
+              if(localMax > maxValue || (localMax == maxValue
+                      && lex_less(li_max, lj_max, lk_max, imax, jmax, kmax))){
                   maxValue = localMax;
                   imax = li_max; jmax = lj_max; kmax = lk_max;
               }
-              if(localMin < minValue){
+              if(localMin < minValue || (localMin == minValue
+                      && lex_less(li_min, lj_min, lk_min, imin, jmin, kmin))){
                   minValue = localMin;
                   imin = li_min; jmin = lj_min; kmin = lk_min;
               }
@@ -134,10 +161,13 @@ void cHydrosphereModel::searchMinMax_2D(string name_maxValue, string name_minVal
           for(int j = 1; j < jm-1; j++){
               for(int k = 1; k < km-1; k++){
                   double val = value.y[j][k];
-                  if(val > localMax){
+                  if(val > localMax || (val == localMax
+                          && lex_less(0, j, k, 0, lj_max, lk_max))){
                       localMax = val;
                       lj_max = j; lk_max = k;
-                  }else if(val < localMin){
+                  }
+                  if(val < localMin || (val == localMin
+                          && lex_less(0, j, k, 0, lj_min, lk_min))){
                       localMin = val;
                       lj_min = j; lk_min = k;
                   }
@@ -146,11 +176,13 @@ void cHydrosphereModel::searchMinMax_2D(string name_maxValue, string name_minVal
 
           #pragma omp critical
           {
-              if(localMax > maxValue){
+              if(localMax > maxValue || (localMax == maxValue
+                      && lex_less(0, lj_max, lk_max, 0, jmax, kmax))){
                   maxValue = localMax;
                   jmax = lj_max; kmax = lk_max;
               }
-              if(localMin < minValue){
+              if(localMin < minValue || (localMin == minValue
+                      && lex_less(0, lj_min, lk_min, 0, jmin, kmin))){
                   minValue = localMin;
                   jmin = lj_min; kmin = lk_min;
               }

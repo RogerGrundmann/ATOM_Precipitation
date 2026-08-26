@@ -337,13 +337,19 @@ void cHydrosphereModel::load_pole_temperature_curve(){
 */
 float cHydrosphereModel::get_temperatures_from_curve(float time, 
     std::map<float, float>& m) const{
+    // THE SIZE TEST MUST COME FIRST. It used to sit BELOW the range test, which
+    // dereferences m.begin() and decrements m.end() -- both undefined behaviour on an
+    // empty map, and (--m.end()) is UB whether or not the map is empty when begin()==end().
+    // The guard that was written to catch a too-small map could not run until after the
+    // code it was guarding. Found in ATHAD, where the curve machinery was deleted outright
+    // (one epoch, no time slices); here the curves are real, so the fix is the order.
+    if(m.size() < 2){
+        std::cout << "No enough data in map m" << std::endl;
+        return NAN;
+    }
     if(time < m.begin()->first 
         || time > (--m.end())->first){
         std::cout << "Input time out of range: " << time << std::endl;    
-        return NAN;
-    }
-    if(m.size() < 2){
-        std::cout << "No enough data in map m" << std::endl;
         return NAN;
     }
     map<float, float>::const_iterator upper = m.begin(), 

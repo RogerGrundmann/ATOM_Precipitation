@@ -240,6 +240,11 @@ public:
 
         auto begin = std::chrono::high_resolution_clock::now();
 
+        // The PREVIOUS call's residuum, captured before anything overwrites it -- see the
+        // race note at the local_max update below. Same defect as the atmosphere's
+        // findResiduumAtm; ATHAD has no ocean, so this site is the port's own find.
+        const double residuum_prev = m.residuum_old;
+
         struct ErrorState { double val; int i, j, k; };
         ErrorState global_max = {0.0, 0, 0, 0};
 
@@ -275,35 +280,53 @@ public:
                                          + dvdthe * dvdthe 
                                          + dwdphi * dwdphi) / 3.0);
 
-                        if (res > local_max.val) {
-                            local_max = {res, i, j, k};
-                            m.residuum_old = res;
-                        }
+                        // `m.residuum_old = res;` used to sit here: a SHARED model member
+                        // written from inside every thread's loop with no synchronisation.
+                        // Whichever thread wrote last survived, so the value reported as
+                        // "old" was not the previous call's residuum at all -- and it drives
+                        // the declining/too-high line a human reads to judge convergence.
+                        // Set once, after the reduction, below.
+                        if (res > local_max.val) local_max = {res, i, j, k};
                     }
                 }
             }
 
             #pragma omp critical
             {
-                if (local_max.val > global_max.val)
+                // Deterministic tie-break: a plain `>` lets the first thread into the
+                // critical section win an equal maximum, so the reported error LOCATION
+                // depended on thread arrival order. Prefer the lexicographically smallest
+                // (i,j,k) so the choice is a property of the field, not of the schedule.
+                const bool better = (local_max.val > global_max.val)
+                                 || (local_max.val == global_max.val
+                                     && (local_max.i < global_max.i
+                                         || (local_max.i == global_max.i
+                                             && (local_max.j < global_max.j
+                                                 || (local_max.j == global_max.j
+                                                     && local_max.k < global_max.k)))));
+                if (better)
                     global_max = local_max;
             }
         }
 
         cout.precision(8);
-        const bool declining = (m.residuum_old - global_max.val) > 0.0;
+        const bool declining = (residuum_prev - global_max.val) > 0.0;
         cout << endl
              << (declining
                  ? "      OGCM: find_residuum_hyd, absolute error declining .......................\n"
                  : "      OGCM: find_residuum_hyd, absolute error is too high .....................\n")
              << "      residuum_hyd = " << global_max.val
-             << "      residuum_old = " << m.residuum_old
+             << "      residuum_old = " << residuum_prev
              << "      eps_residuum = " << m.eps_residuum << endl
              << "      i_error = " << global_max.i
              << "   j_error = "    << global_max.j
              << "   k_error = "    << global_max.k << endl
-             << "      relative error = " << fabs(global_max.val / m.residuum_old - 1.0) << endl
-             << "      absolute error = " << fabs(m.residuum_old - global_max.val) << endl;
+             << "      relative error = " << fabs(global_max.val / residuum_prev - 1.0) << endl
+             << "      absolute error = " << fabs(residuum_prev - global_max.val) << endl;
+
+        // Hand this call's residuum to the next one. Written ONCE, outside every parallel
+        // region, which is the whole of the fix.
+        m.residuum_old = global_max.val;
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);

@@ -3,7 +3,12 @@
 
 # TODO: don't always enable debugging
 #CFLAGS = -ggdb -Wall -fPIC -std=c++11 -Ilib -Iatmosphere -Ihydrosphere -Itinyxml2 -fopenmp
-CFLAGS = -ggdb -Wall -ffast-math -march=native -fPIC -std=c++17 -Ilib -Iatmosphere -Ihydrosphere -Itinyxml2 -fopenmp
+# -MMD -MP emits a .d file per object listing the headers it includes, so editing a
+# header rebuilds every .cpp that includes it. Without them make only ever saw the
+# .cpp timestamps, and since nearly all the physics in this tree lives in headers,
+# a header edit produced a link of stale objects that looked like a successful build.
+# Ported from ATHAD.
+CFLAGS = -ggdb -Wall -ffast-math -march=native -fPIC -std=c++17 -Ilib -Iatmosphere -Ihydrosphere -Itinyxml2 -fopenmp -MMD -MP
 
 # Common files for the shared lib(libatom.a)
 LIB_OBJ = lib/Array.o lib/Array_2D.o lib/Array_1D.o lib/Config.o lib/Utils.o lib/FFT.o
@@ -80,8 +85,14 @@ tinyxml2/%.o: tinyxml2/%.cpp
 %.o: %.cpp
 	$(CXX) $(CFLAGS) -c $<
 
+# Header dependencies emitted by -MMD, one .d per object. The '-' suppresses the
+# "no such file" noise on the first build, before any .d exists.
+DEPS = $(LIB_OBJ:.o=.d) $(ATM_OBJ:.o=.d) $(HYD_OBJ:.o=.d) $(XML_OBJ:.o=.d) \
+       $(ATM_CLI_OBJ:.o=.d) $(HYD_CLI_OBJ:.o=.d)
+-include $(DEPS)
+
 .PHONY: clean
 clean:
-	\rm -vf $(LIB_OBJ) $(ATM_OBJ) $(HYD_OBJ) $(XML_OBJ) $(ATM_CLI_OBJ) $(HYD_CLI_OBJ) $(PARAM_OUTPUTS) atm hyd libatom.a
+	\rm -vf $(LIB_OBJ) $(ATM_OBJ) $(HYD_OBJ) $(XML_OBJ) $(ATM_CLI_OBJ) $(HYD_CLI_OBJ) $(DEPS) $(PARAM_OUTPUTS) atm hyd libatom.a
 	\rm -vf python/*.so python/*.o python/pyatom.cpp
 	\rm -rf python/build/
