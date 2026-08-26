@@ -24,7 +24,11 @@ public:
         : m(model)
     {}
 
-    void run(bool verbose = true)
+    // sweeps_override > 0 replaces the ATM_PRESS_SWEEPS knob for THIS call only. It exists so
+    // the initial projection can relax harder than the time loop without the two counts being
+    // entangled -- see project_initial_velocity and ATHAD README item 68, where setting the
+    // time-loop knob silently changed the startup state as well and an attribution was lost.
+    void run(bool verbose = true, int sweeps_override = -1)
     {
         using namespace std;
         if (verbose) cout << endl << endl << endl << "      ATOM: PressureSolverAtm" << endl;
@@ -121,6 +125,17 @@ public:
         const bool metric_div = AtomUtils::metric_divergence();
 
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
+        // ATM_PRESS_SWEEPS -- relaxation sweeps per call, default 1, which is what this solver
+        // has always done. Ported from ATHAD, which took it from ATURAN's shared
+        // PressureSolver.h (<TAG>_PRESS_SWEEPS). Independent of ATM_PROJ_SWEEPS below, so
+        // varying one does not move the other.
+        static const int n_sweeps_knob = [](){ const char* e = getenv("ATM_PRESS_SWEEPS");
+                                               const int v = e ? atoi(e) : 1;
+                                               return v > 0 ? v : 1; }();
+        const int n_press_sweeps = (sweeps_override > 0) ? sweeps_override : n_sweeps_knob;
+
+        for (int sweep = 0; sweep < n_press_sweeps; sweep++) {
+
         // ==================================================================
         // THE RELAXATION IS RED-BLACK, AND WAS NOT ALWAYS. Ported from ATHAD.
         //
@@ -400,6 +415,8 @@ public:
 
         } // colour
 
+        } // sweep
+
         #undef LAND
 
         // Radial boundary extrapolation.
@@ -531,8 +548,26 @@ public:
     // projection pressure; we then apply v ← v − ∇p in the same metric form used
     // by the time-stepping RHS, and reset p_dyn to 0 so the next RK4 call does not
     // double-correct via its own −∂p/∂r term.
+    // ATM_PROJ_SWEEPS -- relaxation sweeps PER PASS of the initial projection.
+    //
+    // DEFAULT 1 HERE, WHICH IS UNMEASURED IN THIS TREE. ATHAD ships 10 (README item 68),
+    // where one sweep left the meridional streamfunction not closing at the ground -- Psi
+    // there must be zero, and at one sweep it was 2.09x the interior circulation, falling
+    // 52.5 % at 10 sweeps and 55.9 % at 100, i.e. a knee rather than a converged value. That
+    // measurement has not been made here, so the default stays at the historical 1 and the
+    // knob exists to make it. The cost is a one-time startup expense: the projection is 200
+    // passes and a relaxation sweep is ~0.1 % of a time step.
+    //
+    // It is deliberately separate from ATM_PRESS_SWEEPS. This routine calls run() 200 times,
+    // so a single knob would have made "10 sweeps in the time loop" mean 2000 relaxations at
+    // startup as well, and the arms of any comparison would have differed in their INITIAL
+    // STATE as well as in the quantity under test. ATHAD lost an attribution that way.
     void project_initial_velocity(int n_sweeps = 200)
     {
+        static const int proj_sweeps = [](){
+            const char* e = getenv("ATM_PROJ_SWEEPS");
+            const int v = e ? atoi(e) : 1;
+            return v > 0 ? v : 1; }();
         using namespace std;
         cout << endl << endl << "      ATOM: project_initial_velocity ("
              << n_sweeps << " Jacobi sweeps)" << endl;
@@ -555,7 +590,7 @@ public:
         // pressure.  Each call to run() also re-applies the i, theta, and phi BCs on
         // p_dyn, so polar/topographic anchors stay consistent with the time loop.
         for (int s = 0; s < n_sweeps; s++) {
-            run(false);
+            run(false, proj_sweeps);
         }
 
         // Step 3 — gradient correction v ← v − ∇p_dyn in the interior.

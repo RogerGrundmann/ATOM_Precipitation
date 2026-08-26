@@ -301,6 +301,66 @@ streamlines by construction. `u-v-Cell` is kept, now correctly dimensional.
 **The longitudinal writer is still on index space** in this tree and in ATHAD. ATHAD fixed the
 zonal one only, and this port does not go beyond what was measured there.
 
+## Tier C knobs ported from ATHAD (2026-08-26)
+
+These change physics, so all of them are **default-off / default-1 and bit-identical when
+unset**, and each needs its own A/B *here* rather than inheriting ATHAD's default. The first
+one already shows why.
+
+### `ATM_PRESS_SWEEPS`, `ATM_PROJ_SWEEPS` — and ATHAD's lever is INERT in this tree
+
+The initial projection calls the solver 200 times; `ATM_PROJ_SWEEPS` sets the relaxation sweeps
+*per pass*, and `ATM_PRESS_SWEEPS` does the same for the time loop. They are deliberately
+separate: one knob would have made "10 sweeps in the time loop" also mean 2000 relaxations at
+startup, so the arms of any comparison would differ in their initial state as well as in the
+quantity under test. ATHAD lost an attribution exactly that way.
+
+The meridional streamfunction must vanish at the ground — `u` is zero at the surface and Psi is
+zero at the lid, so the column-integrated meridional mass flux is forced to vanish. It does not,
+here or in ATHAD. Measured at 4 iterations, 8 threads (RMS over latitude, not max — the max sits
+inside one cell and hides changes elsewhere):
+
+| `ATM_PROJ_SWEEPS` | RMS Psi(ground) | vs 1 | projection cost |
+|---|---|---|---|
+| 1 (default) | 1.5841e11 kg/s | — | 2.6 s |
+| 10 | 1.5834e11 | **-0.04 %** | 21.0 s |
+| 100 | 1.5830e11 | **-0.07 %** | 223 s |
+
+Each arm wrote to its own output directory; the 100-arm was re-run alone after an earlier
+attempt shared one with a concurrent run, and reproduced 1.5830e11 exactly.
+
+**In ATHAD the same knob cuts it 52.5 %.** The knob is connected — the projection cost rises 8x
+and 96x — so this is a real null, and the default stays at **1** here. What it means is that
+this tree's Psi(ground), **42 % of its own interior maximum**, is not a projection-convergence
+problem at all: it is the structural non-closure ATHAD's item 72 attributes to the discrete
+divergence and gradient not being adjoint on a collocated stencil, with Rhie-Chow face
+reconstruction named as the un-done repair. In ATHAD roughly half the non-closure was
+convergence and the rest structural; here it looks like all of it.
+
+### `ATM_BUOY_TREF`, `ATM_BUOY_CONSISTENT` — implemented, UNMEASURED in this tree
+
+The Boussinesq buoyancy divides its temperature anomaly by `t_0` = 273.15 K, the
+**non-dimensionalisation constant**, where the physical reference temperature belongs.
+`ATM_BUOY_TREF` divides by `t_ref_level[i]` instead. Here that is a **~5 %** correction
+(`T_ref/t_0` = 1.055 at 288 K); in ATHAD it runs 5.49x at the surface and 0.96x at the top, so
+there it is a height-dependent distortion rather than a rescaling.
+
+`ATM_BUOY_CONSISTENT` additionally removes the second of item 34's extra `*dt` factors,
+`g*dt/u_0 -> g*L_atm/u_0^2`. **That is a factor of 5.0e5 on a body force in this tree.** The
+largest coefficient ever run on this term in the family was an intermediate 336, which drove a
+polar vertical runaway; expect instability, and if it appears, that is a Boussinesq result
+rather than a fault in that line — do not tune the coefficient back down, which is how the 336
+arrived.
+
+**Why no measurement yet, stated so it is not mistaken for a null.** A 4-iteration A/B shows
+`ATM_BUOY_TREF` changing nothing, and that test is under-powered rather than informative:
+`buoyancy_ramp` is **0.013** at iteration 4 (it reaches 1 at `buoyancy_ramp_iters` ~ 300), so
+the whole term is suppressed ~100x during the window measured. A real test needs ~300+
+iterations per arm, and the *better* instrument is a radial momentum budget — ATHAD's `ubud_*`,
+which exists in neither tree until it is ported — because it answers the prior question of how
+large this term is at all. ATHAD measured its own as ~1e-6 against a pressure gradient of 1.15,
+i.e. effectively absent, on the same shipped coefficient this tree uses.
+
 ## Atmosphere diagnostics and A/B knobs
 
 A few atmosphere-model behaviours can be probed at run time without recompiling. These are

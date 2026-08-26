@@ -959,8 +959,55 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // buoyancy/Coriolis RATIO, but that combined with this path's over-hot Ω-time Coriolis to
     // drive a polar vertical runaway — see the force_nd note above. Using g*dt/u_0 (and
     // force_nd on Coriolis) makes the whole RHS share the laminar scaling.
+    // ATM_BUOY_TREF and ATM_BUOY_CONSISTENT (ported from ATHAD, README item 50). Both default
+    // OFF, so an unset environment is BIT-IDENTICAL to what this line has always computed --
+    // and the OFF branch below is the original expression verbatim rather than a hoisted
+    // coefficient, because `*` and `/` are left-associative and floating-point multiplication
+    // is not: ((A*g)*dt)/u_0 and A*((g*dt)/u_0) are not the same double. -ffast-math may
+    // reassociate them into agreement, but that is an optimiser decision, not a guarantee.
+    //
+    // (b) THE BOUSSINESQ REFERENCE TEMPERATURE -- ATM_BUOY_TREF. The anomaly
+    //     (t - t_ref_level[i]) is (T - T_ref)/t_0, because t is T/t_0, so this term divides
+    //     by t_0 = 273.15 K -- the NON-DIMENSIONALISATION CONSTANT. Boussinesq buoyancy is
+    //     g*(T - T_ref)/T_REF. In non-dimensional variables that relative anomaly is simply
+    //     (t - t_ref)/t_ref, the t_0 cancelling. HERE the two differ by T_ref/t_0 = 1.055 at
+    //     288 K, i.e. ~5 %, which is why the defect is invisible on Earth and why this is the
+    //     safe tree to test it in. In ATHAD it runs 5.49x at a 1500 K surface and 0.96x at the
+    //     top -- a height-dependent distortion of the body force rather than a rescaling.
+    //
+    // (a) THE NON-DIMENSIONALISATION -- ATM_BUOY_CONSISTENT, which implies (b). g*dt/u_0 ->
+    //     g*L_atm/u_0^2; RK4 supplies the dt, so the shipped form carries it twice. That is
+    //     item 34's second extra-*dt term, the half the surf_drag repair did not touch.
+    //     HERE IT IS A FACTOR OF (L_atm/u_0)/dt = 5.0e5 ON A BODY FORCE. The largest
+    //     coefficient ever run on this term in the family was an intermediate 336, which drove
+    //     the polar vertical runaway the comment above records; the consistent value is
+    //     61.29 against a shipped 1.226e-4. EXPECT IT TO BE UNSTABLE. If it is, that is a
+    //     Boussinesq result and not a bug in this line -- do not "fix" it by tuning the
+    //     coefficient back down, which is how the 336 got here.
+    static const bool buoy_tref = [](){
+        const char* e = getenv("ATM_BUOY_TREF"); return e && atoi(e) != 0; }();
+    static const bool buoy_consistent = [](){
+        const char* e = getenv("ATM_BUOY_CONSISTENT"); return e && atoi(e) != 0; }();
+
+    double buoyancy_term;
+    if(buoy_consistent){
+        // (a) + (b) together: fixing the dt without the reference temperature just rescales
+        // an incorrect force.
+        const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+        buoyancy_term = buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
+                      * (t.x[i][j][k] - t_ref_level[i]) / tref;
+    }else if(buoy_tref){
+        // (b) alone, on the shipped coefficient -- the arm that is measurable here.
+        const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+        buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
+                      * (t.x[i][j][k] - t_ref_level[i]) / tref;
+    }else{
+        buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
+                      * (t.x[i][j][k] - t_ref_level[i]);
+    }
+
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoyancy_ramp * buoyancy * g * dt / u_0 * (t.x[i][j][k] - t_ref_level[i])
+        + buoyancy_term
         + coriolis * force_nd * coriolis_rad;
 
     // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----
