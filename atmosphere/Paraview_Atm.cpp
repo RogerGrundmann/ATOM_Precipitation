@@ -176,7 +176,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("WaterVapour", c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudWater", cloud, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudIce", ice, 1e3, Atmosphere_panorama_vts_File);
-//    dump_array("CloudGraupel", gr, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("CloudGraupel", gr, 1e3, Atmosphere_panorama_vts_File);
     // Moist source/sink terms. S_c and S_r are the rhs_t latent-heat drivers
     // (RHS_Atm.cpp:397, coeff_energy*lv*(S_c+S_r)) that couple precip -> temperature
     // -> buoyancy -> velocity; dump them so the NE-Pacific (j=37,k=229) precip<->u
@@ -186,7 +186,6 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("S_v", S_v, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_c", S_c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_r", S_r, 1e3, Atmosphere_panorama_vts_File);
-//    dump_array("cloudiness", cloudiness, 1.0, Atmosphere_panorama_vts_File);
 
     dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
     dump_array("PrecipitationRain", P_rain, 8.64e4, Atmosphere_panorama_vts_File);
@@ -655,8 +654,29 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     double dx = 0.1;
     double dy = 0.05;
 
+    // ==================================================================
+    // THE VERTICAL AXIS IS TRUE HEIGHT, NOT LEVEL INDEX. Ported from ATHAD (item 70).
+    //
+    // x = i*dx puts the points at LEVEL INDICES, which on this exponentially stretched
+    // grid is not a height axis at all: at zeta = 3.715 layer 0 is 43 m and layer 39 is
+    // 1457 m, so index space stretches the bottom of the atmosphere and squashes the top
+    // by ~34x. Everything drawn on it inherits that -- contours, glyph angles and
+    // streamline curvature alike -- and the distortion VARIES with height, so no single
+    // aspect-ratio setting in ParaView can undo it.
+    //
+    // Mapping the true height onto the same 0..(im-1)*dx span keeps the figure the size it
+    // always was while making the axis linear in metres, so the vertical exaggeration
+    // becomes ONE constant instead of a function of altitude.
+    //
+    // NOTE the longitudinal writer below is still on index space; ATHAD fixed the zonal
+    // one only, and this port does not go beyond what was measured there.
+    // ==================================================================
+    const double h_top  = get_layer_height(im - 1);
+    const double x_span = (im - 1) * dx;
+    const double x_of_h = (h_top > 0.0) ? x_span / h_top : 0.0;   // plot units per metre
+
     for(int i = 0; i < im; i++){
-        double x = i * dx;
+        double x = get_layer_height(i) * x_of_h;
         for(int j = 0; j < jm; j++){
             buf << x << " " << j * dy << " " << 0.0 << '\n';
         }
@@ -671,13 +691,43 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     dump_zonal("v-Component", v, u_0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("w-Component", w, u_0, k_zonal, Atmosphere_vtk_zonal_File);
 
-    double inv_u_0 = 1.0 / u_0;
+    // The glyph vectors below used to be scaled by 1/u_0 while every scalar written beside
+    // them (dump_zonal) used u_0 -- a factor of u_0^2 = 64 between a component and its own
+    // vector, in the same file. Direction was unaffected, magnitude was not. Ported from
+    // ATHAD item 70, extended to the updraft/downdraft pairs, which carry the same defect.
+    const double dl = r_Earth * 1000.0 * M_PI / (double)(jm - 1);   // m per latitude index
 
     buf << "VECTORS u-v-Cell float\n";
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
-            buf << safe_val(u.x[i][j][k_zonal] * inv_u_0) << " "
-                << safe_val(v.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
+            buf << safe_val(u.x[i][j][k_zonal] * u_0) << " "
+                << safe_val(v.x[i][j][k_zonal] * u_0) << " " << 0.0 << '\n';
+        }
+    }
+
+    // u-v-Cell above is the honest m/s field. It is also close to useless as a glyph here:
+    // the physical flow is strongly anisotropic (horizontal >> vertical), so drawn as raw
+    // m/s every glyph lies flat along the latitude axis and the overturning is invisible --
+    // while the streamfunction, which integrates, resolves cells that close through exactly
+    // those small vertical velocities. That is the glyphs and the streamlines telling
+    // different stories about the same field.
+    //
+    // uv_plot converts the velocity INTO the plot's coordinates, so a closed cell is drawn
+    // closed and glyphs and streamlines agree by construction. Units are plot-units per DAY:
+    // the file is written ios::fixed, and plot-units per second are far below the printed
+    // precision, so a per-second field would print as 0.00000000 over most of the domain.
+    // A uniform factor, so it cannot affect direction. Diagnostic only -- no physics reads
+    // either field.
+    const double per_day = 86400.0;
+    const double sx = x_of_h;      // plot units per metre, vertical (one constant, because
+                                   // the geometry above is now linear in height)
+    const double sy = dy / dl;     // plot units per metre, meridional
+
+    buf << "VECTORS uv_plot float\n";
+    for(int i = 0; i < im; i++){
+        for(int j = 0; j < jm; j++){
+            buf << safe_val(u.x[i][j][k_zonal] * u_0 * sx * per_day) << " "
+                << safe_val(v.x[i][j][k_zonal] * u_0 * sy * per_day) << " " << 0.0 << '\n';
         }
     }
 
@@ -726,7 +776,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     dump_zonal("Precipitation", Precipitation, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PrecipitationRain", P_rain, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PrecipitationSnow", P_snow, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
-//    dump_zonal("PrecipitationGraupel", P_graupel, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("PrecipitationGraupel", P_graupel, 8.64e4, k_zonal, Atmosphere_vtk_zonal_File);
 
     dump_zonal("S_v", S_v, 1e3, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("S_c", S_c, 1e3, k_zonal, Atmosphere_vtk_zonal_File);
@@ -803,8 +853,8 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
             if(u.x[i][j][k_zonal] < 0.0) u_u.x[i][j][k_zonal] = 0.0;
-            buf << safe_val(u_u.x[i][j][k_zonal] * inv_u_0)
-                << " " << safe_val(v_u.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
+            buf << safe_val(u_u.x[i][j][k_zonal] * u_0)
+                << " " << safe_val(v_u.x[i][j][k_zonal] * u_0) << " " << 0.0 << '\n';
         }
     }
 
@@ -812,8 +862,8 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
             if(u.x[i][j][k_zonal] < 0.0) u_d.x[i][j][k_zonal] = 0.0;
-            buf << safe_val(u_d.x[i][j][k_zonal] * inv_u_0)
-                << " " << safe_val(v_d.x[i][j][k_zonal] * inv_u_0) << " " << 0.0 << '\n';
+            buf << safe_val(u_d.x[i][j][k_zonal] * u_0)
+                << " " << safe_val(v_d.x[i][j][k_zonal] * u_0) << " " << 0.0 << '\n';
         }
     }
     Atmosphere_vtk_zonal_File << buf.str();

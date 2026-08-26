@@ -206,6 +206,10 @@ public:
     // same length. See the definition for the numbers and the reasoning.
     void checkMetricConsistency() const;
 
+    // Startup check that exp_rm is the Jacobian of the radial stretch -- it is not. Print-only
+    // and self-silencing once the spread drops below 1.05. Call AFTER init_layer_heights.
+    void checkRadialMetric() const;
+
     // ATM_METRIC_RADIUS: reads the knob once and fills m_metric_r0. Call after the coordinates.
     void initMetricRadius();
 

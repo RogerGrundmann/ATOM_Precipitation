@@ -239,6 +239,68 @@ inherited and not addressed here: a tropical precipitation probe differs 4e-6 re
 and 4 threads (`P_rain[i_check]` 15.4734034 against 15.4734603). ATHAD documents the same residue
 and traces its amplification to the convective triggers.
 
+## Instruments ported from ATHAD (2026-08-26)
+
+Three diagnostics, all **print-only or plot-only** — verified: with them in, the residuum
+series and every printed extremum are identical to the binary without them. What they measure
+is not.
+
+### `checkRadialMetric()` — is `exp_rm` the Jacobian of the radial stretch?
+
+It is documented as one in `TurbulenceAtm.h` and written as one in `PressureSolverAtm.h`
+(`dp/dr_physical = exp_rm * dp/d(rad.z)`), and it is not: `exp_rm = 1/(rm+1)` is the Jacobian
+of a **quadratic** stretch while `init_layer_heights` builds an **exponential** one. The test
+is unit-free — `[inv_2dr * exp_rm] * (z[i+1] - z[i-1])` must be constant in `i` — so it cannot
+be argued away as a units convention. Printed at every startup:
+
+    AGCM: radial metric check - core length unit runs 806 m at the surface to 18717 m at
+    the top, spread 23.21x (1.00 = exp_rm is the Jacobian).
+
+**23.21x, and that is the worst in the family** — ATHAD is 11.8x at `zeta = 3.0`, ATHAD_COND
+~12x — because this tree's `zeta = 3.715` is the largest stretch anywhere in it. Every radial
+derivative in the core is mis-scaled by a factor varying 23x across the column, low at the
+surface. It is **not** a function of `im`. `ATM_METRIC_CHECK=1` adds the per-level table; the
+whole diagnostic goes quiet by itself once the spread drops below 1.05, so it costs one startup
+line and cannot change a result. See ATHAD README item 39 for the measurement and for why
+`zeta` rather than `im` is the lever.
+
+### The meridional streamfunction is density-weighted
+
+`MinMax_Atm.cpp` applied one constant density — `r_air`, the SURFACE value — at every level of
+a mass-flux integral, i.e. it labelled a volume flux kg/s. The density is inside the integral
+and inside the zonal mean now, which also keeps the `<rho'v'>` correlation term a warm rising
+branch carries. Measured at 4 iterations:
+
+| | before | after |
+|---|---|---|
+| `Psi_max` | 851.68 (1e9 kg/s) | **373.84** |
+| at | lat 45.00, z = 1729 m | lat 45.00, z = 1729 m |
+
+**2.28x overweight at the cell core**, with the location unmoved — so here it distorted cell
+STRENGTH rather than hiding a cell, which is what it did in ATHAD's 250 bar column where rho
+spans four orders of magnitude instead of six-fold. This tree is the one that uses this
+diagnostic to judge exactly that question (`24ff23a` "revive Hadley/Ferrel cells", `1e59daa`
+jet spin-down), so **every Psi number recorded here before 2026-08-26 is the old,
+volume-flux-like quantity and is not comparable with what the run log prints now.**
+
+### The zonal VTK slice is drawn on a height axis
+
+`paraview_vtk_zonal` wrote the vertical coordinate as **level index**, which on this
+exponentially stretched grid stretches the bottom and squashes the top by ~34x, varying with
+altitude — so no ParaView aspect setting could undo it, and contours, glyph angles and
+streamline curvature all inherited it. It is true height now, mapped onto the same plot span,
+so the vertical exaggeration is one constant.
+
+Two unit defects went with it. The glyph vectors were scaled by `1/u_0` while every scalar
+written beside them used `u_0` — a factor of `u_0^2` between a component and its own vector, in
+the same file (direction unaffected, magnitude not). And raw m/s glyphs on a strongly
+anisotropic flow all lie flat along the latitude axis, so a new `uv_plot` vector carries the
+field in plot-units per day, in which a closed cell is drawn closed and glyphs agree with
+streamlines by construction. `u-v-Cell` is kept, now correctly dimensional.
+
+**The longitudinal writer is still on index space** in this tree and in ATHAD. ATHAD fixed the
+zonal one only, and this port does not go beyond what was measured there.
+
 ## Atmosphere diagnostics and A/B knobs
 
 A few atmosphere-model behaviours can be probed at run time without recompiling. These are
