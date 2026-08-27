@@ -105,13 +105,35 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   second differences — so a growing smooth field contaminates them; the share is the more
   trustworthy. The global index is normalised by rms `p_dyn` and **cannot be compared between
   trees**, because that denominator differs by seven orders; read the per-axis absolutes.
-- **`Psi_max` SITS AT `z = 0 m` FOR ALL 100 ITERATIONS** (2026-08-27, the first run with `Psi` as
-  a field). 379.84 -> 415.69 (1e9 kg/s) at 15N, growing monotonically, **always at the ground**,
-  against `Psi_min` -371.80 -> -351.02 at 45S / 1729 m. That is ATHAD README item 68's signature:
-  the streamfunction not closing at the ground, with the reported maximum being the **spurious
-  surface mass flux** rather than the circulation. Not diagnosed here. Item 68's method note
-  applies — **read `Psi(ground)` as an RMS over latitude, not as a max**, because the max sits
-  inside the Hadley cell and a change elsewhere reads as bit-identical while the field moves. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
+- **`Psi` DOES NOT CLOSE AT THE GROUND, IT IS WRITTEN BY THE INITIAL CONDITION, AND THE ATHAD
+  LEVER IS ALREADY MEASURED INERT HERE** (2026-08-27, the first runs with `Psi` as a field).
+  Measured by item 68's method — **`Psi(ground)` as an RMS over latitude, never as a max**:
+
+  | iter | `Psi(ground)` rms | `Psi(lid)` rms | ground_rms / max\|Psi\| |
+  |---|---|---|---|
+  | 1 | 1.5629e+11 | **0.0000e+00** | 0.407 |
+  | 3 | 1.5771e+11 | 0.0000e+00 | 0.414 |
+  | 20 | 1.6225e+11 | 0.0000e+00 | 0.427 |
+  | 100 | 1.6657e+11 | 0.0000e+00 | 0.401 |
+
+  **The lid closes exactly and the ground does not.** Together those say the column-integrated
+  meridional mass flux does not vanish. **It is NOT a boundary-cell artefact**: rms\|Psi\| decays
+  smoothly through the whole depth — 1.666e+11 at 0 m, 1.598e+11 at 236 m, 1.269e+11 at 2163 m,
+  7.05e+10 at 6088 m, 3.29e+07 at 14567 m — so it is a column-wide offset, not a spike at `i = 0`.
+
+  **At iteration 1 it is already 93.8 % of its iteration-100 value** (ATHAD item 68 measured
+  98.7 %), so it is written by the initial velocity profile and the dynamics only add 2.7 % over
+  the next 99 iterations.
+
+  **AND `Psi_max` MIGRATES ONTO THE DEFECT.** At iterations 1-3 it is at 45N / 1729 m — the real
+  circulation — and by iteration 20 it is at 15N / **0 m** and stays there to 100. The interior
+  circulation decays (this tree's jet spin-down) while the ground offset does not, so the same
+  scalar reports the circulation early and the defect later. **Any `Psi_max` comparison that
+  straddles that crossover is comparing two different quantities.**
+
+  **The ATHAD fix does not transfer**: there `ATM_PROJ_SWEEPS` cut the ground RMS 52.5 %, and the
+  knob table above records it as **inert here** (-0.04 % at 10x, -0.07 % at 100x). So the lever is
+  already excluded and the cause is open. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
   0.59 in ATHAD**, a 16 km shell over a 6370 km radius against a 300 km one — so "the horizontal
   directions are weakly constrained" is plausibly true HERE and was measured false there.
 
