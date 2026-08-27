@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <iostream>
 #include <iomanip>
+#include <cstdlib>
 #include <algorithm>
 
 #ifdef _OPENMP
@@ -103,6 +104,10 @@ public:
         for (int j = j_max; j > j_half; j--)
             m.short_wave_radiation[j] = m.short_wave_radiation[j_max - j];
 
+        // ATM_RAD_TOPO -- see the i_mount comment inside the column loop below.
+        static const bool topo_rad = [](){
+            const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
+
         // ---- per-column radiative balance (columns independent -> OpenMP over j) ----
         #pragma omp parallel for schedule(dynamic)
         for (int j = 0; j < m.jm; j++) {
@@ -117,9 +122,30 @@ public:
             std::vector<std::vector<double> > CC(m.im, std::vector<double>(m.im, 0.0));
 
             const int i_trop  = m.im - 1;   // top layer (tropopause proxy)
-            const int i_mount = 0;          // surface / bottom layer
 
             for (int k = 0; k < m.km; k++) {
+
+                // THE RADIATION COLUMN STARTS AT THE GROUND, NOT AT LEVEL 0.
+                //
+                // i_mount was the literal 0 with the comment "surface / bottom layer", which is
+                // true only over ocean. Over topography levels 0 .. i_topography-1 are rock, and
+                // ThermoAtm's barometric loop fills every one of them with a real p_stat, so they
+                // carry MASS: dp = p_stat[i] - p_stat[i+1] is positive through the rock and enters
+                // sum_dp. Since each layer's optical depth is tau_dry * dp_i / sum_dp, every AIR
+                // layer over every mountain is diluted by the rock beneath it -- so tau_layer and
+                // tau_above are wrong ABOVE the ground too, not merely inside it. The surface
+                // energy balance, e_surf, epsilon_2D and T_air1 are all placed at sea level by the
+                // same literal.
+                //
+                // This is the family's Earth-constant pattern with terrain in place of a number:
+                // the code assumes the surface is level 0, which holds at home only over water.
+                //
+                // ATM_RAD_TOPO=1 puts the column on the real ground. DEFAULT OFF because it moves
+                // the radiation over all land and this tree measures before it flips. Off-branch
+                // is bit-identical: i_mount is 0 and every loop below reduces to what it was.
+                const int i_mount = topo_rad
+                    ? std::min(std::max(m.i_topography[j][k], 0), i_trop - 3)
+                    : 0;
 
                 // Grey-body emission of each layer and its "original" reference.
                 for (int i = i_mount; i <= i_trop; i++) {
@@ -308,7 +334,7 @@ public:
                 }
                 for (int i = i_mount + 2; i <= i_trop; i++) {
                     CA[i] = 0.0;
-                    for (int l = 1; l <= i - 1; l++) {
+                    for (int l = i_mount + 1; l <= i - 1; l++) {
                         CC[l][i] = CC[l][i - 1] * (1.0 - m.epsilon.x[i][j][k]);   // transmitted past layer i
                         CA[i] += CC[l][i];                                        // sum over all l
                     }
@@ -364,11 +390,11 @@ public:
                 // Back-substitution (Thomas). The top unknown is beta[i_trop] because the
                 // top row's alfa[i_trop] = 0 (cc = 0 — no layer above).
                 m.radiation.x[i_trop][j][k] = beta[i_trop];
-                for (int i = i_trop - 1; i >= 0; i--)
+                for (int i = i_trop - 1; i >= i_mount; i--)
                     m.radiation.x[i][j][k] = alfa[i] * m.radiation.x[i + 1][j][k] + beta[i];
 
                 // Radiation -> temperature (add back the reference emission, invert sigma T^4).
-                for (int i = 0; i <= i_trop; i++) {
+                for (int i = i_mount; i <= i_trop; i++) {
                     m.radiation.x[i][j][k] = radiation_original[i] + m.radiation.x[i][j][k];
                     m.t.x[i][j][k] = pow(m.radiation.x[i][j][k] / m.sigma, 0.25) / m.t_0;
                 }
@@ -417,6 +443,31 @@ public:
                                                + 0.25 * r_orig[i + 1 - i_mount];
                     if (i_top_sm > i_mount)                       // surface: one-sided blend toward air
                         m.radiation.x[i_mount][j][k] = 0.5 * r_orig[0] + 0.5 * r_orig[1];
+                }
+
+                // Sub-surface land cells. With i_mount on the ground the loops above no longer
+                // write i < i_mount at all, so those cells would keep whatever the PREVIOUS call
+                // left -- and t is read by the rest of the model, not just plotted. Copy the
+                // ground value down, which is IceSchemeCommon::fillTopography's convention for
+                // every other field. Empty loop when i_mount == 0, so the off-branch is untouched.
+                for (int i = i_mount - 1; i >= 0; i--) {
+                    m.t.x[i][j][k]         = m.t.x[i_mount][j][k];
+                    m.radiation.x[i][j][k] = m.radiation.x[i_mount][j][k];
+                    m.epsilon.x[i][j][k]   = m.epsilon.x[i_mount][j][k];
+                }
+
+                // tau_above / tau_layer are fed to NOTHING -- print_min_max_atm and the four
+                // ParaView writers, and that is all; epsilon carries the physics. So their
+                // ground boundary condition is applied on BOTH branches: with ATM_RAD_TOPO off
+                // the loops above still walk the rock and leave an optical depth inside the
+                // mountain, which is what makes the plotted field wrong there. Filling from the
+                // ground costs nothing and cannot move a result.
+                {
+                    const int i_g = std::min(std::max(m.i_topography[j][k], 0), i_trop);
+                    for (int i = i_g - 1; i >= 0; i--) {
+                        m.tau_above.x[i][j][k] = m.tau_above.x[i_g][j][k];
+                        m.tau_layer.x[i][j][k] = m.tau_layer.x[i_g][j][k];
+                    }
                 }
             }  // k
         }  // j

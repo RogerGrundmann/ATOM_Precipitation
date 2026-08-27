@@ -885,20 +885,38 @@ public:
             #pragma omp parallel for collapse(2) schedule(static)
             for (int j = 0; j < m.jm; j++) {
                 for (int k = 0; k < m.km; k++) {
+                    // THE GROUND IS THE BOTTOM OF THIS FIELD, NOT LEVEL 0. Over topography the
+                    // cells below i_topography are rock, and they are not empty: the barometric
+                    // loop above writes a real p_stat into every one of them, then overwrites
+                    // p_stat.x[0] with the GROUND value -- so p_stat is non-monotonic across the
+                    // sub-surface column (level 0 lower than level 1). theta inherits that jump,
+                    // and a centred difference at the first air level straddles the terrain and
+                    // differences an air theta against a rock one. That is the source of the
+                    // +-0.03 to 0.047 s^-2 boundary-layer extrema the port commit recorded as
+                    // appearing "every time": they are the terrain, not the boundary layer.
+                    //
+                    // So: build theta from the ground up, make the ground level ONE-SIDED
+                    // exactly as the lid already is, and fill the rock below with the ground
+                    // value (IceSchemeCommon::fillTopography's convention, applied inline here
+                    // because this loop already owns the column). Over ocean i_m = 0 and every
+                    // value is bit-identical to before.
+                    const int i_m = m.i_topography[j][k];
                     std::vector<double> theta(m.im, 0.0);
-                    for (int i = 0; i < m.im; i++) {
+                    for (int i = i_m; i < m.im; i++) {
                         const double T_i = m.t.x[i][j][k] * m.t_0;
                         const double p_i = m.p_stat.x[i][j][k];
                         theta[i] = (T_i > 0.0 && p_i > 0.0) ? T_i * pow(m.p_0 / p_i, kap) : 0.0;
                     }
-                    for (int i = 0; i < m.im; i++) {
-                        const int il = (i > 0)         ? i - 1 : i;
+                    for (int i = i_m; i < m.im; i++) {
+                        const int il = (i > i_m)       ? i - 1 : i;
                         const int iu = (i < m.im - 1)  ? i + 1 : i;
                         const double dz = m.get_layer_height(iu) - m.get_layer_height(il);
                         const double th = theta[i];
                         m.brunt_N2.x[i][j][k] = (dz > 0.0 && th > 0.0)
                                         ? (m.g / th) * (theta[iu] - theta[il]) / dz : 0.0;
                     }
+                    for (int i = i_m - 1; i >= 0; i--)
+                        m.brunt_N2.x[i][j][k] = m.brunt_N2.x[i_m][j][k];
                 }
             }
         }
