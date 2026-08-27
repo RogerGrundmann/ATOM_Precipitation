@@ -93,13 +93,25 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   Poisson operator is the compact 7-point Laplacian at `dr` while `div_src` and the Step-3
   gradient correction are `2*dr` central differences, which annihilate the Nyquist mode exactly.
   Measured here at pressure solve: per-axis Nyquist share **0.443 / 0.331 / 0.660**, absolute
-  ~1.6e-06 on all three — **near-isotropic**, unlike ATHAD's k-only 0.961. **AND IT DECAYS**:
-  over 100 iterations the global index falls **0.63 -> 0.038** while rms `p_dyn` GROWS, so the
-  smooth field builds as the grid-scale part dies. **The earlier "structural, flat under 100x the
-  sweeps" reading was taken at 4 iterations and is CORRECTED** — flat under *sweeps*, decaying
-  under *iterations*, which are different axes. The global index is normalised by rms `p_dyn`
-  and **cannot be compared between trees**, because that denominator differs by seven orders;
-  read the per-axis absolutes. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
+  ~1.6e-06 on all three — **near-isotropic**, unlike ATHAD's k-only 0.961.
+  **IT DOES NOT DECAY, AND THE RATIO SAID OTHERWISE.** Over 100 iterations the global index falls
+  0.63 -> 0.0384, which was first written up here as a spin-up transient. **That was wrong.** The
+  denominator, rms `p_dyn`, grows **24x** over the same run and the ABSOLUTE amplitude RISES:
+  2.990e-06 (diagnostic 1) -> 3.735e-06 (13) -> **4.454e-06** (25). The per-axis measure agrees
+  once the first transient is past — zonal Nyquist 4.34e-05 -> 1.98e-06 by diagnostic 5, then
+  back UP to 3.62e-06, while the zonal anomaly grows faster, so the share falls 0.34 -> 0.19.
+  **The stripes leave the plot because the smooth field grows around them, not because the noise
+  dies.** *Caveat*: neither instrument isolates the Nyquist mode from smooth curvature — both are
+  second differences — so a growing smooth field contaminates them; the share is the more
+  trustworthy. The global index is normalised by rms `p_dyn` and **cannot be compared between
+  trees**, because that denominator differs by seven orders; read the per-axis absolutes.
+- **`Psi_max` SITS AT `z = 0 m` FOR ALL 100 ITERATIONS** (2026-08-27, the first run with `Psi` as
+  a field). 379.84 -> 415.69 (1e9 kg/s) at 15N, growing monotonically, **always at the ground**,
+  against `Psi_min` -371.80 -> -351.02 at 45S / 1729 m. That is ATHAD README item 68's signature:
+  the streamfunction not closing at the ground, with the reported maximum being the **spurious
+  surface mass flux** rather than the circulation. Not diagnosed here. Item 68's method note
+  applies — **read `Psi(ground)` as an RMS over latitude, not as a max**, because the max sits
+  inside the Hadley cell and a change elsewhere reads as bit-identical while the field moves. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
   0.59 in ATHAD**, a 16 km shell over a 6370 km radius against a 300 km one — so "the horizontal
   directions are weakly constrained" is plausibly true HERE and was measured false there.
 

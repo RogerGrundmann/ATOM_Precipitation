@@ -726,8 +726,15 @@ the anomaly along each axis** with absolutes beside every ratio, and the **Poiss
 weights** `c_r`/`c_the`/`c_phi`.
 
 Read the per-axis absolutes, not the global index. The global index divides by rms(`p_dyn`) and
-so cannot be compared between trees or between arms whose smooth field differs — in ATHAD the
-same field read 0.0003 globally and 0.961 on the zonal axis.
+so cannot be compared between trees, between arms, **or between iterations of the same run** —
+in ATHAD the same field read 0.0003 globally and 0.961 on the zonal axis, and here the index
+falls 0.63 -> 0.0384 over 100 iterations purely because its denominator grows 24x, while the
+absolute grid-scale amplitude *rises* 2.99e-06 -> 4.45e-06. A falling index is not a decaying
+mode.
+
+Neither instrument isolates the Nyquist mode from smooth curvature — both are second differences
+— so a growing smooth field contaminates both. Of the two, the per-axis *share* is the most
+trustworthy.
 
 ### ParaView field dumps
 
