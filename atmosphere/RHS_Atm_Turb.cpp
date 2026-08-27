@@ -452,7 +452,35 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         * sqrt((pow(coriolis_rad, 2)
         + pow(coriolis_the, 2)
         + pow(coriolis_phi, 2)) / 3.0);
-    BuoyancyForce.x[i][j][k] = buoyancy * coeff_buoy * (t.x[i][j][k] - t_ref_level[i]);
+    // ---- ATM_BUOY_MOIST: moisture in the buoyancy (default off) ----------------------
+    //
+    // The shipped body force is (t - t_ref_level[i]) -- TEMPERATURE ONLY. Water vapour is
+    // lighter than dry air (M = 18 against 29), so moistening a parcel makes it buoyant, and
+    // none of that reaches the momentum equation. The model already knows it: ThermoAtm builds
+    // r_humid as p/((1 + R_W_R_A_m1*c - cloud - ice)*T), i.e. it computes the virtual
+    // temperature, uses it for density and the streamfunction, and the buoyancy discards it --
+    // because the Boussinesq form takes a TEMPERATURE anomaly where a DENSITY anomaly belongs.
+    //
+    // Consequence measured 2026-08-27: surface evaporation moistens levels 0-3 and cannot drive
+    // convection at all. It also never writes `t`, so it removes no latent heat and cannot cool
+    // the surface into stability either -- the same shape as `Q_Sensible`, which is written and
+    // read by nothing.
+    //
+    // T_v = T(1 + 0.608 q_v - q_c - q_i), with 0.608 taken as R_WaterVapour/R_Air - 1 so it
+    // matches r_humid exactly rather than being a second, independent constant. THE REFERENCE
+    // MUST BE VIRTUAL TOO: t_ref_level is a horizontal mean whose whole purpose is to give the
+    // force zero mean at every height, so moistening the parcel alone would add a uniform
+    // updraft rather than a buoyancy. tv_ref_level is built in the same sweep.
+    static const bool moist_buoy = [](){
+        const char* e = getenv("ATM_BUOY_MOIST"); return e && atoi(e) != 0; }();
+    const bool moist_buoy_ok = moist_buoy && ((int)tv_ref_level.size() == im);
+    const double t_buoy = moist_buoy_ok
+        ? t.x[i][j][k] * (1.0 + (R_WaterVapour / R_Air - 1.0) * c.x[i][j][k]
+                              - cloud.x[i][j][k] - ice.x[i][j][k])
+        : t.x[i][j][k];
+    const double t_buoy_ref = moist_buoy_ok ? tv_ref_level[i] : t_ref_level[i];
+
+    BuoyancyForce.x[i][j][k] = buoyancy * coeff_buoy * (t_buoy - t_buoy_ref);
     PressureGradientForce.x[i][j][k] = -coeff_u_p
         * sqrt((pow(dpdr, 2)
         + pow(dpdthe * inv_rm, 2)
@@ -997,17 +1025,17 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     if(buoy_consistent){
         // (a) + (b) together: fixing the dt without the reference temperature just rescales
         // an incorrect force.
-        const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+        const double tref = (t_buoy_ref > 0.0) ? t_buoy_ref : 1.0;
         buoyancy_term = buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
-                      * (t.x[i][j][k] - t_ref_level[i]) / tref;
+                      * (t_buoy - t_buoy_ref) / tref;
     }else if(buoy_tref){
         // (b) alone, on the shipped coefficient -- the arm that is measurable here.
-        const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+        const double tref = (t_buoy_ref > 0.0) ? t_buoy_ref : 1.0;
         buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
-                      * (t.x[i][j][k] - t_ref_level[i]) / tref;
+                      * (t_buoy - t_buoy_ref) / tref;
     }else{
         buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
-                      * (t.x[i][j][k] - t_ref_level[i]);
+                      * (t_buoy - t_buoy_ref);
     }
 
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u

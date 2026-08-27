@@ -123,6 +123,31 @@ public:
 
         // ATOM_METRIC_DIVERGENCE — hoisted out of the cell loop; see lib/Utils.h.
         const bool metric_div = AtomUtils::metric_divergence();
+
+        // ---- ATM_ANELASTIC (ported from ATHAD 2026-08-27, default OFF here) ---------------
+        //
+        // WHY THIS TREE NEEDS IT. The projection had NO DENSITY IN IT AT ALL -- no dlnrho, no
+        // rho_bar -- so div_src was pure div(u) and the solver enforced VOLUME continuity. With
+        // u pinned to zero at both walls that forces INT(v dz) = 0. But `Psi` is a MASS
+        // streamfunction, INT(rho*v*dz), and rho varies ~4x over the 16 km column, so zero
+        // volume flux does not give zero mass flux: Psi(ground) had no reason to close, and did
+        // not. Measured over 100 iterations the two integrals move in OPPOSITE directions --
+        // with ATM_V_MASSBAL on, volume -21.8 % while mass +51.2 % -- which is why imposing the
+        // mass constraint at t = 0 decays.
+        //
+        // The anelastic form, from ATHAD's copy. The pieces are not separable:
+        //   source     D = (1/rho_bar) div(rho_bar u*) = div(u*) + u*_r dln(rho_bar)/dr
+        //   operator   (1/rho_bar) div(rho_bar grad p) = lap(p) + dln(rho_bar)/dr dp/dr
+        // The operator's extra first-derivative term folds into the EXISTING num_a
+        // off-diagonal, which here already carries the metric curvature -- so the coefficient
+        // becomes (dlnrho - curv) and no new stencil is introduced.
+        //
+        // Off-branch bit-identical: dlnrho_i is 0 when the knob is off, so num_a and div_src
+        // reduce exactly to what they were.
+        static const bool anelastic_knob = [](){
+            const char* e = getenv("ATM_ANELASTIC"); return e && atoi(e) != 0; }();
+        const bool anelastic = anelastic_knob && ((int)m.m_dlnrho_dr.size() == m.im);
+        const double* const dlnrho = anelastic ? m.m_dlnrho_dr.data() : nullptr;
         // ATM_RHIE_CHOW -- fourth-difference pressure smoothing, ported from ATHAD 2026-08-27.
         // 0 (default) restores the old branch exactly. See the term at the update below.
         static const double rc_alpha = [](){
@@ -226,7 +251,8 @@ public:
                 // is bit-identical; under ATM_METRIC_EXACT it is the same order as the term it
                 // sits beside. Diagonal dominance is unaffected -- the ratio to num1 is
                 // curv*dr/2, which is 0.046 at zeta = 3.715.
-                const double num_a = geo.exp_2_rm * (-geo.curv) * geo.inv_2dr;
+                const double dlnrho_i = anelastic ? dlnrho[i] : 0.0;
+                const double num_a = geo.exp_2_rm * (dlnrho_i - geo.curv) * geo.inv_2dr;
                 const double num2 = m_the * inv_dthe2;
                 const double num3 = m_phi * inv_dphi2;
 
@@ -410,6 +436,13 @@ public:
                                         + m.aux_v.x[i][j][k] * geo.costhe / geo.sinthe)
                                        * geo.inv_rm;
                         }
+                        // Anelastic source term. rho_bar depends on r only, so
+                        // (1/rho_bar) div(rho_bar u*) - div(u*) is this one extra piece. Formed
+                        // from aux_u, because the source is the divergence of the PROVISIONAL
+                        // velocity the projection has to remove.
+                        if (anelastic)
+                            div_src += m.aux_u.x[i][j][k] * dlnrho[i] * geo.exp_rm;
+
                         const double src_max = denom * p_dyn_cap;
 
                         if (!is_finite_safe(div_src))   div_src = 0.0;

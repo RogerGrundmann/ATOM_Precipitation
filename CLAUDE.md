@@ -64,6 +64,45 @@ times out of four.**
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
 | `ATM_V_MASSBAL` | **NEW HERE**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
+| `ATM_ANELASTIC` | ported, **null on `Psi(ground)` (-0.006 %)** — and the reason is structural, below | on by default there |
+| `ATM_BUOY_MOIST` | **NEW HERE**: +4.9 % on `ubud_buoy`, but ONLY with `ATM_BUOY_CONSISTENT` | not ported |
+
+**`ATM_BUOY_CONSISTENT` IS NO LONGER UNMEASURED, AND THE ROW ABOVE SAYING "the budget says not
+worth it" WAS WRONG ON ITS SECOND HALF** (2026-08-27). Measured: `ubud_buoy` **0.000003 ->
+1.208688**, a factor of 400 000, which puts it **ninety-fold above `ubud_pgf`** (0.0135). ATHAD's
+extra-`dt` defect (its items 34/42) is confirmed here at the same order of magnitude. What is
+still true is that it does not move `Psi`: that force is RADIAL and `Psi` is meridional.
+
+**`ATM_BUOY_MOIST`, and why it needs the row above.** The shipped buoyancy is
+`(t - t_ref_level[i])`, TEMPERATURE ONLY. Water vapour is lighter than dry air, and the model
+already computes the virtual temperature — `r_humid = p/((1 + R_W_R_A_m1*c - cloud - ice)*T)` —
+uses it for density and the streamfunction, and the buoyancy discards it, because the Boussinesq
+form takes a TEMPERATURE anomaly where a DENSITY anomaly belongs. The knob adds
+`T_v = T(1 + 0.608 q_v - q_c - q_i)` at all four sites, with the 0.608 taken as
+`R_WaterVapour/R_Air - 1` so it matches `r_humid` rather than being a second constant.
+**The REFERENCE is virtual too** (`tv_ref_level`, built in the same sweep): `t_ref_level`'s whole
+purpose is that the body force has zero mean at every height, so moistening the parcel alone
+would have added a uniform updraft rather than a buoyancy.
+**On the shipped branch it is a null in the 10th digit — because the buoyancy itself is inert.**
+With `ATM_BUOY_CONSISTENT=1` it is **+4.9 %** on `ubud_buoy`. *Adding moisture to a force that is
+not acting cannot show anything*, and that is the whole content of the first measurement.
+
+**AND SURFACE EVAPORATION THEREFORE CANNOT DRIVE CONVECTION.** It moistens levels 0-3 and reaches
+the momentum equation through nothing on the shipped branch. It also **never writes `t`**, so it
+removes no latent heat and cannot cool the surface into stability either — the same shape as
+`Q_Sensible`, which is written and read by nothing. Both halves of the surface energy exchange
+are open, in opposite directions.
+
+**WHY `ATM_ANELASTIC` IS A NULL HERE, AND WHY THAT IS NOT A RESULT ABOUT CONTINUITY.** The port is
+faithful — source `div(u*) + u*_r dln(rho_bar)/dr`, the matching operator term folded into the
+existing `num_a` off-diagonal, base state built in `densities()` at line 514 and so available to
+`project_initial_velocity` at line 554. It moves `Psi(ground)` **-0.006 %**. The reason is the
+structural gap recorded above: in the time loop `PressureSolverAtm::run()` computes `p_dyn` and
+**never applies `v <- v - grad(p)`**, so changing which continuity the PRESSURE solves for cannot
+change the VELOCITY during a run. **Consequence for the volume-vs-mass diagnosis: it is
+UNSUPPORTED, not confirmed.** The two-integrals measurement stands on its own, but the arm that
+would have tested the explanation could not reach the velocity. Testing it needs the velocity
+projected INSIDE the time loop — a change to how the model steps, not a knob.
 
 `ATM_RHIE_CHOW` being a null on `Psi(ground)` is STRUCTURAL, not a failure to tune: `D4`
 annihilates smooth fields by construction — that is the property that makes the knob safe — and

@@ -22,21 +22,32 @@ using namespace std;
 // accelerate the flow. Refilled once per RK4 step. (Moved here from the former
 // RungeKutta_Atm.cpp when the separate laminar solver was dropped.)
 void cAtmosphereModel::computeLevelMeanTemperature(){
-    if((int)t_ref_level.size() != im) t_ref_level.assign(im, 1.0);
+    if((int)t_ref_level.size()  != im) t_ref_level.assign(im, 1.0);
+    if((int)tv_ref_level.size() != im) tv_ref_level.assign(im, 1.0);
+
+    // The VIRTUAL reference is built in the same sweep and with the same weights, because the
+    // zero-mean property above is what makes this a buoyancy rather than a bulk lift. Computed
+    // unconditionally: it costs one multiply per cell and leaves ATM_BUOY_MOIST free of any
+    // ordering dependence.
+    const double R_W_R_A_m1 = R_WaterVapour / R_Air - 1.0;
 
     #pragma omp parallel for schedule(static)
     for(int i = 0; i < im; i++){
-        double sum = 0.0, wsum = 0.0;
+        double sum = 0.0, sum_v = 0.0, wsum = 0.0;
         for(int j = 0; j < jm; j++){
             const double w = sin(the.z[j]);                 // spherical area weight
             for(int k = 0; k < km; k++){
                 if(AtomUtils::is_air(h, i, j, k)){
-                    sum  += w * t.x[i][j][k];
-                    wsum += w;
+                    sum   += w * t.x[i][j][k];
+                    sum_v += w * t.x[i][j][k]
+                           * (1.0 + R_W_R_A_m1 * c.x[i][j][k]
+                                  - cloud.x[i][j][k] - ice.x[i][j][k]);
+                    wsum  += w;
                 }
             }
         }
-        t_ref_level[i] = (wsum > 0.0) ? sum / wsum : 1.0;   // all-land level → neutral
+        t_ref_level[i]  = (wsum > 0.0) ? sum   / wsum : 1.0;   // all-land level → neutral
+        tv_ref_level[i] = (wsum > 0.0) ? sum_v / wsum : 1.0;
     }
 }
 

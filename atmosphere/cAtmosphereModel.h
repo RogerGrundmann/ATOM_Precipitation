@@ -290,6 +290,15 @@ private:
     std::map<float,float> m_equat_temperature_curve;
     std::map<float,float> m_pole_temperature_curve;
 
+    // Anelastic base state, ported from ATHAD 2026-08-27. m_rho_base is the cos-latitude
+    // weighted horizontal mean of r_humid at each level; m_dlnrho_dr is d ln(rho_bar)/d(rad.z),
+    // i.e. differentiated in the GRID radial coordinate, so it composes with exp_rm the same way
+    // every other radial derivative in the solver does. One-dimensional: the horizontal density
+    // contrast is small against the vertical span, so a 1-D base state loses almost nothing and
+    // keeps the elliptic operator constant in time.
+    std::vector<double> m_rho_base;
+    std::vector<double> m_dlnrho_dr;
+
     std::vector<double> alfa;
     std::vector<double> beta;
 
@@ -329,6 +338,11 @@ private:
     // does not fight the hydrostatic p_stat/p_dyn split. Refilled once per
     // RK4 step by computeLevelMeanTemperature().
     std::vector<double> t_ref_level;
+    // Virtual-temperature counterpart of t_ref_level, for ATM_BUOY_MOIST. It must exist and be
+    // built the same way: the buoyancy's design property is that the body force has ZERO MEAN at
+    // every height, so moistening the parcel without moistening the reference would add a
+    // uniform upward force everywhere instead of a buoyancy.
+    std::vector<double> tv_ref_level;
     void computeLevelMeanTemperature();
 
     // Initial (non-dim) temperature at the model lid (i=im-1), snapshotted once

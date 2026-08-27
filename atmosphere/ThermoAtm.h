@@ -863,6 +863,47 @@ public:
             }
         }
 
+        // ---- Anelastic base state (ported from ATHAD) -----------------------------------
+        //
+        // rho_bar(i), the cos-latitude weighted horizontal mean of r_humid, and
+        // d ln(rho_bar)/d(rad.z). Needed by ATM_ANELASTIC in PressureSolverAtm.h; costs one
+        // sweep and is computed unconditionally so the knob has no ordering dependence.
+        //
+        // Land is skipped: a sub-surface cell carries a barometric r_humid that is not air, and
+        // averaging it in would bias the base state toward sea level exactly where the terrain
+        // is highest.
+        m.m_rho_base.assign(m.im, 0.0);
+        m.m_dlnrho_dr.assign(m.im, 0.0);
+        {
+            std::vector<double> lnrho(m.im, 0.0);
+            for (int i = 0; i < m.im; i++) {
+                double num = 0.0, den = 0.0;
+                for (int j = 0; j < m.jm; j++) {
+                    const double coslat = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    for (int k = 0; k < m.km; k++) {
+                        if (i < m.i_topography[j][k]) continue;          // inside terrain
+                        const double rho = m.r_humid.x[i][j][k];
+                        if (!(rho > 0.0) || !std::isfinite(rho)) continue;
+                        num += coslat * rho;
+                        den += coslat;
+                    }
+                }
+                m.m_rho_base[i] = (den > 0.0) ? num / den : 0.0;
+                lnrho[i] = (m.m_rho_base[i] > 0.0) ? log(m.m_rho_base[i]) : 0.0;
+            }
+            // rad.z is uniform, so the centred difference is the stencil the solver uses on
+            // every other field; the ends get the one-sided form so the first and last interior
+            // cells -- exactly where the projection's wall BC acts -- are not fed a half-step.
+            const double inv_2dr_b = 1.0 / (2.0 * m.dr);
+            const double inv_dr_b  = 1.0 / m.dr;
+            for (int i = 1; i < m.im - 1; i++)
+                m.m_dlnrho_dr[i] = (lnrho[i+1] - lnrho[i-1]) * inv_2dr_b;
+            if (m.im > 1) {
+                m.m_dlnrho_dr[0]        = (lnrho[1] - lnrho[0]) * inv_dr_b;
+                m.m_dlnrho_dr[m.im - 1] = (lnrho[m.im-1] - lnrho[m.im-2]) * inv_dr_b;
+            }
+        }
+
         // ---- Brunt-Vaisala frequency squared -------------------------------------------
         //
         // N^2 = (g/theta) d(theta)/dz, potential temperature theta = T*(p0/p)^(R/cp).
