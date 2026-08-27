@@ -732,6 +732,31 @@ With `ATM_CONV_ADJ=1`:
 | enthalpy drift | | **3.07e-16** |
 | `Psi(ground)` / `max\|Psi\|` | | -0.02 % / -0.3 % |
 
+**Measured again in isolation** (`ATM_CONV_ADJ=1` alone, `ATM_V_MASSBAL` off, against the
+all-defaults reference), because the table above was measured on top of the mass balance and its
+effect on `Psi` was therefore confounded with a field that repair had already changed by 71 %:
+
+| quantity | reference | conv-adj alone |
+|---|---|---|
+| `brunt_N2` median `i=0` | -2.6811e-04 | **-1.0e-07** |
+| `brunt_N2` median `i=1` | -4.706e-05 | **+6.091e-05** |
+| `brunt_N2` frac<0 `i=1` | 0.58726 | **0.00554** |
+| lapse 0-1 | -19.362 K/km | **-9.758** |
+| `Psi(ground)` rms | 1.6657e+11 | 1.6634e+11 (**-0.139 %**) |
+| `max\|Psi\|` | 4.1568e+11 | 4.1532e+11 (-0.087 %) |
+
+**The thermal result is identical to the on-top-of-massbal arm** — `brunt_N2` at `i=0` lands on
+-1e-07 in both, the lapse on -9.758 against -9.76, `frac<0` at `i=1` on 0.0055 in both — and the
+scheme statistics differ by two columns and seven layers out of ninety-six thousand. So the
+adjustment's effect does not depend on the initial mass balance.
+
+**The two repairs are orthogonal, and the obvious worry does not materialise.** On the
+uncorrected profile the bottom layers start ~10 K/km more unstable, so mixing them changes
+density more and might have been expected to move `Psi`; it moves it **-0.139 %**, seven times
+the -0.02 % measured on the corrected field and still negligible. `Psi_max` stays at 15N, z = 0 m
+at all five printouts either way — the convective adjustment does nothing about the ground
+non-closure, which is `ATM_V_MASSBAL`'s job.
+
 67.3 % of columns adjust, worst column 2 sweeps of an allowed 64. It runs **before**
 `densities()`, which is where `brunt_N2` is formed — otherwise the instrument reports the profile
 the adjustment was about to remove.
