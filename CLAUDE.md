@@ -131,9 +131,32 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   scalar reports the circulation early and the defect later. **Any `Psi_max` comparison that
   straddles that crossover is comparing two different quantities.**
 
-  **The ATHAD fix does not transfer**: there `ATM_PROJ_SWEEPS` cut the ground RMS 52.5 %, and the
-  knob table above records it as **inert here** (-0.04 % at 10x, -0.07 % at 100x). So the lever is
-  already excluded and the cause is open. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
+  **THE INITIAL PROJECTION IS EXONERATED, AND IT IS `VelocityInitializer`** (`ATM_PSI_PROJ_DUMP=1`
+  writes the streamfunction either side of `project_initial_velocity` as iterations -1 and -2):
+
+  | stage | `Psi(ground)` rms | `Psi(lid)` rms |
+  |---|---|---|
+  | before the projection | 1.5543e+11 | 0.0000e+00 |
+  | after the projection | 1.5541e+11 | 0.0000e+00 |
+
+  **-0.0143 %.** The projection does not remove the non-closure; it does not touch it. So the
+  offset is written by `VelocityInitializer`'s analytical Hadley/Ferrel profile and survives
+  intact. **This also explains why `ATM_PROJ_SWEEPS` is inert here** where ATHAD got 52.5 % from
+  it (-0.04 % at 10x, -0.07 % at 100x in the knob table above): upstream the projection cannot
+  see this mode at all, so sweeping harder changes nothing.
+
+  **AND IT CONTRADICTS THE COMMENT AT THE CALL SITE**, which says the projection "lets the time
+  loop start from a clean div v = 0 state with the solenoidal part of the prescribed flow
+  intact". For this quantity that is false.
+
+  **The physics narrows what is left.** For a zonally symmetric field with no mass flux through
+  top or bottom, `div(rho v) = 0` forces the column-integrated meridional flux to be constant in
+  latitude and zero at the poles, hence zero everywhere, hence `Psi(ground) = 0`. It is not. So
+  either the projected field is not actually divergence-free -- which item 72 and item 86 already
+  establish, it converges to a fixed point that is not -- **or there is real flux through the
+  bottom boundary, i.e. `u` at the ground is not zero.** ATHAD's invariant 1 pins `u(i=0) = 0`;
+  **that has NOT been checked here, and with topography it cannot be assumed.** One-line read,
+  not a run. Do that before spending anything else on this. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
   0.59 in ATHAD**, a 16 km shell over a 6370 km radius against a 300 km one — so "the horizontal
   directions are weakly constrained" is plausibly true HERE and was measured false there.
 

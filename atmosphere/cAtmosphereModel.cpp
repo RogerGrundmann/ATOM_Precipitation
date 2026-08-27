@@ -533,7 +533,20 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // prescribed global circulation decays to noise (max u → <0.5 m/s by iter 150).
     // Doing the projection once here lets the time loop start from a clean
     // ∇·v = 0 state with the solenoidal part of the prescribed flow intact.
-    PressureSolverAtm(*this).project_initial_velocity(200);
+    // ATM_PSI_PROJ_DUMP=1 -- write the streamfunction either side of the initial projection,
+    // as iterations -1 (before) and -2 (after). THE DISCRIMINATING ARM for the ground
+    // non-closure: Psi(lid) closes exactly while Psi(ground) does not, and 93.8 % of the ground
+    // RMS is already there at iteration 1 -- which says "initial condition" but does not say
+    // WHICH one, VelocityInitializer's analytical profile or the projection applied to it. The
+    // comment above asserts the profile is not divergence-free and that this call cleans it;
+    // these two dumps are what checks that. Print/CSV only, default off.
+    {
+        static const bool psi_proj_dump = [](){
+            const char* e = getenv("ATM_PSI_PROJ_DUMP"); return e && atoi(e) != 0; }();
+        if (psi_proj_dump) write_meridional_streamfunction(-1);   // before
+        PressureSolverAtm(*this).project_initial_velocity(200);
+        if (psi_proj_dump) write_meridional_streamfunction(-2);   // after
+    }
 
     UtilsAtm(*this).storeIntermediateData3D(1.0);
     UtilsAtm(*this).findResiduumAtm();
