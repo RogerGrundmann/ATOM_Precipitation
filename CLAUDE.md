@@ -66,6 +66,34 @@ times out of four.**
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
 | `ATM_ANELASTIC` | ported, **null on `Psi(ground)` (-0.006 %)** — and the reason is structural, below | on by default there |
 | `ATM_BUOY_MOIST` | **NEW HERE**: +4.9 % on `ubud_buoy`, but ONLY with `ATM_BUOY_CONSISTENT` | not ported |
+| `ATM_PROJECT_IN_LOOP` | **NEW HERE, IMPLEMENTED BUT UNTESTED** — see below | no equivalent |
+
+**`ATM_PROJECT_IN_LOOP=<sweeps>` IS IMPLEMENTED AND NOT YET TESTED. DO NOT QUOTE ITS NULL.**
+Default 0 = off. It is a real velocity projection inside the time loop: seed `aux` from `u/v/w`,
+relax the Poisson, apply `v <- v - grad(p)`, with `p_dyn` saved and restored around the call
+because the loop's own pressure is live and read by the next RK4 stage.
+
+**It is NOT "call `run()` and subtract the gradient", and that distinction is the useful part.**
+In the time loop `aux_*` does not hold a velocity: `RHS_Atm_Turb.cpp:1140` sets
+`aux_u = rhs_u + dpdr_exp`, a momentum TENDENCY. So the loop's `run()` computes the pressure that
+makes the ACCELERATION divergence-free — a legitimate fractional-step variant, since if `div(u)`
+starts at zero and every tendency is divergence-free then `div(u)` stays zero — and subtracting
+THAT gradient from `u` would be wrong. **So "the velocity is never projected" is true but the
+model is not simply omitting a step; it projects the tendency instead.**
+
+Measured at 10 sweeps, three arms (off / 10 / 10 + anelastic): `Psi(ground)` **1.6657e+11 in all
+three, unchanged to five digits**, volume integral likewise. **THAT NULL IS NOT A RESULT.** The
+projection is barely acting: `div(u)` at pressure solve moves **1.766e-03 -> 1.764e-03**, a tenth
+of a percent. `project_initial_velocity` runs **200** relaxation passes and this was given
+**10** — twenty times fewer — and red-black Jacobi converges the LARGEST scales slowest, error
+decaying like `(1 - c/N^2)` per sweep, so a domain-scale mode on a 181x361 grid wants O(N^2).
+`Psi(ground)` is exactly such a mode. The untried arm is 200 sweeps, at ~20x the solver cost per
+iteration.
+
+**And the whole line may be chasing a quantity the model does not constrain**: `INT(v dz)` is
+7.83e3 m^2/s, so `div(u)` was never zero to begin with, and `Psi(ground)` may be measuring
+accumulated solver error rather than one defect. The volume-vs-mass explanation remains
+**UNSUPPORTED** — neither confirmed nor refuted by anything run so far.
 
 **`ATM_BUOY_CONSISTENT` IS NO LONGER UNMEASURED, AND THE ROW ABOVE SAYING "the budget says not
 worth it" WAS WRONG ON ITS SECOND HALF** (2026-08-27). Measured: `ubud_buoy` **0.000003 ->

@@ -1041,6 +1041,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             PressureSolverAtm(*this).run();
         }
 
+        // ATM_PROJECT_IN_LOOP=<sweeps>, default 0 = off. A real velocity projection, distinct
+        // from the run() above: that one computes the pressure that makes the momentum TENDENCY
+        // divergence-free (aux_* holds rhs_u + dpdr_exp, not a velocity), and the velocity
+        // itself is never projected anywhere in the time loop. See PressureSolverAtm.h.
+        if(PressureSolverAtm::projectInLoopSweeps() > 0)
+            PressureSolverAtm(*this).project_velocity_in_loop(
+                PressureSolverAtm::projectInLoopSweeps());
+
 
 
         // Two cadences during inviscid spin-up:

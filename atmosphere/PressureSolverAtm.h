@@ -882,6 +882,107 @@ public:
         cout.flags(f); cout.precision(p);
     }
 
+    // ==================================================================
+    // ATM_PROJECT_IN_LOOP=<sweeps> -- a real velocity projection inside the time loop.
+    // Default 0 = off.
+    //
+    // WHY THIS IS NOT JUST "CALL run() AND SUBTRACT THE GRADIENT". In the time loop `aux_*` does
+    // NOT hold a velocity: RHS_Atm_Turb.cpp:1140 sets `aux_u = rhs_u + dpdr_exp`, a momentum
+    // TENDENCY. So `run()` there computes the pressure that makes the ACCELERATION
+    // divergence-free, which is a legitimate fractional-step variant -- if div(u) starts at zero
+    // and every tendency is divergence-free, div(u) stays zero -- but it means the p_dyn sitting
+    // in the array is not the pressure that projects the VELOCITY, and subtracting its gradient
+    // from u would be wrong. That is the trap this routine exists to avoid.
+    //
+    // What it does instead is the same three steps project_initial_velocity uses, on the actual
+    // velocity: seed aux from u/v/w, relax the Poisson, then apply v <- v - grad(p) with the
+    // metric factors the RHS uses. p_dyn is SAVED and RESTORED around the call, because the
+    // time loop's own p_dyn is read by the next RK4 stage through -dp/dr and Step 4 of the
+    // initial projection would otherwise wipe it.
+    //
+    // The question it exists to answer: Psi(ground) does not close, and ATM_ANELASTIC measured a
+    // null because changing which continuity the PRESSURE solves for cannot change the VELOCITY
+    // when the velocity is never projected. This is the arm that can actually test that.
+    // ==================================================================
+    static int projectInLoopSweeps(){
+        static const int v = [](){
+            const char* e = getenv("ATM_PROJECT_IN_LOOP");
+            const int n = e ? atoi(e) : 0;
+            return n > 0 ? n : 0; }();
+        return v;
+    }
+
+    void project_velocity_in_loop(int n_sweeps)
+    {
+        if (n_sweeps <= 0) return;
+
+        // Save p_dyn: the time loop's pressure is live and the projection overwrites it.
+        std::vector<double> p_save((size_t)m.im * m.jm * m.km);
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    p_save[((size_t)i*m.jm + j)*m.km + k] = m.p_dyn.x[i][j][k];
+
+        // Steps 1-3, on the velocity.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++) {
+                    m.aux_u.x[i][j][k] = m.u.x[i][j][k];
+                    m.aux_v.x[i][j][k] = m.v.x[i][j][k];
+                    m.aux_w.x[i][j][k] = m.w.x[i][j][k];
+                    m.p_dyn.x[i][j][k] = 0.0;
+                }
+
+        for (int s = 0; s < n_sweeps; s++) run(false, 1);
+
+        applyGradientCorrection();
+
+        // Restore the time loop's pressure.
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    m.p_dyn.x[i][j][k] = p_save[((size_t)i*m.jm + j)*m.km + k];
+    }
+
+    // v <- v - grad(p_dyn) in the interior, with the metric factors the rhs_u/v/w
+    // pressure-gradient terms use. Extracted from project_initial_velocity Step 3 so the
+    // in-loop projection cannot drift from it.
+    void applyGradientCorrection()
+    {
+        const double inv_2dr   = 1.0 / (2.0 * m.dr);
+        const double inv_2dthe = 1.0 / (2.0 * m.dthe);
+        const double inv_2dphi = 1.0 / (2.0 * m.dphi);
+
+        std::vector<double> sinthe_tab(m.jm);
+        for (int j = 0; j < m.jm; j++) {
+            sinthe_tab[j] = sin(m.the.z[j]);
+            if (sinthe_tab[j] < 0.55) sinthe_tab[j] = 0.55;
+        }
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                const double rm           = m.rad.z[i];
+                const double exp_rm       = m.metricExpRm(rm);
+                const double rmet         = m.metricRadius(rm);
+                const double inv_rm       = 1.0 / rmet;
+                const double inv_rmsinthe = 1.0 / (rmet * sinthe_tab[j]);
+                for (int k = 1; k < m.km-1; k++) {
+                    if (m.h.x[i][j][k] == 1.0) continue;          // solid cell
+                    const double dpdr   = (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * inv_2dr;
+                    const double dpdthe = (m.p_dyn.x[i][j+1][k] - m.p_dyn.x[i][j-1][k]) * inv_2dthe;
+                    const double dpdphi = (m.p_dyn.x[i][j][k+1] - m.p_dyn.x[i][j][k-1]) * inv_2dphi;
+                    m.u.x[i][j][k] -= dpdr   * exp_rm;
+                    m.v.x[i][j][k] -= dpdthe * inv_rm;
+                    m.w.x[i][j][k] -= dpdphi * inv_rmsinthe;
+                }
+            }
+        }
+    }
+
     void project_initial_velocity(int n_sweeps = 200)
     {
         static const int proj_sweeps = [](){
