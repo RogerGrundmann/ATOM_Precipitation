@@ -678,6 +678,11 @@ environment variable before launching the atmosphere to change behaviour.
 | Env variable | Default | Effect |
 |---|---|---|
 | `ATM_METRIC_RADIUS` | `r_Earth` (on) | Planetary radius, in km, for the HORIZONTAL metric. Since 2026-07-28 the default is the configured `r_Earth`; `0` restores the old `rad.z ~ 1.5` metric for A/B work. It replaced `ATM_CORIOLIS_SCALE`, which was a multiplier compensating for the same length error: that error factorised as 397.5 (the metric, fixed by this knob) x 40 (`force_nd` dividing by `L_atm` = 400 m instead of the ~16023 m one `rad.z` unit represents, now fixed in RHS_Atm_Turb). With both corrected there is nothing left to sweep |
+| `ATM_CONV_ADJ` | `0` (off) | Dry convective adjustment, Manabe-Strickler, ported from ATHAD 2026-08-27. **This tree had none**, so nothing could remove a superadiabatic layer; see the section below. `ATM_CONV_ADJ_LAPSE` scales the critical lapse (`0` = isothermal criterion, `>1` stricter than dry) and `ATM_CONV_ADJ_PASSES` caps the sweeps per column (default 64) |
+| `ATM_V_MASSBAL` | `0` (off) | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section |
+| `ATM_RAD_TOPO` | `0` (off) | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them |
+| `ATM_RHIE_CHOW` | `0` (off) | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
+| `ATM_PSI_PROJ_DUMP` | `0` (off) | Writes the streamfunction either side of `project_initial_velocity`, as iterations `-1` and `-2`. Print/CSV only |
 | `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
 
 Example — run the atmosphere with a stronger Coriolis and a gentler radial filter:
@@ -703,6 +708,45 @@ the RK4 net into its physical terms (`pgf`, `coriolis`, `adv_vert`, `adv_horiz`,
 `drag_mc`) in m/s per iteration. A one-line tropical trade-layer summary is also echoed to
 stdout each time.
 
+### Dry convective adjustment (`ATM_CONV_ADJ`, 2026-08-27)
+
+Until this port the tree had **no dry convective adjustment at all** — no such file, no call
+site, only `MoistConvection.h`. Nothing could remove a superadiabatic layer, so one formed and
+stayed.
+
+Measured over 100 iterations at 24 threads. At iteration 0 the surface layer is *stable*
+(-3.93 K/km, `brunt_N2 < 0` in 0.000 of columns). By iteration 20 the lowest 39 m runs at
+**-18.05 K/km, twice the dry adiabat**, with `brunt_N2 < 0` in 59 % of columns at `i = 0` and
+`i = 1` and 0 % at `i = 2` — one unstable layer, exactly the surface-to-first-level step. The
+time loop makes it: over the run the surface warms +0.76 K while the air above warms +0.15 K,
+and nothing mixes them.
+
+With `ATM_CONV_ADJ=1`:
+
+| quantity | off | on |
+|---|---|---|
+| surface lapse | -19.45 K/km | **-9.76** (dry adiabat -9.8) |
+| `brunt_N2` median `i=0` | -2.69e-04 | **-1.0e-07** |
+| `brunt_N2` median `i=1` | -4.75e-05 | **+6.09e-05** (frac<0 0.587 -> 0.006) |
+| `i=3` and above | | unchanged to four figures |
+| enthalpy drift | | **3.07e-16** |
+| `Psi(ground)` / `max\|Psi\|` | | -0.02 % / -0.3 % |
+
+67.3 % of columns adjust, worst column 2 sweeps of an allowed 64. It runs **before**
+`densities()`, which is where `brunt_N2` is formed — otherwise the instrument reports the profile
+the adjustment was about to remove.
+
+**Two numbers here must be read by magnitude, not by count.** `frac<0` at `i = 0` stays 0.590
+while the value falls to -1e-07: that is the scheme's tolerance on a layer now neutral by
+construction, so the fraction counts round-off there. And max/min temperature are *bit-identical*
+between the arms while the median surface profile moves 0.3 K — the extremum is a false null.
+
+The port kept ATHAD's per-layer critical drop from `get_layer_height()` and its cumulative-sum
+segment adiabat, because the family's shared `planet/ConvectiveAdjustment.h` computes
+`dz_m = L_atm*1e3/(im-1)`, a layer thickness only on a **uniform** grid. Two things were adapted:
+the column starts at `i_topography` rather than level 0 (ATHAD has no terrain), and `cp` is the
+constant `cp_l` rather than a mixture value (this tree has no `MixtureAtm`).
+
 ### Meridional streamfunction as a field
 
 `Psi` — the meridional mass streamfunction [kg/s] — is published as a 3D field as well as a
@@ -710,6 +754,23 @@ printed extremum. `write_meridional_streamfunction()` already formed `psi[i][j]`
 away except for a CSV and the `Psi_max` line; it now fills `Psi`, which appears in
 `print_min_max_atm` and in the radial/zonal/longal ParaView dumps as `PsiMerid`. It is a zonal
 mean, so it is replicated across `k`.
+
+**`Psi` does not close at the ground, and most of it is the prescribed initial profile.**
+`Psi(lid)` is `0.0000e+00` exactly at every iteration while `Psi(ground)` rms is 1.55e+11 kg/s —
+about 40 % of the Hadley cell's own strength — and `u` is pinned to zero at BOTH walls
+(`BC_Atm.h:679`, `:697`, verified in the field, `max|u| = 0.000000e+00`). With no flux through
+either wall, `div(rho v) = 0` would force `Psi(ground) = 0`. It is not a boundary cell: rms`|Psi|`
+decays smoothly through the whole depth. 93.8 % of it is present at iteration 1, and
+`project_initial_velocity` changes it by **-0.014 %**, so the projection does not remove it.
+
+The cause is `VelocityInitializer::init_v_or_w`, which builds `v` as a **linear ramp in height**
+between two hand-set endpoints. Nothing constrains `INT(rho*v*dz) = 0`, or even `INT(v*dz) = 0`:
+at 15N the column runs +3.67 m/s at the ground against -0.54 m/s at 7.4 km, and `INT(v*dz)` is
++9151 m^2/s, so it fails in volume as well as mass. `ATM_V_MASSBAL=1` subtracts the
+density-weighted column mean, which zeroes the column mass flux while shifting the profile by a
+single constant, leaving the shear — and hence the overturning — untouched. **-94.8 % at
+initialisation, -71.2 % at iteration 100**, with `max|Psi|` 4.16e+11 -> 1.61e+11. It is **not a
+cure**: the residual rises monotonically and no limit is claimed.
 
 The reason for publishing it is ATHAD's README item 68: there `Psi_max` was reporting the
 **spurious surface mass flux** rather than the circulation, which a scalar cannot show and a

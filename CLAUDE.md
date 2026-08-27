@@ -61,7 +61,16 @@ times out of four.**
 | `ATM_BUOY_TREF` / `_CONSISTENT` | unmeasured, and the budget says not worth it | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
 | `ATM_RAD_TOPO` | **NEW HERE, and it is this tree's defect, not ATHAD's** | inapplicable — no topography |
-| `ATM_RHIE_CHOW` | ported, **unmeasured here** | -2.55x on the zonal Nyquist |
+| `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
+| `ATM_V_MASSBAL` | **NEW HERE**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
+| `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
+
+`ATM_RHIE_CHOW` being a null on `Psi(ground)` is STRUCTURAL, not a failure to tune: `D4`
+annihilates smooth fields by construction — that is the property that makes the knob safe — and
+`Psi(ground)` is a domain-scale quantity. **So the collocated-grid checkerboard and the
+streamfunction non-closure are NOT the same defect**, despite both having been attributed to
+div/grad non-adjointness. At smooth scales the 2*dr and compact operators agree to O(dx^2), which
+cannot produce a 40 % error.
 
 `ATM_PRESS_SWEEPS` exists too and is deliberately separate from `ATM_PROJ_SWEEPS`: this
 projection calls the solver 200 times, so one knob would make "10 sweeps in the time loop" also
