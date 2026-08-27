@@ -107,6 +107,9 @@ public:
         // ATM_RAD_TOPO -- see the i_mount comment inside the column loop below.
         static const bool topo_rad = [](){
             const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
+        // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
+        static const bool sfc_coupled = [](){
+            const char* e = getenv("ATM_SFC_COUPLED"); return e && atoi(e) != 0; }();
 
         // ---- per-column radiative balance (columns independent -> OpenMP over j) ----
         #pragma omp parallel for schedule(dynamic)
@@ -425,6 +428,20 @@ public:
                                        + dsigT4 * T_s0 + c_H * T_air1) / (dsigT4 + c_H);
                 m.radiation.x[i_mount][j][k] = m.sigma * pow(T_s, 4.0);
                 m.t.x[i_mount][j][k]         = T_s / m.t_0;
+
+                // NOTE (2026-08-27): ATM_SFC_COUPLED lived here and is REMOVED as a measured
+                // null written on a wrong premise. It solved the surface balance together with a
+                // neutral-lapse constraint, to cure brunt_N2 < 0 in the bottom layer. It never
+                // fired: at setup the column is STABLE (-3.93 K/km) and the two arms were
+                // identical at iteration 0, because the instability is manufactured by the TIME
+                // LOOP -- and MLR's seven calls are all at lines 713-889 while that loop starts
+                // at 985, so MLR cannot maintain it. The real gap was that this tree had no dry
+                // convective adjustment at all; see ConvectiveAdjustment.h.
+                //
+                // What survives, and is NOT fixed here: the balance above debits the surface
+                // c_H*(T_s - T_air1) and nothing credits it to the air. `Q_Sensible` is written
+                // in RHS_Atm_Turb.cpp:485 and read by NOTHING. A real conservation defect in the
+                // initialisation, recorded rather than silently repaired.
 
                 // De-kink the surface radiative step in the DIAGNOSTIC radiation profile only.
                 // The 1-point surface energy balance (sigma T_s^4 at i_mount) and the column

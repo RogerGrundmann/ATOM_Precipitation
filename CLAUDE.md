@@ -70,6 +70,37 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
 
+- **THIS TREE HAD NO DRY CONVECTIVE ADJUSTMENT, SO NOTHING COULD REMOVE A SUPERADIABATIC LAYER**
+  (`ATM_CONV_ADJ`, default off, ported from ATHAD 2026-08-27). No such file, no call site, only
+  `MoistConvection.h`. Measured over 100 iterations at 24 threads: at iteration 0 the surface
+  layer is STABLE (-3.93 K/km, `brunt_N2` < 0 in **0.000** of columns); by iteration 20 the
+  lowest 39 m runs at **-18.05 K/km, twice the dry adiabat**, with `brunt_N2` < 0 in 59 % of
+  columns at i = 0 and i = 1 and 0 % at i = 2 — one unstable layer, exactly the
+  surface-to-first-level step. It is manufactured by the TIME LOOP: the surface warms +0.76 K
+  over the run while the air above warms +0.15 K, and nothing mixes them.
+  **With the adjustment on**: surface lapse **-19.45 -> -9.76 K/km** against a -9.8 dry adiabat,
+  `brunt_N2` median at i = 0 **-2.69e-04 -> -1.0e-07** and at i = 1 -4.75e-05 -> **+6.09e-05**
+  (frac<0 0.587 -> **0.006**), i = 3 and above unchanged to four figures. **Enthalpy drift
+  3.07e-16**, machine precision; 67.3 % of columns adjust, worst column 2 sweeps of an allowed
+  64. `Psi(ground)` -0.02 %, `max|Psi|` -0.3 %, radiation extremes +0.11 % / -0.55 %.
+  **READ THE MAGNITUDE, NOT THE FRACTION**: `frac<0` at i = 0 stays 0.590 while the value falls
+  to -1e-07 — that residual is the `tol_nd` tolerance on a layer that is now neutral by
+  construction, so the fraction counts round-off there. **And max/min temperature are
+  BIT-IDENTICAL between the arms** (35.065051 / -37.203979) while the median surface profile
+  moves 0.3 K — the extremum is a false null, again.
+- **`ATM_SFC_COUPLED` WAS WRITTEN, MEASURED AND REMOVED, and the lesson is worth more than the
+  knob.** It solved the surface energy balance together with a neutral-lapse constraint, to cure
+  the same `brunt_N2` < 0. It never fired: at setup the column is stable, so the guard correctly
+  declined, and the two arms were identical at iteration 0. **`MultiLayerRadiation` is called
+  seven times, ALL at lines 713-889, while the iteration loop starts at line 985 — MLR never runs
+  inside the loop and cannot maintain anything at iteration 100.** Check where a routine is
+  CALLED before attributing a standing feature to it.
+- **`Q_Sensible` IS WRITTEN AND READ BY NOTHING** (`RHS_Atm_Turb.cpp:485`). MLR's surface balance
+  debits the surface `c_H*(T_s - T_air1)` W/m2 and nothing credits it to the air. A real
+  conservation defect, but an INITIALISATION one — not the cause of the instability above.
+  Recorded, not repaired. Second instrument-shaped defect found this day after `Psi`: a quantity
+  computed, stored, and never used.
+
 - **THE RADIATION COLUMN STARTED AT LEVEL 0, WHICH IS THE GROUND ONLY OVER OCEAN**
   (`ATM_RAD_TOPO`, default off, 2026-08-27). `MultiLayerRadiation` had
   `const int i_mount = 0;  // surface / bottom layer`. Over topography levels

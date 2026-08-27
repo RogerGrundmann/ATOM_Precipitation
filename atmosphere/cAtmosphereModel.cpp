@@ -23,6 +23,7 @@
 #include "ThreeCatIceScheme.h"
 #include "SaturationAdjustment.h"
 #include "VelocityInitializer.h"
+#include "ConvectiveAdjustment.h"
 #include "PressureSolverAtm.h"
 #include "ThermoAtm.h"
 #include "UtilsAtm.h"
@@ -1210,6 +1211,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     }
                 }
             }  // moist_phys_active
+
+            // Dry convective adjustment BEFORE densities(), which is where brunt_N2 is formed --
+            // otherwise the instrument reports the profile the adjustment was about to remove.
+            // ATM_CONV_ADJ, default off. See ConvectiveAdjustment.h for why this tree needs one:
+            // it had none, so nothing could remove a superadiabatic layer, and the lowest 39 m
+            // reached twice the dry adiabat in 59 % of columns by iteration 20.
+            if(ConvectiveAdjustment::enabled()) ConvectiveAdjustment(*this).run();
 
             ThermoAtm(*this).densities();
             ThermoAtm(*this).forces();
