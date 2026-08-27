@@ -1224,8 +1224,12 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             BC_Atm(*this).bcSolidGround();                              // values inside mountains
 
             if(iter_n % checkpoint == 0){
-                print_min_max_atm();
+                // Psi is FILLED here and READ by print_min_max_atm, so the fill goes first.
+                // The other order leaves the reported Psi min/max one checkpoint stale and zero
+                // on the first -- the same defect ATHAD's README item 42 records. The vtk and
+                // the CSV were always correct; only the printed extrema were behind.
                 write_meridional_streamfunction(iter_n);   // Hadley/Ferrel cell strength (zonal-mean v + Ψ) per vtk checkpoint
+                print_min_max_atm();
                 UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
                 cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
             }

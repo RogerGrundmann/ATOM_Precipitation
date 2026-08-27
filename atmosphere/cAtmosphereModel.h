@@ -758,6 +758,14 @@ public:
     Array tau_above;
     Array tau_layer;
     Array brunt_N2;
+    // Psi -- the meridional mass streamfunction as a FIELD [kg/s]. Ported from ATHAD 2026-08-27.
+    // write_meridional_streamfunction() already formed psi[i][j] and threw it away except for a
+    // CSV and a printed Psi_max; publishing it puts the cells in ParaView and in the Results
+    // min/max, instead of the whole cell-structure argument resting on one scalar. That
+    // mattered in ATHAD: Psi_max was reporting the SPURIOUS SURFACE FLUX rather than the
+    // circulation (README item 68), which a scalar cannot show and a field can. It is a zonal
+    // mean, so it is replicated across k.
+    Array Psi;
     // RADIAL momentum-budget term capture (diagnostic): per-cell rhs_u contributions,
     // stored when ubudget_capture is set. Ported from ATHAD (README item 42): the vertical
     // component was the one with NO instrument, so a spurious radial acceleration is

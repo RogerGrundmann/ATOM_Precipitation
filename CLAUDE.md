@@ -60,6 +60,8 @@ times out of four.**
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
 | `ATM_BUOY_TREF` / `_CONSISTENT` | unmeasured, and the budget says not worth it | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
+| `ATM_RAD_TOPO` | **NEW HERE, and it is this tree's defect, not ATHAD's** | inapplicable — no topography |
+| `ATM_RHIE_CHOW` | ported, **unmeasured here** | -2.55x on the zonal Nyquist |
 
 `ATM_PRESS_SWEEPS` exists too and is deliberately separate from `ATM_PROJ_SWEEPS`: this
 projection calls the solver 200 times, so one knob would make "10 sweeps in the time loop" also
@@ -67,6 +69,39 @@ mean 2000 relaxations at startup, and any comparison would differ in its INITIAL
 as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
+
+- **THE RADIATION COLUMN STARTED AT LEVEL 0, WHICH IS THE GROUND ONLY OVER OCEAN**
+  (`ATM_RAD_TOPO`, default off, 2026-08-27). `MultiLayerRadiation` had
+  `const int i_mount = 0;  // surface / bottom layer`. Over topography levels
+  `0 .. i_topography-1` are rock, and `ThermoAtm`'s barometric loop writes a real `p_stat` into
+  every one of them — so they carry MASS, `dp` is positive through the rock and enters `sum_dp`,
+  and since each layer's optical depth is `tau_dry*dp_i/sum_dp`, **every air layer over every
+  mountain was diluted by the rock beneath it**. `tau_layer`/`tau_above` were wrong ABOVE the
+  ground, not merely inside it; the surface energy balance, `e_surf`, `epsilon_2D` and `T_air1`
+  were all placed at sea level. **This is the family's Earth-constant pattern with TERRAIN in
+  place of a number.** Off-branch bit-identical. With it on at 4 iterations: `epsilon_2D` max
+  relocates from Angola to **29N 88E, the Himalaya** (0.088 -> 0.119), `tau_layer` max +25 % and
+  also to the Himalaya, `tau_above` max -2.7 %, `radiation` min 95.2 -> 111.2 W/m2.
+  **Recommended for the default after a longer run — not flipped, because the band constants
+  here are tuned.**
+- **`brunt_N2`'s +-0.03 to 0.047 s^-2 "boundary-layer" extrema were THE TERRAIN** — the centred
+  difference at the first air level straddled it. Repaired unconditionally; ocean columns
+  bit-identical. Extremes are now -0.00068/+0.0051, and the old ones sat on the Andes
+  (14S 71W) and the Himalaya (29N 87E). **`ba5f542`'s note that they appear "every time" is
+  retired.**
+- **`p_dyn` CARRIES A GRID-SCALE MODE, AND HERE IT IS A SPIN-UP TRANSIENT** (2026-08-27). The
+  Poisson operator is the compact 7-point Laplacian at `dr` while `div_src` and the Step-3
+  gradient correction are `2*dr` central differences, which annihilate the Nyquist mode exactly.
+  Measured here at pressure solve: per-axis Nyquist share **0.443 / 0.331 / 0.660**, absolute
+  ~1.6e-06 on all three — **near-isotropic**, unlike ATHAD's k-only 0.961. **AND IT DECAYS**:
+  over 100 iterations the global index falls **0.63 -> 0.038** while rms `p_dyn` GROWS, so the
+  smooth field builds as the grid-scale part dies. **The earlier "structural, flat under 100x the
+  sweeps" reading was taken at 4 iterations and is CORRECTED** — flat under *sweeps*, decaying
+  under *iterations*, which are different axes. The global index is normalised by rms `p_dyn`
+  and **cannot be compared between trees**, because that denominator differs by seven orders;
+  read the per-axis absolutes. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
+  0.59 in ATHAD**, a 16 km shell over a 6370 km radius against a 300 km one — so "the horizontal
+  directions are weakly constrained" is plausibly true HERE and was measured false there.
 
 - **The meridional streamfunction does not close at the ground, and it is not the solver.**
   `Psi(ground)` must be zero; its RMS over latitude is **42 % of the interior maximum**, and

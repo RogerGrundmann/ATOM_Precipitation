@@ -259,6 +259,14 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
         f.close();
     }
 
+    // Publish Psi as a field. It is a zonal mean, so it is replicated across k; the point is
+    // that the cells become visible in ParaView and appear in the Results min/max, instead of
+    // the whole cell-structure argument resting on the scalar Psi_max below.
+    for(int i = 0; i < im; i++)
+        for(int j = 0; j < jm; j++)
+            for(int k = 0; k < km; k++)
+                Psi.x[i][j][k] = psi[i][j];
+
     // log the strongest overturning cells so the structure is readable from the run log
     double psimax = -DBL_MAX, psimin = DBL_MAX;
     int jmx = 0, imx = 0, jmn = 0, imn = 0;

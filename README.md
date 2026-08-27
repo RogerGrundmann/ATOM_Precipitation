@@ -703,6 +703,32 @@ the RK4 net into its physical terms (`pgf`, `coriolis`, `adv_vert`, `adv_horiz`,
 `drag_mc`) in m/s per iteration. A one-line tropical trade-layer summary is also echoed to
 stdout each time.
 
+### Meridional streamfunction as a field
+
+`Psi` — the meridional mass streamfunction [kg/s] — is published as a 3D field as well as a
+printed extremum. `write_meridional_streamfunction()` already formed `psi[i][j]` and threw it
+away except for a CSV and the `Psi_max` line; it now fills `Psi`, which appears in
+`print_min_max_atm` and in the radial/zonal/longal ParaView dumps as `PsiMerid`. It is a zonal
+mean, so it is replicated across `k`.
+
+The reason for publishing it is ATHAD's README item 68: there `Psi_max` was reporting the
+**spurious surface mass flux** rather than the circulation, which a scalar cannot show and a
+field can. **The fill now runs BEFORE `print_min_max_atm`** — the other order left the reported
+`Psi` min/max one checkpoint stale and zero on the first, the same defect ATHAD's item 42
+records. The CSV and the vtk were always correct; only the printed extrema were behind.
+
+### Pressure-field diagnostics
+
+`reportDivergence()` prints, at both the initial projection and each pressure solve: the
+divergence the projection is meant to remove, a **checkerboard index** on `p_dyn`
+(rms(`p` - mean of the 6 neighbours)/rms(`p`); 0 smooth, 2 pure Nyquist), the **Nyquist share of
+the anomaly along each axis** with absolutes beside every ratio, and the **Poisson operator
+weights** `c_r`/`c_the`/`c_phi`.
+
+Read the per-axis absolutes, not the global index. The global index divides by rms(`p_dyn`) and
+so cannot be compared between trees or between arms whose smooth field differs — in ATHAD the
+same field read 0.0003 globally and 0.961 on the zonal axis.
+
 ### ParaView field dumps
 
 The atmosphere's ParaView writers (`atmosphere/Paraview_Atm.cpp`) expose many optional fields

@@ -123,6 +123,10 @@ public:
 
         // ATOM_METRIC_DIVERGENCE — hoisted out of the cell loop; see lib/Utils.h.
         const bool metric_div = AtomUtils::metric_divergence();
+        // ATM_RHIE_CHOW -- fourth-difference pressure smoothing, ported from ATHAD 2026-08-27.
+        // 0 (default) restores the old branch exactly. See the term at the update below.
+        static const double rc_alpha = [](){
+            const char* e = getenv("ATM_RHIE_CHOW"); return e ? atof(e) : 0.0; }();
 
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         // ATM_PRESS_SWEEPS -- relaxation sweeps per call, default 1, which is what this solver
@@ -412,12 +416,55 @@ public:
                         else if (div_src >  src_max)    div_src =  src_max;
                         else if (div_src < -src_max)    div_src = -src_max;
 
+                        // ---- RHIE-CHOW PRESSURE SMOOTHING (ATM_RHIE_CHOW) --------------
+                        //
+                        // The operator on the left is the COMPACT 7-point Laplacian at dr, while
+                        // div_src and the gradient correction in project_initial_velocity Step 3
+                        // are 2*dr central differences. A 2*dr difference annihilates the Nyquist
+                        // mode exactly, so a checkerboard in p_dyn is invisible to the correction
+                        // and unconstrained by the source. Interpolating velocities to faces does
+                        // NOT help -- plain averaging reproduces the 2*dr stencil identically,
+                        // which is the whole reason Rhie-Chow exists.
+                        //
+                        // Add the fourth difference the face reconstruction implies,
+                        // D4 = (L_compact - L_wide) p. It annihilates smooth fields, so the
+                        // smooth solution is untouched; on the Nyquist mode L_wide = 0. Applied
+                        // AFTER the source clamp, so the clamp still bounds the velocity
+                        // divergence and never sees this term. Interior only.
+                        //
+                        // MEASURED IN ATHAD: zonal Nyquist rms 2.42e-3 -> 9.49e-4 at alpha = 1,
+                        // then a hard instability edge before 1.5, because a fourth difference
+                        // reaches i+-2 -- the SAME COLOUR in a red-black sweep, hence necessarily
+                        // lagged. NOT yet measured in THIS tree, where the mode is near-isotropic
+                        // (share 0.443/0.331/0.660, absolute Nyquist ~1.6e-06 on all three axes)
+                        // rather than confined to k, and where c_phi/c_r is 0.0322 against 0.59.
+                        // Do not assume alpha = 1 transfers.
+                        double rc = 0.0;
+                        if (rc_alpha != 0.0) {
+                            if (i >= 2 && i < m.im-2)
+                                rc += num1 * ((m.p_dyn.x[i+1][j][k] - 2.0*m.p_dyn.x[i][j][k]
+                                             + m.p_dyn.x[i-1][j][k])
+                                            - 0.25*(m.p_dyn.x[i+2][j][k] - 2.0*m.p_dyn.x[i][j][k]
+                                                  + m.p_dyn.x[i-2][j][k]));
+                            if (j >= 2 && j < m.jm-2)
+                                rc += num2 * ((m.p_dyn.x[i][j+1][k] - 2.0*m.p_dyn.x[i][j][k]
+                                             + m.p_dyn.x[i][j-1][k])
+                                            - 0.25*(m.p_dyn.x[i][j+2][k] - 2.0*m.p_dyn.x[i][j][k]
+                                                  + m.p_dyn.x[i][j-2][k]));
+                            if (k >= 2 && k < m.km-2)
+                                rc += num3 * ((m.p_dyn.x[i][j][k+1] - 2.0*m.p_dyn.x[i][j][k]
+                                             + m.p_dyn.x[i][j][k-1])
+                                            - 0.25*(m.p_dyn.x[i][j][k+2] - 2.0*m.p_dyn.x[i][j][k]
+                                                  + m.p_dyn.x[i][j][k-2]));
+                            rc *= rc_alpha;
+                        }
+
                         m.p_dyn.x[i][j][k] =
                             ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
                            + (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]) * num2
                            + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
                            + (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * num_a
-                           - div_src) * inv_denom;
+                           - div_src - rc) * inv_denom;
                     }
                 } // k
             } // j

@@ -606,6 +606,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     // file as nitrogen and was read as the gas more than once.
     dump_radial("tau_above", tau_above, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("tau_layer", tau_layer, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("PsiMerid", Psi, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("BruntVaisala_N2", brunt_N2, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
 
@@ -766,6 +767,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     // file as nitrogen and was read as the gas more than once.
     dump_zonal("tau_above", tau_above, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("tau_layer", tau_layer, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("PsiMerid", Psi, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("BruntVaisala_N2", brunt_N2, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("Radiation", radiation, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("Epsilon", epsilon, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
@@ -1067,6 +1069,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     // file as nitrogen and was read as the gas more than once.
     dump_longal("tau_above", tau_above, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("tau_layer", tau_layer, 1.0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("PsiMerid", Psi, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("BruntVaisala_N2", brunt_N2, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
 

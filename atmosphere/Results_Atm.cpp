@@ -70,6 +70,8 @@ void cAtmosphereModel::print_min_max_atm(){
     searchMinMax_3D(" max tau_layer ", " min tau_layer ", 
         " 1 ", tau_layer, 1.0);
 
+    searchMinMax_3D(" max Psi ", " min Psi ", 
+        " kg/s ", Psi, 1.0);
     searchMinMax_3D(" max BruntVaisala_N2 ", " min BruntVaisala_N2 ", 
         " 1/s2 ", brunt_N2, 1.0);
 
