@@ -149,14 +149,23 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   loop start from a clean div v = 0 state with the solenoidal part of the prescribed flow
   intact". For this quantity that is false.
 
-  **The physics narrows what is left.** For a zonally symmetric field with no mass flux through
-  top or bottom, `div(rho v) = 0` forces the column-integrated meridional flux to be constant in
-  latitude and zero at the poles, hence zero everywhere, hence `Psi(ground) = 0`. It is not. So
-  either the projected field is not actually divergence-free -- which item 72 and item 86 already
-  establish, it converges to a fixed point that is not -- **or there is real flux through the
-  bottom boundary, i.e. `u` at the ground is not zero.** ATHAD's invariant 1 pins `u(i=0) = 0`;
-  **that has NOT been checked here, and with topography it cannot be assumed.** One-line read,
-  not a run. Do that before spending anything else on this. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
+  **AND `u` AT BOTH WALLS IS EXACTLY ZERO, WHICH CLOSES THE ARGUMENT.** `BC_Atm.h:679` sets
+  `u.x[im-1] = 0` and `:697` sets `u.x[0] = 0` (with `un` in lockstep), both unconditional -- the
+  latter carries a comment recording that leaving it unconstrained drove +-100 m/s coastal
+  blowups. Verified in the written field at iteration 100, not merely in the assignment:
+  `max|u|` = **0.000000e+00** at `i = 0` and at `i = im-1`, against ~7e-03 one cell in.
+
+  So: for a zonally symmetric field with no mass flux through top or bottom, `div(rho v) = 0`
+  forces the column-integrated meridional flux constant in latitude and zero at the poles, hence
+  `Psi(ground) = 0`. Both walls are shut, and it is 1.55e+11 anyway. **The field is not
+  divergence-free, and this is item 72 / item 86's non-adjoint projection with a physical
+  consequence attached at last**: the residual divergence integrates to a **spurious net
+  meridional mass transport, ~40 % of the Hadley cell's own strength**.
+
+  **That makes `Psi(ground)` an INTEGRATED instrument for the projection residual** -- and a far
+  more legible one than the local `div(u)` rms, which is what this tree and ATHAD have been
+  reading. It is also why `ATM_PROJ_SWEEPS` cannot help: sweeping harder converges the solver to
+  the same non-divergence-free fixed point item 72 measured as bit-identical under 64x. Operator weights differ too: **`c_phi/c_r` = 0.0322 here against
   0.59 in ATHAD**, a 16 km shell over a 6370 km radius against a 300 km one — so "the horizontal
   directions are weakly constrained" is plausibly true HERE and was measured false there.
 
