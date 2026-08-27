@@ -638,6 +638,122 @@ public:
                 }
             }
         }
+        // ---- CHECKERBOARD INDEX ON p_dyn -------------------------------------------
+        //
+        // Roger reports diagonal stripes in p_dyn. Diagonal is the signature to take
+        // seriously: the red-black colouring below is on (i+j+k)&1, so on ANY single slice
+        // the two colours lie along diagonals -- a field that differs between colours draws
+        // exactly diagonal stripes and nothing else.
+        //
+        // Two mechanisms can put a difference there and they need separating, so this
+        // measures rather than assumes:
+        //
+        //  (1) ITERATION. Red-black Gauss-Seidel updates each colour from the other; stop
+        //      mid-cycle, or stop far from convergence, and the colours sit at different
+        //      iteration levels. Cured by sweeping more.
+        //  (2) ODD-EVEN DECOUPLING, i.e. the collocated-grid checkerboard. The Poisson
+        //      SOURCE and the gradient correction in project_initial_velocity Step 3 are
+        //      2*dr central differences, while the operator inverted here is the COMPACT
+        //      7-point Laplacian at dr. A 2*dr central difference annihilates the Nyquist
+        //      mode exactly, so a checkerboard in p_dyn is invisible to the velocity
+        //      correction and unconstrained by the source -- the classical reason Rhie-Chow
+        //      exists, and this file already records div and grad as non-adjoint. NOT cured
+        //      by sweeping more.
+        //
+        // The index: chk = p - (mean of the 6 neighbours). Smooth field -> O(dr^2 * lap p),
+        // small next to rms(p). Pure checkerboard -> chk = 2p, so the ratio tends to 2.
+        // Printed with the red/black mean split, which is the same thing seen globally.
+        double c2 = 0.0, pp2 = 0.0, sred = 0.0, sblk = 0.0;
+        long   nc = 0, nred = 0, nblk = 0;
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:c2,pp2,nc,sred,sblk,nred,nblk)
+        for (int i = 1; i < m.im-1; i++) {
+            for (int j = 1; j < m.jm-1; j++) {
+                for (int k = 1; k < m.km-1; k++) {
+                    if (m.h.x[i][j][k] == 1.0 || m.h.x[i+1][j][k] == 1.0 || m.h.x[i-1][j][k] == 1.0
+                     || m.h.x[i][j+1][k] == 1.0 || m.h.x[i][j-1][k] == 1.0
+                     || m.h.x[i][j][k+1] == 1.0 || m.h.x[i][j][k-1] == 1.0) continue;
+                    const double pc = m.p_dyn.x[i][j][k];
+                    if (!is_finite_safe(pc)) continue;
+                    const double nb = (m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]
+                                     + m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k]
+                                     + m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) / 6.0;
+                    const double chk = pc - nb;
+                    c2 += chk * chk; pp2 += pc * pc; nc++;
+                    if (((i + j + k) & 1) == 0) { sred += pc; nred++; }
+                    else                        { sblk += pc; nblk++; }
+                }
+            }
+        }
+        // ---- DIRECTIONAL NYQUIST SHARE (ported from ATHAD 2026-08-27) ------------------
+        //
+        // THE GLOBAL INDEX ABOVE IS A FALSE NULL, and it is kept beside this one rather than
+        // replaced so the two can be read together. It divides by rms(p_dyn). In ATHAD that
+        // denominator is the large smooth radial/latitudinal structure, so a checkerboard at
+        // 1e-6 of it reads 0.0003 and looks clean -- while the SAME field, measured per
+        // direction, is 96 % Nyquist in k. This tree reads 0.63 not because its checkerboard is
+        // worse but because its rms(p_dyn) has collapsed to ~5e-06; in ABSOLUTE terms ATHAD's
+        // grid-scale component is ~15 000x larger. A ratio whose denominator moves between
+        // trees cannot be compared between them.
+        //
+        // So: the 2-delta component measured against the field's own variation ALONG EACH AXIS,
+        // and the ABSOLUTES beside the ratio -- because a ratio alone cannot tell a cure from a
+        // uniform shrink of everything in that direction. In ATHAD that distinction mattered:
+        // the share moved only 0.961 -> 0.885 while the absolute Nyquist fell 2.55x.
+        //
+        // Land is skipped the same way the divergence above skips it: fluid cells whose
+        // neighbours along the axis being differenced are also fluid.
+        double share[3] = {0.0, 0.0, 0.0};
+        double anom_rms[3] = {0.0, 0.0, 0.0}, nyq_rms[3] = {0.0, 0.0, 0.0};
+        for (int dir = 0; dir < 3; dir++) {
+            const int ni = (dir == 0) ? m.im : ((dir == 1) ? m.jm : m.km);
+            const int n1 = (dir == 0) ? m.jm : m.im;
+            const int n2 = (dir == 2) ? m.jm : m.km;
+            if (ni < 5) continue;
+            double an2 = 0.0, ny2 = 0.0; long ncd = 0;
+            #pragma omp parallel for collapse(2) schedule(static) reduction(+:an2,ny2,ncd)
+            for (int p1 = 1; p1 < n1 - 1; p1++) {
+                for (int p2 = 1; p2 < n2 - 1; p2++) {
+                    double sum = 0.0; long cnt = 0;
+                    for (int q = 1; q < ni - 1; q++) {
+                        const int i = (dir == 0) ? q : p1;
+                        const int j = (dir == 1) ? q : ((dir == 0) ? p1 : p2);
+                        const int k = (dir == 2) ? q : p2;
+                        if (m.h.x[i][j][k] == 1.0) continue;
+                        const double v = m.p_dyn.x[i][j][k];
+                        if (is_finite_safe(v)) { sum += v; cnt++; }
+                    }
+                    if (cnt < 3) continue;
+                    const double mean = sum / (double)cnt;
+                    for (int q = 1; q < ni - 1; q++) {
+                        const int i = (dir == 0) ? q : p1;
+                        const int j = (dir == 1) ? q : ((dir == 0) ? p1 : p2);
+                        const int k = (dir == 2) ? q : p2;
+                        const int ip = (dir == 0) ? i+1 : i, im1 = (dir == 0) ? i-1 : i;
+                        const int jp = (dir == 1) ? j+1 : j, jm1 = (dir == 1) ? j-1 : j;
+                        const int kp = (dir == 2) ? k+1 : k, km1 = (dir == 2) ? k-1 : k;
+                        if (m.h.x[i][j][k] == 1.0 || m.h.x[ip][jp][kp] == 1.0
+                                                  || m.h.x[im1][jm1][km1] == 1.0) continue;
+                        const double v  = m.p_dyn.x[i][j][k];
+                        const double vp = m.p_dyn.x[ip][jp][kp];
+                        const double vm = m.p_dyn.x[im1][jm1][km1];
+                        if (!is_finite_safe(v) || !is_finite_safe(vp) || !is_finite_safe(vm)) continue;
+                        const double anom = v - mean;
+                        const double nyq  = 0.5 * (v - 0.5 * (vp + vm));
+                        an2 += anom * anom; ny2 += nyq * nyq; ncd++;
+                    }
+                }
+            }
+            share[dir]    = (an2 > 0.0) ? sqrt(ny2 / an2) : 0.0;
+            anom_rms[dir] = (ncd > 0)   ? sqrt(an2 / (double)ncd) : 0.0;
+            nyq_rms[dir]  = (ncd > 0)   ? sqrt(ny2 / (double)ncd) : 0.0;
+        }
+
+        const double rms_chk = (nc > 0) ? sqrt(c2 / nc)  : 0.0;
+        const double rms_p   = (nc > 0) ? sqrt(pp2 / nc) : 0.0;
+        const double mred    = (nred > 0) ? sred / nred : 0.0;
+        const double mblk    = (nblk > 0) ? sblk / nblk : 0.0;
+
         const double rms  = (n > 0) ? sqrt(d2 / n)   : 0.0;
         const double rrad = (n > 0) ? sqrt(rad2 / n) : 0.0;
         const ios::fmtflags f = cout.flags();
@@ -649,6 +765,40 @@ public:
              << fixed << setprecision(3)
              << "   ratio rms/radial = " << ((rrad > 0.0) ? rms / rrad : 0.0)
              << "   (" << n << " cells)" << endl;
+        cout << "      ATOM: p_dyn checkerboard " << setw(16) << left << tag << right
+             << " index = " << fixed << setprecision(4)
+             << ((rms_p > 0.0) ? rms_chk / rms_p : 0.0)
+             << "   (0 = smooth, 2 = pure)   rms p_dyn = "
+             << scientific << setprecision(3) << rms_p
+             << "   red-black mean split = " << (mred - mblk) << endl;
+        // Operator weights at a mid-column cell. Printed because the direction the Nyquist mode
+        // lives in should be the direction the operator constrains LEAST, and that is checkable
+        // rather than assumable. In ATHAD it was NOT the explanation: c_phi/c_r = 0.59 there,
+        // comparable, so the mode lives in k because k carries no physical signal, not because
+        // k is weakly damped.
+        {
+            const int i = m.im/2, j = m.jm/2;
+            const double rm = m.rad.z[i], e = m.metricExpRm(rm);
+            double sth = sin(m.the.z[j]); if (sth < 0.55) sth = 0.55;
+            const double rmet = m.metricRadius(rm);
+            const double c1 = e*e/(m.dr*m.dr);
+            const double c2d = (1.0/rmet)/(m.dthe*m.dthe);
+            const double c3 = (1.0/(rmet*sth))/(m.dphi*m.dphi);
+            cout << "      ATOM: Poisson weights at i=" << i << ", j=" << j
+                 << "   c_r = " << scientific << setprecision(3) << c1
+                 << "   c_the = " << c2d << "   c_phi = " << c3
+                 << fixed << setprecision(4) << "   c_phi/c_r = " << (c1>0.0 ? c3/c1 : 0.0) << endl;
+        }
+        static const char* dname[3] = {"radial(i)", "merid(j)", "zonal(k)"};
+        cout << "      ATOM: p_dyn Nyquist share of the anomaly along each axis: ";
+        for (int d = 0; d < 3; d++)
+            cout << "  " << dname[d] << " = " << fixed << setprecision(3) << share[d];
+        cout << endl;
+        cout << "      ATOM: p_dyn absolute rms  ";
+        for (int d = 0; d < 3; d++)
+            cout << "  " << dname[d] << ": anom = " << scientific << setprecision(3)
+                 << anom_rms[d] << " nyq = " << nyq_rms[d];
+        cout << endl;
         cout.flags(f); cout.precision(p);
     }
 
