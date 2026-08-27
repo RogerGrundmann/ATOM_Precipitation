@@ -162,6 +162,45 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   consequence attached at last**: the residual divergence integrates to a **spurious net
   meridional mass transport, ~40 % of the Hadley cell's own strength**.
 
+  **THE CAUSE IS THE PRESCRIBED PROFILE, AND `ATM_V_MASSBAL=1` REMOVES 94.8 % OF IT AT
+  INITIALISATION AND 71.2 % AT ITERATION 100** (default off). `VelocityInitializer::init_v_or_w`
+  builds `v` as a **linear ramp in height** from `coeff_sl` at the surface to `coeff_trop` at the
+  tropopause, then a linear decay to the lid. Nothing constrains `INT(rho*v*dz) = 0`, or even
+  `INT(v*dz) = 0`: for a linear ramp the volume integral is `H*(v_s+v_t)/2`, zero only if the two
+  hand-set endpoints are exact opposites, and the mass integral needs something different again
+  because rho decays roughly exponentially while the ramp is linear in z. At 15N the column runs
+  +3.67 m/s at the ground against -0.54 m/s at 7.4 km — the poleward branch in the dense lower
+  6 km, the return in thin air — and `INT(v*dz)` is **+9151 m^2/s**, so it fails to close in
+  VOLUME as well. Two defects stacked, and the density weighting would still be wrong if the
+  endpoints were opposites.
+
+  **This is the family's rho-blindness one file upstream of where it was already caught**:
+  `MinMax_Atm.cpp`'s `const double rho = r_air` was the DIAGNOSTIC version (`dabbc94` in ATHAD,
+  `ede4810` here). The instrument was corrected; the thing it measures never was.
+
+  The repair is the initial-condition analogue of ATHAD's `initBalancedState` — impose the
+  constraint rather than hope the projection removes it. Per fluid column subtract the
+  density-weighted column mean, `v <- v - INT(rho*v*dz)/INT(rho*dz)`, which zeroes the column
+  mass flux while shifting the profile by a single constant, so the SHEAR defining the cell is
+  untouched. 65 341 columns, largest correction 2.6e-01 non-dim.
+
+  | iter | ground rms off | ground rms on | change | max\|Psi\| off | max\|Psi\| on |
+  |---|---|---|---|---|---|
+  | init | 1.5543e+11 | 8.0210e+09 | **-94.8 %** | | |
+  | 20 | 1.6225e+11 | 3.1714e+10 | -80.5 % | 3.7984e+11 | 2.0371e+11 |
+  | 100 | 1.6657e+11 | 4.7935e+10 | **-71.2 %** | 4.1568e+11 | 1.6077e+11 |
+
+  **IT IS NOT A CURE AND THE RESIDUAL IS RISING MONOTONICALLY** — 8.02e+09 at initialisation to
+  4.79e+10 at iteration 100, still climbing. **No limit is claimed; this file has been caught
+  extrapolating that shape.** So the initial profile is the DOMINANT source but not the only one:
+  the dynamics regenerate the offset, which is what a projection that converges to a
+  non-divergence-free fixed point would do. Two further caveats: the residual is ~5 % even at
+  initialisation, because `Psi` uses the ZONAL MEAN `rvbar` whose fluid-cell count varies with
+  height where `i_topography` varies with `k`, so a per-column balance is not exactly a
+  zonal-mean balance; and `Psi_max` still migrates onto the ground by iteration 100, though at
+  iterations 20-80 it sits at 3.7-5.5 km — **the real circulation, which the control never
+  showed after iteration 3.**
+
   **That makes `Psi(ground)` an INTEGRATED instrument for the projection residual** -- and a far
   more legible one than the local `div(u)` rms, which is what this tree and ATHAD have been
   reading. It is also why `ATM_PROJ_SWEEPS` cannot help: sweeping harder converges the solver to

@@ -540,6 +540,12 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // WHICH one, VelocityInitializer's analytical profile or the projection applied to it. The
     // comment above asserts the profile is not divergence-free and that this call cleans it;
     // these two dumps are what checks that. Print/CSV only, default off.
+    // Impose INT(rho*v*dz) = 0 per column BEFORE projecting. See balance_column_mass_flux()
+    // in VelocityInitializer.h: the prescribed cell is a linear ramp in height and closes in
+    // neither volume nor mass, and neither ATM_PROJ_SWEEPS nor ATM_RHIE_CHOW can remove it.
+    // ATM_V_MASSBAL=1; default off, and a no-op when unset.
+    VelocityInitializer(*this).balance_column_mass_flux();
+
     {
         static const bool psi_proj_dump = [](){
             const char* e = getenv("ATM_PSI_PROJ_DUMP"); return e && atoi(e) != 0; }();

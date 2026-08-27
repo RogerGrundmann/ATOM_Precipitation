@@ -5,6 +5,8 @@
 
 #include <iostream>
 #include <cmath>
+#include <iomanip>
+#include <cstdlib>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -197,6 +199,94 @@ public:
                 }
             }
         }
+    }
+
+    // ==================================================================
+    // COLUMN MASS-FLUX BALANCE (ATM_V_MASSBAL, default off)
+    //
+    // THE PRESCRIBED CELL IS NOT MASS-BALANCED, AND NOTHING DOWNSTREAM FIXES IT.
+    // init_v_or_w() builds v as a LINEAR RAMP IN HEIGHT from coeff_sl at the surface to
+    // coeff_trop at the tropopause, then a linear decay to zero at the lid. Nothing in that
+    // construction constrains INT(rho*v*dz) = 0, or even INT(v*dz) = 0: for a linear ramp the
+    // volume integral is H*(v_s + v_t)/2, which vanishes only if the two hand-set endpoints are
+    // exact opposites, and the MASS integral needs something different again because rho decays
+    // roughly exponentially while the ramp is linear in z.
+    //
+    // Measured consequence (ATOM_Precipitation, 2026-08-27): Psi(lid) = 0.0000e+00 exactly and
+    // Psi(ground) rms = 1.55e+11 kg/s -- about 40 % of the Hadley cell's own strength -- with
+    // u pinned to 0 at BOTH walls (BC_Atm.h:679, :697, verified in the field). With no flux
+    // through either wall, div(rho v) = 0 would force Psi(ground) = 0. At 15N the column runs
+    // +3.67 m/s at the ground and -0.54 m/s at 7.4 km: the poleward branch sits in the dense
+    // lower 6 km and the return in thin air above, so the two cannot cancel. INT(v*dz) is
+    // +9151 m^2/s there, so it fails to close in VOLUME as well -- two defects stacked, and the
+    // density weighting would still be wrong if the endpoints were opposites.
+    //
+    // This is the family's rho-blindness, one file upstream of where it was already caught:
+    // MinMax_Atm.cpp's `const double rho = r_air` was the DIAGNOSTIC version (dabbc94 in ATHAD,
+    // ede4810 here, 2.28x overweight at the cell core). The instrument was corrected; the thing
+    // it measures never was.
+    //
+    // Neither existing lever touches it, both measured on this quantity rather than inferred:
+    // ATM_PROJ_SWEEPS -0.085 % at 100x (ATHAD gets -52.5 % at 10), and ATM_RHIE_CHOW +0.005 %,
+    // which is structural -- D4 annihilates smooth fields by construction, and Psi(ground) is a
+    // domain-scale quantity, so that knob CANNOT act on it. The checkerboard and this
+    // non-closure are not the same defect.
+    //
+    // The repair is the initial-condition analogue of ATHAD's initBalancedState: impose the
+    // constraint rather than hope the projection removes it. Per fluid column, subtract the
+    // density-weighted column mean,
+    //
+    //     v <- v - INT(rho*v*dz) / INT(rho*dz)
+    //
+    // which makes INT(rho*v*dz) = 0 exactly while changing the profile by a single constant, so
+    // the SHEAR that defines the cell -- and hence the overturning -- is untouched. It is the
+    // minimum-norm correction that satisfies the constraint.
+    //
+    // Runs after densities(), because it needs r_humid; r_air is the documented fallback, the
+    // same one write_meridional_streamfunction uses for pre-densities() cells. v only: the
+    // constraint is on the meridional overturning, and w is zonal.
+    // ==================================================================
+    void balance_column_mass_flux()
+    {
+        if (!massBalance()) return;
+        long n_cols = 0; double worst = 0.0;
+        #pragma omp parallel for collapse(2) schedule(static) reduction(+:n_cols) reduction(max:worst)
+        for (int j = 0; j < m.jm; j++) {
+            for (int k = 0; k < m.km; k++) {
+                const int i0 = m.i_topography[j][k];
+                if (i0 >= m.im - 1) continue;
+                double I1 = 0.0, I0 = 0.0;
+                for (int i = i0; i < m.im - 1; i++) {
+                    const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                    if (!(dz > 0.0)) continue;
+                    double r1 = m.r_humid.x[i][j][k], r2 = m.r_humid.x[i+1][j][k];
+                    if (!AtomUtils::is_finite_safe(r1) || r1 <= 0.0) r1 = m.r_air;
+                    if (!AtomUtils::is_finite_safe(r2) || r2 <= 0.0) r2 = m.r_air;
+                    const double v1 = m.v.x[i][j][k], v2 = m.v.x[i+1][j][k];
+                    if (!AtomUtils::is_finite_safe(v1) || !AtomUtils::is_finite_safe(v2)) continue;
+                    I1 += 0.5 * (r1*v1 + r2*v2) * dz;
+                    I0 += 0.5 * (r1    + r2   ) * dz;
+                }
+                if (!(I0 > 0.0)) continue;
+                const double dv = I1 / I0;
+                if (std::fabs(dv) > worst) worst = std::fabs(dv);
+                for (int i = i0; i < m.im; i++) {
+                    m.v.x[i][j][k]  -= dv;
+                    m.vn.x[i][j][k]  = m.v.x[i][j][k];
+                }
+                n_cols++;
+            }
+        }
+        // The walls are re-imposed by bcRadius afterwards; this only shifts interior v.
+        std::cout << "      ATOM: column mass-flux balance applied to " << n_cols
+                  << " columns, largest correction " << std::scientific << std::setprecision(3)
+                  << worst << " (non-dim v)" << std::endl;
+    }
+
+    static bool massBalance(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_V_MASSBAL"); return e && atoi(e) != 0; }();
+        return v;
     }
 
 private:
