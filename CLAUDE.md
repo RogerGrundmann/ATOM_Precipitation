@@ -321,15 +321,24 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   In ATHAD roughly half that non-closure was projection convergence and the rest structural;
   **here it looks like all-structural**, which makes this tree a CLEANER specimen of ATHAD item
   72's non-adjoint collocated stencil (Rhie-Chow named as the un-done repair) than ATHAD itself.
-- **`ATM_METRIC_EXACT` halves the vertical wind and nothing integrated notices.** RMS ratios
-  0.611/0.537 on two orthogonal slices, **p50 ratios 0.460/0.597**, every level 0.50-0.69 — the
-  median falls as far as the max, so it is not a clipped extremum. `Psi` is built from the
-  MERIDIONAL wind and KE from the horizontal components; a RADIAL metric governs the vertical
-  one, and neither instrument reads it. **Unattributed** between the exact Jacobian (21.8x
-  larger at the surface) and the curvature term added with it (`-curv*df/dr`, `curv = zeta`);
-  the discriminating arm — exact Jacobian, curvature forced off, ~12 min — HAS NOT BEEN RUN.
-  This is why the default is off, and the first write-up of it was WRONG and is corrected in
-  the README.
+- **`ATM_METRIC_EXACT` does not damp the vertical wind, it produces a DIFFERENT one from
+  iteration 0.** RMS ratios 0.611/0.537 on two orthogonal slices, **p50 ratios 0.460/0.597**,
+  every level 0.50-0.69 — which the first two write-ups read as a halving. It is a relocated
+  structure, not a damped one. `Psi` is built from the MERIDIONAL wind and KE from the
+  horizontal components; a RADIAL metric governs the vertical one, and neither instrument
+  reads it.
+  **THE ATTRIBUTION ARM HAS BEEN RUN, AND THE QUESTION HAS NO ANSWER** (`ATM_METRIC_NOCURV`,
+  `6d4c68c` 2026-08-26 — an earlier version of this bullet said it had NOT been run, and that
+  line was two days stale). Difference RMS against legacy, zonal / longitudinal: Jacobian only
+  **92.7 % / 83.1 %**, curvature only **72.8 % / 65.3 %**, **both together 60.8 % / 51.8 %** —
+  the combined change is SMALLER than either piece alone, so the two halves partially cancel
+  and there is no additive split to attribute. The test's own premise failed too: the arms
+  already differ **at iteration 0** by 95 % of the field, because `project_initial_velocity`
+  uses `exp_rm` in the Poisson operator AND in the gradient correction, so the metric acts
+  through the INITIAL PROJECTION first and no arm ever started from a shared state.
+  **NOT DECIDABLE BY MORE A/B RUNS** — it is a physics judgement about which field is right,
+  and the prerequisite is the `div(rho u)/rho` print in the next bullet, not another arm.
+  This is why the default is off; the full record is in the README.
 - **No `div(rho u)/rho` diagnostic.** ATHAD prints it every iteration and judges the projection
   by it; here closure has to be computed from `meridional_streamfunction_*.csv`. Porting that
   print is the obvious next instrument.
