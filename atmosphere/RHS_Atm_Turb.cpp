@@ -985,6 +985,54 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     }
 
 
+    // ---- ATM_SFC_FLUX: the bulk turbulent surface heat flux, into the lowest AIR level ----
+    //
+    // WHY THIS EXISTS. brunt_N2 < 0 at i = 0 is the OCEAN MASK -- P(N2<0) is 0.9998 over ocean
+    // and 0.0049 over land at iteration 100 -- because level 0 over ocean has no boundary
+    // condition and no dynamics. `t` is absent from all three of bcRadius's pattern lists;
+    // the line meant to cover that (BC_Atm.h:433, `t.x[0] = t.x[i_topography]`) is a
+    // SELF-ASSIGNMENT where i_topography == 0, i.e. over every ocean column; and the RK4 loop
+    // starts at i = 1. So level 0's only coupling to the air above is damp_wiggles' Shapiro
+    // pass, and it drifts +0.786 K over 100 iterations against +0.15 K above it.
+    //
+    // MultiLayerRadiation's surface balance already debits the surface c_H*(T_s - T_air1)
+    // (MultiLayerRadiation.h:425, c_H = 15 W/m2/K) and nothing credits it to the air. That is
+    // the missing term. It cannot be taken from MLR itself: MLR's seven calls are all at
+    // cAtmosphereModel.cpp:713-889 and the iteration loop starts at 985, so MLR never runs
+    // inside the loop. It has to be formed here, from the live t.
+    //
+    // NOT `Q_Sensible`. That array (line 513 below) is coeff_S*lap(T), the CONDUCTIVE flux
+    // divergence at every interior cell; crediting it here would double-count the thermal
+    // diffusion diffusion_t_re already applies. Different quantity, similar name.
+    //
+    // FORM. A bulk flux H = c_H*(T_s - T_1) [W/m2] warms the lowest air layer at
+    // dT_1/dt = H/(rho*cp*dz), so the rate coefficient is k_S = c_H/(rho*cp*dz) [1/s],
+    // non-dimensionalised in advective time as k_S*L_atm/u_0 exactly like the Held-Suarez
+    // relaxation above, and integrated by RK4's own *dt like every other rhs_t term.
+    //
+    // THE SURFACE IS TREATED AS A FIXED RESERVOIR, which is the prescribed-SST convention: the
+    // ocean's mixed-layer heat capacity dwarfs the air column's, and this tree does not own SST
+    // in the one-way chain. So the flux is one-way into the air and the atmosphere is a net
+    // sink at the surface -- the same choice every prescribed-SST AGCM makes, and stated rather
+    // than hidden. Crediting the surface back requires level 0 to be prognostic, which is the
+    // larger question this defect raises.
+    //
+    // ATM_SFC_FLUX = c_H in W/m2/K. Default 0 = OFF and bit-identical; 15 matches MLR's own
+    // constant. Applied at the FIRST AIR LEVEL only, i_topography+1, over land and ocean alike.
+    static const double sfc_flux_cH = [](){
+        const char* e = getenv("ATM_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+    if (sfc_flux_cH != 0.0 && i == i_topography[j][k] + 1) {
+        double rho = r_humid.x[i][j][k];
+        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
+        const double dz = 0.5 * (get_layer_height(i+1) - get_layer_height(i-1));   // [m]
+        if (dz > 0.0 && cp_l > 0.0) {
+            const double k_S = sfc_flux_cH / (rho * cp_l * dz);                    // [1/s]
+            rhs_t.x[i][j][k] += (k_S * L_atm / u_0)
+                              * (t.x[i-1][j][k] - t.x[i][j][k]);
+        }
+    }
+
+
     // Boussinesq buoyancy body force, in the laminar RHS_Atm.cpp advective-time form
     // g*dt/u_0 (the calibrated, STABLE reference). The turbulent path originally had the
     // bare anomaly (coeff 1.0). An intermediate "fix" used g/(omega*L_atm)≈336 to match the

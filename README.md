@@ -679,7 +679,9 @@ environment variable before launching the atmosphere to change behaviour.
 |---|---|---|
 | `ATM_METRIC_RADIUS` | `r_Earth` (on) | Planetary radius, in km, for the HORIZONTAL metric. Since 2026-07-28 the default is the configured `r_Earth`; `0` restores the old `rad.z ~ 1.5` metric for A/B work. It replaced `ATM_CORIOLIS_SCALE`, which was a multiplier compensating for the same length error: that error factorised as 397.5 (the metric, fixed by this knob) x 40 (`force_nd` dividing by `L_atm` = 400 m instead of the ~16023 m one `rad.z` unit represents, now fixed in RHS_Atm_Turb). With both corrected there is nothing left to sweep |
 | `ATM_CONV_ADJ` | `0` (off) | Dry convective adjustment, Manabe-Strickler, ported from ATHAD 2026-08-27. **This tree had none**, so nothing could remove a superadiabatic layer; see the section below. `ATM_CONV_ADJ_LAPSE` scales the critical lapse (`0` = isothermal criterion, `>1` stricter than dry) and `ATM_CONV_ADJ_PASSES` caps the sweeps per column (default 64) |
-| `ATM_V_MASSBAL` | `0` (off) | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section |
+| `ATM_V_MASSBAL` | **`1` (ON since 2026-08-28)** | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section. **`0` restores the old unbalanced profile exactly** — every measurement in this file dated before 2026-08-28 was made on that branch |
+| `ATM_PROJECT_IN_LOOP` | `0` (off) | `<sweeps>`: a real velocity projection inside the time loop — seed `aux` from `u/v/w`, relax, apply `v <- v - grad(p)`, with `p_dyn` saved/restored. Distinct from the solver's own `run()`, which projects the momentum TENDENCY, not the velocity. Measured a null on `Psi(ground)` at 10 sweeps AND at 200 (-0.013 %) |
+| `ATM_ANELASTIC` | `0` (off) | Solves `div(rho_bar u) = 0` instead of `div(u) = 0`. Null on a full run (-0.006 %) because the time loop never applies the pressure to the velocity; measured **2.0x the volume projection** across the INITIAL projection, where it is applied |
 | `ATM_RAD_TOPO` | `0` (off) | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them |
 | `ATM_RHIE_CHOW` | `0` (off) | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
 | `ATM_PSI_PROJ_DUMP` | `0` (off) | Writes the streamfunction either side of `project_initial_velocity`, as iterations `-1` and `-2`. Print/CSV only |
@@ -830,6 +832,153 @@ as commented-out `dump_*` lines — force components (`BuoyancyForce`, `Coriolis
 more. Uncomment the ones you need for a given investigation and rebuild. The pole-singular
 `paraview_sphere_vts` output can be skipped in favour of the `panorama` `.vts` (whose
 derivatives are well-behaved away from the poles).
+
+## 2026-08-28: the projection arms closed out, and the surface boundary condition
+
+### `ATM_PROJECT_IN_LOOP` at 200 sweeps — still a null, and now the null means something
+
+`f88d319` recorded the knob as implemented-but-untested and discounted its 10-sweep null on the
+grounds that the projection was under-resourced: `project_initial_velocity` runs 200 relaxation
+passes and the in-loop call had been given 10, with red-black Jacobi converging the largest
+scales slowest — error decaying like `(1 - c/N^2)` per sweep, and `Psi(ground)` exactly such a
+domain-scale mode. It has now had 200. Iteration 100, 24 threads, `nm = 100`:
+
+| sweeps | `Psi(ground)` rms | vs off | `div(u)` at solve 25 | wall |
+|---|---|---|---|---|
+| off | 1.66571090e+11 | — | 1.766e-03 | 527 s |
+| 10 | 1.66569245e+11 | -0.0011 % | 1.764e-03 | 556 s |
+| 10 + anelastic | 1.66561990e+11 | -0.0055 % | — | 552 s |
+| **200** | **1.66549029e+11** | **-0.0132 %** | **1.761e-03** | **1017 s** |
+
+**Twenty times the sweeps bought 2.5x the `div(u)` reduction** (-0.28 % against -0.11 %) and left
+`Psi(ground)` where it was. The cost estimate in the first write-up was wrong too: "~20x the
+solver cost per iteration" is true per solve, but the solve is about a fifth of the runtime —
+**1.93x wall clock, 17 minutes**. The arm was deferred as expensive and was not.
+
+**What it does not settle, and the gap is one print.** `div(u)` is only ever reported AT THE
+PRESSURE SOLVE, never immediately after `project_velocity_in_loop`. "The projection zeroes
+`div(u)` and one time step puts all of it back" and "the projection never reduces `div(u)`" have
+the identical signature in that table, and they are different defects.
+
+### `Psi(lid) = 0` is the integration constant, and `im` cannot close `Psi(ground)`
+
+`MinMax_Atm.cpp:232` integrates DOWNWARD from the lid with `psi[im-1] = 0` by construction, so
+the `Psi(lid)` column of the streamfunction table above is arithmetic and is identical in every
+arm ever run. The earlier framing, "the lid closes exactly and the ground does not", gave it
+weight it never had. **All the content is in `Psi(ground)`** — which is therefore identically the
+whole-column integral `2*pi*a*cos(phi)*INT(rho*vbar dz)`, not a value AT `i = 0` but a TOTAL
+reported at `i = 0`.
+
+That reading rules out two tempting non-cures:
+
+1. **Reshaping the initial `v(z)` to push the offset up the column cannot work.** A definite
+   integral is invariant to any vertical redistribution preserving `INT(rho*v dz)`: the profile
+   can be reshaped until `Psi` is near-zero through most of the depth and the ground value will
+   not move by one digit. Re-integrating upward from the ground is the cosmetic version — it
+   relabels which end carries the constant and destroys the instrument.
+2. **More vertical levels cannot close it, because the defect is in the INTEGRAND.** Measured by
+   re-integrating the written field with a cubic spline on the SAME 41 levels (nodal `rvbar`
+   recovered from the `psi` differences; that back-out is marginally stable, so the lid anchor
+   was swept over its plausible range and the three anchors agree to three decimals):
+
+   | field | trapezoid (model) | cubic spline | change |
+   |---|---|---|---|
+   | shipped, iter 20 | 1.622498e+11 | 1.619763e+11 | **-0.169 %** |
+   | shipped, iter 100 | 1.665711e+11 | 1.663176e+11 | **-0.152 %** |
+   | `ATM_PROJECT_IN_LOOP=200`, iter 100 | 1.665490e+11 | 1.662955e+11 | -0.152 % |
+   | `ATM_V_MASSBAL=1`, iter 100 | 4.793468e+10 | 4.777011e+10 | -0.343 % |
+
+   Quadrature is ~0.15 % of a 40 % non-closure, and in absolute terms ~1.6e8-2.5e8 kg/s in every
+   arm — so even the residual `ATM_V_MASSBAL` leaves is **200x larger than the discretisation
+   error**. The source says the same without running anything: `VelocityInitializer.h:55` sets
+   the 15N Hadley column with `init_v_or_w(m.v, 75, -3.0, 4.0)`, tropopause **-3.0** and surface
+   **+4.0**, and for the linear ramp the continuous integral is `H*(v_s+v_t)/2 ∝ +1.0`, nonzero
+   before any grid exists.
+
+   *Caveat kept rather than argued away*: this tree's stretch is the family's worst (`zeta`
+   3.715, spread 23.21x, 38.9 m bottom layer), so a real trapezoid error could have hidden near
+   the surface. The spline measurement is what bounds it at 0.15 %; it is a bound, not an
+   argument.
+
+### `ATM_V_MASSBAL` is the default since 2026-08-28
+
+No other lever in this tree touches `Psi(ground)`: `ATM_PROJ_SWEEPS` is inert here, `ATM_RHIE_CHOW`
+is structurally incapable of it, `ATM_ANELASTIC` cannot reach the velocity in the loop, and
+`ATM_PROJECT_IN_LOOP` is a null at 10 and at 200 sweeps. The column mass balance removes 94.8 % at
+initialisation and 71.2 % at iteration 100. Verified both directions at iteration 100, `nm = 100`,
+24 threads:
+
+| branch | `Psi(ground)` | `max\|Psi\|` | matches |
+|---|---|---|---|
+| `ATM_V_MASSBAL=0` | 1.6657e+11 | 4.1568e+11 | the recorded old default |
+| default (unset) | 4.7935e+10 | 1.6078e+11 | the recorded `=1` arm |
+
+**And the global maximum of `Psi` moves off the ground**, which is ATHAD item 68's signature:
+
+| | max signed `Psi` | min signed `Psi` | global `max\|Psi\|` |
+|---|---|---|---|
+| massbal OFF | +4.1568e+11 @ 15N, **0 m** | -3.5102e+11 @ 45S, 1729 m | 4.1568e+11 @ 15N, **0 m** |
+| massbal ON | +1.4689e+11 @ 15N, 0 m | -1.6078e+11 @ 45S, 3316 m | **1.6078e+11 @ 45S, 3316 m** |
+
+On the old default the largest value in the streamfunction WAS the ground defect; on the new one
+the real circulation exceeds it. **Every other knob measurement in this file dated before
+2026-08-28 was made against the unbalanced initial state**, so those comparisons now differ in
+their initial state as well as in the quantity under test — the trap this project already records
+ATHAD losing an attribution to. `ATM_V_MASSBAL=0` restores the old branch exactly.
+
+### `brunt_N2 < 0` at `i = 0` is the OCEAN MASK, and `t` has no radial boundary condition there
+
+Measured on the level-0 radial slice at iteration 100:
+
+| | cells | `P(N2 < 0)` | median `N2` |
+|---|---|---|---|
+| ocean | 43 602 (66.73 %) | **0.9998** | **-3.70e-04** |
+| land | 21 739 (33.27 %) | **0.0049** | **+2.11e-04** |
+
+43 593 of the 43 700 unstable cells are ocean and 107 are land. **The "59 % of columns" recorded
+for `ATM_CONV_ADJ` was always the ocean fraction.**
+
+Four facts, and the last is the defect:
+
+1. **Level 0 is not prognostic** — `RungeKutta_Atm_Turb.cpp:111` is `for(int i = 1; i < im-1;)`.
+2. **`t` has NO radial BC at `i = 0`.** `bcRadius` carries three pattern lists — `both_cubic`,
+   `vn_bot_cubic_top`, `cubic_bot_vn_top` — and `t` is in **none** of them, while `p_stat`,
+   `r_humid`, `cloud`, `ice` and `tke` all get one. `t` has explicit special handling at the LID
+   (`pin_t_top`) and nothing at the bottom.
+3. **The mechanism meant to cover that is a self-assignment over ocean.** `BC_Atm.h:433`,
+   documented as "copy surface-level (`i_mount`) values down to the i=0 reference layer … so
+   surface fluxes see the correct surface state", is `t.x[0] = t.x[i_topography]`. Over land
+   `i_topography > 0` and it does real work — which is exactly why land is stable. Over ocean
+   `i_topography == 0` (`FileIO_Atm.cpp:488`) and it reads `t.x[0] = t.x[0]`.
+4. **So level 0's only coupling to the air above is a Shapiro smoother**, `damp_wiggles(t,…)` at
+   `cAtmosphereModel.cpp:1113`. Level 0 drifts **+0.786 K** over 100 iterations against +0.15 K
+   above it.
+
+**The stencil explains why it is ONE layer.** `N2` at `i = 0` is one-sided on `theta[0],
+theta[1]`; at `i = 1` centred on `theta[0], theta[2]`; at `i = 2` centred on `theta[1],
+theta[3]` — the first stencil that does not see level 0. The 59/59/0 pattern is one bad value
+read by two stencils, not two unstable layers.
+
+**The model has not decided whether ocean level 0 is the ocean or the air.** If it is a
+prescribed SST skin then `N2 < 0` there is physically correct and the repair is to credit the
+bulk flux to level 1; if it is the lowest air level it needs RK4 and a flux BC. It is currently
+neither. **This reframes `ATM_CONV_ADJ`**: its -19.45 -> -9.76 K/km is a palliative mixing away a
+boundary-condition gap, not a missing convection scheme.
+
+**And `Q_Sensible` is NOT the surface flux** — an earlier note ran two quantities together. The
+array at `RHS_Atm_Turb.cpp:513` is `coeff_S*lap(T)`, the CONDUCTIVE flux divergence at every
+interior cell; crediting it anywhere would double-count the thermal diffusion `diffusion_t_re`
+already applies. The surface bulk flux is the separate `c_H*(T_s - T_air1)` with
+`c_H = 15 W/m2/K` at `MultiLayerRadiation.h:425`. Both are real defects; only the second bears on
+the instability, and MLR's copy cannot cure it because **MLR never runs inside the loop** (calls
+at `cAtmosphereModel.cpp:713-889`, loop at 985).
+
+`ATM_SFC_FLUX=<c_H>` (default `0` = off, bit-identical; `15` matches MLR) forms that flux in the
+loop from the live `t`, as a rate `k_S = c_H/(rho*cp*dz)` non-dimensionalised in advective time
+`k_S*L_atm/u_0` exactly like the Held-Suarez relaxation, applied at the first air level
+`i_topography+1`. The surface is treated as a fixed reservoir — the prescribed-SST convention,
+stated rather than hidden; crediting the surface back requires level 0 to be prognostic, which is
+the larger question this defect raises.
 
 ## Output
 
