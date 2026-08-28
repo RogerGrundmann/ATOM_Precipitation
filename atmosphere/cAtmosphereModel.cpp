@@ -544,7 +544,9 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // Impose INT(rho*v*dz) = 0 per column BEFORE projecting. See balance_column_mass_flux()
     // in VelocityInitializer.h: the prescribed cell is a linear ramp in height and closes in
     // neither volume nor mass, and neither ATM_PROJ_SWEEPS nor ATM_RHIE_CHOW can remove it.
-    // ATM_V_MASSBAL=1; default off, and a no-op when unset.
+    // DEFAULT ON since 2026-08-28: it removes 94.8 % of Psi(ground) at initialisation and
+    // 71.2 % at iteration 100, and no other lever in this tree touches that mode.
+    // ATM_V_MASSBAL=0 restores the unbalanced profile exactly.
     VelocityInitializer(*this).balance_column_mass_flux();
 
     {

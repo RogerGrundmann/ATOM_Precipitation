@@ -202,7 +202,7 @@ public:
     }
 
     // ==================================================================
-    // COLUMN MASS-FLUX BALANCE (ATM_V_MASSBAL, default off)
+    // COLUMN MASS-FLUX BALANCE (ATM_V_MASSBAL, DEFAULT ON since 2026-08-28; =0 restores)
     //
     // THE PRESCRIBED CELL IS NOT MASS-BALANCED, AND NOTHING DOWNSTREAM FIXES IT.
     // init_v_or_w() builds v as a LINEAR RAMP IN HEIGHT from coeff_sl at the surface to
@@ -283,9 +283,11 @@ public:
                   << worst << " (non-dim v)" << std::endl;
     }
 
+    // DEFAULT ON since 2026-08-28. ATM_V_MASSBAL=0 restores the unbalanced prescribed profile
+    // exactly, which is the branch every measurement recorded before that date was made on.
     static bool massBalance(){
         static const bool v = [](){
-            const char* e = getenv("ATM_V_MASSBAL"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_V_MASSBAL"); return e ? (atoi(e) != 0) : true; }();
         return v;
     }
 

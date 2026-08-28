@@ -50,7 +50,10 @@ by construction, and that law puts this tree's 16 km lid at 117 K.
 
 ## The ported A/B knobs, and what each MEASURED here
 
-All default to what this tree has always done, and all are verified bit-identical when unset.
+All but `ATM_V_MASSBAL` default to what this tree has always done, and all are verified
+bit-identical when unset. **`ATM_V_MASSBAL` BECAME THE DEFAULT ON 2026-08-28, SO EVERY OTHER ROW
+IN THIS TABLE WAS MEASURED AGAINST AN INITIAL STATE THAT IS NO LONGER THE DEFAULT** — the arms
+are being re-run against the new one; `ATM_V_MASSBAL=0` restores the old branch exactly.
 **Every one behaved differently from ATHAD — porting its DEFAULTS would have been wrong four
 times out of four.**
 
@@ -62,7 +65,7 @@ times out of four.**
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
 | `ATM_RAD_TOPO` | **NEW HERE, and it is this tree's defect, not ATHAD's** | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
-| `ATM_V_MASSBAL` | **NEW HERE**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
+| `ATM_V_MASSBAL` | **NEW HERE, AND DEFAULT ON SINCE 2026-08-28**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
 | `ATM_ANELASTIC` | ported, **null on `Psi(ground)` (-0.006 %)** — and the reason is structural, below | on by default there |
 | `ATM_BUOY_MOIST` | **NEW HERE**: +4.9 % on `ubud_buoy`, but ONLY with `ATM_BUOY_CONSISTENT` | not ported |
@@ -331,8 +334,10 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   consequence attached at last**: the residual divergence integrates to a **spurious net
   meridional mass transport, ~40 % of the Hadley cell's own strength**.
 
-  **THE CAUSE IS THE PRESCRIBED PROFILE, AND `ATM_V_MASSBAL=1` REMOVES 94.8 % OF IT AT
-  INITIALISATION AND 71.2 % AT ITERATION 100** (default off). `VelocityInitializer::init_v_or_w`
+  **THE CAUSE IS THE PRESCRIBED PROFILE, AND `ATM_V_MASSBAL` REMOVES 94.8 % OF IT AT
+  INITIALISATION AND 71.2 % AT ITERATION 100** (**DEFAULT ON since 2026-08-28**; `=0` restores
+  the old branch, verified at iteration 100: `Psi(ground)` 1.6657e+11 and `max|Psi|` 4.1568e+11,
+  the recorded values to five figures). `VelocityInitializer::init_v_or_w`
   builds `v` as a **linear ramp in height** from `coeff_sl` at the surface to `coeff_trop` at the
   tropopause, then a linear decay to the lid. Nothing constrains `INT(rho*v*dz) = 0`, or even
   `INT(v*dz) = 0`: for a linear ramp the volume integral is `H*(v_s+v_t)/2`, zero only if the two
