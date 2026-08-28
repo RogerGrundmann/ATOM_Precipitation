@@ -239,7 +239,38 @@ public:
                 // Applied to LWP_i/IWP_i below, it feeds BOTH the LW tau_cloud and the SW path, so
                 // the two stay BALANCED — fixing only one (e.g. SW albedo alone) removes the
                 // excess cooling but leaves the excess greenhouse and tips the climate hot.
-                constexpr double cwp_cap_col = 250.0;                // g/m2 physical thick-cloud column condensate
+                // ATM_CWP_CAP -- the column condensate cap in g/m2. **20.0 since 2026-08-28**,
+                // was 250.0; ATM_CWP_CAP=250 restores the old branch exactly.
+                //
+                // 250 was never tunable against anything: the "OLR" printed next to it was the
+                // LID TEMPERATURE (sigma*236.15^4 = 176.3 W/m2) and moved 2.7 W/m2 when cloud was
+                // removed entirely. With column_olr() integrating the real upward flux, the cap
+                // became measurable and 250 was three times too opaque. Sweep at nm = 21,
+                // cos-lat-mean, cloud LW forcing against Earth's ~25:
+                //
+                //     cap    15      17      20      25      50     100     250
+                //     forc 20.38   22.56   25.58   30.05   45.39   61.55   80.59
+                //
+                // 20 is the value, and it is CONFIRMED AT nm = 100 rather than fitted at 21 and
+                // hoped for: the forcing runs 25.58239 / 25.59069 / 25.59188 / 25.59284 /
+                // 25.59398 at iterations 20/40/60/80/100 -- a drift of +0.05 % over 80 iterations.
+                // The worry it was run to answer -- that cloud_scale = cap/cwp_raw would over-clip
+                // as the condensate field grew -- does not materialise, because cwp_raw (~1500)
+                // exceeds the cap in every column, so the cap sets the column path outright and
+                // only its vertical distribution can move.
+                //
+                // WHAT IT DOES NOT FIX, and must not be tuned to hide: clear-sky OLR is 273.9
+                // against Earth's ~265, so all-sky lands at 248.3 rather than ~240. That ~9 W/m2
+                // lives in the CLEAR column -- eps_dry, the Bignami 0.0056, co2_band_scale -- and
+                // absorbing it into a cloud constant would make this number mean nothing.
+                // AND IT IS A FIT, NOT A MECHANISM: the cap stands in for a cloud fraction the
+                // scheme does not have, so every column is treated as fully overcast with a thin
+                // cloud rather than 65 % of them with a thick one. The global mean is matched;
+                // the regional distribution is not.
+                static const double cwp_cap_col = [](){
+                    const char* e = getenv("ATM_CWP_CAP");
+                    const double v = e ? atof(e) : 20.0;
+                    return v > 0.0 ? v : 20.0; }();
                 double cwp_raw = 0.0;
                 for (int i = i_mount; i <= i_trop; i++) {
                     const double dz_i   = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
