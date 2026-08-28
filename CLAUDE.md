@@ -66,9 +66,10 @@ times out of four.**
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
 | `ATM_ANELASTIC` | ported, **null on `Psi(ground)` (-0.006 %)** — and the reason is structural, below | on by default there |
 | `ATM_BUOY_MOIST` | **NEW HERE**: +4.9 % on `ubud_buoy`, but ONLY with `ATM_BUOY_CONSISTENT` | not ported |
-| `ATM_PROJECT_IN_LOOP` | **NEW HERE, IMPLEMENTED BUT UNTESTED** — see below | no equivalent |
+| `ATM_PROJECT_IN_LOOP` | **NEW HERE**: null on `Psi(ground)` at 10 AND at 200 sweeps (-0.013 %) | no equivalent |
 
-**`ATM_PROJECT_IN_LOOP=<sweeps>` IS IMPLEMENTED AND NOT YET TESTED. DO NOT QUOTE ITS NULL.**
+**`ATM_PROJECT_IN_LOOP=<sweeps>` HAS NOW BEEN RUN TO 200 SWEEPS (2026-08-28), AND SWEEPS ARE NOT
+THE LEVER.**
 Default 0 = off. It is a real velocity projection inside the time loop: seed `aux` from `u/v/w`,
 relax the Poisson, apply `v <- v - grad(p)`, with `p_dyn` saved and restored around the call
 because the loop's own pressure is live and read by the next RK4 stage.
@@ -81,14 +82,33 @@ starts at zero and every tendency is divergence-free then `div(u)` stays zero �
 THAT gradient from `u` would be wrong. **So "the velocity is never projected" is true but the
 model is not simply omitting a step; it projects the tendency instead.**
 
-Measured at 10 sweeps, three arms (off / 10 / 10 + anelastic): `Psi(ground)` **1.6657e+11 in all
-three, unchanged to five digits**, volume integral likewise. **THAT NULL IS NOT A RESULT.** The
-projection is barely acting: `div(u)` at pressure solve moves **1.766e-03 -> 1.764e-03**, a tenth
-of a percent. `project_initial_velocity` runs **200** relaxation passes and this was given
-**10** — twenty times fewer — and red-black Jacobi converges the LARGEST scales slowest, error
-decaying like `(1 - c/N^2)` per sweep, so a domain-scale mode on a 181x361 grid wants O(N^2).
-`Psi(ground)` is exactly such a mode. The untried arm is 200 sweeps, at ~20x the solver cost per
-iteration.
+Four arms at iteration 100, 24 threads:
+
+| sweeps | `Psi(ground)` rms | vs off | `div(u)` at solve 25 | wall |
+|---|---|---|---|---|
+| off | 1.66571090e+11 | — | 1.766e-03 | 527 s |
+| 10 | 1.66569245e+11 | -0.0011 % | 1.764e-03 | 556 s |
+| 10 + anelastic | 1.66561990e+11 | -0.0055 % | — | 552 s |
+| **200** | **1.66549029e+11** | **-0.0132 %** | **1.761e-03** | **1017 s** |
+
+**THE 10-SWEEP NULL WAS DISCOUNTED FOR A REASON THAT NO LONGER HOLDS.** The first write-up said
+the projection was "barely acting" because `project_initial_velocity` runs **200** passes and
+this was given **10**, and red-black Jacobi converges the LARGEST scales slowest — error decaying
+like `(1 - c/N^2)` per sweep, so a domain-scale mode on a 181x361 grid wants O(N^2), and
+`Psi(ground)` is exactly such a mode. It has now had 200. **Twenty times the sweeps bought 2.5x
+the `div(u)` reduction** (-0.28 % against -0.11 %) and left `Psi(ground)` where it was. That is
+the same shape as `ATM_PROJ_SWEEPS` being bit-identical under 64x: **the solver converges to a
+fixed point that is not divergence-free, and more relaxation converges to it harder.**
+
+**THE COST ESTIMATE IN THE FIRST WRITE-UP WAS ALSO WRONG.** "~20x the solver cost per iteration"
+is true per solve, but the solve is about a fifth of the runtime: 1017 s against 527 s, **1.93x
+wall clock, 17 minutes.** The arm was deferred as expensive and was not.
+
+**WHAT IT STILL DOES NOT SETTLE, AND THE MISSING INSTRUMENT IS ONE PRINT.** `div(u)` is only ever
+reported AT THE PRESSURE SOLVE, never immediately after `project_velocity_in_loop`. So
+"the projection zeroes `div(u)` and one time step puts all of it back" and "the projection never
+reduces `div(u)` at all" have the IDENTICAL signature in this table, and they are different
+defects. Do not read this null as either one.
 
 **And the whole line may be chasing a quantity the model does not constrain**: `INT(v dz)` is
 7.83e3 m^2/s, so `div(u)` was never zero to begin with, and `Psi(ground)` may be measuring
