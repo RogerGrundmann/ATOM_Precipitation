@@ -183,7 +183,14 @@ public:
                 // Gives OLR ~263 W/m2 with the water-vapour greenhouse feedback retained.
                 // The CO2 anomaly forcing is handled separately (5.35*ln(C/C0)); no CO2
                 // emissivity term here.
-                const double eps_dry = 0.684;                     // Bignami dry-air baseline
+                // ATM_EPS_DRY / ATM_CO2_BAND -- the two clear-sky constants, made sweepable so
+                // the offline harness (test/rad_selftest, ~0.07 s per case) can scan the scheme's
+                // radiative equilibrium against a US-standard column without running the model.
+                // Defaults are the shipped values, so unset is bit-identical.
+                static const double eps_dry = [](){
+                    const char* e = getenv("ATM_EPS_DRY");
+                    const double v = e ? atof(e) : 0.684;
+                    return (v > 0.0 && v < 1.0) ? v : 0.684; }();     // Bignami dry-air baseline
                 double sum_dp = 0.0, sum_vp = 0.0;
                 for (int i = i_mount; i <= i_trop; i++) {
                     double dp = (i < i_trop) ? (m.p_stat.x[i][j][k] - m.p_stat.x[i+1][j][k])
@@ -300,7 +307,10 @@ public:
                     // per-doubling forcing is the separate 5.35*ln(C/C0) t_eq shift
                     // (cAtmosphereModel.cpp). If MLR is ever wired AND that t_eq forcing is on,
                     // CO2 acts twice; reconcile then (see project_multilayer_radiation).
-                    const double co2_band_scale = 0.17;
+                    static const double co2_band_scale = [](){
+                        const char* e = getenv("ATM_CO2_BAND");
+                        const double v = e ? atof(e) : 0.17;
+                        return (v >= 0.0) ? v : 0.17; }();
                     const double dz  = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
                                                     : (m.get_layer_height(i) - m.get_layer_height(i-1));
                     // co2.x is stored in ppm (ThermoAtm init, BCs, transport all use ppm): a

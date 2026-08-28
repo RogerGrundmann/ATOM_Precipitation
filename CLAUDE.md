@@ -629,6 +629,35 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   convective adjustment cannot steepen a profile that is already too stable.
   **So the warm-aloft bias is the radiation scheme's own equilibrium**, which the offline harness
   shows independently: handed a US-standard column it returns +17.7 K at 9923 m unaided.
+
+  **AND IT IS NOT REACHABLE BY THE CLEAR-SKY CONSTANTS. SWEPT IN THE HARNESS**
+  (`ATM_EPS_DRY`, `ATM_CO2_BAND`, both default to the shipped values, ~0.07 s per case):
+
+  | case | T_sfc | T(9.9 km) | lapse K/km | OLR |
+  |---|---|---|---|---|
+  | **US-standard / Earth** | **288.15** | **223.75** | **6.49** | **~265** |
+  | shipped 0.684 / 0.17 | 280.76 | 241.41 | 3.97 | 255.0 |
+  | `eps_dry` 0.50 | 276.46 | 242.49 | 3.42 | 271.0 |
+  | `eps_dry` 0.95 | 292.66 | 234.50 | 5.86 | 182.5 |
+  | `co2_band` 0.0 | 261.50 | 243.15 | 1.85 | 251.4 |
+  | `co2_band` 1.40 | 293.23 | 232.52 | 6.12 | 165.2 |
+
+  **LAPSE RATE AND OLR ARE LOCKED IN OPPOSITION, AND EARTH IS OFF THE CURVE.** Every setting that
+  steepens the lapse toward 6.5 collapses the OLR: 6.12 K/km costs **165 W/m2**. Earth has BOTH
+  6.49 and 265, and no combination of these two constants comes near it. The constants move the
+  profile's OFFSET — the surface spans 261-293 K — and barely its SLOPE aloft, where 9.9 km stays
+  in 232-243 K against a standard 223.75 across the entire sweep. **Tuning them is exhausted.**
+
+  **THE STRUCTURAL READING, and it closes the `ATM_CONV_ADJ` null above.** This scheme computes
+  RADIATIVE equilibrium; Earth's troposphere is in radiative-CONVECTIVE equilibrium. Earth's
+  radiative equilibrium is strongly UNSTABLE near the ground (~15 K/km), which is what triggers
+  convection and lets it set 6.5. This scheme's is **3.97 K/km — far too STABLE**, so there is
+  nothing for a convective adjustment to mix, which is exactly what `ATM_CONV_ADJ=1` measured.
+  **The lead is the optical-depth weighting**: `tau_i = tau_dry*dp_i/Sum(dp)` distributes by MASS
+  alone, with no pressure broadening, whereas real LW absorption goes roughly as `p*dp` and so
+  concentrates optical depth near the surface — which is what makes a real radiative equilibrium
+  steep at the bottom. Mass-only weighting spreads it too evenly and flattens the profile.
+  **Untested**, and the harness makes it a minutes-long test.
   *Side note, not the same quantity*: the SURFACE lapse at 28N is **194.65 -> 188.74 K/km** — a
   7.6 K jump across the 39 m from level 0 to level 1, the boundary-condition defect above, which
   the adjustment dents by 3 %. Do not confuse it with the tropospheric lapse; they move
