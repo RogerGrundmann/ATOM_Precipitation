@@ -243,10 +243,52 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   | 20 | 1.6225e+11 | 0.0000e+00 | 0.427 |
   | 100 | 1.6657e+11 | 0.0000e+00 | 0.401 |
 
-  **The lid closes exactly and the ground does not.** Together those say the column-integrated
-  meridional mass flux does not vanish. **It is NOT a boundary-cell artefact**: rms\|Psi\| decays
+  **`Psi(lid)` = 0 IS THE INTEGRATION CONSTANT, NOT A RESULT, and the "lid closes / ground does
+  not" framing gave it weight it never had.** `MinMax_Atm.cpp:232` integrates DOWNWARD from the
+  lid with `psi[im-1] = 0` by construction, so that column of the table is arithmetic and is
+  identical in every arm ever run. **All of the content is in `Psi(ground)`**, which is therefore
+  identically the whole-column integral `2*pi*a*cos(phi)*INT(rho*vbar dz)` — not a value AT
+  `i = 0` but a TOTAL, reported at `i = 0`. It does not vanish, and it must.
+  **It is NOT a boundary-cell artefact**: rms\|Psi\| decays
   smoothly through the whole depth — 1.666e+11 at 0 m, 1.598e+11 at 236 m, 1.269e+11 at 2163 m,
   7.05e+10 at 6088 m, 3.29e+07 at 14567 m — so it is a column-wide offset, not a spike at `i = 0`.
+
+  **AND IT CANNOT BE RELOCATED OR RESOLVED AWAY. TWO TEMPTING NON-CURES, BOTH RULED OUT**
+  (2026-08-28):
+
+  1. **Pushing the offset up the column by reshaping the initial `v(z)` cannot work.**
+     `Psi(ground)` is a definite integral, so it is INVARIANT to any vertical redistribution of
+     `v` that preserves `INT(rho*v dz)`. The profile can be reshaped so `Psi` is near-zero
+     through most of the depth with the whole discrepancy in one thin layer, and the ground
+     value will not move by one digit. There is no "where" for a total to live. The only initial
+     condition that moves it is one that changes the column integral — which is `ATM_V_MASSBAL`.
+     Re-integrating UPWARD from the ground instead is the cosmetic version: it relabels which end
+     carries the constant, changes no velocity, and destroys the instrument.
+  2. **Increasing `im` cannot close it either — the defect is in the INTEGRAND, not the
+     quadrature.** Checked directly, by re-integrating the written field with a cubic spline on
+     the SAME 41 levels (nodal `rvbar` recovered from the `psi` differences; the back-out is
+     marginally stable, so the lid anchor was swept over its plausible range and the three
+     anchors agree to three decimals):
+
+     | field | trapezoid (model) | cubic spline | change |
+     |---|---|---|---|
+     | shipped, iter 20 | 1.622498e+11 | 1.619763e+11 | **-0.169 %** |
+     | shipped, iter 100 | 1.665711e+11 | 1.663176e+11 | **-0.152 %** |
+     | `ATM_PROJECT_IN_LOOP=200`, iter 100 | 1.665490e+11 | 1.662955e+11 | -0.152 % |
+     | `ATM_V_MASSBAL=1`, iter 100 | 4.793468e+10 | 4.777011e+10 | -0.343 % |
+
+     **Quadrature is ~0.15 % of a 40 % non-closure.** In ABSOLUTE terms it is ~1.6e8-2.5e8 kg/s
+     in every arm — so even the residual `ATM_V_MASSBAL` leaves is **200x larger than the
+     discretisation error**, and refining the grid cannot reach that either.
+     The reason is visible in the source without running anything: `VelocityInitializer.h:55`
+     sets the 15N Hadley column with `init_v_or_w(m.v, 75, -3.0, 4.0)` — tropopause **-3.0**,
+     surface **+4.0**. For the linear ramp the CONTINUOUS integral is `H*(v_s+v_t)/2`,
+     proportional to `+4.0 - 3.0 = +1.0`, nonzero before any grid exists. More levels converge
+     the sum to that nonzero limit. **`ATM_V_MASSBAL` removing 94.8 % by changing `v` on the SAME
+     grid with the SAME quadrature is the other half of the same proof.**
+     *Caveat worth keeping*: this tree's stretch is the family's worst (`zeta` 3.715, spread
+     23.21x, 38.9 m bottom layer), so a real trapezoid error could hide near the surface — the
+     measurement above is what bounds it at 0.15 %, and it is a bound, not an argument.
 
   **At iteration 1 it is already 93.8 % of its iteration-100 value** (ATHAD item 68 measured
   98.7 %), so it is written by the initial velocity profile and the dynamics only add 2.7 % over
