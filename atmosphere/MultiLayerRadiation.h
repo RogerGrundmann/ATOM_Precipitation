@@ -105,8 +105,14 @@ public:
             m.short_wave_radiation[j] = m.short_wave_radiation[j_max - j];
 
         // ATM_RAD_TOPO -- see the i_mount comment inside the column loop below.
+        // DEFAULT ON since 2026-08-28; ATM_RAD_TOPO=0 restores the sea-level column exactly.
+        // The flip is on a 100-iteration measurement of the OFF branch, which the original
+        // 4-iteration one could not see: max Epsilon steps 0.088 (Angola, iter 20) -> 0.663
+        // (28N 88E, the Himalaya, iter 40) and max tau_layer 0.121 -> 7.590, a 63x jump that
+        // then holds to iteration 100. The knob's original comparison, 0.088 -> 0.119, was made
+        // at 4 iterations -- entirely before the defect it repairs appears.
         static const bool topo_rad = [](){
-            const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_RAD_TOPO"); return e ? (atoi(e) != 0) : true; }();
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         static const bool sfc_coupled = [](){
             const char* e = getenv("ATM_SFC_COUPLED"); return e && atoi(e) != 0; }();

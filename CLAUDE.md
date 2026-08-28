@@ -63,7 +63,7 @@ times out of four.**
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
 | `ATM_BUOY_TREF` / `_CONSISTENT` | unmeasured, and the budget says not worth it | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
-| `ATM_RAD_TOPO` | **NEW HERE, and it is this tree's defect, not ATHAD's** | inapplicable — no topography |
+| `ATM_RAD_TOPO` | **NEW HERE, DEFAULT ON since 2026-08-28** — this tree's defect, not ATHAD's | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
 | `ATM_V_MASSBAL` | **NEW HERE, AND DEFAULT ON SINCE 2026-08-28**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
@@ -283,8 +283,42 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   place of a number.** Off-branch bit-identical. With it on at 4 iterations: `epsilon_2D` max
   relocates from Angola to **29N 88E, the Himalaya** (0.088 -> 0.119), `tau_layer` max +25 % and
   also to the Himalaya, `tau_above` max -2.7 %, `radiation` min 95.2 -> 111.2 W/m2.
-  **Recommended for the default after a longer run — not flipped, because the band constants
-  here are tuned.**
+  **FLIPPED ON BY DEFAULT 2026-08-28, AND THE LONGER RUN IS WHY — THE 4-ITERATION COMPARISON WAS
+  TAKEN BEFORE THE DEFECT APPEARS.** Off branch, `nm = 100`, level-0 radial slice:
+
+  | iter | max `epsilon_2D` | at | max `tau_layer` | at |
+  |---|---|---|---|---|
+  | 20 | 0.08805 | 17S 12E — **Angola** | 0.12070 | 20S 68W |
+  | **40** | **0.66300** | **28N 88E — Himalaya** | **7.59045** | **28N 88E** |
+  | 100 | 0.67683 | 28N 88E | 7.88527 | 28N 88E |
+
+  Between iterations 20 and 40 there is a STEP — `epsilon_2D` x7.5, `tau_layer` **x63** — and the
+  maximum relocates to the Himalaya permanently. The recorded off-branch figure (0.088, Angola)
+  reproduces exactly at iteration 20, so the old measurement was not wrong; **it was taken at 4
+  iterations, before the thing the knob repairs exists.** At iteration 100 the off branch is
+  **7.7x** the number the knob was judged against.
+
+  **THE MECHANISM, READ OFF THE HIMALAYA COLUMN AT 28N (`k = 88`), ITERATION 100:**
+
+  | lvl | `p_stat` | `Epsilon` | `tau_layer` | `q_v` |
+  |---|---|---|---|---|
+  | 0 | 951.2 | **0.67683** | **7.88527** | **7.295** |
+  | 1 | 946.7 | 0.01778 | 7.88527 | **0.000** |
+  | 2 | 941.7 | 0.01862 | 7.88527 | 0.000 |
+
+  ocean at the same latitude: `Epsilon` 0.0217, `tau_layer` 0.0220, `q_v` 12.8.
+  `tau_layer` is CONSTANT through the rock because of the fill at `MultiLayerRadiation.h:485`
+  (applied on both branches), so the plotted value is the ground value replicated downward and
+  the excess is in the ground value itself — 360x the ocean's. `Epsilon` is NOT filled off-branch,
+  so its 0.677 is MLR's own level-0 value, 38x the cell above it.
+  **The cause is `q_v` = 7.295 at level 0 and exactly 0.000 in every rock level above.** `BC_Atm`
+  Pass 3 copies the mountain-top humidity down (`c.x[0] = c.x[i_mount]`) while the rock is dry, so
+  in `tau_i = tau_dry*dp_i/Sum(dp) + tau_wv*vp_i/Sum(vp)` with `vp_i = c_i*dp_i`, level 0 holds
+  essentially the whole sub-surface vapour path and collects a large share of the water-vapour
+  optical depth.
+  **`ATM_RAD_TOPO=0` restores the sea-level column exactly.** The band constants are still tuned
+  on the old branch — that caveat stands and is now the argument for re-checking them, not for
+  leaving the radiation at sea level over every mountain.
 - **`brunt_N2`'s +-0.03 to 0.047 s^-2 "boundary-layer" extrema were THE TERRAIN** — the centred
   difference at the first air level straddled it. Repaired unconditionally; ocean columns
   bit-identical. Extremes are now -0.00068/+0.0051, and the old ones sat on the Andes
