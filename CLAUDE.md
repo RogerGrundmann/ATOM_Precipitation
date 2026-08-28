@@ -591,6 +591,44 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   density, `Q_Sensible`, and `brunt_N2`'s terrain extrema: computed, printed, trusted, and
   measuring something other than its name.
 
+- **THE CLEAR-SKY OLR EXCESS IS THE TEMPERATURE PROFILE, NOT THE BAND CONSTANTS — AND THE TWO
+  ERRORS HAVE OPPOSITE SIGNS** (2026-08-28). Clear-sky OLR is 273.9 against Earth's ~265, a
+  +9 W/m2 excess. It decomposes into two larger errors that partly cancel:
+
+  | | OLR clear | vs Earth |
+  |---|---|---|
+  | constants on a CORRECT column (`test/rad_selftest`, US-standard, CO2 380) | **255.0** | **-10** |
+  | the model's own atmosphere | **273.9** | **+9** |
+  | difference — the profile | **+18.9** | |
+
+  **So the constants UNDER-produce on a correct column** — 255.0 against Earth's ~265 and against
+  the de-saturation note's own claim of "~263" — and the model's profile more than cancels it.
+  Tuning `eps_dry` or `co2_band_scale` to remove the +9 would push a column that is already
+  10 W/m2 too transparent further wrong.
+
+  **THE PROFILE BIAS GROWS WITH HEIGHT AND PEAKS AT THE EMISSION LEVEL**, model minus US-standard
+  at 28N, iteration 100:
+
+  | z | 0 m | 612 m | 2160 m | 6079 m | **9908 m** | 13220 m |
+  |---|---|---|---|---|---|---|
+  | model - std | +7.67 | +7.59 | +11.43 | +15.76 | **+18.75** | +19.57 |
+
+  Lapse rate **5.38 K/km against 6.50** standard. The photosphere sits at ~9.9 km (`tau_above` = 1),
+  which is exactly where the bias is largest, so the column emits from a level **18.75 K too warm**.
+  **AND THE RADIATION SCHEME ITSELF PRODUCES THAT BIAS**: the offline harness, given a US-standard
+  column, returns **241.41 K at 9923 m against the 223.7 K it was handed** — +17.7 K, matching the
+  full model's +18.75 almost exactly. It is the scheme's own radiative equilibrium, not something
+  the dynamics did to it. **`ATM_CONV_ADJ` is default OFF and is the obvious lead** — nothing is
+  pulling the profile toward a convective lapse rate — but that is a lead, not a measurement.
+
+- **`test/rad_selftest` SEGFAULTED FROM 2026-08-26 TO 2026-08-28 AND NOBODY RAN IT.**
+  `MultiLayerRadiation` gained `tau_above` / `tau_layer` with the ported instruments and also
+  reads `i_topography` and `short_wave_radiation`; none of the four were allocated in the harness,
+  so the first write past an unallocated `Array` took the process down (exit 139). **The offline
+  reference column — the thing the band constants were fitted against — was unrunnable for the
+  whole period in which those constants were being argued about**, including a full afternoon of
+  this session. Repaired by allocating everything the scheme touches.
+
 - **Read `Psi(ground)` as an RMS over latitude, never as a max.** The max sits inside one cell,
   so a change elsewhere reads as bit-identical while the field moves. ATHAD item 68's trap.
 - **Thread count still changes results in the last digits.** OpenMP reduction order is not

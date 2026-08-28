@@ -44,6 +44,17 @@ public:
         m.ice.initArray(im, jm, km, 0.0);           // cloud ice   mixing ratio [kg/kg]
         m.albedo.initArray_2D(jm, km, 0.0);
         m.epsilon_2D.initArray_2D(jm, km, 0.0);
+        // THIS HARNESS SEGFAULTED FROM 2026-08-26 UNTIL 2026-08-28 AND NOBODY RAN IT.
+        // MultiLayerRadiation gained tau_above / tau_layer with the ported instruments and now
+        // also reads i_topography (for the ATM_RAD_TOPO ground index and the rock fill) and
+        // short_wave_radiation. None of the four were allocated here, so the first write past
+        // the end of an unallocated Array took the process down. An offline harness that is not
+        // run is not a harness -- allocate everything the scheme touches, so the next field it
+        // acquires fails loudly at the allocation list rather than silently in a crash.
+        m.tau_above.initArray(im, jm, km, 0.0);
+        m.tau_layer.initArray(im, jm, km, 0.0);
+        m.i_topography.assign(jm, std::vector<int>(km, 0));   // ocean everywhere: ground at i = 0
+        m.short_wave_radiation.assign(jm, 0.0);
 
         const int j0 = jm / 2, k0 = km / 2;           // equatorial-ish probe column
 
