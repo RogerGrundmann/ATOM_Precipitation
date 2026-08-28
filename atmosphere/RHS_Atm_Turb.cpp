@@ -370,9 +370,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double coeff_energy   = 1.0 / (c_0 * cp_l * t_0);
     double coeff_u_p      = 0.5 * r_air * u_0 * u_0 / L_atm;
     double coeff_trans    = 1.0;
-    double coeff_MC_vel   = L_atm / (u_0 * u_0);
-    double coeff_MC_q     = L_atm / (u_0 * c_0);
-    double coeff_MC_t     = L_atm / (u_0 * t_0);
+    double coeff_MC_vel   = ndimLength() / (u_0 * u_0);
+    double coeff_MC_q     = ndimLength() / (u_0 * c_0);
+    double coeff_MC_t     = ndimLength() / (u_0 * t_0);
 
     // Coriolis
     double coriolis = 1.0;
@@ -493,8 +493,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double q_Ice  = ep * E_Ice  / (p_hydro.x[i][j][k] - E_Ice);
     double Q_Latent_Ice = 0.0;
 
-    double coeff_S = lamda * t_0 / L_atm;
-    double coeff_L = r_air * c_0 * lv * u_0 / L_atm;
+    double coeff_S = lamda * t_0 / ndimLength();
+    double coeff_L = r_air * c_0 * lv * u_0 / ndimLength();
 
     if(c.x[i][j][k] >= 0.85 * q_Rain){
         Q_Latent.x[i][j][k] = u_ijk * dclouddr
@@ -563,7 +563,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
 
         const double dis_here = std::max(dis.x[i][j][k], dis_min_loc);
         const double tke_here = std::max(tke.x[i][j][k], 0.0);
-        const double nue_max  = 1000.0 / (u_0 * L_atm);
+        const double nue_max  = 1000.0 / (u_0 * ndimLength());
         double cnue = use_k_epsilon_turbulence_model
                     ? C_nue_loc * tke_here * tke_here / dis_here
                     : tke_here / dis_here;
@@ -704,7 +704,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         // nue_air_nd = ν_air / (u_0·L_atm) is the non-dimensional molecular viscosity
         // (same constant as TurbulenceAtm uses for nue_air_nd).
         constexpr double nue_air_phys = 1.5e-5;   // [m²/s]
-        const double nue_air_nd = nue_air_phys / (u_0 * L_atm);
+        const double nue_air_nd = nue_air_phys / (u_0 * ndimLength());
         double arg1 = std::min(std::max(
             sqrt(tke.x[i][j][k]) / (bet_star * dis.x[i][j][k] * d_close),
             (500.0 * nue_air_nd) / (d_close * d_close * dis.x[i][j][k])),
@@ -981,7 +981,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         // relaxation is k_T*L_atm/u_0 (dimensionless), integrated by RK4's own *dt like every
         // other rhs_t term (advection/diffusion/latent, all dt^1). The extra *dt made HS enter
         // as dt^2 = ~1e-4 too weak -> inert (t_eq shift never reached T; CO2 forcing invisible).
-        rhs_t.x[i][j][k] -= (k_T * L_atm / u_0) * (t.x[i][j][k] - t_eq.x[i][j][k]);
+        rhs_t.x[i][j][k] -= (k_T * ndimLength() / u_0) * (t.x[i][j][k] - t_eq.x[i][j][k]);
     }
 
 
@@ -1007,8 +1007,17 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //
     // FORM. A bulk flux H = c_H*(T_s - T_1) [W/m2] warms the lowest air layer at
     // dT_1/dt = H/(rho*cp*dz), so the rate coefficient is k_S = c_H/(rho*cp*dz) [1/s],
-    // non-dimensionalised in advective time as k_S*L_atm/u_0 exactly like the Held-Suarez
-    // relaxation above, and integrated by RK4's own *dt like every other rhs_t term.
+    // non-dimensionalised in advective time and integrated by RK4's own *dt like every other
+    // rhs_t term.
+    //
+    // THE LENGTH IS metricShellLength(), NOT L_atm, and the first version of this term got that
+    // wrong by copying the Held-Suarez line above it. L_atm = 400 m is the AMPLITUDE OF THE
+    // EXPONENTIAL STRETCH, not a grid step: one rad.z unit is metricShellLength() ~ 16023 m.
+    // Non-dimensionalising a rate by L_atm/u_0 therefore makes it 40x too weak -- exactly the
+    // second factor in the 16000 = 397.5 x 40 decomposition in the force_nd note above, and
+    // exactly the group that note lists as "STILL ON L_atm, and therefore still 40x too weak:
+    // the Held-Suarez relaxation, the Rayleigh surface drag, coeff_MC_*, coeff_S, coeff_L and
+    // nue_max". This term is not joining that list.
     //
     // THE SURFACE IS TREATED AS A FIXED RESERVOIR, which is the prescribed-SST convention: the
     // ocean's mixed-layer heat capacity dwarfs the air column's, and this tree does not own SST
@@ -1027,7 +1036,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         const double dz = 0.5 * (get_layer_height(i+1) - get_layer_height(i-1));   // [m]
         if (dz > 0.0 && cp_l > 0.0) {
             const double k_S = sfc_flux_cH / (rho * cp_l * dz);                    // [1/s]
-            rhs_t.x[i][j][k] += (k_S * L_atm / u_0)
+            rhs_t.x[i][j][k] += (k_S * metricShellLength() / u_0)
                               * (t.x[i-1][j][k] - t.x[i][j][k]);
         }
     }
@@ -1127,7 +1136,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double drag_profile = 1.0 - (double)(i - i_topography[j][k]) / drag_n_layers;
     if(drag_profile < 0.0) drag_profile = 0.0;
     if(drag_profile > 1.0) drag_profile = 1.0;
-    double surf_drag = (rayleigh_kf * L_atm / u_0 * dt) * drag_profile;
+    double surf_drag = (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
         + coriolis * force_nd * coriolis_the

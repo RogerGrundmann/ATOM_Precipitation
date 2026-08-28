@@ -633,6 +633,37 @@ private:
     //
     // The two readings differ by exactly 1/dr = 40, which is why the planetary radius expressed
     // in rad.z units is 6370/16.02 = 397.5 and not 6.37e6/400 = 15925.
+    // ==================================================================
+    // ATM_LENGTH_NDIM -- one length for the whole non-dimensionalisation. DEFAULT OFF.
+    //
+    // L_atm = 400 m is the AMPLITUDE OF THE EXPONENTIAL STRETCH, not a grid step: one rad.z
+    // unit is metricShellLength() ~ 16023 m. force_nd was moved onto the latter on 2026-07-28
+    // (the "40" in 16000 = 397.5 x 40, see the note in RHS_Atm_Turb.cpp), and that note lists
+    // the terms left behind: the Held-Suarez relaxation, the Rayleigh surface drag, coeff_MC_*,
+    // coeff_S, coeff_L and nue_max -- plus nue_air_nd, which has the same shape and was not
+    // named. This knob moves all of them together, because a nondimensionalisation is only
+    // meaningful as a whole.
+    //
+    // THE DIRECTION IS NOT UNIFORM, AND "40x too weak" IS ONLY HALF THE STORY. Where the length
+    // is in the NUMERATOR -- rates, k*L/u_0: Held-Suarez, surf_drag, coeff_MC_* -- the shipped
+    // terms are 40x too WEAK and this makes them stronger. Where it is in the DENOMINATOR --
+    // diffusivities, nu/(u_0*L): nue_max, nue_air_nd, coeff_S, coeff_L -- the shipped terms are
+    // 40x too STRONG and this makes them weaker. Both follow from the same substitution.
+    //
+    // NOT FLIPPED ON BY DEFAULT, and not because of caution: a 40x change to the surface drag
+    // and the eddy-viscosity ceiling is a change to the shipped dynamics, and this tree's rule
+    // is that such a thing is measured behind a knob first. Off-branch bit-identical by
+    // construction -- ndimLength() returns L_atm unchanged.
+    // ==================================================================
+    static bool lengthNdimConsistent(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_LENGTH_NDIM"); return e && atoi(e) != 0; }();
+        return v;
+    }
+    double ndimLength() const {
+        return lengthNdimConsistent() ? metricShellLength() : L_atm;
+    }
+
     double metricShellLength() const {
         const double span = rad.z[im-1] - rad.z[0];
         if(!(span > 0.0)) return L_atm;
