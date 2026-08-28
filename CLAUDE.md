@@ -194,11 +194,55 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   seven times, ALL at lines 713-889, while the iteration loop starts at line 985 — MLR never runs
   inside the loop and cannot maintain anything at iteration 100.** Check where a routine is
   CALLED before attributing a standing feature to it.
-- **`Q_Sensible` IS WRITTEN AND READ BY NOTHING** (`RHS_Atm_Turb.cpp:485`). MLR's surface balance
-  debits the surface `c_H*(T_s - T_air1)` W/m2 and nothing credits it to the air. A real
-  conservation defect, but an INITIALISATION one — not the cause of the instability above.
-  Recorded, not repaired. Second instrument-shaped defect found this day after `Psi`: a quantity
-  computed, stored, and never used.
+- **`brunt_N2 < 0` AT `i = 0` IS THE OCEAN MASK, AND IT IS A BOUNDARY-CONDITION GAP**
+  (2026-08-28). Measured at iteration 100 on the level-0 radial slice:
+
+  | | cells | `P(N2 < 0)` | median `N2` |
+  |---|---|---|---|
+  | ocean | 43 602 (66.73 %) | **0.9998** | **-3.70e-04** |
+  | land | 21 739 (33.27 %) | **0.0049** | **+2.11e-04** |
+
+  43 593 of the 43 700 unstable cells are ocean and 107 are land. **The "59 % of columns"
+  recorded above was always the ocean fraction** — the number was in the file for a day and
+  nobody matched it to the mask.
+
+  Four facts, and the last is the defect:
+  1. **Level 0 is not prognostic**: `RungeKutta_Atm_Turb.cpp:111` is `for(int i = 1; i < im-1;)`.
+  2. **`t` has NO radial BC at `i = 0`.** `bcRadius` carries three pattern lists —
+     `both_cubic`, `vn_bot_cubic_top`, `cubic_bot_vn_top` — and `t` is in **none** of them,
+     while `p_stat`, `r_humid`, `cloud`, `ice` and `tke` all get one. `t` has explicit special
+     handling at the LID (`pin_t_top`) and nothing at the bottom.
+  3. **The mechanism meant to cover that is a self-assignment over ocean.** `BC_Atm.h:433`,
+     documented as "copy surface-level (`i_mount`) values down to the i=0 reference layer … so
+     surface fluxes see the correct surface state", is `t.x[0] = t.x[i_topography]`. Over land
+     `i_topography > 0` and it does real work — which is why **land is stable**. Over ocean
+     `i_topography == 0` (`FileIO_Atm.cpp:488`) and it reads `t.x[0] = t.x[0]`.
+  4. **So level 0's only coupling to the air above is a Shapiro smoother**, `damp_wiggles(t,…)`
+     at `cAtmosphereModel.cpp:1113`, whose `along_i` pass starts at `i_surf`. Not a physical
+     mixing process. Level 0 drifts **+0.786 K** over 100 iterations while the air above moves
+     +0.15 K.
+
+  **The stencil explains why it is ONE layer.** `N2` at `i = 0` is one-sided on `theta[0],
+  theta[1]`; at `i = 1` it is centred on `theta[0], theta[2]`; at `i = 2` it is centred on
+  `theta[1], theta[3]` — the first stencil that does not see level 0. **The 59/59/0 pattern is
+  one bad value read by two stencils, not two unstable layers.**
+
+  **THE MODEL HAS NOT DECIDED WHETHER OCEAN LEVEL 0 IS THE OCEAN OR THE AIR.** If it is a
+  prescribed SST skin then `N2 < 0` there is PHYSICALLY CORRECT — a heated surface is
+  superadiabatic against the air — and the repair is to apply the bulk flux to level 1. If it is
+  the lowest air level it needs RK4 and a flux BC. It is currently neither.
+  **This reframes `ATM_CONV_ADJ`**: its -19.45 -> -9.76 K/km is a palliative mixing away a
+  boundary-condition gap, not a missing convection scheme.
+
+- **`Q_Sensible` IS WRITTEN AND READ BY NOTHING** (`RHS_Atm_Turb.cpp:513`), **AND IT IS NOT THE
+  SURFACE FLUX — an earlier version of this bullet ran two different quantities together.**
+  The array is `coeff_S * lap(T)`, the CONDUCTIVE heat-flux divergence, computed at every
+  interior cell; adding it anywhere would double-count the thermal diffusion `diffusion_t_re`
+  already applies. The surface bulk flux is a SEPARATE term, `c_H*(T_s - T_air1)` with
+  `c_H = 15 W/m2/K` at `MultiLayerRadiation.h:425`, which the surface balance debits and nothing
+  credits to the air. Both are real defects; only the second one bears on the instability above,
+  and **MLR's copy of it cannot cure that instability either, because MLR never runs inside the
+  loop** — the flux has to be formed in the loop from the live `t.x[0]`/`t.x[1]`.
 
 - **THE RADIATION COLUMN STARTED AT LEVEL 0, WHICH IS THE GROUND ONLY OVER OCEAN**
   (`ATM_RAD_TOPO`, default off, 2026-08-27). `MultiLayerRadiation` had
