@@ -657,7 +657,38 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   alone, with no pressure broadening, whereas real LW absorption goes roughly as `p*dp` and so
   concentrates optical depth near the surface — which is what makes a real radiative equilibrium
   steep at the bottom. Mass-only weighting spreads it too evenly and flattens the profile.
-  **Untested**, and the harness makes it a minutes-long test.
+  **TESTED AND REFUTED** (`ATM_TAU_PBROAD`, exponent on `(p_i/p_0)`, default 0 = shipped and
+  bit-identical, column total renormalised so it redistributes rather than adds):
+
+  | pbroad | T_sfc | T(9.9 km) | lapse K/km | OLR |
+  |---|---|---|---|---|
+  | 0 (shipped) | 280.76 | 241.41 | 3.97 | 255.0 |
+  | 0.50 | 282.30 | 241.97 | 4.06 | 271.0 |
+  | 1.00 | 283.45 | 242.87 | 4.09 | 282.7 |
+  | 2.00 | 284.98 | 244.30 | 4.10 | 296.3 |
+
+  The lapse moves **3.97 -> 4.10 K/km across the whole range, 3 %**, and the upper troposphere gets
+  **WARMER** (241.4 -> 244.3), the opposite of the prediction. The knob is plainly connected — OLR
+  swings 255 -> 296 — it simply does not act on the profile's slope.
+
+  **AND THAT PAIRS INTO SOMETHING SHARPER: THE TOTAL OPTICAL DEPTH MOVES THE LAPSE, ITS VERTICAL
+  DISTRIBUTION DOES NOT.** `co2_band` 0 -> 1.4 swings the lapse 1.85 -> 6.12; `pbroad` 0 -> 2 pins
+  it at 4.0-4.1. That is backwards for a radiative-transfer scheme, where the profile follows
+  `tau(z)` directly. Checked against the grey analytic form `sigma*T^4 = A(1 + 3*tau/2)`,
+  normalised at the lid:
+
+  | level | `tau_above` | `sigma T^4` | grey prediction | ratio |
+  |---|---|---|---|---|
+  | 40 | 0.000 | 176.3 | 176.3 | 1.000 |
+  | 35 | 0.814 | 196.1 | 391.7 | **0.501** |
+  | 30 | 3.851 | 277.1 | 1195.0 | **0.232** |
+  | 20 | 22.148 | 376.9 | 6034.4 | **0.062** |
+
+  **The temperature barely responds to the optical depth it sits under.** *Caveat, and it matters*:
+  that table is the FULL MODEL's `t`, which dynamics also shape, so a departure from pure
+  radiative equilibrium is partly expected. What is not explained by dynamics is the OFFLINE
+  harness — no dynamics at all — returning the same flat 3.97 K/km from a US-standard input.
+  **The next suspect is the tridiagonal solve itself, not its optical-depth inputs.** Not read yet.
   *Side note, not the same quantity*: the SURFACE lapse at 28N is **194.65 -> 188.74 K/km** — a
   7.6 K jump across the 39 m from level 0 to level 1, the boundary-condition defect above, which
   the adjustment dents by 3 %. Do not confuse it with the tropospheric lapse; they move

@@ -128,7 +128,7 @@ public:
             // Thread-local Thomas-solver scratch; reused across k within this j.
             // Every column fully overwrites the entries it later reads (i_mount = 0,
             // i_trop = im-1), so reuse is race-free.
-            std::vector<double> dp_col(m.im, 0.0), vpath_col(m.im, 0.0);
+            std::vector<double> dp_col(m.im, 0.0), vpath_col(m.im, 0.0), wdp_col(m.im, 0.0);
             std::vector<double> alfa(m.im, 0.0), beta(m.im, 0.0);
             std::vector<double> AA(m.im, 0.0), CA(m.im, 0.0);
             std::vector<double> radiation_original(m.im, 0.0);
@@ -191,7 +191,20 @@ public:
                     const char* e = getenv("ATM_EPS_DRY");
                     const double v = e ? atof(e) : 0.684;
                     return (v > 0.0 && v < 1.0) ? v : 0.684; }();     // Bignami dry-air baseline
-                double sum_dp = 0.0, sum_vp = 0.0;
+                double sum_dp = 0.0, sum_vp = 0.0, sum_wdp = 0.0, sum_wvp = 0.0;
+                // ATM_TAU_PBROAD -- PRESSURE BROADENING of the optical-depth distribution.
+                // Exponent n on (p_i/p_0); 0.0 (default) is the shipped mass-only weighting and
+                // is bit-identical, 1.0 is full broadening. Real longwave absorption goes roughly
+                // as p*dp, not dp, because line widths scale with pressure. Mass-only weighting
+                // spreads optical depth evenly through the column, which flattens the radiative
+                // equilibrium; the shipped scheme sits at 3.97 K/km against a US-standard 6.49,
+                // and no setting of eps_dry or co2_band_scale reaches the latter without
+                // collapsing the OLR. The column TOTAL is renormalised, so this redistributes
+                // optical depth downward without adding any.
+                static const double pbroad = [](){
+                    const char* e = getenv("ATM_TAU_PBROAD");
+                    const double v = e ? atof(e) : 0.0;
+                    return (v >= 0.0 && v <= 4.0) ? v : 0.0; }();
                 for (int i = i_mount; i <= i_trop; i++) {
                     double dp = (i < i_trop) ? (m.p_stat.x[i][j][k] - m.p_stat.x[i+1][j][k])
                                              : m.p_stat.x[i][j][k];   // top layer: all mass above
@@ -199,8 +212,13 @@ public:
                     double cw    = (m.c.x[i][j][k] > 0.0) ? m.c.x[i][j][k] : 0.0;
                     dp_col[i]    = dp;
                     vpath_col[i] = cw * dp;                          // ~ layer precipitable water
+                    const double pw = (pbroad > 0.0 && m.p_0 > 0.0)
+                                    ? pow(m.p_stat.x[i][j][k] / m.p_0, pbroad) : 1.0;
+                    wdp_col[i]   = dp * pw;
                     sum_dp      += dp;
                     sum_vp      += vpath_col[i];
+                    sum_wdp     += wdp_col[i];
+                    sum_wvp     += vpath_col[i] * pw;
                 }
                 const double e_surf  = m.c.x[i_mount][j][k] * m.p_stat.x[i_mount][j][k] / m.ep; // [hPa]
                 double eps_col       = eps_dry + 0.0056 * e_surf;    // Bignami column emissivity
@@ -234,8 +252,8 @@ public:
                 const double tau_dry = topo_rad ? tau_dry_full * mass_frac : tau_dry_full;
                 const double tau_col = -log(1.0 - eps_col);
                 const double tau_wv  = (tau_col > tau_dry) ? (tau_col - tau_dry) : 0.0;
-                const double inv_dp  = (sum_dp > 0.0) ? 1.0 / sum_dp : 0.0;
-                const double inv_vp  = (sum_vp > 0.0) ? 1.0 / sum_vp : 0.0;
+                const double inv_dp  = (sum_wdp > 0.0) ? 1.0 / sum_wdp : 0.0;
+                const double inv_vp  = (sum_wvp > 0.0) ? 1.0 / sum_wvp : 0.0;
 
                 // Physical cap on the column cloud condensate the RADIATION sees. The model
                 // over-condenses (column LWP ~1500 g/m2 vs observed ~100), which saturates BOTH
@@ -392,7 +410,9 @@ public:
                     }
                     lwp_col += LWP_i;  iwp_col += IWP_i;                          // column paths for the SW albedo bump
 
-                    double tau = tau_dry * dp_col[i] * inv_dp + tau_wv * vpath_col[i] * inv_vp
+                    const double pw_i = (dp_col[i] > 0.0) ? wdp_col[i] / dp_col[i] : 1.0;
+                    double tau = tau_dry * wdp_col[i] * inv_dp
+                               + tau_wv * vpath_col[i] * pw_i * inv_vp
                                + tau_co2 + tau_cloud;
                     m.epsilon.x[i][j][k] = 1.0 - exp(-tau);
 
