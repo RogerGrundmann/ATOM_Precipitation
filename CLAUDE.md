@@ -526,6 +526,35 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 - **No `div(rho u)/rho` diagnostic.** ATHAD prints it every iteration and judges the projection
   by it; here closure has to be computed from `meridional_streamfunction_*.csv`. Porting that
   print is the obvious next instrument.
+- **THE CLOUD OPTICAL DEPTH SATURATES ALOFT ON THE SHIPPED BRANCH, AND `ATM_CLOUD_TAU_MAX` IS
+  DEFAULT ON SINCE 2026-08-28.** `cwp_cap_col` caps the COLUMN condensate path; it does not bound
+  a LAYER, and the two are different constraints. Full-field `max epsilon` at iteration 100:
+
+  | arm | max `epsilon` (all levels, all latitudes) | where |
+  |---|---|---|
+  | shipped, no ceiling | **0.999624** | 28N 88E, **4988 m** |
+  | shipped + ceiling (**the default**) | **0.885490** | 20N 53E, 3316 m |
+  | `ATM_RAD_TOPO=1`, no ceiling | 0.999747 | 28N 88E, 0 m |
+  | `ATM_RAD_TOPO=1` + ceiling | **0.891525** | 35N 84E, 0 m |
+
+  **No cell anywhere exceeds 0.892 with the ceiling on, on either branch.** A near-blackbody layer
+  is the pathology the de-saturation split (`MultiLayerRadiation.h:169`) exists to prevent — it
+  pins the emission level and collapses the OLR — and it was present in the SHIPPED model at
+  ~5 km, with `ATM_RAD_TOPO` off. The topo branch does not create it; it moves it to the ground
+  where a level-0 diagnostic finally showed it. Flipped on top-of-atmosphere evidence: clear-sky
+  OLR **bit-identical** at 180.33882 W/m2, cloudy +0.053. `ATM_CLOUD_TAU_MAX=0` disables.
+  The knob scales `LWP_i` AND `IWP_i` together so the LW `tau_cloud` and the SW albedo bump see
+  the same condensate — capping one and not the other is the imbalance `cwp_cap_col`'s own note
+  warns about.
+
+- **`Results_Atm.cpp:40` HAS BEEN PRINTING THE FULL-FIELD `max epsilon`, WITH ITS HEIGHT, IN EVERY
+  RUN LOG.** The table above took three rounds of slice extraction — level 0, then one longal cut,
+  then a proposal to run 70N/70S arms — to reach a number already in the logs being grepped.
+  **Third occurrence of this pattern in the family**: ATHAD item 68 ("every number in this item
+  came from re-reading VTK files that had been sitting in `output_Hadean/` unexamined") and item
+  72 ("the model has been printing this residual in every run log all along"). **A level-0
+  diagnostic cannot answer a column question**, and reaching for the existing print costs nothing.
+
 - **Read `Psi(ground)` as an RMS over latitude, never as a max.** The max sits inside one cell,
   so a change elsewhere reads as bit-identical while the field moves. ATHAD item 68's trap.
 - **Thread count still changes results in the last digits.** OpenMP reduction order is not
