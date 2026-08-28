@@ -618,8 +618,21 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   **AND THE RADIATION SCHEME ITSELF PRODUCES THAT BIAS**: the offline harness, given a US-standard
   column, returns **241.41 K at 9923 m against the 223.7 K it was handed** — +17.7 K, matching the
   full model's +18.75 almost exactly. It is the scheme's own radiative equilibrium, not something
-  the dynamics did to it. **`ATM_CONV_ADJ` is default OFF and is the obvious lead** — nothing is
-  pulling the profile toward a convective lapse rate — but that is a lead, not a measurement.
+  the dynamics did to it. **`ATM_CONV_ADJ` WAS THE OBVIOUS LEAD AND IS NOW A MEASURED NULL ON IT**
+  (`nm = 100`, same binary, current default): tropospheric lapse **5.381 -> 5.362 K/km**, 0.35 %,
+  and the profile above 82 m is unchanged to **+0.002 K at every level** — including +0.002 K at
+  9908 m, the emission level carrying the whole +18.75 K bias. Clear-sky OLR moves
+  273.899 -> 273.791, **-0.11 W/m2**. The adjustment touches level 0 only (-0.191 K).
+  **The reason is structural and was predictable**: the scheme mixes where `brunt_N2 < 0`, i.e.
+  SUPERadiabatic layers, and this troposphere has the opposite defect — at 5.38 K/km it is far
+  MORE stable than the 6.5 moist or 9.8 dry adiabat, so there is nothing for it to act on. A
+  convective adjustment cannot steepen a profile that is already too stable.
+  **So the warm-aloft bias is the radiation scheme's own equilibrium**, which the offline harness
+  shows independently: handed a US-standard column it returns +17.7 K at 9923 m unaided.
+  *Side note, not the same quantity*: the SURFACE lapse at 28N is **194.65 -> 188.74 K/km** — a
+  7.6 K jump across the 39 m from level 0 to level 1, the boundary-condition defect above, which
+  the adjustment dents by 3 %. Do not confuse it with the tropospheric lapse; they move
+  independently and only the tropospheric one bears on the OLR.
 
 - **`test/rad_selftest` SEGFAULTED FROM 2026-08-26 TO 2026-08-28 AND NOBODY RAN IT.**
   `MultiLayerRadiation` gained `tau_above` / `tau_layer` with the ported instruments and also
