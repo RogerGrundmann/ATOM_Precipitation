@@ -867,6 +867,36 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // output) and printing the cloud longwave effect = cos-lat-mean top-layer radiation clear minus
     // cloudy. Diagnostic only: cloud/ice and t are saved and restored, dynamics untouched.
     std::vector<double> cld_diag_save, ice_diag_save;
+    // TRUE OUTGOING LONGWAVE, integrated rather than read off the top layer.
+    //
+    // WHY THIS EXISTS. The pre-existing diagnostic reports radiation.x[im-1] -- the TOP LAYER's
+    // own emission -- and calls it "top radiation". It is not the outgoing flux, and the pair of
+    // numbers next to it proves the point: zeroing cloud takes the column optical depth from
+    // 28.10 to 2.18, twenty-six optical depths, and moves that "OLR" by 2.7 W/m2. A real OLR
+    // would move by tens. What it actually tracks is the lid temperature, 236.15 K, whose
+    // blackbody emission is 176.3 W/m2 -- which is the whole of the "OLR is 180, Earth is 240"
+    // gap. The greenhouse was never 60 W/m2 wrong; the instrument was measuring the lid.
+    //
+    // The integral is the upward mirror of the L_down sum MultiLayerRadiation already does for
+    // its surface balance: each layer's emission attenuated by the layers above it, plus the
+    // ground's emission attenuated by the whole column.
+    //
+    //     OLR = SUM_i eps_i B_i PROD_{j>i} (1 - eps_j)  +  B_ground PROD_all (1 - eps_j)
+    //
+    // The column starts at i_topography, not at level 0, so it never integrates through rock --
+    // independent of ATM_RAD_TOPO, which only decides where MLR itself started.
+    auto column_olr = [&](int j, int k) {
+        const int i_g = std::min(std::max(i_topography[j][k], 0), im - 1);
+        double olr = 0.0, trans = 1.0;
+        for (int i = im - 1; i > i_g; i--) {
+            const double B = sigma * std::pow(t.x[i][j][k] * t_0, 4.0);
+            olr   += epsilon.x[i][j][k] * B * trans;
+            trans *= (1.0 - epsilon.x[i][j][k]);
+        }
+        olr += sigma * std::pow(t.x[i_g][j][k] * t_0, 4.0) * trans;   // ground through the column
+        return olr;
+    };
+
     auto cloud_radiation_diag = [&]() {
         const size_t N = (size_t)im * jm * km;
         if (t_diag_backup.empty()) t_diag_backup.assign(N, 0.0);
@@ -879,10 +909,12 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             idx++;
         }
         MultiLayerRadiation(*this).run();
-        double w_sum = 0.0, olr_clear = 0.0;
+        double w_sum = 0.0, olr_clear = 0.0, tau_clear = 0.0, olr_true_clear = 0.0;
         for (int j = 0; j < jm; j++) { const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
             w_sum += w * km;
-            for (int k = 0; k < km; k++) olr_clear += w * radiation.x[im - 1][j][k]; }
+            for (int k = 0; k < km; k++) { olr_clear += w * radiation.x[im - 1][j][k];
+                tau_clear += w * tau_above.x[i_topography[j][k]][j][k];
+                olr_true_clear += w * column_olr(j, k); } }
         idx = 0;                                                 // restore t + clouds, cloudy pass
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++) {
             t.x[i][j][k] = t_diag_backup[idx];
@@ -890,15 +922,31 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             idx++;
         }
         MultiLayerRadiation(*this).run();                        // radiation.x/epsilon end CLOUDY (kept for output)
-        double olr_cloudy = 0.0;
+        double olr_cloudy = 0.0, tau_cloudy = 0.0, olr_true_cloudy = 0.0;
         for (int j = 0; j < jm; j++) { const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
-            for (int k = 0; k < km; k++) olr_cloudy += w * radiation.x[im - 1][j][k]; }
+            for (int k = 0; k < km; k++) { olr_cloudy += w * radiation.x[im - 1][j][k];
+                tau_cloudy += w * tau_above.x[i_topography[j][k]][j][k];
+                olr_true_cloudy += w * column_olr(j, k); } }
         idx = 0;                                                 // restore dynamical t (radiation.x kept cloudy)
         for (int i = 0; i < im; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
             t.x[i][j][k] = t_diag_backup[idx++];
+        // The COLUMN optical depth in both passes, alongside the flux. Without it the pair is
+        // not interpretable: the measured tau_above at the ground is ~28.6 while the Bignami
+        // dry+vapour baseline is ~1.3 for the whole column BY CONSTRUCTION, which says cloud
+        // carries ~27 of it -- and yet the clear-cloudy flux difference is only ~2.7 W/m2.
+        // Those two cannot both be true. Printing tau in both passes says which: if tau_clear
+        // is ~1.3 the optical depth IS cloud and the flux pair is the thing to distrust; if
+        // tau_clear is still ~28 then zeroing cloud/ice does not remove the cloud optical depth
+        // and the clear-sky pass is not clear-sky.
         std::cout << "      AGCM: [cloud-rad DIAG] cos-lat-mean top radiation: clear=" << olr_clear / w_sum
                   << " cloudy=" << olr_cloudy / w_sum << " W/m2  ->  cloud LW effect="
-                  << (olr_clear - olr_cloudy) / w_sum << " W/m2" << std::endl;
+                  << (olr_clear - olr_cloudy) / w_sum << " W/m2"
+                  << "   column tau_above(ground): clear=" << tau_clear / w_sum
+                  << " cloudy=" << tau_cloudy / w_sum << std::endl;
+        std::cout << "      AGCM: [cloud-rad DIAG] INTEGRATED OLR (upward flux): clear="
+                  << olr_true_clear / w_sum << " cloudy=" << olr_true_cloudy / w_sum
+                  << " W/m2  ->  cloud LW forcing=" << (olr_true_clear - olr_true_cloudy) / w_sum
+                  << " W/m2   [Earth: ~265 clear, ~240 all-sky, ~25 forcing]" << std::endl;
     };
 
     if      (radiation_mode == 1) refresh_radiative_teq();       // A: MLR absolute -> t_eq

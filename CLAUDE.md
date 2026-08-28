@@ -555,6 +555,42 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   72 ("the model has been printing this residual in every run log all along"). **A level-0
   diagnostic cannot answer a column question**, and reaching for the existing print costs nothing.
 
+- **THE "OLR" WAS THE LID TEMPERATURE, NOT AN OUTGOING FLUX — AND THE GREENHOUSE WAS NEVER 60 W/m2
+  WRONG** (2026-08-28). `cloud_radiation_diag` printed `radiation.x[im-1]`, the TOP LAYER's own
+  emission, as "cos-lat-mean top radiation". It read ~180 W/m2 against Earth's ~240 and was cited
+  all day as a 60 W/m2 model error. It is **sigma*T_lid^4**: the lid sits at **236.15 K** and
+  `sigma*236.15^4 = 176.3 W/m2`. The instrument was measuring the lid pin.
+
+  **The proof is one line of the new print**: zeroing cloud takes the column optical depth from
+  **28.10 to 2.18** — twenty-six optical depths — and moves that "OLR" by **2.7 W/m2**. A real OLR
+  moves by tens.
+
+  `column_olr()` integrates the upward flux properly, as the mirror of the `L_down` sum MLR
+  already does — each layer's emission attenuated by the layers above, plus the ground through the
+  whole column, starting at `i_topography` so it never integrates through rock:
+
+  | | model | Earth |
+  |---|---|---|
+  | column tau, clear | **2.18** | ~1.5-2 |
+  | column tau, cloudy | **28.10** | — |
+  | **OLR clear** | **273.89** | ~265 |
+  | **OLR all-sky** | **193.31** | ~240 |
+  | **cloud LW forcing** | **80.59** | **~25** |
+
+  **THE CLEAR-SKY RADIATION IS ESSENTIALLY RIGHT**, 273.9 against ~265, which confirms the
+  de-saturation split's own claim of "OLR ~263" and vindicates `eps_dry`, the Bignami 0.0056 and
+  `co2_band_scale`. **THE WHOLE DEFECT IS CLOUD**: 26 of the 28 optical depths, and a longwave
+  forcing **3.2x** Earth's. `cwp_cap_col = 250 g/m2` is still 2.5x the observed ~100, and there is
+  **no cloud fraction at all** — every column is treated as fully overcast.
+
+  **AND THIS REVERSES TWO THINGS SAID EARLIER THE SAME DAY.** "Re-tuning `cwp_cap_col` would not
+  move the OLR" was based on the broken instrument and is **wrong** — it is now the single lever
+  that matters. And the standing objection to `ATM_RAD_TOPO`, that it costs 0.54 W/m2 of OLR in a
+  model already 60 low, is **void**: that 0.54 was a change in the lid layer's emission, and the
+  model is not 60 low. **Fourth instrument-shaped defect in this tree** after `Psi`'s constant
+  density, `Q_Sensible`, and `brunt_N2`'s terrain extrema: computed, printed, trusted, and
+  measuring something other than its name.
+
 - **Read `Psi(ground)` as an RMS over latitude, never as a max.** The max sits inside one cell,
   so a change elsewhere reads as bit-identical while the field moves. ATHAD item 68's trap.
 - **Thread count still changes results in the last digits.** OpenMP reduction order is not
