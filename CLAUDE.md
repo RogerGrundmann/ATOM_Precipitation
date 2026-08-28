@@ -221,6 +221,16 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   seven times, ALL at lines 713-889, while the iteration loop starts at line 985 — MLR never runs
   inside the loop and cannot maintain anything at iteration 100.** Check where a routine is
   CALLED before attributing a standing feature to it.
+  **THAT PARAGRAPH IS WRONG, AND IT BROKE ITS OWN RULE** (2026-08-28). Lines 711-892 are LAMBDA
+  DEFINITIONS — `refresh_radiative_teq`, `apply_radiative_heating`, `refresh_radiation_diag`,
+  `cloud_radiation_diag` — and the CALL SITES are at **1463-1471, inside the loop**. The active
+  `radiation_mode` is **5** (the run log prints it), which calls `cloud_radiation_diag()`, and
+  that runs MLR, **every `teq_refresh_stride` = 20 iterations**. So MLR does run in the loop, on a
+  20-iteration cadence — which is exactly the cadence of the `epsilon` step measured between
+  iterations 20 and 40. The sentence above told the next reader to check where a routine is
+  CALLED, and was itself written from where one is DEFINED.
+  **`ATM_SFC_COUPLED`'s "it never fired" needs re-examining on that basis**; the guard-declined-
+  at-setup half of it stands, the "MLR cannot maintain anything" half does not.
 - **`brunt_N2 < 0` AT `i = 0` IS THE OCEAN MASK, AND IT IS A BOUNDARY-CONDITION GAP**
   (2026-08-28). Measured at iteration 100 on the level-0 radial slice:
 
@@ -268,8 +278,10 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   already applies. The surface bulk flux is a SEPARATE term, `c_H*(T_s - T_air1)` with
   `c_H = 15 W/m2/K` at `MultiLayerRadiation.h:425`, which the surface balance debits and nothing
   credits to the air. Both are real defects; only the second one bears on the instability above,
-  and **MLR's copy of it cannot cure that instability either, because MLR never runs inside the
-  loop** — the flux has to be formed in the loop from the live `t.x[0]`/`t.x[1]`.
+  and **MLR's copy of it is refreshed only every 20 iterations** (`radiation_mode` 5 ->
+  `cloud_radiation_diag()` at `cAtmosphereModel.cpp:1471`; an earlier version of this bullet said
+  MLR never runs in the loop at all, which was wrong) — so the flux still has to be formed in the
+  loop from the live `t.x[0]`/`t.x[1]` if it is to act every step.
 
 - **THE RADIATION COLUMN STARTED AT LEVEL 0, WHICH IS THE GROUND ONLY OVER OCEAN**
   (`ATM_RAD_TOPO`, default off, 2026-08-27). `MultiLayerRadiation` had

@@ -105,14 +105,18 @@ public:
             m.short_wave_radiation[j] = m.short_wave_radiation[j_max - j];
 
         // ATM_RAD_TOPO -- see the i_mount comment inside the column loop below.
-        // DEFAULT ON since 2026-08-28; ATM_RAD_TOPO=0 restores the sea-level column exactly.
-        // The flip is on a 100-iteration measurement of the OFF branch, which the original
-        // 4-iteration one could not see: max Epsilon steps 0.088 (Angola, iter 20) -> 0.663
-        // (28N 88E, the Himalaya, iter 40) and max tau_layer 0.121 -> 7.590, a 63x jump that
-        // then holds to iteration 100. The knob's original comparison, 0.088 -> 0.119, was made
-        // at 4 iterations -- entirely before the defect it repairs appears.
+        //
+        // FLIPPED ON 2026-08-28 AND REVERTED THE SAME DAY, BY ITS OWN VERIFICATION ARM. The
+        // off-branch case for flipping is real and stands: at 100 iterations max tau_layer is
+        // 7.885 over the Himalaya against 0.022 over ocean, and the original 4-iteration
+        // comparison (0.088 -> 0.119) was taken before that defect even appears -- it emerges as
+        // a STEP between iterations 20 and 40. But the on-branch arm showed the cure is worse:
+        // 622 cells reach layer emissivity > 0.9 and 270 exceed 0.99 (max 0.99973 at 28N 88E),
+        // against ZERO such cells off-branch, and land-mean radiation falls 327.1 -> 306.4 W/m2.
+        // That is the saturation pathology the de-saturation split above exists to prevent.
+        // See the tau_dry mass scaling below for why, and what has to be true before it flips.
         static const bool topo_rad = [](){
-            const char* e = getenv("ATM_RAD_TOPO"); return e ? (atoi(e) != 0) : true; }();
+            const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         static const bool sfc_coupled = [](){
             const char* e = getenv("ATM_SFC_COUPLED"); return e && atoi(e) != 0; }();
@@ -194,7 +198,33 @@ public:
                 const double e_surf  = m.c.x[i_mount][j][k] * m.p_stat.x[i_mount][j][k] / m.ep; // [hPa]
                 double eps_col       = eps_dry + 0.0056 * e_surf;    // Bignami column emissivity
                 if (eps_col > 0.999) eps_col = 0.999;
-                const double tau_dry = -log(1.0 - eps_dry);          // dry-baseline column optical depth
+                // tau_dry IS A SEA-LEVEL WHOLE-COLUMN VALUE, AND A MOUNTAIN COLUMN IS NOT ONE.
+                // eps_dry = 0.684 is Bignami's clear-sky emissivity for a full column; the
+                // optical depth it implies, 1.152, was handed unchanged to every column and then
+                // split by dp_i/Sum(dp). With i_mount on the ground Sum(dp) telescopes to
+                // p_stat[i_mount], the GROUND pressure, so a 5 km column carries ~55 % of the air
+                // mass and was still given 100 % of the dry optical depth. Scaling by the actual
+                // mass, Sum(dp)/p_0, makes the Sum(dp) cancel -- each layer's dry opacity becomes
+                // tau_dry_full*dp_i/p_0, proportional to its OWN mass and independent of where the
+                // column starts. That is the right form and it is kept for that reason.
+                //
+                // IT IS NOT WHAT CAUSED THE SATURATION, AND THIS COMMENT ONCE SAID IT WAS.
+                // Measured: with the scaling in, cells at layer emissivity > 0.9 go 622 -> 639 and
+                // > 0.99 goes 270 -> 271, land radiation 306.4 -> 305.9 W/m2. No improvement.
+                // The driver is tau_cloud: the saturated cells carry mean CloudWater 0.4016
+                // against 0.0328 over land as a whole, TWELVE times, while their water vapour is
+                // slightly LOWER than average. cwp_cap_col caps the COLUMN condensate path, and
+                // with the rock excluded that same 250 g/m2 is shared among fewer, thinner air
+                // layers -- same column total, larger per-layer LWP_i, and eps_i = 1-exp(-tau_i)
+                // saturates. Capping a column does not bound a layer. That is what has to be
+                // fixed before ATM_RAD_TOPO can be the default.
+                //
+                // Gated on topo_rad so the sea-level branch stays bit-identical: there Sum(dp) is
+                // the surface pressure and the ratio would be ~1.01 rather than exactly 1, which
+                // would silently move every recorded off-branch number.
+                const double tau_dry_full = -log(1.0 - eps_dry);     // Bignami, sea-level column
+                const double mass_frac    = (m.p_0 > 0.0) ? (sum_dp / m.p_0) : 1.0;
+                const double tau_dry = topo_rad ? tau_dry_full * mass_frac : tau_dry_full;
                 const double tau_col = -log(1.0 - eps_col);
                 const double tau_wv  = (tau_col > tau_dry) ? (tau_col - tau_dry) : 0.0;
                 const double inv_dp  = (sum_dp > 0.0) ? 1.0 / sum_dp : 0.0;
@@ -272,9 +302,53 @@ public:
                     const double rho_i = (T_i > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_i) : 0.0; // [kg/m3]
                     const double cw_l  = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0; // [kg/kg]
                     const double cw_i  = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0; // [kg/kg]
-                    const double LWP_i = cloud_scale * cw_l * rho_i * dz * 1000.0; // liquid water path [g/m2], capped
-                    const double IWP_i = cloud_scale * cw_i * rho_i * dz * 1000.0; // ice   water path [g/m2], capped
-                    const double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;
+                    double LWP_i = cloud_scale * cw_l * rho_i * dz * 1000.0;  // liquid water path [g/m2], capped
+                    double IWP_i = cloud_scale * cw_i * rho_i * dz * 1000.0;  // ice   water path [g/m2], capped
+                    double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;
+
+                    // PER-LAYER CLOUD OPTICAL-DEPTH CEILING. cwp_cap_col above bounds the COLUMN
+                    // condensate path; it does not bound a LAYER, and the two are not the same
+                    // constraint. With ATM_RAD_TOPO on, the same capped 250 g/m2 is shared among
+                    // fewer, thinner air layers once the rock is excluded, so a single layer goes
+                    // optically black: 622 cells at eps > 0.9 and 270 above 0.99 (max 0.99973),
+                    // against ZERO off-branch, and land radiation down 20.7 W/m2. The saturated
+                    // cells carry twelve times the mean land CloudWater while their water vapour
+                    // is slightly BELOW average, so it is the condensate and not the vapour.
+                    // A near-blackbody layer is exactly what the de-saturation split above exists
+                    // to prevent -- it pins the emission level and collapses the OLR.
+                    //
+                    // Scale LWP_i AND IWP_i by the same factor rather than clipping tau_cloud, so
+                    // the LW (tau_cloud) and the SW (lwp_col/iwp_col, the albedo bump below) see
+                    // the same condensate. Capping one and not the other removes the excess
+                    // cooling but leaves the excess greenhouse -- the imbalance the cwp_cap_col
+                    // note above already warns about.
+                    //
+                    // GATED, AND THE REASON IS A PREDICTION OF MINE THAT WAS WRONG. This was first
+                    // written ungated, argued "inert on the shipped branch" from the off-branch max
+                    // layer emissivity of 0.67683. That number is the maximum AT LEVEL 0 -- the
+                    // radial slice -- and it is not the column maximum. Measured over all 41 levels
+                    // on one latitude slice, the SHIPPED branch reaches eps = 0.99962 at level 28
+                    // with 1773 cells above 0.9. The saturation this ceiling exists to stop is
+                    // ALREADY PRESENT ALOFT with ATM_RAD_TOPO off; it is not something the topo
+                    // branch introduces, only something the topo branch brings down to the ground
+                    // where a surface diagnostic finally showed it.
+                    //
+                    // So the ceiling changes shipped behaviour -- land radiation 327.08 -> 326.82,
+                    // ocean 362.26 -> 362.19, and 1773 -> 0 saturated cells per slice -- and goes
+                    // DEFAULT 2.0 (ON) since 2026-08-28; ATM_CLOUD_TAU_MAX=0 disables it exactly.
+                    // Flipped on the top-of-atmosphere evidence, which is where a radiation change
+                    // has to be judged: clear-sky OLR is BIT-IDENTICAL across the flip
+                    // (180.33882 W/m2 both ways) and cloudy OLR moves +0.053 (177.607 -> 177.660),
+                    // while 1773 near-blackbody layers per latitude slice become zero. Removing a
+                    // pathology the design already forbids, at 0.05 W/m2, is worth taking.
+                    static const double tau_cloud_max = [](){
+                        const char* e = getenv("ATM_CLOUD_TAU_MAX");
+                        const double v = e ? atof(e) : 2.0;
+                        return v > 0.0 ? v : 0.0; }();
+                    if (tau_cloud_max > 0.0 && tau_cloud > tau_cloud_max) {
+                        const double f = tau_cloud_max / tau_cloud;
+                        LWP_i *= f;  IWP_i *= f;  tau_cloud = tau_cloud_max;
+                    }
                     lwp_col += LWP_i;  iwp_col += IWP_i;                          // column paths for the SW albedo bump
 
                     double tau = tau_dry * dp_col[i] * inv_dp + tau_wv * vpath_col[i] * inv_vp

@@ -684,6 +684,7 @@ environment variable before launching the atmosphere to change behaviour.
 | `ATM_ANELASTIC` | `0` (off) | Solves `div(rho_bar u) = 0` instead of `div(u) = 0`. Null on a full run (-0.006 %) because the time loop never applies the pressure to the velocity; measured **2.0x the volume projection** across the INITIAL projection, where it is applied |
 | `ATM_RAD_TOPO` | **`1` (ON since 2026-08-28)** | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them; and level 0, which `BC_Atm` stuffs with the mountain-top humidity while the rock stays dry, collects a large share of the water-vapour optical depth. Off-branch at 100 iterations: max `tau_layer` **7.885** over the Himalaya against 0.022 over ocean. `0` restores the sea-level column |
 | `ATM_RHIE_CHOW` | `0` (off) | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
+| `ATM_CLOUD_TAU_MAX` | **`2.0` (ON since 2026-08-28)** | Per-layer ceiling on the CLOUD optical depth, scaling `LWP_i` and `IWP_i` together so the LW (`tau_cloud`) and SW (albedo bump) stay balanced. `cwp_cap_col` bounds the COLUMN condensate path and does not bound a LAYER: without this the shipped branch reaches layer emissivity **0.99962** aloft with 1773 cells above 0.9 per latitude slice — the near-blackbody pathology the de-saturation split exists to prevent. Clear-sky OLR is bit-identical across the flip (180.33882 W/m2), cloudy OLR +0.053. `0` disables |
 | `ATM_PSI_PROJ_DUMP` | `0` (off) | Writes the streamfunction either side of `project_initial_velocity`, as iterations `-1` and `-2`. Print/CSV only |
 | `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
 
@@ -970,8 +971,11 @@ array at `RHS_Atm_Turb.cpp:513` is `coeff_S*lap(T)`, the CONDUCTIVE flux diverge
 interior cell; crediting it anywhere would double-count the thermal diffusion `diffusion_t_re`
 already applies. The surface bulk flux is the separate `c_H*(T_s - T_air1)` with
 `c_H = 15 W/m2/K` at `MultiLayerRadiation.h:425`. Both are real defects; only the second bears on
-the instability, and MLR's copy cannot cure it because **MLR never runs inside the loop** (calls
-at `cAtmosphereModel.cpp:713-889`, loop at 985).
+the instability, and MLR's copy is refreshed only every 20 iterations. **An earlier version of
+this section said MLR never runs inside the loop, citing "calls at `cAtmosphereModel.cpp:713-889`,
+loop at 985". That was wrong**: 711-892 are LAMBDA DEFINITIONS and the call sites are at 1463-1471,
+inside the loop, with the active `radiation_mode` 5 invoking `cloud_radiation_diag()` — and hence
+MLR — every `teq_refresh_stride` = 20 iterations.
 
 `ATM_SFC_FLUX=<c_H>` (default `0` = off, bit-identical; `15` matches MLR) forms that flux in the
 loop from the live `t`, as a rate `k_S = c_H/(rho*cp*dz)` non-dimensionalised in advective time
