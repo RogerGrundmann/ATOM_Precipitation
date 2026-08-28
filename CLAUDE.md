@@ -144,7 +144,34 @@ removes no latent heat and cannot cool the surface into stability either — the
 `Q_Sensible`, which is written and read by nothing. Both halves of the surface energy exchange
 are open, in opposite directions.
 
-**WHY `ATM_ANELASTIC` IS A NULL HERE, AND WHY THAT IS NOT A RESULT ABOUT CONTINUITY.** The port is
+**THE VOLUME-VS-MASS EXPLANATION IS NOW MEASURED: REAL IN DIRECTION, FAR TOO SMALL TO BE THE
+CAUSE** (2026-08-28). The arm that was said to be unreachable was reachable all along -- the TIME
+LOOP never applies the pressure to the velocity, but `project_initial_velocity` DOES, and
+`ATM_PSI_PROJ_DUMP=1` writes `Psi` either side of it. Measured across the initial projection with
+`ATM_V_MASSBAL` on, so all arms start from `Psi(ground)` = 8.0210e+09:
+
+| projection enforces | relaxations | after | change |
+|---|---|---|---|
+| `div(u)` — volume | 200 | 8.0038e+09 | -0.215 % |
+| `div(rho u)` — MASS | 200 | 7.9860e+09 | **-0.436 %** |
+| `div(rho u)` — MASS | 4 000 | 7.8258e+09 | -2.434 % |
+| `div(rho u)` — MASS | 12 000 | 7.7834e+09 | -2.962 % |
+| `div(rho u)` — MASS | 40 000 | 7.7671e+09 | **-3.166 %** |
+| `div(u)` — volume | 40 000 | 7.8873e+09 | **-1.667 %** |
+
+**MASS BEATS VOLUME BY 1.9x AT CONVERGENCE** (2.03x at 200 relaxations, 1.90x at 40 000), so the
+explanation in `PressureSolverAtm.h:129` is confirmed in DIRECTION. **AND IT ACCOUNTS FOR 1.5
+PERCENTAGE POINTS OF A 100 % NON-CLOSURE.** Even the mass projection, fully converged, leaves
+96.8 % of `Psi(ground)` standing. Volume-vs-mass is a real contributor and NOT the cause.
+
+**THE PROJECTION IS CONVERGED, AND THE MIDDLE OF THAT CURVE LIES.** Increments are +2.00, +0.53,
++0.20 points for 200 -> 4 000 -> 12 000 -> 40 000. Read at 4 000 alone it looks convergence-limited
+and this file briefly said so; the plateau near -3.2 % is unambiguous by 40 000. **So item 72's
+reading stands: the solver converges to a fixed point that is not divergence-free**, and ~97 % of
+the non-closure is structural, outside any projection's reach. 40 000 relaxations is O(N^2) on a
+181x361 grid, so this is not a sweep-count question.
+
+**WHY `ATM_ANELASTIC` IS A NULL ON A FULL RUN, AND WHY THAT IS NOT A RESULT ABOUT CONTINUITY.** The port is
 faithful — source `div(u*) + u*_r dln(rho_bar)/dr`, the matching operator term folded into the
 existing `num_a` off-diagonal, base state built in `densities()` at line 514 and so available to
 `project_initial_velocity` at line 554. It moves `Psi(ground)` **-0.006 %**. The reason is the

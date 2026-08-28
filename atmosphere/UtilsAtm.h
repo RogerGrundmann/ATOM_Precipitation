@@ -321,7 +321,15 @@ public:
 //            int i_radial = m.im-1;
             m.paraview_vtk_radial(bathymetry_name, i_radial, m.iter_n);
 
-            int j_longal = 62;                                          // Mount Everest/Himalaya
+            // ATM_LONGAL_J -- which latitude row the longitudinal slice is cut at.
+            // Default 62 (Mount Everest/Himalaya, 28N), which is what this has always been;
+            // j = 90 - lat, so 20 is 70N and 160 is 70S. The seam diagnostics need a slice at
+            // a latitude where the 1/sin^2(theta) Poisson metric is large, and the shipped cut
+            // is mid-latitude. Read once via getenv, like every other knob here.
+            static const int j_longal = [](){
+                const char* e = getenv("ATM_LONGAL_J");
+                const int v = e ? atoi(e) : 62;
+                return (v >= 0 && v < cAtmosphereModel::jm) ? v : 62; }();
             m.paraview_vtk_longal(bathymetry_name, j_longal, m.iter_n);
 
             int k_zonal = 87;                                           // Mount Everest/Himalaya
