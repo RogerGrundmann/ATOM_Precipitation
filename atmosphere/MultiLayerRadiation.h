@@ -235,6 +235,11 @@ public:
 
         std::vector<double> cwp_census;                 // ATM_CWP_CENSUS: cwp_raw per column
         if (cwpCensus()) cwp_census.assign((size_t)m.jm * m.km, 0.0);
+        // Per-LEVEL condensate, so the column total can be split into "too much per level" and
+        // "spread over too many levels" -- different defects with different fixes. Indexed
+        // [j][i] so each OpenMP thread owns its own j and no reduction is needed.
+        std::vector<double> cwp_prof;
+        if (cwpCensus()) cwp_prof.assign((size_t)m.jm * m.im, 0.0);
 
         // ---- per-column radiative balance (columns independent -> OpenMP over j) ----
         #pragma omp parallel for schedule(dynamic)
@@ -423,6 +428,18 @@ public:
                     cwp_raw += (cwl + cwi) * rho_ii * dz_i * 1000.0;
                 }
                 if (!cwp_census.empty()) cwp_census[(size_t)j * m.km + k] = cwp_raw;
+                if (!cwp_prof.empty()) {
+                    const double wj = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    for (int i = i_mount; i <= i_trop; i++) {
+                        const double dz_i = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
+                                                         : (m.get_layer_height(i) - m.get_layer_height(i-1));
+                        const double T_ii = m.t.x[i][j][k] * m.t_0;
+                        const double rho_ii = (T_ii > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_ii) : 0.0;
+                        const double cwl = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0;
+                        const double cwi = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0;
+                        cwp_prof[(size_t)j * m.im + i] += wj * (cwl + cwi) * rho_ii * dz_i * 1000.0;
+                    }
+                }
                 const double cloud_scale = (cwp_raw > cwp_cap_col) ? (cwp_cap_col / cwp_raw) : 1.0;
 
                 double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated (scaled) condensate paths [g/m2] (for the SW albedo bump)
@@ -802,6 +819,24 @@ public:
             // rescales every column to `cap`, so a column whose real path is cwp carries a cloud
             // of optical thickness cap/cwp of the real one. Reading that as "fraction of the sky
             // covered by a REALISTIC 100 g/m2 cloud" is the comparison the replacement needs.
+            // WHERE the condensate sits. A realistic cloud occupies a LAYER; if the profile
+            // is flat the column total is an integration over depth that should not exist.
+            if (!cwp_prof.empty()) {
+                std::vector<double> prof(m.im, 0.0);
+                for (int j = 0; j < m.jm; j++)
+                    for (int i = 0; i < m.im; i++) prof[i] += cwp_prof[(size_t)j * m.im + i];
+                double tot = 0.0; int nlev = 0;
+                for (int i = 0; i < m.im; i++) { prof[i] /= w_tot; tot += prof[i]; if (prof[i] > 0.01) nlev++; }
+                std::cout << "      AGCM: [CWP CENSUS] per-level g/m2 (cos-lat mean), "
+                          << nlev << " of " << m.im << " levels carrying > 0.01:" << std::endl;
+                std::cout << "      AGCM: [CWP CENSUS]";
+                for (int i = 0; i < m.im; i += 4)
+                    std::cout << "  " << (int)m.get_layer_height(i) << "m:" << prof[i];
+                std::cout << std::endl;
+                std::cout << "      AGCM: [CWP CENSUS] column total from the profile = " << tot
+                          << " g/m2;  mean per carrying level = " << (nlev ? tot / nlev : 0.0)
+                          << " g/m2" << std::endl;
+            }
             std::cout << "      AGCM: [CWP CENSUS] cap=" << cap
                       << " g/m2 applied to every column; implied cover if the cloudy part carried"
                       << " 100 g/m2: mean f = " << std::min(1.0, cap / 100.0) * 100.0

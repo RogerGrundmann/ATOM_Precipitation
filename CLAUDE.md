@@ -196,6 +196,60 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
 
+- **THE CONDENSATE IS 20-30x TOO LARGE BECAUSE THE INITIAL HUMIDITY IS NEAR-SATURATED AT EVERY
+  LEVEL, AND THE CLOUD SCHEME ONLY WORKS BECAUSE OF IT** (2026-08-29). Traced end to end with
+  two new print-only instruments, `ATM_CWP_CENSUS` and `ATM_CLOUD_INIT_DIAG`.
+
+  **The column path and where it sits.** 1584 g/m2 cos-lat mean against an observed ~50-100,
+  **98.9 % of columns cloudy**, spread over **38 of 41 levels**, peaking at 127 g/m2 in the
+  single level at 3316 m. But the PER-CELL values are ordinary — max cloud water 0.72 g/kg,
+  ~0.25 g/kg at the profile peak, max vapour 30.2 g/kg. **Nothing is too wet in any one cell;
+  cloud simply exists everywhere.**
+
+  **The humidity is the cause.** `initWaterWapour` sets `c = RH_init*q_sat` with `RH_init`
+  **constant in height** (0.60 land / 0.75 ocean) and then multiplies by **1.25** — a fudge whose
+  own comment says it "gives a nice cloud around 1 km height". So the ocean column stands at
+  **RH = 0.9375 from the surface to the lid.** Measured:
+
+  | z | 82 m | 819 | 1368 | 2163 | 3316 | 4988 |
+  |---|---|---|---|---|---|---|
+  | mean RH | 0.700 | 0.860 | 0.896 | 0.914 | 0.929 | **0.937** |
+  | `H_crit` | 0.983 | 0.934 | 0.899 | 0.859 | 0.823 | 0.801 |
+  | cells RH > 0.8 | 70 % | 86 % | 90 % | 93 % | 98 % | **100 %** |
+  | cells with cloud | 15 % | 50 % | 90 % | 92 % | 92 % | 78 % |
+
+  **RH RISES with height where Earth's falls** (~80 % in the boundary layer to 40-60 % aloft),
+  while `H_crit` FALLS. They cross at ~1.4 km and above that essentially every cell condenses.
+  `cloud/cloud_max` is 0.47-0.60 at the peak, so the amount is set by the supersaturation and
+  not by the ceiling — the field is a faithful response to the humidity.
+
+  **AND THE TWO CONSTANTS ARE A TUNED PAIR — THE CANCELLING-ERROR PATTERN A THIRD TIME.**
+  `ATM_RH_PROFILE=1` (default 0, bit-identical) replaces the constant column with
+  Manabe-Wetherald `RH(sigma) = RH_s*(sigma - 0.02)/0.98` and drops the 1.25. Alone it takes the
+  column path **1584 -> 0.0006 g/m2**: no cell reaches `H_crit` any more. Lowering the threshold
+  with it (`ATM_RH_CRIT`, default 0.8 = shipped) barely helps —
+
+  | `ATM_RH_CRIT` | 0.8 | 0.55 | 0.45 | 0.35 |
+  |---|---|---|---|---|
+  | column path g/m2 | 0.0006 | 0.0006 | 0.0006 | **1.90** |
+
+  — still ~50x BELOW the target. **The reason is structural and it is the real finding.**
+  `cloud_max[i]`, the scheme's ceiling, is itself the horizontal MEAN of `max(0, c - 0.74*q_sat)`
+  over the level. In a realistic atmosphere the grid-mean supersaturation is essentially never
+  positive, so `cloud_max` collapses to its 1e-4 floor and almost no cloud forms at any
+  threshold. **The scheme diagnoses cloud from GRID-MEAN supersaturation, and real cloud forms
+  from SUB-GRID variability** — parts of a cell saturated while the mean is not. That is exactly
+  what a fractional (Sundqvist/Smith) scheme supplies and what this model has never had.
+
+  **So the chain is: no sub-grid cloud scheme -> the only way to get cloud is to saturate the
+  whole column -> the 1.25 fudge does that -> the condensate comes out 20-30x too large ->
+  `cwp_cap_col` = 20 divides it by 79 three modules downstream.** Every link is now measured.
+  **The repair is a cloud FRACTION, not a re-tune**: nothing in the existing scheme can produce
+  a realistic condensate field from a realistic humidity field, so `ATM_RH_PROFILE` must not be
+  flipped until the fractional scheme exists. Both knobs stay default OFF and both are
+  bit-identical unset (verified: 1583.96 either way).
+
+
 - **THE TWO MISSING INSTRUMENTS ARE IN, AND BOTH ANSWERED ON FIRST LIGHT** (2026-08-29,
   print-only, verified: physics bit-identical, the only log difference is the new lines).
 

@@ -1039,6 +1039,31 @@ void cAtmosphereModel::initWaterWapour() {
         for (int k = 0; k < km; k++) {
             int i_mount = i_topography[j][k];
 
+            // ATM_RH_PROFILE -- give the initial humidity a VERTICAL PROFILE. Default 0 =
+            // the shipped constant-RH column, bit-identical.
+            //
+            // The shipped column sets RH = RH_init at EVERY level and then multiplies by 1.25,
+            // so the ocean column stands at RH = 0.9375 from the surface to the lid -- within
+            // 6 % of saturation through the entire troposphere. Earth's mean RH is ~80 % in the
+            // boundary layer and falls to 40-60 % in the mid-troposphere; this profile does not
+            // fall, it does not vary at all.
+            //
+            // MEASURED CONSEQUENCE (ATM_CLOUD_INIT_DIAG + ATM_CWP_CENSUS): mean RH reaches 0.937
+            // at 5 km with RH > 0.8 in 100 % of cells, while H_crit FALLS with height
+            // (0.983 -> 0.801), so the two cross at ~1.4 km and above that essentially every
+            // cell condenses -- cloud in 92 % of cells over 38 of 41 levels and a column
+            // condensate path of 1584 g/m2 against an observed ~50-100. The per-cell values are
+            // ordinary (peak 0.72 g/kg, ~0.25 g/kg at the profile peak); the excess is entirely
+            // that cloud exists EVERYWHERE. So the defect is the HUMIDITY, and cwp_cap_col = 20
+            // -- a factor of 79 -- has been compensating for it three modules downstream.
+            //
+            // The replacement is Manabe-Wetherald: RH(sigma) = RH_s*(sigma - 0.02)/0.98 with
+            // sigma = p/p_0, the standard idealised profile, RH_s at the ground falling to zero
+            // at the top, introducing no constant beyond the surface value already here. The
+            // 1.25 multiplier goes with it: its own comment says it exists to give "a nice cloud
+            // around 1 km height", i.e. a cloud deck manufactured by a fudge factor.
+            static const bool rh_profile = [](){
+                const char* e = getenv("ATM_RH_PROFILE"); return e && atoi(e) != 0; }();
             const double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
@@ -1051,9 +1076,15 @@ void cAtmosphereModel::initWaterWapour() {
                 const double q_sat = (p_u > E_sat) ? ep * E_sat / (p_u - E_sat)
                                                     : ep * FALLBACK_Q_FACTOR;
 
-                c.x[i][j][k]     = (i >= i_mount) ? RH_init * q_sat : 0.0;
+                double rh_i = RH_init;
+                if (rh_profile) {
+                    const double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
+                    rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
+                }
+                c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes
-                c.x[i][j][k]     = 1.25 * c.x[i][j][k];                 // gives a nice cloud around 1 km height
+                if (!rh_profile)
+                    c.x[i][j][k] = 1.25 * c.x[i][j][k];             // gives a nice cloud around 1 km height
                 cloud.x[i][j][k] = 0.0;
             }
         }
@@ -1089,7 +1120,16 @@ void cAtmosphereModel::initCloudIce() {
 
     const double alfa_s    = 1.5;
     const double Hu_cr_max = 1.0;
-    const double Hu_cr_mid = 0.8;
+    // ATM_RH_CRIT -- the critical-humidity midpoint. Default 0.8 = shipped, bit-identical.
+    // H_crit and the initial RH are a TUNED PAIR: the shipped H_crit runs 0.80-0.98 and only a
+    // near-saturated column ever exceeds it, which is exactly what the shipped constant-RH
+    // 0.9375 column provides. Give the humidity a realistic profile (ATM_RH_PROFILE) without
+    // touching this and the condensate collapses 1584 -> 0.0006 g/m2: no cell reaches threshold.
+    // The two must move together, which is why this is a knob and not a constant.
+    const double Hu_cr_mid = [](){
+        const char* e = getenv("ATM_RH_CRIT");
+        const double v = e ? atof(e) : 0.8;
+        return (v > 0.0 && v < 1.0) ? v : 0.8; }();
     const double Hu_diff   = Hu_cr_max - Hu_cr_mid;
 //    const double det_T_0   = t_0 - 3.0;
     const double det_T_0   = t_0;
@@ -1218,6 +1258,58 @@ void cAtmosphereModel::initCloudIce() {
                     gr.x[i][j][k]    = 0.0;
                 }
             }
+        }
+    }
+
+    // ---- ATM_CLOUD_INIT_DIAG: which term sets the condensate magnitude? -------------------
+    //
+    // The column condensate path is 1584 g/m2 in 99 % of columns against an observed ~50-100,
+    // spread over 38 of 41 levels, while the PER-CELL values are physically ordinary (peak
+    // 0.72 g/kg, mean per carrying level ~0.09 g/kg). So the excess is not "too much in a
+    // cloud", it is "cloud everywhere". Two terms could set that and they need different fixes:
+    //
+    //   cloud = cloud_max[i] * (1 - exp(-alfa_s * del_q / cloud_max[i]))
+    //
+    // For del_q << cloud_max/alfa_s this is LINEAR, cloud ~ alfa_s*del_q, and the supersaturation
+    // sets the amount. For del_q >> cloud_max/alfa_s it SATURATES at cloud_max[i], and the
+    // ceiling sets it -- a ceiling that is itself the horizontal MEAN of max(0, c - 0.74*q_sat)
+    // over the level, with a threshold that DISAGREES with the 0.8-1.0 H_crit used two passes
+    // below. Printing the ratio cloud/cloud_max per level says which regime the field is in.
+    // Print-only, default off.
+    if (const char* e = getenv("ATM_CLOUD_INIT_DIAG")) if (atoi(e) != 0) {
+        std::cout << "      AGCM: [CLOUD-INIT] lvl      z[m]   cloud_max[g/kg]   mean del_q   "
+                  << "mean cloud   mean RH   H_crit   RH>0.8   cells with cloud" << std::endl;
+        for (int i = 0; i < im; i += 2) {
+            double sum_dq = 0.0, sum_cl = 0.0, w_tot = 0.0, sum_rh = 0.0, sum_hc = 0.0;
+            long n_cl = 0, n_tot = 0, n_rh80 = 0;
+            for (int j = 0; j < jm; j++) {
+                const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+                for (int k = 0; k < km; k++) {
+                    const double t_u = t.x[i][j][k] * t_0, p_u = p_stat.x[i][j][k];
+                    const double E_sat = (t_u >= t_0)
+                        ? hp * AtomUtils::exp_func(t_u, MAGNUS_A_WATER, MAGNUS_B_WATER)
+                        : hp * AtomUtils::exp_func(t_u, MAGNUS_A_ICE,   MAGNUS_B_ICE);
+                    const double q_sat  = ep * E_sat / (p_u - E_sat);
+                    const double x_norm = p_u * inv_p_crit;
+                    double H_crit = Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
+                    if (H_crit > 1.0) H_crit = 1.0;
+                    if (q_sat > 0.0) { sum_rh += w * (c.x[i][j][k] / q_sat);
+                                       if (c.x[i][j][k] > 0.8 * q_sat) n_rh80++; }
+                    sum_hc += w * H_crit;
+                    sum_dq += w * std::max(0.0, c.x[i][j][k] - H_crit * q_sat);
+                    sum_cl += w * cloud.x[i][j][k];
+                    w_tot  += w;
+                    if (cloud.x[i][j][k] > 1e-8) n_cl++;
+                    n_tot++;
+                }
+            }
+            const double mdq = (w_tot > 0.0) ? sum_dq / w_tot : 0.0;
+            const double mcl = (w_tot > 0.0) ? sum_cl / w_tot : 0.0;
+            printf("      AGCM: [CLOUD-INIT] %3d %9.0f   %13.6f  %11.6f  %11.6f  %7.3f  %7.3f  %5.1f %%  %6.2f %%\n",
+                   i, get_layer_height(i), cloud_max[i] * 1000.0, mdq * 1000.0, mcl * 1000.0,
+                   (w_tot > 0.0) ? sum_rh / w_tot : 0.0, (w_tot > 0.0) ? sum_hc / w_tot : 0.0,
+                   100.0 * (double)n_rh80 / (double)std::max(1L, n_tot),
+                   100.0 * (double)n_cl / (double)std::max(1L, n_tot));
         }
     }
 
