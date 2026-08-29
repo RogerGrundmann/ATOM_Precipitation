@@ -110,6 +110,21 @@ public:
         return v;
     }
 
+    // ATM_CWP_CENSUS=1 -- print the DISTRIBUTION of the raw column condensate path. Print-only.
+    //
+    // `cwp_cap_col` scales every column's condensate to the same 20 g/m2, and its own note says
+    // what that is: "a fit, not a mechanism ... the cap stands in for a cloud fraction the scheme
+    // does not have, so every column is treated as fully overcast with a thin cloud rather than
+    // 65 % of them with a thick one." The number that decides the replacement is the DISTRIBUTION
+    // of cwp_raw across columns -- how many are cloudy at all, and how thick the cloudy ones are
+    // -- and nothing in the tree prints it. A single mean cannot separate "every column at 1500"
+    // from "a fifth of them at 7500", and those imply completely different cloud fractions.
+    static bool cwpCensus(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_CWP_CENSUS"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool radEquil(){
         static const bool v = [](){
             const char* e = getenv("ATM_RAD_EQUIL"); return e && atoi(e) != 0; }();
@@ -217,6 +232,9 @@ public:
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         static const bool sfc_coupled = [](){
             const char* e = getenv("ATM_SFC_COUPLED"); return e && atoi(e) != 0; }();
+
+        std::vector<double> cwp_census;                 // ATM_CWP_CENSUS: cwp_raw per column
+        if (cwpCensus()) cwp_census.assign((size_t)m.jm * m.km, 0.0);
 
         // ---- per-column radiative balance (columns independent -> OpenMP over j) ----
         #pragma omp parallel for schedule(dynamic)
@@ -404,6 +422,7 @@ public:
                     const double cwi    = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0;
                     cwp_raw += (cwl + cwi) * rho_ii * dz_i * 1000.0;
                 }
+                if (!cwp_census.empty()) cwp_census[(size_t)j * m.km + k] = cwp_raw;
                 const double cloud_scale = (cwp_raw > cwp_cap_col) ? (cwp_cap_col / cwp_raw) : 1.0;
 
                 double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated (scaled) condensate paths [g/m2] (for the SW albedo bump)
@@ -746,6 +765,50 @@ public:
                 }
             }  // k
         }  // j
+
+        // ---- ATM_CWP_CENSUS: the distribution cwp_cap_col is standing in for --------------
+        if (!cwp_census.empty()) {
+            // Cos-lat weighted, because a column at 80N covers far less area than one at the
+            // equator and an unweighted percentile would over-count the poles.
+            std::vector<std::pair<double,double> > v;                 // (cwp, weight)
+            v.reserve(cwp_census.size());
+            double w_tot = 0.0, w_cloudy = 0.0, mean = 0.0;
+            for (int j = 0; j < m.jm; j++) {
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for (int k = 0; k < m.km; k++) {
+                    const double c = cwp_census[(size_t)j * m.km + k];
+                    v.push_back(std::make_pair(c, w));
+                    w_tot += w; mean += w * c;
+                    if (c > 5.0) w_cloudy += w;                       // 5 g/m2 ~ a just-visible cloud
+                }
+            }
+            std::sort(v.begin(), v.end());
+            const double pct[] = {0.05, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99};
+            double q[7] = {0,0,0,0,0,0,0};
+            double acc = 0.0; int pi = 0;
+            for (size_t n = 0; n < v.size() && pi < 7; n++) {
+                acc += v[n].second;
+                while (pi < 7 && acc >= pct[pi] * w_tot) q[pi++] = v[n].first;
+            }
+            const double cap = [](){ const char* e = getenv("ATM_CWP_CAP");
+                                     const double x = e ? atof(e) : 20.0; return x > 0.0 ? x : 20.0; }();
+            std::cout << "      AGCM: [CWP CENSUS] column condensate path g/m2, cos-lat weighted."
+                      << "  mean=" << mean / w_tot
+                      << "  cloudy(>5)=" << 100.0 * w_cloudy / w_tot << " %" << std::endl;
+            std::cout << "      AGCM: [CWP CENSUS] p05=" << q[0] << " p25=" << q[1] << " p50=" << q[2]
+                      << " p75=" << q[3] << " p90=" << q[4] << " p95=" << q[5] << " p99=" << q[6]
+                      << "  max=" << v.back().first << std::endl;
+            // What the cap is doing, stated as the cloud fraction it implicitly asserts: it
+            // rescales every column to `cap`, so a column whose real path is cwp carries a cloud
+            // of optical thickness cap/cwp of the real one. Reading that as "fraction of the sky
+            // covered by a REALISTIC 100 g/m2 cloud" is the comparison the replacement needs.
+            std::cout << "      AGCM: [CWP CENSUS] cap=" << cap
+                      << " g/m2 applied to every column; implied cover if the cloudy part carried"
+                      << " 100 g/m2: mean f = " << std::min(1.0, cap / 100.0) * 100.0
+                      << " % everywhere, against a physical f = "
+                      << 100.0 * std::min(1.0, (mean / w_tot) / 100.0) << " % from the mean path"
+                      << std::endl;
+        }
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);

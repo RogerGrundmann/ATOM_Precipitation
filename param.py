@@ -121,7 +121,7 @@ def main():
             ('inviscid_spinup_iters', 'cumulative iterations to run inviscid (Euler + free-slip mountains) before viscous physics activates; 0 disables', 'int', 0),
             ('inviscid_ramp_iters', 'iterations over which diffusion coefficient ramps from 0 to 1 after the inviscid phase', 'int', 20),
 
-            ('moist_phys_start_iter', 'cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; lets the velocity circulation form on a dry field first; 0 disables (always on)', 'int', 300),
+            ('moist_phys_start_iter', 'cumulative iterations before moist physics (SaturationAdjustment, ice scheme, MoistConvection) activates; 0 = always on (THE DEFAULT since 2026-08-29). The gate never worked: the Andes runaway it was installed for fired at iter 309, nine iterations AFTER release, because activating stiff microphysics onto a spun-up high-CAPE circulation is what ignited it. It was cured at source instead (MCv_max 0.5->0.05, the S_* and MC_* cap passes, damp_wiggles on MC_t/MC_v/MC_w). Meanwhile the gate silently stripped moist physics out of every nm<=300 run, which is all the A/B configs, so every cloud number in the tree was fitted to initCloudIce. Set 300 to restore the old branch', 'int', 0),
 
             ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 300),
 #            ('checkpoint_save_iter', 'dump the full 3D prognostic state to output_path/atm_restart_<iter>.bin when total_iter_count reaches this, for a fast debug restart; -1 disables', 'int', 200),

@@ -196,6 +196,48 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
 
+- **`moist_phys_start_iter` IS 0 SINCE 2026-08-29, AND THE GATE NEVER WORKED.** It was installed
+  to defer a MoistConvection/ice-scheme runaway; the recorded blow-up is at **iteration 309 —
+  nine iterations AFTER the gate released at 300** (Patagonian Andes, 49S 72W). So the gate did
+  not prevent the runaway, it deferred it onto a WORSE field: activating stiff microphysics onto
+  a spun-up high-CAPE circulation with a Patagonian jet is what ignited it. It was cured at
+  source instead — `MCv_max` 0.5 -> 0.05, the `S_*` and `MC_*` cap passes, and `damp_wiggles` on
+  `MC_t`/`MC_v`/`MC_w`. **Validated here before the flip**: `nm = 400`, gate 0, 24 threads —
+  400 iterations, **no NaN**, straight through 300-320, `max|w|` **19.83 m/s** against the +-100
+  clamp (`max|v|` 2.79, `max|u|` 0.028), `residuum_atm` smooth and bounded 23.55 -> 23.63.
+  Set `<moist_phys_start_iter>300</...>` to restore the old branch.
+  **What it was silently doing**: with `nm` <= 300 the moist block never executes, and that is
+  every A/B config in this tree — so `SaturationAdjustment`, the ice scheme and `MoistConvection`
+  have not run in ANY recorded measurement here, `damp_wiggles(t)` included (it sits inside the
+  same block).
+
+- **BUT THE GATE IS NOT WHY THE CLOUD CONSTANTS WERE FITTED TO AN INITIAL CONDITION — THE RUN
+  LENGTH IS** (`ATM_CWP_CENSUS=1`, new, print-only). Two arms at `nm = 100`, 24 threads, the
+  cos-lat-weighted column condensate path in g/m2:
+
+  | arm | mean | p05 | p50 | p95 | max | cloudy (>5 g/m2) |
+  |---|---|---|---|---|---|---|
+  | gate 300 (no moist physics at all) | 1587.5 | 214.6 | 1967.2 | 2258.3 | 2309.2 | **98.94 %** |
+  | gate 0 (moist physics from iter 0) | 1583.3 | 213.6 | 1960.7 | 2252.0 | 2299.1 | **98.94 %** |
+
+  **0.27 % apart.** Turning the moist physics on changes the condensate field by almost nothing,
+  because 100 iterations is **20 seconds of physical time** — `SaturationAdjustment` is
+  instantaneous and the field arrives already adjusted, while every rate-based process carries
+  `dt` and cannot act. This REFUTES the prediction that motivated the census (that arm B would
+  differ materially and so `cwp_cap_col` was a fit to the wrong field). The field is the same
+  either way; it is `initCloudIce`'s, and the run is too short for anything to move it.
+
+- **AND THE CENSUS FOUND SOMETHING LARGER THAN THE MISSING CLOUD FRACTION.** The column
+  condensate path is **1587 g/m2 in 99 % of columns**, against an observed overcast LWP of
+  ~100 g/m2 and a global mean nearer 30-50. `cwp_cap_col` = 20 divides that by **79**. So the
+  cap is not merely standing in for a cloud fraction, as its own note says — it is compensating
+  for a condensate field **20-30x too large covering essentially the whole globe**, and a cloud
+  fraction diagnosed from that field would be 1.0 everywhere. The p05 is 214 g/m2: even the
+  driest 5 % of columns are twice a realistic overcast column. **The defect is upstream of the
+  radiation, in `initCloudIce` and the moist physics, and re-tuning any cloud constant before it
+  is fixed is fitting to a field that is wrong by more than the constant.**
+
+
 - **THIS TREE HAD NO DRY CONVECTIVE ADJUSTMENT, SO NOTHING COULD REMOVE A SUPERADIABATIC LAYER**
   (`ATM_CONV_ADJ`, default off, ported from ATHAD 2026-08-27). No such file, no call site, only
   `MoistConvection.h`. Measured over 100 iterations at 24 threads: at iteration 0 the surface
