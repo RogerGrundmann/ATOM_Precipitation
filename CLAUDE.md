@@ -840,9 +840,126 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   on a profile made flat by a solver defect, not by physics, and the convective route to Earth's
   6.5 K/km is REOPENED.**
 
-  **The next thing to read is the bottom of the matrix, not the whole of it**: rows `i_mount`,
-  `i_mount+1` and `i_mount+2` are three hand-written special cases sitting exactly where the
-  failure is, and the surface-balance override replaces the answer at the fourth.
+  **THE WHOLE MATRIX IS WRONG, NOT ITS BOTTOM, AND POINT 4(a) ABOVE IS RETRACTED**
+  (`ATM_RAD_EQUIL`, default 0, 2026-08-29). The grey comparison in point 2 used the Eddington
+  **3/2 diffusivity factor** and this scheme has none, so it was the wrong yardstick, and it
+  exonerated the solve aloft when it should not have. Two REFERENCE-FREE tests replace it.
+
+  **(i) THE OUTPUT DOES NOT SATISFY THE BALANCE THE SCHEME IS WRITTEN TO SOLVE.** For an air
+  layer, absorbed = emitted is `eps_i*(U_i + D_i) = 2*eps_i*B_i`, i.e. **`B_i = (U_i + D_i)/2`
+  with `eps` cancelling** — no optical-depth assumption, no diffusivity factor, nothing external.
+  Sweeping U and D from the scheme's OWN epsilon and OWN output:
+
+  | z [m] | 16023 | 9923 | 6088 | 2163 | 1368 | 613 | 82 |
+  |---|---|---|---|---|---|---|---|
+  | residual W/m2 | +3.76 | -17.69 | -45.52 | -76.48 | **-79.97** | -72.69 | -28.06 |
+  | as dT [K] | +1.55 | -5.75 | -12.25 | -16.81 | **-16.95** | -15.08 | -5.99 |
+
+  The output is too WARM against its own balance at every level below 10 km, peaking at
+  **-80 W/m2 (-17 K) at 1.4 km**. Which is also why iterating it DIVERGES: the balance wants it
+  colder, and each pass overshoots.
+
+  **(ii) SOLVED TO CONVERGENCE, THE SAME BALANCE GIVES A COMPLETELY DIFFERENT PROFILE.** Jacobi
+  on the scheme's own epsilon and shortwave, 200 000 sweeps, validated by a TOA closure of
+  **+0.000 W/m2** that is enforced nowhere in the iteration:
+
+  | z [m] | 16023 | 9923 | 6088 | 2163 | 819 | 82 | 0 |
+  |---|---|---|---|---|---|---|---|
+  | scheme | 219.52 | 241.41 | 260.04 | 280.05 | 284.64 | 277.40 | 280.76 |
+  | **correct** | **193.91** | **207.03** | **218.47** | **235.72** | **244.22** | **250.48** | **269.85** |
+  | diff | -25.61 | -34.38 | -41.57 | -44.32 | -40.41 | -26.93 | -10.91 |
+
+  Wrong by **25-44 K at EVERY level**, not only below 3.7 km. And the correct answer aloft is
+  **16.6 K COLDER than US-standard** at 9.9 km, not warmer — which is what radiative equilibrium
+  should be, since convection warms the upper troposphere relative to it. **So the "+18.75 K
+  warm-aloft bias" IS a solver defect after all**, and 4(a)'s exoneration was an artefact of the
+  3/2 yardstick.
+
+  **(iii) POINT 4(b) STANDS AND IS STRENGTHENED.** Correctly solved, the lower troposphere is
+  **15.78 K/km over the bottom 2 km** from the shipped shortwave and **19.93 K/km** from a
+  realistic one — hugely superadiabatic against a 9.8 dry adiabat. This file's own structural
+  reading ("Earth's radiative equilibrium is strongly UNSTABLE near the ground (~15 K/km), which
+  is what triggers convection... This scheme's is 3.97 K/km — far too STABLE") had the physics
+  exactly right and the attribution exactly wrong: **it is the solver, not the scheme's physics.**
+  `ATM_CONV_ADJ`'s null was measured on a profile the solver flattened.
+
+  **THE REPLACEMENT IS EXACT, AND CHEAPER THAN WHAT IT REPLACES.** `U[i]` crosses the interface
+  BELOW layer i and `D[i]` the one ABOVE it, so `U[i] - D[i]` is not a net flux at one level —
+  the net at layer i's upper interface is `U[i+1] - D[i]`, and radiative equilibrium holds THAT
+  constant at F. Eliminating B and D from the transfer step gives a single downward sweep:
+
+      U[i+1] = U[i] - eps_i*F/(2 - eps_i)
+      B_i    = U[i] - F/2 - eps_i*F/(2*(2 - eps_i))
+
+  from `U` above the lid = F = absorbed shortwave, with `B` at the ground = `U[i_mount+1]`
+  because a blackbody surface does not attenuate its own emission. The `eps/(2 - eps)` is the
+  layer's opacity to its own emission; assuming `eps/2` costs 2.23 K, which is how it was caught.
+  **Verified against the 200 000-sweep Jacobi at max |dT| = 0.000000 K.** O(im) and
+  non-iterative, against the shipped O(im^2) `CC` construction.
+  **And it gives the scheme a fixed point**: `ATM_RAD_EQUIL=1` converges and is EXACTLY
+  stationary thereafter (`max|dT|` = 0.0000), where the shipped path reaches NaN in five passes.
+  Off-branch bit-identical — `rad_selftest` reproduces 280.76 / 241.41 / 255.0.
+
+  **IT MUST NOT BE FLIPPED ON, BECAUSE IT UNCOVERS A SECOND DEFECT: THE SHORTWAVE IS ~2.5x TOO
+  LOW AND THE BROKEN SOLVER WAS MASKING IT.** `rad_equator_short` = **163.3 W/m2** against
+  Earth's annual-mean equatorial TOA insolation of ~416 (global mean 341), `rad_pole_short` =
+  100.0 against ~173. The shipped scheme emits 255 W/m2 while absorbing 150 — **a 105 W/m2 TOA
+  imbalance that was invisible because the solve was never energy-closed.** Correct the solver
+  alone and the ice-albedo feedback runs away:
+
+  | equatorial SW | converges | surface | lapse 0-2.2 km | lapse 0-9.9 km | OLR |
+  |---|---|---|---|---|---|
+  | 163.3 (shipped) | pass 3 | **219.12 — snowball** | 12.81 | 5.14 | 65.3 |
+  | **416 (Earth)** | **pass 1** | **340.92** | **19.93** | **7.998** | **382.7** |
+
+  340.9 K with a strongly superadiabatic lower troposphere is the textbook Manabe-Strickler
+  radiative equilibrium. **Two errors have been cancelling: a solver biased warm and a shortwave
+  forcing 2.25x too weak.** Fixing either alone makes the model worse, which is the family's
+  `mue_ch4` pattern (ATNEPT item 2) a third time.
+
+  **THE SHORTWAVE IS NOW FIXED TOO, AND THE PARABOLA WAS THE WRONG SHAPE RATHER THAN THE WRONG
+  SCALE** (`ATM_SW_INSOL=<S0>`, default 0 = off, bit-identical; 1361 = Earth). `parabola(x) =
+  x^2 - 2x` on `j/j_half` is a quadratic in LATITUDE; the annual-mean insolation is exactly a
+  quadratic in SIN(latitude),
+  `S(phi) = (S0/4)*(1 - 0.477*P2(sin phi))`, where the 0.477 is the obliquity's second Legendre
+  coefficient — **solar geometry, not a fit**. Cos-lat means:
+
+  | | equator | pole | global mean | rms vs true |
+  |---|---|---|---|---|
+  | true annual-mean | 421.4 | 178.0 | **340.3** | — |
+  | shipped 163.3 / 100.0 | 163.3 | 100.0 | **151.3** | 198.3 |
+  | true endpoints in the parabola | 416 | 173 | 370.0 | 39.7 |
+  | best-fit parabola | 404.9 | **63.6** | 340.3 | 16.7 |
+
+  **The two constants cannot both be right in the parabolic form**: the true endpoints overshoot
+  the integral by 8.7 % because the parabola is too flat in mid-latitudes, and a least-squares
+  parabola gets the integral right only by driving the pole to 63.6 W/m2 against a true 178. In
+  the correct form there are no free constants at all, only `S0`. `rad_equator_short` /
+  `rad_pole_short` are ignored on this branch and restore the old profile exactly when it is off.
+
+  **THE FOUR ARMS, AND WHY THE TWO KNOBS ARE A PAIR** (US-standard column, iterating the scheme on
+  its own output, `test/rad_iterate`):
+
+  | arm | pass 1 | fixed point | lapse 0-9.9 km | TOA closure |
+  |---|---|---|---|---|
+  | shipped | 280.76 | **NaN by pass 6** | 3.965 | never closes |
+  | `ATM_SW_INSOL` only | 297.08 | **140.92, still falling** | 5.490 | — |
+  | `ATM_RAD_EQUIL` only | 269.85 | 219.12 — snowball | 6.331 | +0.000 |
+  | **BOTH** | **342.02** | **342.02, stationary from pass 2** | **8.024** | **+0.000** |
+
+  **FIXING THE SHORTWAVE ALONE IS WORSE THAN SHIPPING NEITHER** — it diverges to 140.92 K with an
+  INVERTED lapse of -11.7 K/km. Together they converge in ONE pass, are exactly stationary
+  thereafter, close the top of atmosphere to +0.000 W/m2 with closure enforced nowhere, and give
+  a lower troposphere of **19.998 K/km over the bottom 2 km**. That is clear-sky
+  Manabe-Strickler radiative equilibrium, and it is what a convective adjustment is supposed to
+  find and mix. **`MultiLayerRadiation::warnIfHalfRepaired()` prints a loud warning if exactly
+  one of the two is set**, because that arm is the worst of the four and looks like a repair.
+
+  **STILL OPEN, AND NOT CHASED HERE**: the scheme has no atmospheric shortwave absorption and no
+  Rayleigh scattering, so with `albedo_equator` = 0.1 it absorbs 387.7 W/m2 at the equator
+  against Earth's ~316 — the albedo constants are a SURFACE albedo doing a PLANETARY albedo's
+  job. That is the next thing in this chain, and it is why 342.02 K should be read as "the
+  scheme's clear-sky RE, correctly solved" rather than as a claim about Earth.
   *Side note, not the same quantity*: the SURFACE lapse at 28N is **194.65 -> 188.74 K/km** — a
   7.6 K jump across the 39 m from level 0 to level 1, the boundary-condition defect above, which
   the adjustment dents by 3 %. Do not confuse it with the tropospheric lapse; they move

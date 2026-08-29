@@ -52,12 +52,98 @@ using namespace AtomUtils;
 
 class MultiLayerRadiation {
 public:
+    // ATM_RAD_EQUIL -- solve the layer radiative equilibrium EXACTLY instead of with the
+    // hand-rolled tridiagonal. Default 0 = the shipped path, bit-identical.
+    //
+    // WHY. The shipped Thomas solve does not satisfy the balance it is written to solve.
+    // Measured on a US-standard column (test/rad_iterate), its output violates
+    // absorbed = emitted by up to -80 W/m2 (-17 K) at 1.4 km, and applying the scheme to its
+    // OWN output diverges -- surface 288.15 -> 280.76 -> 268.31 -> 243.81 -> 193.67 -> NaN in
+    // five passes, with the lapse inverting by pass 3. So it has no fixed point and the single
+    // pass everything was tuned against is one step of a divergent map.
+    //
+    // THE REPLACEMENT IS EXACT AND CHEAPER. In radiative equilibrium the net upward flux is
+    // constant with height. Care with the two flux arrays: U[i] crosses the interface BELOW
+    // layer i and D[i] the one ABOVE it, so U[i] - D[i] is not a net flux at one level -- the
+    // net at layer i's upper interface is U[i+1] - D[i], and that is what is held at F. With
+    // B_i = (U[i] + D[i])/2 (absorbed = emitted; eps cancels) and the transfer step
+    // U[i+1] = U[i](1 - eps_i) + eps_i*B_i, eliminating B and D gives
+    //     U[i+1] = U[i] - eps_i*F/(2 - eps_i)
+    //     B_i    = U[i] - F/2 - eps_i*F/(2*(2 - eps_i))
+    // integrated downward from U above the lid = F = absorbed shortwave, with B at the ground
+    // equal to U[i_mount+1] because a blackbody surface does not attenuate its own emission.
+    // The eps/(2 - eps) rather than eps/2 is the layer's opacity to its own emission; assuming
+    // eps/2 costs 2.23 K. Verified against a 200 000-sweep Jacobi solve of the same balance:
+    // max |dT| = 0.000000 K, with TOA closure OLR = SW_abs coming out to +0.000 W/m2 although
+    // it is enforced nowhere.
+    //
+    // O(im) and non-iterative, against the shipped O(im^2) CC construction -- so this is
+    // cheaper than what it replaces. On this branch the separate surface energy balance and the
+    // de-kink smoother are SKIPPED: the surface is solved by the same physics as every other
+    // level (more optical depth -> larger U[i_mount+1] -> warmer ground, so CO2 warms the
+    // surface by construction rather than through a bolted-on Newton step), and the smoother
+    // exists to hide the discontinuity that override created.
+    // ATM_SW_INSOL=<solar constant W/m2> -- use the real annual-mean insolation instead of the
+    // fitted pole/equator parabola. Default 0 = off, shipped path bit-identical. 1361 = Earth.
+    //
+    // WHY. `rad_equator_short` = 163.3 and `rad_pole_short` = 100.0 give a cos-lat GLOBAL MEAN
+    // of 151.3 W/m2 against Earth's 340.3 -- the shortwave forcing is 2.25x too weak. It went
+    // unnoticed because the shipped tridiagonal is biased warm by a compensating amount and was
+    // never energy-closed: it emits 255 W/m2 while absorbing 150, a 105 W/m2 TOA imbalance that
+    // no diagnostic in the tree reports. Two errors cancelling, the family's mue_ch4 pattern.
+    //
+    // AND THE PARABOLA IS THE WRONG SHAPE, NOT MERELY THE WRONG SCALE. `parabola(j/j_half)` is a
+    // quadratic in LATITUDE; the annual-mean insolation is exactly a quadratic in SIN(latitude),
+    //     S(phi) = (S0/4) * (1 - s2*P2(sin phi)),   P2(x) = (3x^2 - 1)/2,   s2 = 0.477,
+    // which is solar geometry (the 0.477 is the obliquity's second Legendre coefficient), not a
+    // fit. Putting the true endpoints 421/178 into the parabola still overshoots the global mean
+    // by 8.7 % because the parabola is too flat in mid-latitudes; a least-squares parabola gets
+    // the integral right only by driving the pole to 63.6 W/m2 against a true 178. So the two
+    // constants cannot both be right in this form -- and in the correct form there are no free
+    // constants at all, only S0.
+    //
+    // Endpoints come out at 421.4 (equator) and 178.0 (pole) with a global mean of 340.3 by
+    // construction. `rad_equator_short` / `rad_pole_short` are ignored on this branch.
+    static double swInsol(){
+        static const double v = [](){
+            const char* e = getenv("ATM_SW_INSOL"); return e ? atof(e) : 0.0; }();
+        return v;
+    }
+
+    static bool radEquil(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_RAD_EQUIL"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     explicit MultiLayerRadiation(cAtmosphereModel& model)
         : m(model)
     {}
 
+    // The two repairs are ONLY correct together, and each alone is worse than shipping neither.
+    // Measured on a US-standard column, iterating the scheme on its own output (test/rad_iterate):
+    //
+    //   arm                    pass 1    fixed point        lapse 0-9.9 km   TOA closure
+    //   shipped                280.76    NaN by pass 6          3.965        never closes
+    //   ATM_SW_INSOL only      297.08    140.92, still falling  5.490        --
+    //   ATM_RAD_EQUIL only     269.85    219.12 snowball        6.331        +0.000
+    //   BOTH                   342.02    342.02 stationary      8.024        +0.000
+    //
+    // A solver biased warm and a shortwave 2.25x too weak have been cancelling. Warn loudly if
+    // exactly one is set, because that arm is the worst of the four and looks like a repair.
+    static void warnIfHalfRepaired() {
+        static bool done = false;
+        if (done) return;
+        done = true;
+        if ((swInsol() > 0.0) != radEquil())
+            std::cout << "      AGCM: [RADIATION WARNING] ATM_RAD_EQUIL and ATM_SW_INSOL are a PAIR"
+                      << " and only one is set. A warm-biased solver and a 2.25x-too-weak shortwave"
+                      << " have been cancelling; either alone is worse than neither." << std::endl;
+    }
+
     void run()
     {
+        warnIfHalfRepaired();
         using namespace std;
         cout << endl << "      RadiationMultiLayer" << endl;
         auto begin = std::chrono::high_resolution_clock::now();
@@ -96,6 +182,16 @@ public:
                 }
 
         // Incoming short-wave radiation: pole -> equator parabola, hemispherically symmetric.
+        if (swInsol() > 0.0) {
+            // Real annual-mean insolation; see ATM_SW_INSOL above. Latitude uses the same
+            // j -> phi convention as every cos-lat weight in the tree.
+            m.short_wave_radiation = std::vector<double>(m.jm, 0.0);
+            for (int j = 0; j < m.jm; j++) {
+                const double sp = sin(((double)j / (double)(m.jm - 1) - 0.5) * M_PI);
+                const double P2 = 0.5 * (3.0 * sp * sp - 1.0);
+                m.short_wave_radiation[j] = 0.25 * swInsol() * (1.0 - 0.477 * P2);
+            }
+        } else {
         m.short_wave_radiation = std::vector<double>(m.jm, m.rad_pole_short);
         const double rad_short_eff = m.rad_pole_short - m.rad_equator_short;
         for (int j = j_half; j >= 0; j--)
@@ -103,6 +199,7 @@ public:
                 rad_short_eff * parabola((double)j / (double)j_half) + m.rad_pole_short;
         for (int j = j_max; j > j_half; j--)
             m.short_wave_radiation[j] = m.short_wave_radiation[j_max - j];
+        }
 
         // ATM_RAD_TOPO -- see the i_mount comment inside the column loop below.
         //
@@ -131,6 +228,7 @@ public:
             std::vector<double> dp_col(m.im, 0.0), vpath_col(m.im, 0.0), wdp_col(m.im, 0.0);
             std::vector<double> alfa(m.im, 0.0), beta(m.im, 0.0);
             std::vector<double> AA(m.im, 0.0), CA(m.im, 0.0);
+            std::vector<double> Uc(m.im + 1, 0.0);          // ATM_RAD_EQUIL upward-flux sweep
             std::vector<double> radiation_original(m.im, 0.0);
             std::vector<std::vector<double> > CC(m.im, std::vector<double>(m.im, 0.0));
 
@@ -468,6 +566,23 @@ public:
                         m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * refl;
                 }
 
+                if (radEquil()) {
+                    // ---- exact layer radiative equilibrium (see ATM_RAD_EQUIL above) ----
+                    const double F = (1.0 - m.albedo.y[j][k]) * m.short_wave_radiation[j];
+                    Uc[i_trop + 1] = F;
+                    for (int i = i_trop; i >= i_mount + 1; i--) {
+                        const double e = m.epsilon.x[i][j][k];
+                        Uc[i] = Uc[i + 1] + e * F / (2.0 - e);
+                    }
+                    for (int i = i_mount + 1; i <= i_trop; i++) {
+                        const double e = m.epsilon.x[i][j][k];
+                        m.radiation.x[i][j][k] = Uc[i] - 0.5 * F - e * F / (2.0 * (2.0 - e));
+                    }
+                    m.radiation.x[i_mount][j][k] = Uc[i_mount + 1];
+                    for (int i = i_mount; i <= i_trop; i++)
+                        m.t.x[i][j][k] = pow(std::max(1.0, m.radiation.x[i][j][k]) / m.sigma, 0.25) / m.t_0;
+                } else {
+
                 // Transmitted (AA) / absorbed (CC diagonal) radiation, and the sum CA
                 // of all radiations transmitted through each layer.
                 AA[i_mount]          = m.radiation.x[i_mount][j][k];              // surface radiation
@@ -602,6 +717,8 @@ public:
                     if (i_top_sm > i_mount)                       // surface: one-sided blend toward air
                         m.radiation.x[i_mount][j][k] = 0.5 * r_orig[0] + 0.5 * r_orig[1];
                 }
+
+                }  // end of the shipped tridiagonal branch (ATM_RAD_EQUIL = 0)
 
                 // Sub-surface land cells. With i_mount on the ground the loops above no longer
                 // write i < i_mount at all, so those cells would keep whatever the PREVIOUS call
