@@ -261,10 +261,40 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   one of the three is wrong. Fix any one alone and the condensate collapses; the 38 % vs 99.77 %
   row above is that statement measured.
 
-  **THE REMAINING FIX IS SPECIFIED.** `SaturationAdjustment` must target the FRACTIONAL
-  equilibrium rather than `q_sat`: with total water `q_t = q_v + q_c + q_i`, the closure gives
-  `q_c_eq = f^2*D` and the adjustment should drive `q_v -> q_t - q_c_eq` instead of
-  `q_v -> q_sat` (`SaturationAdjustment.h:130`, and the same target at :164). Not written.
+  **WRITTEN, AND THE CHAIN NOW CLOSES.** `SaturationAdjustment` targets the FRACTIONAL
+  equilibrium under `ATM_CLOUD_FRAC`: with total water `q_t = q_v + q_c + q_i` — conserved by
+  the loop, since `d_cnd + d_dep = d_q_v` — the target becomes `q_t - q_c_eq` with `q_c_eq` from
+  the same uniform-PDF closure. It reduces EXACTLY to the shipped `q_s` when `H_crit` = 1
+  (`D` = 0, `f` = 1), so the off-branch is unchanged BY CONSTRUCTION rather than by a guard, and
+  measures so (1583.9636 against a 1583.9636 baseline). The entry test is widened too: a cell
+  can now be cloudy while the grid mean is subsaturated, so admission cannot be conditioned on
+  `q_v > q_sat` alone.
+
+  **THE CONDENSATE NOW SURVIVES.** `nm = 20`, `ATM_RH_PROFILE` + `ATM_CLOUD_FRAC`:
+
+  | `ATM_RH_CRIT` | at init | after init SatAdj | at the radiation | columns w/ cloud |
+  |---|---|---|---|---|
+  | 0.35 | 26.81 | 25.09 | **24.99** | 73 % |
+  | 0.32 | 55.34 | 53.61 | **53.39** | 82 % |
+  | 0.30 | 80.26 | 79.34 | **79.02** | 86 % |
+  | 0.28 | 109.77 | 110.59 | **110.14** | 89 % |
+
+  **Loss across the adjustment is 1.5 %, against 99.77 % before** — that single row is the
+  repair. And the column path is now a CALIBRATABLE quantity that lands in the observed
+  50-100 g/m2 at `ATM_RH_CRIT` ~ 0.30-0.32, instead of being forced there by `cwp_cap_col`
+  dividing by 79 three modules downstream.
+
+  **TWO CAVEATS ON READING THAT TABLE.** The last column is the fraction of COLUMNS carrying
+  more than 5 g/m2, NOT satellite cloud cover — a column with `f` = 0.1 at a few levels counts
+  as cloudy — so 86 % is not a claim of 86 % cloud cover and must not be compared with Earth's
+  ~67 %. And `nm` = 20 is the INITIAL field: this is the condensate the model starts from, not
+  one a spun-up circulation maintained.
+
+  **STILL DEFAULT OFF, ALL FOUR** (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`, and the
+  fraction-aware adjustment they share). What has NOT been done: `cwp_cap_col` is still 20 and
+  still divides the now-physical path by ~4, so it must be disabled in the same flip; the
+  radiation still treats every column as overcast rather than weighting by `f`; and none of this
+  has been run to a spun-up state or checked against the OLR.
 
   **So the state is: the humidity fix is measured and good, the closure is measured and
   structurally good, and the two together are NOT yet a working pair.** All three knobs

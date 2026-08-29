@@ -14,6 +14,50 @@ using namespace AtomUtils;
 
 class SaturationAdjustment {
 public:
+    // ---- ATM_CLOUD_FRAC: make the adjustment FRACTION-AWARE (default 0 = shipped) --------
+    //
+    // The shipped adjustment drives q_v toward q_sat on the GRID MEAN. A sub-grid cloud scheme
+    // puts condensate exactly where the grid mean is SUBSATURATED, so a grid-mean adjustment
+    // evaporates precisely the cloud the closure created. Measured: with ATM_CLOUD_FRAC and a
+    // realistic humidity the init call at cAtmosphereModel.cpp:461 takes the column condensate
+    // path from 270.70 g/m2 to 0.633 -- a factor of 428, against 38 % on the shipped
+    // near-saturated column, which is the one state a grid-mean adjustment does not destroy.
+    //
+    // The repair is to target the FRACTIONAL equilibrium. Total water q_t = q_v + q_c + q_i is
+    // conserved by the loop below (d_cnd + d_dep = d_q_v), so for the uniform-PDF closure
+    //     D       = (1 - H_crit)*q_s
+    //     f       = clamp((q_t + D - q_s) / 2D, 0, 1)
+    //     q_c_eq  = f^2*D   (f < 1),   q_t - q_s   (f = 1)
+    //     target  = q_t - q_c_eq
+    // which reduces EXACTLY to the shipped target q_s when H_crit = 1 (D = 0, f = 1), so the
+    // off-branch is unchanged by construction and not merely by a guard.
+    static bool cloudFrac(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_CLOUD_FRAC"); return e && atoi(e) != 0; }();
+        return v;
+    }
+    // The same critical-humidity parabola initCloudIce uses, with the same ATM_RH_CRIT knob.
+    static double hCrit(double p_hPa){
+        static const double mid = [](){
+            const char* e = getenv("ATM_RH_CRIT");
+            const double v = e ? atof(e) : 0.8;
+            return (v > 0.0 && v < 1.0) ? v : 0.8; }();
+        const double x_mid = 0.55;
+        const double curv  = (1.0 - mid) / (x_mid * (1.0 - x_mid));
+        const double x     = p_hPa / 1000.0;
+        const double h     = 1.0 - curv * x * (1.0 - x);
+        return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
+    }
+    // Grid-mean condensate the closure supports for total water q_t at saturation q_s.
+    static double qcEquilibrium(double q_t, double q_s, double p_hPa){
+        const double D = (1.0 - hCrit(p_hPa)) * q_s;
+        if (!(D > 0.0)) return std::max(0.0, q_t - q_s);      // H_crit = 1 -> grid-mean limit
+        double f = (q_t + D - q_s) / (2.0 * D);
+        if (f <= 0.0) return 0.0;
+        if (f >= 1.0) return std::max(0.0, q_t - q_s);
+        return f * f * D;
+    }
+
     explicit SaturationAdjustment(cAtmosphereModel& model)
         : m(model)
     {}
@@ -120,7 +164,12 @@ private:
 
                     const double alpha_entry = 1.0 / (1.0 + std::exp(-(T - m.t_00) / fade_K));
 
-                    if ((q_v_old > q_sat && alpha_entry > 0.01) ||
+                    // Under ATM_CLOUD_FRAC a cell can be cloudy while the GRID MEAN is
+                    // subsaturated, so entry cannot be conditioned on q_v > q_sat alone: a cell
+                    // above the critical humidity must be admitted even with no condensate yet.
+                    const bool frac_active = cloudFrac()
+                        && (q_v_old + q_c_old + q_i_old) > hCrit(p_local) * q_sat;
+                    if ((q_v_old > q_sat && alpha_entry > 0.01) || frac_active ||
                         (q_v_old < q_sat &&
                         (q_c_old > 1e-12 || q_i_old > 1e-12))) {
 
@@ -164,6 +213,16 @@ private:
                             double q_v_target = (q_sum > 1e-12)
                                 ? (q_c_b * q_sat + q_i_b * q_Ice) / q_sum
                                 : ((T >= m.t_0) ? q_sat : q_Ice);
+
+                            // Fraction-aware target. q_s above is the phase-blended saturation
+                            // the shipped scheme drives to; under ATM_CLOUD_FRAC the cell is
+                            // allowed to retain the condensate the sub-grid closure supports at
+                            // that saturation, rather than being dried to it.
+                            if (cloudFrac()) {
+                                const double q_t_b = q_v_b + q_c_b + q_i_b;
+                                const double q_c_eq = qcEquilibrium(q_t_b, q_v_target, p_local);
+                                q_v_target = std::max(0.0, q_t_b - q_c_eq);
+                            }
 
                             // Adaptive Newton-damped update. The previous fixed 0.5 under-
                             // relaxation is UNSTABLE when the latent-heat gain
