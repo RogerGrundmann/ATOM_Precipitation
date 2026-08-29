@@ -783,7 +783,66 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   that table is the FULL MODEL's `t`, which dynamics also shape, so a departure from pure
   radiative equilibrium is partly expected. What is not explained by dynamics is the OFFLINE
   harness — no dynamics at all — returning the same flat 3.97 K/km from a US-standard input.
-  **The next suspect is the tridiagonal solve itself, not its optical-depth inputs.** Not read yet.
+  **THE TRIDIAGONAL SOLVE HAS NOW BEEN READ AND TESTED, AND IT IS EXONERATED ABOVE 3.7 km AND
+  GUILTY BELOW IT — AND THE SCHEME HAS NO RADIATIVE EQUILIBRIUM AT ALL** (`test/rad_iterate`,
+  2026-08-29, ~1 s per pass, no model change).
+
+  **1. THERE IS NO FIXED POINT.** `rad_selftest` calls the scheme ONCE and reports what comes
+  back; that answers "does it run", not "what is its equilibrium". Applied REPEATEDLY to its own
+  output on a US-standard column it DIVERGES:
+
+  | pass | T(0 m) | T(2163) | T(6088) | T(9923) | lapse 0-9.9 km | OLR |
+  |---|---|---|---|---|---|---|
+  | input | 288.15 | 274.09 | 248.58 | 223.65 | 6.500 | — |
+  | 1 | 280.76 | 280.05 | 260.04 | 241.41 | **3.965** | 255.01 |
+  | 2 | 268.31 | 281.23 | 264.31 | 247.76 | 2.070 | 256.57 |
+  | 3 | 243.81 | 278.49 | 264.37 | 249.31 | **-0.554** | 240.87 |
+  | 4 | 193.67 | 270.63 | 259.89 | 246.35 | -5.309 | 207.82 |
+  | 5 | **NaN** | 254.36 | 249.10 | 237.64 | NaN | NaN |
+
+  The surface collapses at an ACCELERATING rate (-7.4, -12.5, -24.5, -50.1 K) and the lapse
+  inverts by pass 3. **So "the radiation scheme's own radiative equilibrium" names something that
+  does not exist**, and the 3.97 K/km is ONE STEP of a divergent map applied to a US-standard
+  column — not a converged state. Every constant ever fitted against a single pass was fitted
+  against a transient. (Not yet separated: how much of the divergence is the tridiagonal and how
+  much the surface-balance override bolted on beside it.)
+
+  **2. AGAINST ANALYTIC GREY RE ON THE SCHEME'S OWN `tau_above`, THE SOLVE IS RIGHT ALOFT.**
+  `sigma*T^4 = (F/2)(1 + 3*tau/2)` with F = the scheme's own OLR — not fitted, not normalised, so
+  the lid value is a PREDICTION:
+
+  | z [m] | 16023 | 9923 | 6088 | 3678 | 2163 | 1211 | 613 | 82 | 0 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | `tau_above` | 0.000 | 0.355 | 0.686 | 1.014 | 1.305 | 1.547 | 1.739 | 1.961 | 2.003 |
+  | model | 219.52 | 241.41 | 260.04 | 272.43 | 280.05 | 283.92 | 284.45 | 277.40 | 280.76 |
+  | grey | 217.76 | 242.29 | 259.91 | 274.38 | 285.57 | 293.95 | 300.14 | 306.83 | 308.06 |
+  | **model - grey** | +1.76 | -0.88 | +0.13 | -1.95 | **-5.52** | **-10.04** | **-15.68** | **-29.43** | -27.30 |
+
+  Within ~2 K over the whole column above 3.7 km, including an unfitted lid. **The tridiagonal
+  solve is doing grey radiative transfer correctly where the optical depth is thin.**
+
+  **3. BELOW 3.7 km IT FAILS, AND IN THE LOWEST 800 m IT INVERTS THE PROFILE.** The model peaks
+  at **284.64 K at 819 m** and falls DOWNWARD to **277.40 K at 82 m**, where grey RE requires a
+  monotone rise to 308.06 K at the ground. That is 16 K of error OF THE WRONG SIGN in the bottom
+  800 m, and the surface-balance override then puts 280.76 K underneath it — **a superadiabatic
+  surface step manufactured by the radiation scheme itself**, in a harness with no dynamics.
+
+  **4. SO TWO CONCLUSIONS RECORDED ABOVE ARE WRONG.**
+  **(a) The +18.75 K warm-aloft bias is NOT a solver defect.** Grey RE on the scheme's own tau is
+  **+18.64 K above US-standard at 9.9 km** (242.29 against 223.65) and the scheme returns
+  241.41 — it reproduces grey RE there to 0.88 K. The bias is the ABSENCE OF CONVECTION and
+  nothing else, which is what a radiative-equilibrium scheme is supposed to give.
+  **(b) "This scheme's radiative equilibrium is 3.97 K/km — far too STABLE, so there is nothing
+  for a convective adjustment to mix" IS AN ARTEFACT OF THE BOTTOM FAILURE.** The scheme's OWN
+  grey equilibrium over 0-2163 m is (308.06 - 285.57)/2.163 = **10.40 K/km — SUPERADIABATIC**,
+  against a 9.8 dry adiabat. There is a great deal for a convective adjustment to mix; it is
+  hidden by a solver that flattens the bottom 3.7 km. **`ATM_CONV_ADJ`'s measured null was taken
+  on a profile made flat by a solver defect, not by physics, and the convective route to Earth's
+  6.5 K/km is REOPENED.**
+
+  **The next thing to read is the bottom of the matrix, not the whole of it**: rows `i_mount`,
+  `i_mount+1` and `i_mount+2` are three hand-written special cases sitting exactly where the
+  failure is, and the surface-balance override replaces the answer at the fourth.
   *Side note, not the same quantity*: the SURFACE lapse at 28N is **194.65 -> 188.74 K/km** — a
   7.6 K jump across the 39 m from level 0 to level 1, the boundary-condition defect above, which
   the adjustment dents by 3 %. Do not confuse it with the tropospheric lapse; they move
