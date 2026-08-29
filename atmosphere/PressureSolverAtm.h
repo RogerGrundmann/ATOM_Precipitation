@@ -683,11 +683,25 @@ public:
         const double inv_2dphi = 1.0 / (2.0 * m.dphi);
         const bool metric_div  = AtomUtils::metric_divergence();
 
-        double d2 = 0.0, dmax = 0.0, rad2 = 0.0;
+        // div(rho u)/rho ALONGSIDE div(u). ATHAD prints this every iteration and judges the
+        // projection by it; this tree had only the volume form, and CLAUDE.md's own note says
+        // the metric question "is NOT DECIDABLE BY MORE A/B RUNS -- the prerequisite is the
+        // div(rho u)/rho print, not another arm". The two differ because rho varies ~4x over
+        // the 16 km column, so a field can be volume-divergence-free and carry a net MASS flux,
+        // which is exactly the Psi(ground) non-closure. Term for term as the anelastic Poisson
+        // source forms it (line 444, `div_src += aux_u * dlnrho[i] * exp_rm`), so the number is
+        // the model's own quantity and not one rewritten by the diagnostic. The base state is
+        // built in densities() and exists whether or not ATM_ANELASTIC is set -- so this prints
+        // on BOTH branches, which is the point: it measures what the shipped solver is leaving
+        // behind. Zero extra sweep; folded into the existing one. Print-only.
+        const bool have_rho = ((int)m.m_dlnrho_dr.size() == m.im);
+        const double* const dlnrho_d = have_rho ? m.m_dlnrho_dr.data() : nullptr;
+
+        double d2 = 0.0, dmax = 0.0, rad2 = 0.0, dm2 = 0.0, dmmax = 0.0;
         long   n  = 0;
 
         #pragma omp parallel for collapse(2) schedule(static) \
-                reduction(+:d2,rad2,n) reduction(max:dmax)
+                reduction(+:d2,rad2,dm2,n) reduction(max:dmax,dmmax)
         for (int i = 1; i < m.im-1; i++) {
             for (int j = 1; j < m.jm-1; j++) {
                 const double rm       = m.rad.z[i];
@@ -714,6 +728,12 @@ public:
                     if (!is_finite_safe(d)) continue;
                     d2 += d * d; rad2 += d_r * d_r;
                     if (fabs(d) > dmax) dmax = fabs(d);
+                    const double dm = have_rho
+                        ? d + m.u.x[i][j][k] * dlnrho_d[i] * exp_rm : d;
+                    if (is_finite_safe(dm)) {
+                        dm2 += dm * dm;
+                        if (fabs(dm) > dmmax) dmmax = fabs(dm);
+                    }
                     n++;
                 }
             }
@@ -845,6 +865,15 @@ public:
              << fixed << setprecision(3)
              << "   ratio rms/radial = " << ((rrad > 0.0) ? rms / rrad : 0.0)
              << "   (" << n << " cells)" << endl;
+        {
+            const double rmsm = (n > 0) ? sqrt(dm2 / n) : 0.0;
+            cout << "      ATOM: div(rho u)/rho " << setw(17) << left << tag << right
+                 << " rms = " << scientific << setprecision(3) << rmsm
+                 << "   max = " << dmmax
+                 << fixed << setprecision(3)
+                 << "   mass/volume = " << ((rms > 0.0) ? rmsm / rms : 0.0)
+                 << (have_rho ? "" : "   [NO BASE STATE -- equals div(u)]") << endl;
+        }
         cout << "      ATOM: p_dyn checkerboard " << setw(16) << left << tag << right
              << " index = " << fixed << setprecision(4)
              << ((rms_p > 0.0) ? rms_chk / rms_p : 0.0)
@@ -937,7 +966,18 @@ public:
 
         for (int s = 0; s < n_sweeps; s++) run(false, 1);
 
+        // div(u) EITHER SIDE OF THE CORRECTION, which is the one instrument this arm was
+        // missing. CLAUDE.md: "`div(u)` is only ever reported AT THE PRESSURE SOLVE, never
+        // immediately after `project_velocity_in_loop`. So 'the projection zeroes `div(u)` and
+        // one time step puts all of it back' and 'the projection never reduces `div(u)` at all'
+        // have the IDENTICAL signature in this table, and they are different defects."
+        // Reporting before AND after separates them in one call: if the pair is (large, small)
+        // the projection works and the time step undoes it; if it is (large, large) the
+        // projection never acts. Only fires when the knob is on, since n_sweeps <= 0 returned
+        // above. Print-only.
+        reportDivergence("in-loop projection, pre");
         applyGradientCorrection();
+        reportDivergence("in-loop projection, post");
 
         // Restore the time loop's pressure.
         #pragma omp parallel for collapse(2) schedule(static)

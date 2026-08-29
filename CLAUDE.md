@@ -196,6 +196,40 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
 
+- **THE TWO MISSING INSTRUMENTS ARE IN, AND BOTH ANSWERED ON FIRST LIGHT** (2026-08-29,
+  print-only, verified: physics bit-identical, the only log difference is the new lines).
+
+  **(1) `div(rho u)/rho` is printed alongside `div(u)` at every existing call site.** This file
+  said the metric question "is NOT DECIDABLE BY MORE A/B RUNS -- the prerequisite is the
+  `div(rho u)/rho` print, not another arm", and the print did not exist. Formed term for term as
+  the anelastic Poisson source forms it (`div_src += aux_u * dlnrho[i] * exp_rm`), from the base
+  state `densities()` builds, so it prints on BOTH branches and measures what the SHIPPED solver
+  leaves behind. First reading, after the initial projection: `div(u)` rms **3.013e-03**,
+  `div(rho u)/rho` rms **3.570e-03** — **mass/volume = 1.185**. The mass divergence is 18.5 %
+  larger than the volume one, which is the quantity `Psi(ground)`'s non-closure is made of.
+
+  **(2) `div(u)` is now reported EITHER SIDE of `project_velocity_in_loop`.** This file recorded
+  that "'the projection zeroes `div(u)` and one time step puts all of it back' and 'the
+  projection never reduces `div(u)` at all' have the IDENTICAL signature, and they are different
+  defects." A pre/post pair inside one call separates them. At `ATM_PROJECT_IN_LOOP=10`:
+
+  | iter | pre | post | change |
+  |---|---|---|---|
+  | 1 | 3.013e-03 | 2.748e-03 | **-8.8 %** |
+  | 2 | 2.149e-03 | 1.856e-03 | -13.6 % |
+  | 3 | 1.951e-03 | 1.675e-03 | -14.1 % |
+
+  **BOTH READINGS WERE WRONG.** The projection does not zero `div(u)` — it removes **9-14 %** of
+  it — and it does not fail to act either. And the time step does NOT put it back: post of one
+  call is 2.748e-03 while pre of the next is 2.149e-03, i.e. LOWER. **That is why
+  `ATM_PROJECT_IN_LOOP` is a null on `Psi(ground)`**: one call dents the divergence by a tenth,
+  and `Psi(ground)` is a domain-scale integral of what remains.
+  *Caveat*: `nm = 3`, 8 threads, inside the initial transient where the field is still settling,
+  so the trend across iterations is spin-up and not a projection result. The pre/post PAIR is
+  the clean measurement — it is self-contained within a single call — and it is what settles the
+  ambiguity. Re-read the trend on a spun-up run before quoting it.
+
+
 - **`moist_phys_start_iter` IS 0 SINCE 2026-08-29, AND THE GATE NEVER WORKED.** It was installed
   to defer a MoistConvection/ice-scheme runaway; the recorded blow-up is at **iteration 309 —
   nine iterations AFTER the gate released at 300** (Patagonian Andes, 49S 72W). So the gate did
