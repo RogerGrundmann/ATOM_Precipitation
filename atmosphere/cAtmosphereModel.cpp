@@ -1126,6 +1126,52 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     if (t0_attrib) t0_capture();
     // ----------------------------------------------------------------------------------------
 
+    // ---- THE RUN'S PHYSICAL DURATION, AND WHAT THAT MAKES REACHABLE -------------------------
+    //
+    // ATHAD's item 47 records "no run in this file has a stated physical duration" as an open
+    // risk, and this tree inherited the gap without ever printing the number. It matters more
+    // here than there, because this tree's surface work is all measured at nm = 100.
+    //
+    // The advective time unit is metricShellLength()/u_0 and `dt` is non-dimensional, so one
+    // iteration is dt*L/u_0 SECONDS. At the shipped values -- L = 16024 m (zeta = 3.715,
+    // L_atm = 400), u_0 = 8 m/s, dt_visc = 1e-4 -- that is 0.2 s, and a 100-iteration run is
+    // TWENTY SECONDS of physical time.
+    //
+    // Read the relaxation against that. `omega_teq` is a fraction PER ITERATION, not a rate: it
+    // carries no dt and no timescale, so at 0.20 its e-folding is ~4.5 iterations = ~0.9 s of
+    // physical time. Every physical term in `rhs_t` is multiplied by dt and therefore scales
+    // with the step; the relaxation does not. So the relaxation outruns the bulk surface flux
+    // (c_H = 15 W/m2/K is a ~1 hour timescale) by three to four orders of magnitude, and it
+    // does so BY CONSTRUCTION rather than by tuning. Any surface-physics knob measured in this
+    // configuration is measuring the relaxation.
+    //
+    // Printed unconditionally: it is information, it changes no field, and its absence is what
+    // let a 20-second run be read as a spin-up.
+    {
+        const double t_unit = metricShellLength() / u_0;                  // [s] per unit nondim time
+        const double sec_it = dt_visc * t_unit;                           // [s] per iteration
+        std::cout << "      AGCM: [TIMESCALES] advective unit L/u_0 = " << t_unit << " s"
+                  << "   one iteration = " << sec_it << " s"
+                  << "   nm = " << nm << " iterations = " << nm * sec_it << " s"
+                  << " (" << nm * sec_it / 3600.0 << " h)" << std::endl;
+        if (radiation_mode == 5)
+            std::cout << "      AGCM: [TIMESCALES] omega_teq = " << omega_teq
+                      << " per ITERATION -> e-folding " << (1.0 / omega_teq) * sec_it
+                      << " s of physical time; it carries no dt, so it does not scale with the step"
+                      << std::endl;
+        const double cH = [](){ const char* e = getenv("ATM_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+        if (cH != 0.0) {
+            const double dz1 = 0.5 * (get_layer_height(2) - get_layer_height(0));
+            const double tau_S = (r_air * cp_l * dz1) / cH;               // [s]
+            std::cout << "      AGCM: [TIMESCALES] ATM_SFC_FLUX c_H = " << cH
+                      << " W/m2/K -> surface-flux timescale " << tau_S << " s ("
+                      << tau_S / 3600.0 << " h); the run reaches "
+                      << 100.0 * (1.0 - exp(-nm * sec_it / tau_S))
+                      << " % of the skin-air difference" << std::endl;
+        }
+    }
+    // ----------------------------------------------------------------------------------------
+
     for(iter_n = iter_start; iter_n <= nm; iter_n++){
         print_loop_3D_headings();
 
@@ -1161,7 +1207,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
              << "  diffusion_ramp = " << std::fixed << std::setprecision(3) << diffusion_ramp
              << "  buoyancy_ramp = " << std::fixed << std::setprecision(3) << buoyancy_ramp
              << "  dt = " << std::scientific << std::setprecision(4) << dt
-             << std::defaultfloat << endl;
+             << std::defaultfloat
+             << "  physical t = " << (total_iter_count * dt * metricShellLength() / u_0) << " s"
+             << endl;
 
 
 

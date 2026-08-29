@@ -1022,6 +1022,47 @@ Two corrections fall out. `damp_wiggles(t)` **does not run in these runs at all*
 the mechanism above was written from where routines are called rather than from what they do —
 the third time in this tree. One build and two runs settled it.
 
+### The run is twenty seconds long, and that is what `ATM_SFC_FLUX` measures (2026-08-29)
+
+`ATM_SFC_FLUX=15` at `nm = 100`, 24 threads, against the arm above: ocean i=1 `RungeKutta`
+-16.7068 -> -16.6464 (+0.36 %), `teq_relaxation` 16.9771 -> 16.9209, NET 0.1763 -> 0.1808 —
+**+0.0045 K on a 0.68 K step**, with the relaxation absorbing 93 % of what the flux adds in the
+same iteration. Ocean i=0 is unmoved.
+
+The model now prints its own timescales at every run (`[TIMESCALES]`; ATHAD's item 47 names the
+missing physical duration as an open risk and this tree had inherited the gap):
+
+| | value |
+|---|---|
+| advective unit `metricShellLength()/u_0` | 16024 m / 8 m/s = **2002.9 s** |
+| one iteration, `dt_visc` = 1e-4 | **0.2003 s** |
+| `nm = 100` | **20.03 s of physical time** |
+| `nm = 400` (shipped default) | 80 s |
+| `omega_teq` = 0.20 **per iteration** | e-folding **1.001 s** |
+| `ATM_SFC_FLUX` c_H = 15 W/m2/K | **3293 s (0.92 h)** |
+
+`omega_teq` carries no `dt` and therefore no timescale: every physical term in `rhs_t` is
+multiplied by `dt` and scales with the step, the relaxation is a fixed fraction per iteration and
+does not. At 0.20 it is a 1-second process competing with a 3293-second surface flux — 3290x
+faster, by construction rather than by tuning. The run reaches `1 - exp(-20.03/3293)` = **0.605 %**
+of the skin-air difference and the measured NET change is 0.0045/0.70 = **0.64 %**; agreement to
+6 % is what says the knob is correctly implemented and correctly scaled, and simply has no time
+to act.
+
+So the level-0 boundary condition and the missing surface flux are one defect, and neither is
+reachable by a surface knob at this `nm` — nor at a larger one, since an hour of physical time is
+17 973 iterations and a day is 431 000, at ~20 s of wall clock each. The lever is `dt`, or the
+relaxation, not the iteration count.
+
+This also explains `radiation_mode` 5's own design: the comment at `cAtmosphereModel.cpp:733`
+records that the in-RHS Held-Suarez term at its physical strength (`k_a` = 1/4 day) "enters as
+~1e-8/iter, never imposes `t_eq`", which is this same arithmetic, so it was replaced by a
+per-iteration numerical fraction to make the CO2 signal persist. The relaxation is a workaround
+for the run being twenty seconds long, and it now dominates every surface diagnostic in the tree.
+Read `ATM_CONV_ADJ`'s -19.45 -> -9.76 K/km in that light: a convective adjustment mixes to neutral
+instantaneously, with no `dt`, which is why it is the only surface treatment that has ever moved
+this layer.
+
 `ATM_SFC_FLUX=<c_H>` (default `0` = off, bit-identical; `15` matches MLR) forms that flux in the
 loop from the live `t`, as a rate `k_S = c_H/(rho*cp*dz)` non-dimensionalised in advective time
 `k_S*L_atm/u_0` exactly like the Held-Suarez relaxation, applied at the first air level
