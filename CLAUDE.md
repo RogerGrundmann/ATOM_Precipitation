@@ -271,6 +271,62 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   **This reframes `ATM_CONV_ADJ`**: its -19.45 -> -9.76 K/km is a palliative mixing away a
   boundary-condition gap, not a missing convection scheme.
 
+  **THE ATTRIBUTION HAS BEEN RUN AND THE PARAGRAPHS ABOVE ARE WRONG ON THE MECHANISM**
+  (`ATM_T0_ATTRIB=1`, 2026-08-29, default off and read-only: it snapshots levels 0 and 1 and
+  differences them after every stage that can write `t`, cos-lat means in kelvin, cumulative,
+  ocean and land separately). `nm = 100`, 24 threads, the default arm:
+
+  | stage | ocean i=0 | ocean i=1 | land i=0 | land i=1 |
+  |---|---|---|---|---|
+  | `BC_Atm` | -0.0014 | -0.0940 | -30.8878 | +126.5407 |
+  | `RungeKutta` | **0.0000** | **-16.7068** | 0.0000 | -206.2882 |
+  | `teq_relaxation` | **+0.8605** | **+16.9771** | +31.5685 | +78.5385 |
+  | every other stage | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+  | **NET** | **+0.8591** | **+0.1763** | +0.6807 | -1.2090 |
+
+  **`apply_teq_relaxation` IS THE ONLY THING THAT WRITES OCEAN LEVEL 0.** It runs EVERY
+  iteration in `radiation_mode` 5 (`cAtmosphereModel.cpp:1521`), loops from `i = 0`, and relaxes
+  at `omega_teq` = **0.20 per iteration** — an e-folding of ~4.5 iterations. So "level 0 is
+  unconstrained" is FALSE: it is Newtonian-relaxed onto `t_eq` harder than anything else in the
+  model. `BC_Atm` contributes **-0.0014 K in 100 iterations** over ocean, which is the
+  self-assignment measured rather than inferred, and `RungeKutta` is **exactly 0.0000**, which
+  is `RungeKutta_Atm_Turb.cpp:111` measured rather than inferred. **`unattributed` is 0.0000, so
+  the twelve hooks account for the whole field** — the instrument is closed, not sampled.
+
+  **AND IT IS NOT A DRIFT. IT IS A ONE-TIME APPROACH THAT ARRIVES BY ITERATION 40.** Ocean i=0
+  NET by checkpoint: **0.8153 / 0.8604 / 0.8588 / 0.8590 / 0.8591** at iterations 20 / 40 / 60 /
+  80 / 100 — flat to four decimals for the last sixty iterations. The recorded "+0.786 K over
+  100 iterations", read here and in the README as a secular drift, is a STEP: level 0 starts
+  ~0.86 K below `t_eq.x[0]` and relaxes onto it. What put it below is the CO2 perturbation —
+  `[co2-perturb DIAG]` prints the surface `t_eq` shift as **+1.075 K at build and 1.169-1.179
+  thereafter**, i.e. the target moves +0.10 K over the whole run and level 0 tracks it. Ocean
+  i=1 is the one that genuinely drifts, and only just: 0.1726 -> 0.1763, +0.0037 K per 20
+  iterations, still rising.
+
+  **THE SUPERADIABATIC LAYER IS `t_eq` RELAXED ONTO A LEVEL THE DYNAMICS CANNOT REACH.** Level 0
+  has no RK4 term at all, so it equilibrates EXACTLY onto its target and stays there. Level 1
+  has a dynamics term of **-16.71 K cumulative** that the relaxation (+16.98) must fight, so it
+  settles BELOW its own target — two terms ~95x the +0.176 net. The step between the two levels
+  is precisely the amount by which the dynamics hold level 1 off a target level 0 is free to sit
+  on. **So the defect is not a missing boundary condition and a Dirichlet pin would not remove
+  it**: pinning level 0 to `t_eq.x[0]` is what the relaxation already achieves. The defect is
+  that a surface-trapped CO2 perturbation is applied to `t_eq` at a level with no dynamics, and
+  the level above it cannot follow.
+
+  **TWO CORRECTIONS TO THE PARAGRAPHS ABOVE, AND THE SECOND IS THE FAMILY'S OWN RULE AGAIN.**
+  (1) "Level 0's only coupling to the air above is a Shapiro smoother, `damp_wiggles(t)`" is
+  wrong twice: the actual writer is the relaxation, and **`damp_wiggles(t)` DOES NOT RUN AT ALL
+  in these runs** — it sits behind `moist_phys_active` and `moist_phys_start_iter` is **300**
+  against `nm` = 100, so every measurement in this bullet, and every `brunt_N2` and
+  `ATM_CONV_ADJ` figure recorded beside it, comes from a DRY run in which that smoother never
+  fired. (2) The mechanism was written from the control flow rather than from a measurement, for
+  the third time in this file. The instrument cost one build and two runs.
+
+  **WHAT SURVIVES.** The ocean/land split, the stencil argument for why it is one layer, and the
+  reframing of `ATM_CONV_ADJ` as a palliative all stand — it palliates a target inconsistency
+  rather than a boundary-condition gap. `ATM_SFC_FLUX` (default 0, `43f7f77`) remains the right
+  physical coupling for skin -> air and is still **UNMEASURED**.
+
 - **`Q_Sensible` IS WRITTEN AND READ BY NOTHING** (`RHS_Atm_Turb.cpp:513`), **AND IT IS NOT THE
   SURFACE FLUX — an earlier version of this bullet ran two different quantities together.**
   The array is `coeff_S * lap(T)`, the CONDUCTIVE heat-flux divergence, computed at every

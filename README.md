@@ -978,6 +978,50 @@ loop at 985". That was wrong**: 711-892 are LAMBDA DEFINITIONS and the call site
 inside the loop, with the active `radiation_mode` 5 invoking `cloud_radiation_diag()` — and hence
 MLR — every `teq_refresh_stride` = 20 iterations.
 
+### `ATM_T0_ATTRIB` — who actually writes ocean level 0 (2026-08-29)
+
+The four facts above are read off the source. Which stage WRITES the layer each iteration is not,
+and this file had answered it from the control flow. `ATM_T0_ATTRIB=1` (default off, read-only —
+it snapshots levels 0 and 1, differences them after each of the twelve stages that can write `t`,
+and never writes a field) answers it by measurement, in the idiom of ATURAN's `TATTRIB`.
+Cos-lat-weighted means in kelvin, cumulative, ocean and land separately; `nm = 100`, 24 threads,
+the default arm:
+
+| stage | ocean i=0 | ocean i=1 | land i=0 | land i=1 |
+|---|---|---|---|---|
+| `BC_Atm` | -0.0014 | -0.0940 | -30.8878 | +126.5407 |
+| `RungeKutta` | **0.0000** | **-16.7068** | 0.0000 | -206.2882 |
+| `teq_relaxation` | **+0.8605** | **+16.9771** | +31.5685 | +78.5385 |
+| every other stage | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| **NET** | **+0.8591** | **+0.1763** | +0.6807 | -1.2090 |
+
+`unattributed` is 0.0000, so the hooks account for the whole field.
+
+**`apply_teq_relaxation` is the only writer of ocean level 0.** It runs every iteration in
+`radiation_mode` 5, loops from `i = 0`, and relaxes at `omega_teq` = 0.20 per iteration — an
+e-folding of ~4.5 iterations. Level 0 is not unconstrained; it is relaxed harder than anything
+else in the model. `BC_Atm`'s -0.0014 K per 100 iterations is the self-assignment measured, and
+`RungeKutta`'s exact 0.0000 is the `i = 1 .. im-2` loop measured.
+
+**It is not a drift.** Ocean i=0 NET by checkpoint is 0.8153 / 0.8604 / 0.8588 / 0.8590 / 0.8591
+at iterations 20 / 40 / 60 / 80 / 100 — arrived by 40, flat to four decimals after. The recorded
+"+0.786 K over 100 iterations" is a one-time approach to a target that the CO2 perturbation put
+~0.86 K above the initial field (`[co2-perturb DIAG]`: surface `t_eq` shift +1.075 K at build,
+1.169-1.179 thereafter). Ocean i=1 is the level that genuinely drifts, at +0.0037 K per 20
+iterations.
+
+**The superadiabatic layer is `t_eq` relaxed onto a level the dynamics cannot reach.** Level 0
+has no RK4 term, so it sits exactly on its target; level 1 has a -16.71 K cumulative dynamics
+term that the +16.98 K relaxation fights, so it settles below its own. The step is the amount by
+which the dynamics hold level 1 off a target level 0 is free to reach. A Dirichlet pin at level 0
+would therefore not remove it — the relaxation already achieves that pin.
+
+Two corrections fall out. `damp_wiggles(t)` **does not run in these runs at all**: it sits behind
+`moist_phys_active` and `moist_phys_start_iter` is 300 against `nm` = 100, so every `brunt_N2` and
+`ATM_CONV_ADJ` figure recorded here comes from a dry run in which that smoother never fired. And
+the mechanism above was written from where routines are called rather than from what they do —
+the third time in this tree. One build and two runs settled it.
+
 `ATM_SFC_FLUX=<c_H>` (default `0` = off, bit-identical; `15` matches MLR) forms that flux in the
 loop from the live `t`, as a rate `k_S = c_H/(rho*cp*dz)` non-dimensionalised in advective time
 `k_S*L_atm/u_0` exactly like the Held-Suarez relaxation, applied at the first air level

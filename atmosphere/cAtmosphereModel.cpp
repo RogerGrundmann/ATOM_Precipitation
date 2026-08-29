@@ -1033,6 +1033,99 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
       if(cf) cf << "iter,mean_T_K,drift_T_pct,drift_T_K,mean_KE_m2s2,drift_KE_pct,converged\n"; }
     // --------------------------------------------------------------------------------
 
+
+    // ---- ATM_T0_ATTRIB: WHICH STAGE MOVES THE SURFACE LAYER? --------------------------------
+    //
+    // `brunt_N2 < 0` at i = 0 is the OCEAN MASK -- P(N2<0) = 0.9998 over ocean against 0.0049
+    // over land at iteration 100 -- and level 0 over ocean drifts +0.786 K over 100 iterations
+    // while the air above it moves +0.15 K. Two facts are settled by READING the source: level 0
+    // is not integrated (`RungeKutta_Atm_Turb.cpp:111` runs `i = 1 .. im-2`) and `t` appears in
+    // none of `bcRadius`'s three pattern lists, while the line meant to cover that
+    // (`BC_Atm.h:433`, `t.x[0] = t.x[i_topography]`) is a SELF-ASSIGNMENT wherever
+    // `i_topography == 0`, i.e. over every ocean column.
+    //
+    // What reading does NOT settle is which stage actually WRITES the layer each iteration, and
+    // this file has twice recorded a diagnosis taken from where a routine is DEFINED instead of
+    // where it is CALLED. So attribute it the way ATURAN's `TATTRIB` did: snapshot the layer,
+    // difference it after every stage that can write `t`, accumulate over the run, and read the
+    // table rather than the control flow. In particular `apply_teq_relaxation` runs EVERY
+    // iteration in `radiation_mode` 5, loops from `i = 0`, and relaxes at `omega_teq` = 0.20 per
+    // iteration -- so level 0 is not unconstrained, and any account of its drift has to say what
+    // that relaxation is balancing against.
+    //
+    // Reported as cos-lat-weighted means in KELVIN, cumulative, split ocean / land at levels 0
+    // and 1. Land is the CONTROL: there `i_topography > 0`, the copy-down does real work, and
+    // the layer is stable. Levels are the literal 0 and 1 (not `i_topography`-relative) because
+    // that is the slice every recorded `brunt_N2` measurement was taken on.
+    //
+    // ATM_T0_ATTRIB=1 enables. Default off, and it never writes the field -- every hook is
+    // behind the flag and reads only.
+    static const bool t0_attrib = [](){ const char* e = getenv("ATM_T0_ATTRIB");
+                                        return e && atoi(e) != 0; }();
+    std::vector<double> t0_prev;                       // levels 0 and 1 at the previous mark
+    std::vector<std::string> t0_names;                 // stage names, in first-seen order
+    std::vector<double> t0_sum;                        // 4 per stage: ocean i0, ocean i1, land i0, land i1
+    double t0_w_ocean = 0.0, t0_w_land = 0.0;
+    if (t0_attrib) {
+        for (int j = 0; j < jm; j++) {
+            const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            for (int k = 0; k < km; k++)
+                (AtomUtils::is_land(h, 0, j, k) ? t0_w_land : t0_w_ocean) += w;
+        }
+    }
+    auto t0_capture = [&](){
+        if (t0_prev.size() != (size_t)2 * jm * km) t0_prev.assign((size_t)2 * jm * km, 0.0);
+        for (int i = 0; i < 2; i++) for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            t0_prev[((size_t)i * jm + j) * km + k] = t.x[i][j][k];
+    };
+    auto t0_mark = [&](const char* stage){
+        if (!t0_attrib) return;
+        if (t0_prev.empty()) { t0_capture(); return; }
+        double d[4] = {0.0, 0.0, 0.0, 0.0};
+        for (int j = 0; j < jm; j++) {
+            const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            for (int k = 0; k < km; k++) {
+                const int base = AtomUtils::is_land(h, 0, j, k) ? 2 : 0;
+                for (int i = 0; i < 2; i++)
+                    d[base + i] += w * (t.x[i][j][k] - t0_prev[((size_t)i * jm + j) * km + k]) * t_0;
+            }
+        }
+        size_t s = 0;
+        while (s < t0_names.size() && t0_names[s] != stage) s++;
+        if (s == t0_names.size()) { t0_names.emplace_back(stage); t0_sum.resize(4 * (s + 1), 0.0); }
+        for (int q = 0; q < 4; q++) t0_sum[4 * s + q] += d[q];
+        t0_capture();
+    };
+    auto t0_report = [&](int it){
+        if (!t0_attrib || t0_names.empty()) return;
+        std::cout << "      AGCM: [T0-ATTRIB] cumulative K through iteration " << it
+                  << "  (cos-lat means; ocean weight " << t0_w_ocean
+                  << ", land weight " << t0_w_land << ")" << std::endl;
+        std::cout << "      AGCM: [T0-ATTRIB] " << std::left << std::setw(22) << "stage" << std::right
+                  << std::setw(13) << "ocean i=0" << std::setw(13) << "ocean i=1"
+                  << std::setw(13) << "land i=0"  << std::setw(13) << "land i=1" << std::endl;
+        double tot[4] = {0.0, 0.0, 0.0, 0.0};
+        for (size_t s = 0; s < t0_names.size(); s++) {
+            std::cout << "      AGCM: [T0-ATTRIB] " << std::left << std::setw(22) << t0_names[s] << std::right;
+            for (int q = 0; q < 4; q++) {
+                const double wsum = (q < 2) ? t0_w_ocean : t0_w_land;
+                std::cout << std::setw(13) << std::fixed << std::setprecision(4)
+                          << (wsum > 0.0 ? t0_sum[4 * s + q] / wsum : 0.0);
+                tot[q] += t0_sum[4 * s + q];
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "      AGCM: [T0-ATTRIB] " << std::left << std::setw(22) << "NET" << std::right;
+        for (int q = 0; q < 4; q++) {
+            const double wsum = (q < 2) ? t0_w_ocean : t0_w_land;
+            std::cout << std::setw(13) << std::fixed << std::setprecision(4)
+                      << (wsum > 0.0 ? tot[q] / wsum : 0.0);
+        }
+        std::cout << std::defaultfloat << std::endl;
+    };
+    if (t0_attrib) t0_capture();
+    // ----------------------------------------------------------------------------------------
+
     for(iter_n = iter_start; iter_n <= nm; iter_n++){
         print_loop_3D_headings();
 
@@ -1123,6 +1216,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         int moist_stride    = inviscid_phase ? 10  : 2;
         int momentum_stride = 1;
 
+        t0_mark("pressure+project");
         if(iter_n % moist_stride == 0){
 /*
             // Multi-sweep Jacobi: the original single-sweep cadence (one sweep every
@@ -1152,6 +1246,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
             if(moist_phys_active){
                 SaturationAdjustment(*this).run();                      // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
+                t0_mark("SaturationAdjust");
                 // Temperature 2Δt de-checkerboard. c/cloud/ice receive the same stride-2 moist
                 // forcing AND damp_wiggles and stay stable; t got the forcing but NO damping —
                 // the only prognostic without it — letting an undamped 2Δt computational mode
@@ -1159,6 +1254,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // branch) run away to 53 K and crash the barometric formula. Mirror the scalar
                 // treatment on t to close the asymmetry. See [[project_upper_velocity_secular_growth]].
                 AtomUtils::damp_wiggles(t,     &i_topography, true, true, true);
+                t0_mark("damp_wiggles(t)");
                 AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
@@ -1180,7 +1276,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 AtomUtils::damp_wiggles(P_rain, &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(P_snow, &i_topography, true, true, true);
 
+                t0_mark("IceScheme");
                 MoistConvection(*this).run(iter_n);                     // rainfall from convecting clouds
+                t0_mark("MoistConvection");
 
                 AtomUtils::damp_wiggles(P_conv, &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(E_u,    &i_topography, true, true, true);
@@ -1276,6 +1374,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             // it had none, so nothing could remove a superadiabatic layer, and the lowest 39 m
             // reached twice the dry adiabat in 59 % of columns by iteration 20.
             if(ConvectiveAdjustment::enabled()) ConvectiveAdjustment(*this).run();
+            t0_mark("ConvectiveAdjust");
 
             ThermoAtm(*this).densities();
             ThermoAtm(*this).forces();
@@ -1284,6 +1383,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             ThermoAtm(*this).latentSensibleHeat();                      // latent and sensible heat
             ThermoAtm(*this).vegetationLand();                          // vegetation on land
             ThermoAtm(*this).co2Atmosphere();                           // greenhouse gas co2 as function of temperature
+            t0_mark("ThermoAtm");
 
             if(turb_model != "laminar" && !inviscid_phase) {
                 TurbulenceAtm(*this).run();                             // update turbulence sources (skipped in laminar mode / inviscid spin-up)
@@ -1307,6 +1407,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
             BC_Atm(*this).bcScalarSurfSur();                            // scalar variable at surfaces extrapolated by von Neumann
             BC_Atm(*this).bcSolidGround();                              // values inside mountains
+            t0_mark("BC_Atm");
 
             if(iter_n % checkpoint == 0){
                 // Psi is FILLED here and READ by print_min_max_atm, so the fill goes first.
@@ -1363,6 +1464,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // solveRungeKutta_Atmosphere / RHS_Atm.cpp path was dropped — inviscid is now an
         // independent switch (diffusion_ramp), decoupled from the turbulence selection.
         solveRungeKutta_Atmosphere_Turb();
+        t0_mark("RungeKutta");
         ubudget_capture = false;
         vbudget_capture = false;
         wbudget_capture = false;
@@ -1447,6 +1549,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
         AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
         AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        t0_mark("orographic_shapiro");
         // ==============================================================================================
 
         // Soft steep-massif field smoothing (2026-06-10, user request). The init-time terrain
@@ -1517,10 +1620,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             if (iter_n % teq_refresh_stride == 0) {
                 apply_co2_perturbation(false);                  // 5: WV feedback — rebuild deep t_eq perturbation on the warmed field
                 cloud_radiation_diag();                         // 5: refresh radiation.x with clouds + print cloud LW effect
+                t0_mark("co2_pert+cloud_diag");
             }
             apply_teq_relaxation();                             // 5: strong relax t -> Scotese+CO2 perturbation
+            t0_mark("teq_relaxation");
         }
 
+        t0_mark("unattributed");
+        if(iter_n % checkpoint == 0) t0_report(iter_n);
         ThermoAtm(*this).printDataAtm();
 
         // Convergence monitor: sample the slow integral metrics and report secular drift.
