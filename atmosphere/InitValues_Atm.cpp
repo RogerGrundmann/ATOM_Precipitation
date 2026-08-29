@@ -1205,8 +1205,41 @@ void cAtmosphereModel::initCloudIce() {
                 double H_crit = Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
                 if (H_crit > 1.0)  H_crit = 1.0;
 
+                // ---- ATM_CLOUD_FRAC: sub-grid cloud fraction (default 0 = shipped) ----
+                //
+                // The shipped closure diagnoses condensate from the GRID-MEAN supersaturation
+                // and caps it at cloud_max[i], itself the horizontal MEAN of
+                // max(0, c - 0.74*q_sat). In a realistic atmosphere that mean is essentially
+                // never positive, so cloud_max floors at 1e-4 and almost nothing condenses --
+                // measured: with a Manabe-Wetherald humidity the column path collapses to
+                // 0.0006 g/m2 at ANY threshold. The shipped model only makes cloud because its
+                // humidity is held at RH = 0.9375 everywhere. Real cloud forms from SUB-GRID
+                // variability: parts of a cell saturated while the mean is not.
+                //
+                // Uniform-PDF (Smith / Sundqvist) closure. Total water is uniform over
+                // [qbar - D, qbar + D] with D = (1 - H_crit)*q_sat, cloud where q_t > q_sat:
+                //     s   = qbar + D - q_sat = q_sat*(RH - H_crit)
+                //     f   = clamp(s / 2D, 0, 1)
+                //     q_c = f^2 * D           (f < 1),      qbar - q_sat   (f = 1)
+                // f = 0 exactly at RH = H_crit and rises smoothly; q_c is the GRID-MEAN
+                // condensate, so the in-cloud value is q_c/f and stays physical as f -> 0.
+                // One parameter, H_crit, which already exists. No new field: f is recomputed
+                // where needed rather than stored, so sizeof(cAtmosphereModel) is untouched and
+                // the stack-canary hazard in the README does not apply.
+                static const bool cloud_frac = [](){
+                    const char* e = getenv("ATM_CLOUD_FRAC"); return e && atoi(e) != 0; }();
                 const double del_q_ls = std::max(0.0, c.x[i][j][k] - H_crit * q_sat);
-                const double cloud_ls = cloud_max[i] * (1.0 - exp(-alfa_over_cmax[i] * del_q_ls));
+                double cloud_ls;
+                if (cloud_frac) {
+                    const double D = (1.0 - H_crit) * q_sat;
+                    if (D > 0.0) {
+                        const double sfrac = c.x[i][j][k] + D - q_sat;
+                        double f = sfrac / (2.0 * D);
+                        if (f < 0.0) f = 0.0; else if (f > 1.0) f = 1.0;
+                        cloud_ls = (f >= 1.0) ? std::max(0.0, c.x[i][j][k] - q_sat) : f * f * D;
+                    } else cloud_ls = std::max(0.0, c.x[i][j][k] - q_sat);
+                } else
+                cloud_ls = cloud_max[i] * (1.0 - exp(-alfa_over_cmax[i] * del_q_ls));
 
                 double cloud_conv = 0.0;
                 if (P_rain.x[i][j][k] > 0.0 && i < im - 1) {

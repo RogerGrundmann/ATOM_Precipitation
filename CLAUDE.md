@@ -196,6 +196,55 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 
 ## Open risks
 
+- **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
+  CALIBRATED. DO NOT FLIP IT.** (2026-08-29, default 0, off-branch unchanged.)
+
+  Uniform-PDF (Smith / Sundqvist) closure, one parameter, the `H_crit` already present. Total
+  water uniform over `[qbar - D, qbar + D]` with `D = (1 - H_crit)*q_sat`, cloud where
+  `q_t > q_sat`:
+
+      s   = qbar + D - q_sat = q_sat*(RH - H_crit)
+      f   = clamp(s / 2D, 0, 1)
+      q_c = f^2 * D        (f < 1),      qbar - q_sat   (f = 1)
+
+  `f` = 0 exactly at `RH = H_crit`, `q_c` is the GRID-MEAN condensate so the in-cloud value
+  `q_c/f` stays finite as `f -> 0`. Computed on the fly, no new field, so
+  `sizeof(cAtmosphereModel)` is untouched and the stack-canary hazard does not apply.
+
+  **WHAT WORKS.** On the shipped humidity it does exactly what it should to the STRUCTURE:
+  cloudy cover **98.94 % -> 22.16 %** and the column path 1584 -> 4.59 g/m2. The pathology of
+  "cloud in 99 % of columns over 38 of 41 levels" is gone.
+
+  **AND `ATM_RH_PROFILE` GIVES A REALISTIC HUMIDITY**, which is the other half of the repair:
+
+  | z | 0 m | 441 | 1368 | 3316 | 4988 |
+  |---|---|---|---|---|---|
+  | mean RH, shipped | 0.933 | 0.813 | 0.896 | 0.929 | 0.937 |
+  | mean RH, `ATM_RH_PROFILE=1` | **0.719** | **0.610** | **0.601** | **0.485** | **0.392** |
+
+  0.72 at the surface falling to 0.39 at 5 km, against Earth's ~0.8 falling to ~0.4-0.5. **That
+  is the first physically-shaped humidity profile this model has had.**
+
+  **WHAT DOES NOT WORK, AND IT IS UNRESOLVED.** Put the two together and the condensate
+  vanishes rather than landing at the observed 50-100 g/m2:
+
+  | `ATM_RH_CRIT` (with `RH_PROFILE` + `CLOUD_FRAC`) | 0.55 | 0.40 | 0.30 | 0.20 |
+  |---|---|---|---|---|
+  | column path g/m2 | 0.0006 | 0.0043 | 0.151 | **0.627** |
+
+  A hand calculation says otherwise: at 2163 m with `RH_CRIT` = 0.2, `H_crit` = 0.483 against an
+  ocean RH of 0.589, giving `f` ~ 0.10 and `q_c` ~ 0.027 g/kg — tens of g/m2 over the column,
+  not 0.6. **The measurement and the arithmetic disagree by ~100x and I have not found which is
+  wrong.** Do not read the sweep as a calibration curve until that is settled; the most likely
+  suspects are the `t_00` cut that zeroes cloud/ice below a temperature and the interaction with
+  `cloud_max`'s 1e-4 floor, neither of which has been checked.
+
+  **So the state is: the humidity fix is measured and good, the closure is measured and
+  structurally good, and the two together are NOT yet a working pair.** All three knobs
+  (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`) stay default OFF. The next step is the
+  ~100x discrepancy above, not another sweep and not a flip.
+
+
 - **THE CONDENSATE IS 20-30x TOO LARGE BECAUSE THE INITIAL HUMIDITY IS NEAR-SATURATED AT EVERY
   LEVEL, AND THE CLOUD SCHEME ONLY WORKS BECAUSE OF IT** (2026-08-29). Traced end to end with
   two new print-only instruments, `ATM_CWP_CENSUS` and `ATM_CLOUD_INIT_DIAG`.
