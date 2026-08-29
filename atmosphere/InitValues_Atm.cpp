@@ -1344,6 +1344,30 @@ void cAtmosphereModel::initCloudIce() {
                    100.0 * (double)n_rh80 / (double)std::max(1L, n_tot),
                    100.0 * (double)n_cl / (double)std::max(1L, n_tot));
         }
+        // The SAME quantity ATM_CWP_CENSUS reports in MLR, computed here at init, so the two
+        // are directly comparable and any loss between init and the first radiation call is
+        // localised rather than inferred.
+        {
+            double cw_sum = 0.0, w_tot2 = 0.0;
+            for (int j = 0; j < jm; j++) {
+                const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+                for (int k2 = 0; k2 < km; k2++) {
+                    double col = 0.0;
+                    for (int i2 = 0; i2 < im; i2++) {
+                        const double dz_i = (i2 < im-1) ? (get_layer_height(i2+1) - get_layer_height(i2))
+                                                        : (get_layer_height(i2) - get_layer_height(i2-1));
+                        const double T_ii = t.x[i2][j][k2] * t_0;
+                        const double rho_ii = (T_ii > 0.0) ? (p_stat.x[i2][j][k2] * 100.0) / (287.0 * T_ii) : 0.0;
+                        const double cwl = (cloud.x[i2][j][k2] > 0.0) ? cloud.x[i2][j][k2] : 0.0;
+                        const double cwi = (ice.x[i2][j][k2]   > 0.0) ? ice.x[i2][j][k2]   : 0.0;
+                        col += (cwl + cwi) * rho_ii * dz_i * 1000.0;
+                    }
+                    cw_sum += w * col; w_tot2 += w;
+                }
+            }
+            printf("      AGCM: [CLOUD-INIT] COLUMN PATH AT INIT = %.6f g/m2  (compare ATM_CWP_CENSUS in MLR)\n",
+                   (w_tot2 > 0.0) ? cw_sum / w_tot2 : 0.0);
+        }
     }
 
     auto end = std::chrono::high_resolution_clock::now();

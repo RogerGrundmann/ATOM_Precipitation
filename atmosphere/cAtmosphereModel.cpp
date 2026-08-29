@@ -460,6 +460,27 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 //    goto Printout;
 
     SaturationAdjustment(*this).run();                                  // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
+    if (const char* e_ = getenv("ATM_CLOUD_INIT_DIAG")) if (atoi(e_) != 0) {
+        double cw_sum = 0.0, w_tot2 = 0.0;
+        for (int j = 0; j < jm; j++) {
+            const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
+            for (int k2 = 0; k2 < km; k2++) {
+                double col = 0.0;
+                for (int i2 = 0; i2 < im; i2++) {
+                    const double dz_i = (i2 < im-1) ? (get_layer_height(i2+1) - get_layer_height(i2))
+                                                    : (get_layer_height(i2) - get_layer_height(i2-1));
+                    const double T_ii = t.x[i2][j][k2] * t_0;
+                    const double rho_ii = (T_ii > 0.0) ? (p_stat.x[i2][j][k2] * 100.0) / (287.0 * T_ii) : 0.0;
+                    const double cwl = (cloud.x[i2][j][k2] > 0.0) ? cloud.x[i2][j][k2] : 0.0;
+                    const double cwi = (ice.x[i2][j][k2]   > 0.0) ? ice.x[i2][j][k2]   : 0.0;
+                    col += (cwl + cwi) * rho_ii * dz_i * 1000.0;
+                }
+                cw_sum += w * col; w_tot2 += w;
+            }
+        }
+        printf("      AGCM: [CLOUD-INIT] COLUMN PATH AFTER init SaturationAdjustment = %.6f g/m2\n",
+               (w_tot2 > 0.0) ? cw_sum / w_tot2 : 0.0);
+    }
     AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
     AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
     AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);

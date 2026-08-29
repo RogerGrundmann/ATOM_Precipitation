@@ -232,12 +232,39 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   |---|---|---|---|---|
   | column path g/m2 | 0.0006 | 0.0043 | 0.151 | **0.627** |
 
-  A hand calculation says otherwise: at 2163 m with `RH_CRIT` = 0.2, `H_crit` = 0.483 against an
-  ocean RH of 0.589, giving `f` ~ 0.10 and `q_c` ~ 0.027 g/kg — tens of g/m2 over the column,
-  not 0.6. **The measurement and the arithmetic disagree by ~100x and I have not found which is
-  wrong.** Do not read the sweep as a calibration curve until that is settled; the most likely
-  suspects are the `t_00` cut that zeroes cloud/ice below a temperature and the interaction with
-  `cloud_max`'s 1e-4 floor, neither of which has been checked.
+  **THE ~100x DISCREPANCY IS FOUND, AND IT IS A GRID-MEAN SATURATION ADJUSTMENT DESTROYING A
+  SUB-GRID CLOUD.** The arithmetic was right and the sweep was measuring an already-destroyed
+  field. Instrumented at both ends (`ATM_CLOUD_INIT_DIAG` now prints the same column path
+  `ATM_CWP_CENSUS` reports, at init and again after the init adjustment):
+
+  | | column path at init | after the init `SaturationAdjustment` | removed |
+  |---|---|---|---|
+  | shipped (near-saturated column) | 2547.42 | 1588.65 | 38 % |
+  | `RH_PROFILE` + `CLOUD_FRAC` | **270.70** | **0.633** | **99.77 %** |
+
+  **`initCloudIce` with the fractional closure produces 270.70 g/m2 — a physically sensible
+  number, ~3x the observed 50-100 rather than 30x.** The scheme works. What follows it does not:
+  `cAtmosphereModel.cpp:461` calls `SaturationAdjustment(*this).run()` **UNCONDITIONALLY at
+  initialisation**, outside the `moist_phys_start_iter` gate, and it drives `q_v` toward
+  `q_sat` on the GRID MEAN. A fractional scheme puts condensate exactly where the grid mean is
+  SUBSATURATED, so a grid-mean adjustment evaporates precisely the cloud the closure created —
+  a factor of **428**.
+
+  **AN EARLIER TEST OF THIS WAS INVALID AND SAID SO WRONGLY.** Setting the moist gate to 300
+  changed nothing (0.6266 vs 0.6288) and that was read as exonerating `SaturationAdjustment`.
+  The gate governs only the IN-LOOP call; the init call at line 461 is ungated and is the one
+  that does the damage.
+
+  **SO THERE ARE THREE MUTUALLY-CONSISTENT WRONG CHOICES, NOT TWO**: a constant near-saturated
+  RH, an `H_crit` of 0.80-0.98 that only such a column can exceed, and a grid-mean saturation
+  adjustment that only such a column survives. The shipped model is self-consistent and every
+  one of the three is wrong. Fix any one alone and the condensate collapses; the 38 % vs 99.77 %
+  row above is that statement measured.
+
+  **THE REMAINING FIX IS SPECIFIED.** `SaturationAdjustment` must target the FRACTIONAL
+  equilibrium rather than `q_sat`: with total water `q_t = q_v + q_c + q_i`, the closure gives
+  `q_c_eq = f^2*D` and the adjustment should drive `q_v -> q_t - q_c_eq` instead of
+  `q_v -> q_sat` (`SaturationAdjustment.h:130`, and the same target at :164). Not written.
 
   **So the state is: the humidity fix is measured and good, the closure is measured and
   structurally good, and the two together are NOT yet a working pair.** All three knobs
