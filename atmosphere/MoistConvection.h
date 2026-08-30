@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "CloudFraction.h"
 
 #include <vector>
 #include <cmath>
@@ -645,13 +646,67 @@ void findCloudBaseLFS() {
                     const double t_u            = m.t.x[i][j][k] * m.t_0;
                     const double cloud_t_weight = 1.0 / (1.0 + std::exp(-(t_u - t_00) / 2.0));
 
+                    // The UPDRAFT CONDENSATE is the same grid-mean test as the cloud-base
+                    // index below, and fixing only the index leaves this at zero -- measured:
+                    // Cloud_Base found in 106 cells (control 107) while q_c_u stayed 0
+                    // everywhere, so g_p = 0 and P_conv accumulated nothing. Fourth occurrence
+                    // of the grid-mean defect, three lines above the third.
+                    //
+                    // An updraft draws from the MOIST TAIL of the sub-grid distribution, whose
+                    // top is q_t + D with D = (1 - H_crit)*q_sat -- the same tail whose excess
+                    // over q_sat defines f. So the parcel's condensate is (q_t + D) - q_sat,
+                    // which is positive exactly where f > 0, i.e. exactly where the cloud-base
+                    // test below now fires. The two stay consistent by construction.
                     m.q_v_u.x[i][j][k] = m.c.x[i][j][k] + q_v_u_add;
+                    if (CloudFraction::enabled()) {
+                        const double q_t_u = std::max(0.0, m.c.x[i][j][k])
+                                           + std::max(0.0, m.cloud.x[i][j][k])
+                                           + std::max(0.0, m.ice.x[i][j][k]);
+                        const double D_u = (1.0 - CloudFraction::hCrit(m.p_stat.x[i][j][k]))
+                                           * q_sat_col[i];
+                        if (q_t_u + D_u > q_sat_col[i] && t_u >= t_00)
+                            m.q_c_u.x[i][j][k] = q_t_u + D_u - q_sat_col[i];
+                    } else
                     if(m.q_v_u.x[i][j][k] >= scale * q_sat_col[i] && t_u >= t_00)
                         m.q_c_u.x[i][j][k] = m.q_v_u.x[i][j][k] - scale * q_sat_col[i];
                     if(m.q_v_u.x[i][j][k] <= 0.0) m.q_v_u.x[i][j][k] = 0.0;
                     if(m.q_c_u.x[i][j][k] <= 0.0) m.q_c_u.x[i][j][k] = 0.0;
 
-                    if (m.q_v_u.x[i][j][k] >= scale * q_sat_col[i] && cloud_t_weight > 0.01
+                    // ---- ATM_CLOUD_FRAC: CLOUD BASE IS WHERE CLOUD EXISTS, NOT WHERE THE
+                    // GRID MEAN SATURATES ------------------------------------------------
+                    //
+                    // The shipped test asks for grid-mean RH >= scale = 0.98, softened only by
+                    // a fixed q_v_u_add = 0.1 g/kg bump. That is satisfiable only by a
+                    // near-saturated column, which is exactly what the shipped constant-RH
+                    // 0.9375 initial humidity provides -- another member of the tuned set.
+                    // Give the model a realistic humidity (ATM_RH_PROFILE: RH 0.72 at the
+                    // surface falling to 0.39 at 5 km) and NO column anywhere reaches 0.98, so
+                    // no i_Base is ever found, every later stage hits `if(i_base < 0) continue`
+                    // and P_conv is identically 0.000 mm/a against the control's 12.7.
+                    //
+                    // THIRD OCCURRENCE OF ONE DEFECT. SaturationAdjustment drove q_v to q_sat on
+                    // the grid mean (fixed 6d163a0); autoconversion tested q_c against an
+                    // in-cloud q_c_crit on the grid mean (fixed 3ea78e3); this tests RH against
+                    // saturation on the grid mean. A fractional scheme puts cloud where the grid
+                    // mean is SUBSATURATED, so every consumer phrased against the grid mean sees
+                    // nothing there.
+                    //
+                    // Under the closure the condition "this cell contains cloud" is exactly
+                    // f > 0, i.e. RH > H_crit -- the same test initCloudIce, the adjustment and
+                    // the microphysics now use. Off-branch f is not consulted at all and the
+                    // shipped `q_v_u >= scale*q_sat` stands, bit for bit.
+                    bool at_cloud_base;
+                    if (CloudFraction::enabled()) {
+                        const double q_t = std::max(0.0, m.c.x[i][j][k])
+                                         + std::max(0.0, m.cloud.x[i][j][k])
+                                         + std::max(0.0, m.ice.x[i][j][k]);
+                        at_cloud_base = CloudFraction::fraction(q_t, q_sat_col[i],
+                                                                m.p_stat.x[i][j][k]) > 0.0;
+                    } else {
+                        at_cloud_base = (m.q_v_u.x[i][j][k] >= scale * q_sat_col[i]);
+                    }
+
+                    if (at_cloud_base && cloud_t_weight > 0.01
                             && m.p_stat.x[i][j][k] <= p_stat_Cloud_Base) {  // cloud base must be above 900 hPa
                         i_Base_local[j][k]     = i;
                         m.CloudBase.x[i][j][k] = height_table[i] * cloud_t_weight;
