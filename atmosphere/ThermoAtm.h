@@ -38,70 +38,33 @@ public:
 
         auto begin = std::chrono::high_resolution_clock::now();
 
-        const double inv_2dr    = 1.0 / (2.0 * m.dr);
-        const double inv_2dthe  = 1.0 / (2.0 * m.dthe);
-        const double inv_2dphi  = 1.0 / (2.0 * m.dphi);
-        const double inv_sqrt3  = 1.0 / sqrt(3.0);
-
-        std::vector<double> sinthe_table(m.jm);
-        for (int j = 0; j < m.jm; j++) {
-            sinthe_table[j] = sin(m.the.z[j]);
-            if (std::abs(sinthe_table[j]) < 1e-10)
-                sinthe_table[j] = 1e-10;
-        }
+        // Q_SENSIBLE WAS DELETED HERE (2026-08-30), AND THIS FUNCTION IS WHAT IS LEFT OF IT.
+        //
+        // The array was written twice with two different formulas and read by nothing:
+        // RHS_Atm_Turb.cpp had `coeff_S*lap(T)`, a conductive flux DIVERGENCE, and this block
+        // had `cp*T_0/sqrt(3)*|grad T|`, an unsigned gradient MAGNITUDE. Neither is a sensible
+        // heat flux; the surface flux is `c_H*(T_s - T_air1)` in MultiLayerRadiation, which is
+        // debited from the surface balance and credited to nothing. UtilsAtm then clamped the
+        // array to >= 0, discarding half of whichever quantity had last been written, and
+        // Results_Atm printed its min/max in kJ/kg as though it meant something. Wiring it to
+        // the temperature equation would have double-counted `diffusion_t_re`.
+        //
+        // What remains here is the Q_Latent land-zeroing this loop also did. It is kept rather
+        // than deleted because bcSolidGround's identical zeroing runs only AFTER bcRadius /
+        // bcTheta / bcPhi, whose extrapolation lists write Q_Latent at the boundaries -- so the
+        // two are not trivially redundant and proving it is a separate job.
 
         #pragma omp parallel for collapse(2)
-        for (int j = 0; j < m.jm; j++) {
-            for (int k = 0; k < m.km; k++) {
-                m.Q_Latent.x[0][j][k]   = 0.0;
-                m.Q_Sensible.x[0][j][k] = 0.0;
-            }
-        }
+        for (int j = 0; j < m.jm; j++)
+            for (int k = 0; k < m.km; k++)
+                m.Q_Latent.x[0][j][k] = 0.0;
 
         #pragma omp parallel for collapse(2) schedule(dynamic, 4)
-        for (int j = 1; j < m.jm-1; j++) {
-            for (int k = 1; k < m.km-1; k++) {
-
-                double sinthe = sinthe_table[j];
-
-                for (int i = 1; i < m.im-1; i++) {
-
-                    if (is_land(m.h, i, j, k)) {
-                        m.Q_Latent.x[i][j][k]   = 0.0;
-                        m.Q_Sensible.x[i][j][k] = 0.0;
-                        continue;
-                    }
-
-                    double rm           = m.rad.z[i];
-                    double exp_rm       = m.metricExpRm(rm);
-                    double inv_rm       = 1.0 / rm;
-                    double inv_rmsinthe = 1.0 / (rm * sinthe);
-
-                    // Q_Latent is owned by RHS_Atm_Turb (the signed advective
-                    // tendency × coeff_L written at every saturated cell). The
-                    // earlier ThermoAtm path here wrote an unsigned magnitude
-                    // diagnostic (lv · |∇q_sat|) every "moist" iter, racing the
-                    // RHS writer on alternate iters and producing a 2Δt sawtooth
-                    // in the field that confused diagnostics and (combined with
-                    // the now-removed RHS_Atm_Turb.cpp:758 source term) drove the
-                    // iter-358 NaN at 62°N upper-tropo.  See
-                    // [[project-iter358-62n-dry-nan]] and
-                    // [[project-precip-chain-fixes]].
-
-                    // --- sensible heat ---
-                    double dtdr   = (m.t.x[i+1][j][k] - m.t.x[i-1][j][k])
-                                    * inv_2dr * exp_rm;
-                    double dtdthe = (m.t.x[i][j+1][k] - m.t.x[i][j-1][k])
-                                    * inv_2dthe * inv_rm;
-                    double dtdphi = (m.t.x[i][j][k+1] - m.t.x[i][j][k-1])
-                                    * inv_2dphi * inv_rmsinthe;
-
-                    m.Q_Sensible.x[i][j][k] = m.cp_l * m.t_0 * inv_sqrt3
-                        * sqrt(dtdr*dtdr + dtdthe*dtdthe + dtdphi*dtdphi);
-
-                }  // i
-            }  // k
-        }  // j
+        for (int j = 1; j < m.jm-1; j++)
+            for (int k = 1; k < m.km-1; k++)
+                for (int i = 1; i < m.im-1; i++)
+                    if (is_land(m.h, i, j, k))
+                        m.Q_Latent.x[i][j][k] = 0.0;
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);

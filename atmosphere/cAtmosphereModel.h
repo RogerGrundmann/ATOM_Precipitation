@@ -242,7 +242,15 @@ private:
         return !m_pole_temperature_curve.empty();
     }
 
-    int panorama_cnt, iter_n;
+    // panorama_cnt IS DEAD AND WAS UNINITIALISED UNTIL 2026-08-30. UtilsAtm.h records that the
+    // counter it named was replaced by an `iter_n % panorama_print` test, and the member was left
+    // behind: no assignment exists anywhere in the tree, yet PrintMsg prints it on every
+    // iteration line. `cAtmosphereModel model;` is a STACK LOCAL in main, so the printed value
+    // was stack garbage and reading it was undefined behaviour -- it was found because deleting
+    // Q_Sensible shifted the object layout and the printed value changed from 0 to 4 with no
+    // other difference in the run. Initialised here rather than removed, because dropping it
+    // from the print changes the format of every iteration line.
+    int panorama_cnt = 0, iter_n;
 
     // Inviscid spin-up state.
     // total_iter_count accumulates across time slices so the inviscid window is global, not per-slice.
@@ -774,7 +782,6 @@ public:
     Array aux_w;                                                        // auxilliar field w-velocity component
     Array aux_t;                                                        // auxilliar field t
     Array Q_Latent;                                                     // latent heat
-    Array Q_Sensible;                                                   // sensible heat
     Array BuoyancyForce;                                                // buoyancy force, Boussinesque approximation
     Array CoriolisForce;                                                // Coriolis force terms
     Array CentrifugalForce;                                             // centrifugal force terms

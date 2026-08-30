@@ -271,7 +271,6 @@ public:
                     if (m.P_conv.x[i][j][k]   < 0.0)  m.P_conv.x[i][j][k]   = 0.0;
 
                     if (m.Q_Latent.x[i][j][k]   <= 0.0)  m.Q_Latent.x[i][j][k]        = 0.0;
-                    if (m.Q_Sensible.x[i][j][k] <= 0.0)  m.Q_Sensible.x[i][j][k]      = 0.0;
 
                 }
             }
@@ -394,7 +393,7 @@ public:
             &m.CloudBase, &m.LevelFreeSinking, &m.Deep_beg, &m.Deep_end,
             &m.rhs_t, &m.rhs_u, &m.rhs_v, &m.rhs_w, &m.rhs_c, &m.rhs_cloud, &m.rhs_ice, &m.rhs_g, &m.rhs_co2,
             &m.aux_u, &m.aux_v, &m.aux_w, &m.aux_t,
-            &m.Q_Latent, &m.Q_Sensible,
+            &m.Q_Latent,
             &m.BuoyancyForce, &m.CoriolisForce, &m.CentrifugalForce, &m.PresGradForce,
             &m.tau_above, &m.tau_layer, &m.brunt_N2, &m.Psi,
             &m.ubud_pgf, &m.ubud_cor, &m.ubud_advv, &m.ubud_advh, &m.ubud_diff, &m.ubud_buoy,

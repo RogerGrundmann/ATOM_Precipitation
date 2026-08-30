@@ -19,9 +19,9 @@
  * 713-889) while the iteration loop starts at line 985, so MLR cannot be maintaining this and a
  * surface-balance repair does not touch it (ATM_SFC_COUPLED was written on that wrong premise,
  * measured a null, and removed). The separate finding that MLR's surface balance debits
- * c_H*(T_s - T_air1) which `Q_Sensible` never credits to the air -- it is written in
- * RHS_Atm_Turb.cpp:485 and read by NOTHING -- is real, but it is an INITIALISATION defect and
- * not the cause of the standing instability.
+ * c_H*(T_s - T_air1) and nothing credits it to the air is real, but it is an INITIALISATION
+ * defect and not the cause of the standing instability. (`Q_Sensible`, which earlier notes named
+ * as the thing that should have credited it, was never that quantity and was deleted 2026-08-30.)
  *
  * WHAT WAS ADAPTED FROM ATHAD'S COPY. Two of its assumptions do not hold here:
  *

@@ -871,9 +871,10 @@ public:
                 // convective adjustment at all; see ConvectiveAdjustment.h.
                 //
                 // What survives, and is NOT fixed here: the balance above debits the surface
-                // c_H*(T_s - T_air1) and nothing credits it to the air. `Q_Sensible` is written
-                // in RHS_Atm_Turb.cpp:485 and read by NOTHING. A real conservation defect in the
-                // initialisation, recorded rather than silently repaired.
+                // c_H*(T_s - T_air1) and nothing credits it to the air. A real conservation
+                // defect, recorded rather than silently repaired. (`Q_Sensible`, long named here
+                // as the array that should have carried it, was never that quantity -- two
+                // writers, two formulas, neither a flux -- and was deleted on 2026-08-30.)
 
                 // De-kink the surface radiative step in the DIAGNOSTIC radiation profile only.
                 // The 1-point surface energy balance (sigma T_s^4 at i_mount) and the column

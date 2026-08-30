@@ -149,8 +149,6 @@ void cAtmosphereModel::print_min_max_atm(){
     cout << endl << " energies: " << endl;
 //    searchMinMax_3D(" max radiation ",  " min radiation ", 
 //        "kJ/kg", radiation, 1e-3);
-    searchMinMax_3D(" max Q_Sensible ", " min Q_Sensible ", 
-        "kJ/kg", Q_Sensible, 1e-3);
     searchMinMax_3D(" max Q_Latent ", " min Q_Latent ", 
         "kJ/kg", Q_Latent, 1e-3);
 

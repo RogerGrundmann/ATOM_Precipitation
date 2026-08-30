@@ -463,8 +463,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //
     // Consequence measured 2026-08-27: surface evaporation moistens levels 0-3 and cannot drive
     // convection at all. It also never writes `t`, so it removes no latent heat and cannot cool
-    // the surface into stability either -- the same shape as `Q_Sensible`, which is written and
-    // read by nothing.
+    // the surface into stability either -- the same shape `Q_Sensible` had before it was deleted
+    // on 2026-08-30: computed everywhere, read by nothing.
     //
     // T_v = T(1 + 0.608 q_v - q_c - q_i), with 0.608 taken as R_WaterVapour/R_Air - 1 so it
     // matches r_humid exactly rather than being a second, independent constant. THE REFERENCE
@@ -493,7 +493,6 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double q_Ice  = ep * E_Ice  / (p_hydro.x[i][j][k] - E_Ice);
     double Q_Latent_Ice = 0.0;
 
-    double coeff_S = lamda * t_0 / ndimLength();
     double coeff_L = r_air * c_0 * lv * u_0 / ndimLength();
 
     if(c.x[i][j][k] >= 0.85 * q_Rain){
@@ -510,16 +509,11 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
 
     Q_Latent.x[i][j][k] = coeff_L * (Q_Latent.x[i][j][k] + Q_Latent_Ice);
 
-    Q_Sensible.x[i][j][k] = coeff_S
-        * (d2tdr2 + dtdr * 2.0 * inv_rm + d2tdthe2 * inv_rm2
-        + dtdthe * costhe_inv_rm2sinthe + d2tdphi2 * inv_rm2sinthe2);
-
     if(land_ijk){
         BuoyancyForce.x[i][j][k]         = 0.0;
         PressureGradientForce.x[i][j][k] = 0.0;
         CoriolisForce.x[i][j][k]         = 0.0;
         Q_Latent.x[i][j][k]              = 0.0;
-        Q_Sensible.x[i][j][k]            = 0.0;
     }
 
 
@@ -1001,9 +995,11 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // cAtmosphereModel.cpp:713-889 and the iteration loop starts at 985, so MLR never runs
     // inside the loop. It has to be formed here, from the live t.
     //
-    // NOT `Q_Sensible`. That array (line 513 below) is coeff_S*lap(T), the CONDUCTIVE flux
-    // divergence at every interior cell; crediting it here would double-count the thermal
-    // diffusion diffusion_t_re already applies. Different quantity, similar name.
+    // NOT `Q_Sensible`, which no longer exists. That array was coeff_S*lap(T), the CONDUCTIVE
+    // flux divergence at every interior cell; crediting it here would have double-counted the
+    // thermal diffusion diffusion_t_re already applies. It had a second writer in ThermoAtm with
+    // a different formula again, was clamped to >= 0, was read by nothing, and was deleted on
+    // 2026-08-30. Different quantity, similar name -- which is why it survived so long.
     //
     // FORM. A bulk flux H = c_H*(T_s - T_1) [W/m2] warms the lowest air layer at
     // dT_1/dt = H/(rho*cp*dz), so the rate coefficient is k_S = c_H/(rho*cp*dz) [1/s],

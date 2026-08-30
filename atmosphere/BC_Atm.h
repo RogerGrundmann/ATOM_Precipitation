@@ -202,7 +202,6 @@ public:
                         m.CentrifugalForce.x[i][j][k] = 0.0;
 
                         m.Q_Latent.x[i][j][k]   = 0.0;
-                        m.Q_Sensible.x[i][j][k] = 0.0;
 
                         // Turbulence: zero all scalars inside solid cells.
                         m.tke.x[i][j][k]        = 0.0;
@@ -351,7 +350,6 @@ public:
                         m.CentrifugalForce.x[i][j][k] = 0.0;
 
                         m.Q_Latent.x[i][j][k]   = 0.0;
-                        m.Q_Sensible.x[i][j][k] = 0.0;
 
                         // Turbulence: zero all scalars at solid surfaces.
                         m.tke.x[i][j][k]        = 0.0;
@@ -568,7 +566,7 @@ public:
             &m.p_stat, &m.r_humid, &m.r_dry,
             &m.PrecipitableWaterLocal,
             &m.CoriolisForce, &m.CentrifugalForce, &m.BuoyancyForce, &m.PresGradForce,
-            &m.Q_Latent, &m.Q_Sensible,
+            &m.Q_Latent,
             &m.S_c_c, &m.S_v, &m.S_c, &m.S_i, &m.S_r, &m.S_s, &m.S_g,
             &m.q_v_u, &m.q_c_u, &m.u_u, &m.v_u, &m.w_u,
             &m.s, &m.s_u, &m.s_d,
@@ -738,7 +736,7 @@ public:
             &m.q_v_u, &m.q_c_u, &m.u_u, &m.v_u, &m.w_u,
             &m.s, &m.s_u, &m.s_d,
             &m.CoriolisForce, &m.CentrifugalForce, &m.BuoyancyForce, &m.PresGradForce,
-            &m.Q_Latent, &m.Q_Sensible,
+            &m.Q_Latent,
             &m.c_u, &m.e_d, &m.e_l, &m.e_p, &m.g_p
         };
         constexpr int n_cubic = sizeof(fields_cubic) / sizeof(fields_cubic[0]);
@@ -778,7 +776,7 @@ public:
             &m.q_v_u, &m.q_c_u, &m.u_u, &m.v_u, &m.w_u,
             &m.s, &m.s_u, &m.s_d,
             &m.CoriolisForce, &m.CentrifugalForce, &m.PresGradForce, &m.BuoyancyForce,
-            &m.Q_Latent, &m.Q_Sensible,
+            &m.Q_Latent,
             &m.c_u, &m.e_d, &m.e_l, &m.e_p, &m.g_p
 //            &m.tke, &m.dis, &m.nue, &m.prod, &m.tke_source, &m.dis_source
         };
@@ -1004,7 +1002,7 @@ public:
             &m.c, &m.cloud, &m.ice, &m.gr, &m.co2,
             &m.p_stat,
             &m.r_dry, &m.r_humid,
-            &m.Q_Latent, &m.Q_Sensible,
+            &m.Q_Latent,
             &m.BuoyancyForce, &m.CoriolisForce, &m.CentrifugalForce, &m.PresGradForce,
             &m.PrecipitableWaterLocal,
             &m.M_u,   &m.M_d,

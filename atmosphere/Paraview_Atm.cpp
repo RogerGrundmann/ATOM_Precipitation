@@ -199,7 +199,6 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("CO2-Concentration", co2, co2_0, Atmosphere_panorama_vts_File);
 //    dump_array("Q_Latent", Q_Latent, 1.0, Atmosphere_panorama_vts_File);
 //    dump_array("Q_Radiation", radiation, 1.0, Atmosphere_panorama_vts_File);
-//    dump_array("Q_Sensible", Q_Sensible, 1.0, Atmosphere_panorama_vts_File);
 
 /*
     dump_array("u_u", u_u, 1.0, Atmosphere_panorama_vts_File);
@@ -536,7 +535,6 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
 //    dump_radial("Q_Radiation", radiation, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
 //    dump_radial("Q_Latent", Q_Latent, 1e-3, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("Q_Sensible", Q_Sensible, 1e-3, i_radial, Atmosphere_vtk_radial_File);
 
     dump_radial("CO2", co2, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
@@ -810,7 +808,6 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
     dump_zonal("PresGradForce", PresGradForce, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
 //    dump_zonal("Q_Latent", Q_Latent, 1e-3, k_zonal, Atmosphere_vtk_zonal_File);
-//    dump_zonal("Q_Sensible", Q_Sensible, 1e-3, k_zonal, Atmosphere_vtk_zonal_File);
 
     dump_zonal("CO2", co2, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
@@ -1003,7 +1000,6 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     dump_longal("PresGradForce", PresGradForce, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
 //    dump_longal("Q_Latent", Q_Latent, 1e-3, j_longal, Atmosphere_vtk_longal_File);
-//    dump_longal("Q_Sensible", Q_Sensible, 1e-3, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("Q_Radiation", radiation, 1.0, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("TempStandard", TempStand, 1.0, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("TempDewPoint", TempDewPoint, 1.0, j_longal, Atmosphere_vtk_longal_File);
