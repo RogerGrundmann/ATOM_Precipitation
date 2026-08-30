@@ -984,9 +984,31 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
     const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter, Ma);
 
-    // On a successful restart, start the loop counter at the restart point so the
-    // printed iter_n matches where the run actually resumed (not back at 1).
-    const int iter_start = restarted ? restart_from_iter : 1;
+    // On a successful restart, resume at the iteration AFTER the checkpointed one.
+    //
+    // THE +1 IS THE FIX, AND IT WAS MEASURED (2026-08-30). save_state fires at the END of the
+    // loop body, when `total_iter_count == checkpoint_save_iter`, so the file stamped N holds
+    // the state AFTER iteration N completed and the next iteration to run is N+1. Starting at
+    // N re-executed iteration N -- while load_state had already restored total_iter_count = N
+    // and the loop's own `total_iter_count++` then took it to N+1. So the two counters, which
+    // agree exactly on a fresh run, came apart by one at every restart:
+    //
+    //     fresh          n = 1  2  3  4        iter = 1  2  3  4
+    //     restart at 2   n =    2  3  4        iter =    3  4  5
+    //
+    // and everything gated on total_iter_count ran one step early: at restarted n = 2 the log
+    // printed buoyancy_ramp 0.010 (the fresh run's n = 3 value) and physical t = 0.6009 s
+    // instead of 0.4006. inviscid_spinup_iters, buoyancy_ramp_iters, moist_phys_start_iter,
+    // conv_stride and restart_save_stride are all on that counter, so a restarted run was not
+    // the same run continued -- it repeated one iteration of physics and aged the schedule by
+    // one, compounding once per restart.
+    //
+    // This is NOT the hydrosphere's restart defect and must not be confused with it. There
+    // (`5a1f6e9`) iter_n restarts at 1 and VTK stamps COLLIDE, which is why the ocean stamps
+    // files with total_iter_count. Here iter_n was already absolute and nothing collided; the
+    // bug was purely the off-by-one above. Porting the ocean's stamp would have shifted every
+    // post-restart filename by one and fixed nothing.
+    const int iter_start = restarted ? restart_from_iter + 1 : 1;
 
     // ---- Convergence monitor (report-only) ----------------------------------------
     // Makes "is it equilibrated yet?" visible. Every conv_stride iters it samples two
@@ -1489,6 +1511,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
             }
         }  // iter_n % momentum_stride == 0
+
+        // Panorama VTS on its own cadence, deliberately OUTSIDE the momentum_stride and
+        // checkpoint gates above -- see UtilsAtm::writePanorama for why it cannot live inside
+        // writeFile if panorama_print is to mean what its name says.
+        UtilsAtm(*this).writePanorama(bathymetry_name);
 
         // ---- zonal-mean v momentum budget: snapshot vbar before RK4, then difference
         // it across each step (RK4 physics, polar filter, orographic Shapiro, radial
