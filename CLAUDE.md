@@ -367,6 +367,34 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   Manabe-Wetherald profile falls too fast aloft for cirrus to form. That is a THIRD prerequisite,
   independent of the autoconversion one.
 
+  **THE AUTOCONVERSION IS NOW FRACTION-AWARE (`3ea78e3`), IT BOUGHT x1850 ON RAIN, AND THE
+  THRESHOLD IS NOW EXHAUSTED AS A LEVER** (2026-08-30, `nm` = 100, gate 0, 24 threads).
+  Autoconversion is a LOCAL process, so the grid-mean tendency is `f*R(q_c/f)`. Only the
+  NONLINEAR terms move under that transform -- `f*c*(q_c/f) = c*q_c` identically -- and every one
+  that moved is nonlinear because it carries a threshold: TwoCat `S_c_au`/`S_ac`, ZeroCat `S_au`,
+  OneCat `S_au`/`S_rim`/`S_shed`. `S_rim`, `S_shed`, `S_c_frz`, `S_i_au`, `S_nuc` are linear and
+  correct as they stand.
+
+  The structural repair alone takes rain **0.0092 -> 17.05 mm/a**. Then `ATM_QC_CRIT` (new,
+  g/kg, default 0.5 = shipped):
+
+  | `q_c_crit` g/kg | 0.20 | 0.15 | 0.10 | 0.05 | 0.02 | 0.01 | NASA |
+  |---|---|---|---|---|---|---|---|
+  | Precip mm/a | 140/370 | 159/441 | 181/510 | 207/563 | 214/618 | **222/638** | **978** |
+
+  **AND IT SATURATES.** Twenty times lower buys 370 -> 638; the last five-fold gains 13 %. The
+  curve flattens near **~650 mm/a, two thirds of NASA**, so the VALUE is spent -- the same shape
+  as the `eps_dry`/`co2_band` sweep. **Two things are fixed at every point and are where the
+  missing third lives: the condensate is 78.94 g/m2 in all six runs (the rain never draws the
+  cloud down) and `P_conv` is 0.000 in all six against the control's 12.7.** So the residual is
+  the dead convective scheme and the missing high cloud, NOT the microphysics constant. Default
+  stays 0.5.
+
+  *The two figures per point are the two PARITIES*: `printDataAtm` runs every iteration while
+  `moist_stride` = 2 runs the ice scheme every other one, so precipitation carries a 2dt
+  sawtooth -- **x1.22 in the control, x2.5 under the flip**. Quote both or neither, and do not
+  fit a constant against one parity.
+
   **A NOTE ON HOW THIS WAS FOUND, BECAUSE IT IS THE FAMILY'S OWN PATTERN AGAIN.** The arm was
   first written up here on the condensate and the OLR alone and called a success. The
   precipitation was never looked at -- in a model named ATOM_Precipitation -- and the user found
