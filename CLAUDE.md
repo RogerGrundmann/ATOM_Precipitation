@@ -301,6 +301,79 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`) stay default OFF. The next step is the
   ~100x discrepancy above, not another sweep and not a flip.
 
+  **THE FULL FLIP HAS NOW BEEN RUN TO `nm` = 400 WITH MOIST PHYSICS FROM ITERATION 0, AND IT
+  DESTROYS THE PRECIPITATION. DO NOT FLIP IT** (2026-08-30, 24 threads,
+  `ATM_RH_PROFILE=1 ATM_RH_CRIT=0.30 ATM_CLOUD_FRAC=1 ATM_CWP_CAP=off ATM_CLOUD_RAD_FRAC=1`,
+  against the identical config shipped).
+
+  | | shipped | full flip | Earth / NASA |
+  |---|---|---|---|
+  | column condensate path | 1583.2 g/m2 | **78.8** | 50-100 |
+  | p05 / p50 / max | 213 / 1959 / 2298 | **1.0 / 86 / 200** | — |
+  | levels carrying cloud | 38 of 41 | 18 of 41 | — |
+  | precipitable water | 49.6 mm | **29.6** | ~25 |
+  | **Precip mean** | **1046 mm/a** | **1.21 mm/a** | **978 (NASA)** |
+  | P_rain mean | 805 | **0.0092** | — |
+  | P_snow mean | 228.6 | 1.22 | — |
+  | P_conv mean | 9.65 | **0.000** | — |
+  | cloud LW forcing | 25.35 W/m2 | **9.05** | ~25 |
+  | all-sky OLR | 247.7 | 266.5 | ~240 |
+
+  **THE CONDENSATE AND THE HUMIDITY BOTH BECOME RIGHT AND THE MODEL STOPS RAINING.** 78.8 g/m2
+  is in the observed band and 29.6 mm of precipitable water is better than the shipped 49.6, on a
+  SPUN-UP field at iteration 400 -- the "`nm` = 20 is the INITIAL field" caveat above is
+  discharged. And precipitation falls by **865x**, rain by **87 500x**, convective precipitation
+  to exactly zero.
+
+  **THE CAUSE IS A HARD THRESHOLD FITTED TO THE BROKEN CONDENSATE**, `TwoCatIceScheme.h:294`:
+
+      constexpr double q_c_crit = 5.0e-4;            // 0.5 g/kg Kessler threshold
+      if(m.cloud.x[i][j][k] > q_c_crit)
+          S_c_au = c_c_au * (m.cloud.x[i][j][k] - q_c_crit);
+      else S_c_au = 0.0;
+
+  Under the flip the grid-mean cloud water at the profile peak is ~0.04 g/kg -- **twelve times
+  below the threshold** -- so `S_c_au` is identically zero everywhere and no rain forms at all.
+  Snow survives only because ice autoconversion has no threshold (`if(ice > 0.0)`). The
+  threshold's own comment records that it was installed because without it "cloud~0 yet huge
+  P_rain -> gross precip ~30x NASA": **it was fitted against the 20x-too-large condensate.**
+
+  **SO THE SHIPPED 1046 mm/a IS A FIFTH CANCELLING PAIR** -- an over-large condensate feeding a
+  threshold raised to compensate -- and it is the one that matters most, because it is the
+  model's headline output and it currently matches NASA to 7 %.
+
+  **TWO THINGS ARE WRONG WITH `q_c_crit` UNDER A FRACTIONAL SCHEME, AND ONLY THE SECOND IS A
+  TUNING QUESTION.** (1) It is applied to the GRID MEAN. Autoconversion is an in-cloud
+  microphysical process and must see `q_c/f`. **This is structurally the same defect as the
+  grid-mean `SaturationAdjustment` fixed in `6d163a0`, one module downstream** -- the fractional
+  correction was made in the adjustment and not in the microphysics that follows it. (2) 0.5 g/kg
+  is defensible in-cloud and never occurs as a grid mean over a 1x1 degree box.
+
+  **SO THE FLIP LIST IS INCOMPLETE, NOT MERELY UNCALIBRATED.** A fraction-aware autoconversion in
+  the ice scheme is a PREREQUISITE, not a follow-up. Until it exists the flip cannot be judged:
+  its condensate, humidity and cloud-cover fields are all better than the shipped ones and its
+  precipitation is three orders of magnitude wrong.
+
+  **AND THE CLOUD LW FORCING FALLS 25.35 -> 9.05 W/m2 FOR A SECOND, INDEPENDENT REASON: THE FLIP
+  REMOVES THE HIGH CLOUD.** Per-level condensate, cos-lat mean g/m2:
+
+  | z | 2163 m | 3316 m | 4988 m | 7412 m | 10927 m |
+  |---|---|---|---|---|---|
+  | shipped | 99.8 | 127.2 | 92.8 | 30.8 | **20.5** |
+  | flip | 2.4 | 10.6 | 6.7 | 0.03 | **0.000** |
+
+  Earth's ~25 W/m2 of LW cloud forcing is mostly cold high cloud; this leaves only low cloud,
+  which radiates near surface temperature and forces almost nothing. `ATM_RH_PROFILE`'s
+  Manabe-Wetherald profile falls too fast aloft for cirrus to form. That is a THIRD prerequisite,
+  independent of the autoconversion one.
+
+  **A NOTE ON HOW THIS WAS FOUND, BECAUSE IT IS THE FAMILY'S OWN PATTERN AGAIN.** The arm was
+  first written up here on the condensate and the OLR alone and called a success. The
+  precipitation was never looked at -- in a model named ATOM_Precipitation -- and the user found
+  it by opening `output_cd400_on` and seeing no rain. Sixth occurrence of "the answer was in
+  output nobody opened", and the first where the model's PRIMARY diagnostic was the one skipped.
+  **Check `Precip mean` against the NASA line before calling any moisture change an improvement.**
+
 
 - **THE CONDENSATE IS 20-30x TOO LARGE BECAUSE THE INITIAL HUMIDITY IS NEAR-SATURATED AT EVERY
   LEVEL, AND THE CLOUD SCHEME ONLY WORKS BECAUSE OF IT** (2026-08-29). Traced end to end with
