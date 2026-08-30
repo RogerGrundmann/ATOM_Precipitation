@@ -576,21 +576,11 @@ public:
                     // grid mean over the whole cell. f = 1 off-branch, so LWP_i is unchanged
                     // bit for bit and every expression below collapses to the shipped one.
                     double cf = 1.0;
-                    if (cloudRadFrac() && (cw_l > 0.0 || cw_i > 0.0)) {
+                    if (cloudRadFrac()) {
                         const double p_hPa = m.p_stat.x[i][j][k];
                         const double q_s   = CloudFraction::qSat(T_i, p_hPa, m.t_0, m.hp, m.ep);
                         const double q_t   = std::max(0.0, m.c.x[i][j][k]) + cw_l + cw_i;
-                        cf = CloudFraction::fraction(q_t, q_s, p_hPa);
-                        // The condensate is here, so the cell IS cloudy; a zero fraction with
-                        // non-zero water would divide the whole path into nothing. This happens
-                        // where the field was not made by the closure (advected in, or a cell
-                        // the adjustment has since dried), and the honest floor is the fraction
-                        // that would hold this much water: q_c = f^2*D -> f = sqrt(q_c/D).
-                        if (!(cf > 0.0)) {
-                            const double D = (1.0 - CloudFraction::hCrit(p_hPa)) * q_s;
-                            cf = (D > 0.0) ? std::min(1.0, sqrt((cw_l + cw_i) / D)) : 1.0;
-                            if (!(cf > 0.0)) cf = 1.0;
-                        }
+                        cf = CloudFraction::effectiveFraction(q_t, q_s, p_hPa, cw_l + cw_i);
                     }
                     double LWP_i = LWP_gm / cf;                               // IN-CLOUD paths [g/m2]
                     double IWP_i = IWP_gm / cf;

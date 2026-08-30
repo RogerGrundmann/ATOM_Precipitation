@@ -2,6 +2,7 @@
 
 #include "cAtmosphereModel.h"
 #include "IceSchemeCommon.h"
+#include "CloudFraction.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,7 +30,7 @@ namespace TwoCatIce {
     // q_c_crit reservoir threshold is kept, so only excess cloud drains (no return to the
     // immediate-rain-out over-precipitation). project_snow_overproduction.
     constexpr double c_c_au   = 1.0e-3;                                 // 1/s (COSMO original 4.0e-4)
-    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
+    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
     constexpr double c_i_au   = 1.0e-3;                                 // 1/s COSMO
     constexpr double c_ac     = 0.24;                                   // m2/kg
     constexpr double c_rim    = 18.6;                                   // m2/kg
@@ -286,13 +287,47 @@ private:
                                 ((m.c.x[i][j][k] - q_Ice)/dt_snow_dim));// subsaturation, < III > in kg/(kg*s)
 
 
+                        // ---- ATM_CLOUD_FRAC: THE THRESHOLD IS AN IN-CLOUD QUANTITY --------
+                        //
+                        // Autoconversion is a LOCAL microphysical process: it happens inside the
+                        // cloud, at the in-cloud water content q_c/f, not at the grid mean. With
+                        // a sub-grid fraction the grid-mean tendency of a process confined to the
+                        // cloudy area is f * R(q_c/f).
+                        //
+                        // WHY THIS IS NOT OPTIONAL. With ATM_CLOUD_FRAC and a realistic humidity
+                        // the peak GRID-MEAN cloud water is ~0.04 g/kg, twelve times BELOW
+                        // q_c_crit = 0.5 g/kg, so the shipped test is false in every cell and
+                        // S_c_au is identically zero everywhere. Measured at nm = 400: total
+                        // precipitation 1046 -> 1.21 mm/a and rain 805 -> 0.0092, against NASA's
+                        // 978. The threshold was fitted against a condensate 20x too large (its
+                        // note below records the "~30x NASA" it was installed to cure), so
+                        // repairing the condensate without repairing this kills the rain.
+                        //
+                        // This is the SAME defect as the grid-mean SaturationAdjustment fixed in
+                        // 6d163a0, one module downstream: a fractional scheme puts condensate
+                        // where the grid mean is subsaturated, and every consumer that tests a
+                        // grid mean against an in-cloud constant sees nothing there.
+                        //
+                        // f = 1 off-branch, so both expressions are the shipped ones exactly.
+                        // NOTE that only NONLINEAR terms change under this transform: for a term
+                        // linear in cloud water, f * c * (q_c/f) = c * q_c identically -- which is
+                        // why S_rim, S_shed, S_c_frz and S_i_au below are untouched and correct
+                        // as they stand. It is the THRESHOLD that makes these two nonlinear.
+                        const double q_t_frac = std::max(0.0, m.c.x[i][j][k])
+                                              + std::max(0.0, m.cloud.x[i][j][k])
+                                              + std::max(0.0, m.ice.x[i][j][k]);
+                        const double f_cld = CloudFraction::effectiveFraction(
+                                q_t_frac, q_sat, p_u,
+                                std::max(0.0, m.cloud.x[i][j][k]) + std::max(0.0, m.ice.x[i][j][k]));
+                        const double cloud_in = m.cloud.x[i][j][k] / f_cld;   // in-cloud water
+
                         // autoconversion of cloud water to form rain (Kessler with threshold):
                         // cloud must exceed q_c_crit (~0.5 g/kg) before any rain forms. Without
                         // the threshold ANY cloud autoconverted instantly at c_c_au, so saturated
                         // columns rained out the moment they condensed (cloud~0 yet huge P_rain)
                         // -> gross precip ~30x NASA. See project_overprecip_saturation_injection.
-                        if(m.cloud.x[i][j][k] > q_c_crit)               // c_c_au = 4.0e-4, in 1/s
-                            S_c_au = c_c_au * (m.cloud.x[i][j][k] - q_c_crit); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
+                        if(cloud_in > q_c_crit)                         // c_c_au = 4.0e-4, in 1/s
+                            S_c_au = f_cld * c_c_au * (cloud_in - q_c_crit); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
                         else  S_c_au = 0.0;
 
 
@@ -318,8 +353,15 @@ private:
                         // that remained after the autoconversion fix. Keeping a q_c_crit cloud
                         // reservoir un-rainable makes accretion consistent with autoconversion.
                         // See project_overprecip_saturation_injection.
-                        if((t_u >= m.t_0)&&(m.cloud.x[i][j][k] > q_c_crit))
-                            S_ac = c_ac * (m.cloud.x[i][j][k] - q_c_crit) // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
+                        // Fraction-aware for the same reason as S_c_au above, and it MUST move
+                        // with it: the note above records that accretion was given the same
+                        // q_c_crit deliberately, so that a q_c_crit reservoir stays un-rainable
+                        // in both. Leaving one on the grid mean would re-open the inconsistency
+                        // that fix closed. Rain is left as the GRID MEAN -- scaling it too needs
+                        // an assumption about precipitation fraction versus cloud fraction, which
+                        // is a separate modelling choice and not implied by this closure.
+                        if((t_u >= m.t_0)&&(cloud_in > q_c_crit))
+                            S_ac = f_cld * c_ac * (cloud_in - q_c_crit)  // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
                                    * Rain_pow_7_9;                      // in kg/(m² * s)
                         else  S_ac = 0.0;
 

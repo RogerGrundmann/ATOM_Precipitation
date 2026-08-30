@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "CloudFraction.h"
 #include "IceSchemeCommon.h"
 
 #include <algorithm>
@@ -28,7 +29,7 @@ namespace OneCatIce {
     constexpr double N_cf_0_top = 1.0e4;                                // 1/m3
     constexpr double tau_r = 3.3e3;                                     // s, adjusted for NASA avg 2.68 mm/d
     constexpr double tau_s = 4.0e4;                                     // s — slowed 8x from 1e3: S_nuc is now the sole snow seed and accumulates over the full [-37,0)C band; 1e3 over-produced snow (63% frac). 8e3 gives a moderate snow fraction.
-    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg). Ported from TwoCat — without it the tau_r tuning above is defeated (ALL cloud autoconverts) -> ~25x over-precip. Applied to the rain autoconversion only; snow nucleation (S_nuc) is left unthresholded.
+    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg). Ported from TwoCat — without it the tau_r tuning above is defeated (ALL cloud autoconverts) -> ~25x over-precip. Applied to the rain autoconversion only; snow nucleation (S_nuc) is left unthresholded.
     constexpr double a_mc = 0.08;                                       // kg/m2
     constexpr double a_mv = 0.02;                                       // kg/m2
     constexpr int iter_prec_end = 2;                                    // COSMO iterations
@@ -173,8 +174,20 @@ private:
                         else
                             eps_t = 0.0;
 
+                        // ATM_CLOUD_FRAC: every q_c_crit test below is an IN-CLOUD one, so it
+                        // is applied to cloud/f and the rate scaled by f. See TwoCatIceScheme for
+                        // the argument and the measurement. f = 1 off-branch, so all three are
+                        // the shipped expressions exactly. S_nuc and S_ac are LINEAR in cloud
+                        // water and therefore invariant under the transform -- untouched.
+                        const double f_cld = CloudFraction::effectiveFraction(
+                                max(0.0, m.c.x[i][j][k]) + max(0.0, m.cloud.x[i][j][k])
+                                    + max(0.0, m.ice.x[i][j][k]),
+                                q_sat, m.p_stat.x[i][j][k],
+                                max(0.0, m.cloud.x[i][j][k]) + max(0.0, m.ice.x[i][j][k]));
+                        const double cloud_in = m.cloud.x[i][j][k] / f_cld;   // in-cloud water
+
                         if(m.cloud.x[i][j][k] > 0.0){
-                            S_au  = (1.0 - eps_t)/tau_r * max(0.0, m.cloud.x[i][j][k] - q_c_crit); // Kessler threshold: only cloud excess rains
+                            S_au  = f_cld * (1.0 - eps_t)/tau_r * max(0.0, cloud_in - q_c_crit); // Kessler threshold: only cloud excess rains
                             S_nuc = eps_t/tau_s * max(0.0, m.cloud.x[i][j][k]);                    // snow nucleation left unthresholded (want snow)
                         }
 
@@ -191,14 +204,19 @@ private:
                         //     ~0.09 g/kg < q_c_crit, so riming (the runaway term) switches OFF there
                         //     while nucleation still makes snow; (2) c_rim reduced 5x. Snow now
                         //     forms (from S_nuc) and stays bounded.
+                        // Fraction-aware for the same reason as S_au. Snow is left as the GRID
+                        // MEAN, exactly as Rain is in TwoCat's accretion: scaling it too needs an
+                        // assumption about precipitation fraction versus cloud fraction, which
+                        // this closure does not imply. Note these two are thresholded and so
+                        // NONLINEAR -- an unthresholded c_rim*cloud*Snow would need no change.
                         if(t_u < m.t_0)
-                            S_rim = (m.cloud.x[i][j][k] > q_c_crit)
-                                ? (c_rim/5.0)/a_m * (m.cloud.x[i][j][k] - q_c_crit) * Snow : 0.0;
+                            S_rim = (cloud_in > q_c_crit)
+                                ? f_cld * (c_rim/5.0)/a_m * (cloud_in - q_c_crit) * Snow : 0.0;
                         else  S_rim = 0.0;                              // riming rate of snow mass due to collection of supercooled cloud droplets, < VIII >
 
                         if(t_u >= m.t_0)
-                            S_shed = (m.cloud.x[i][j][k] > q_c_crit)
-                                ? (c_rim/5.0)/a_m * (m.cloud.x[i][j][k] - q_c_crit) * Snow : 0.0;
+                            S_shed = (cloud_in > q_c_crit)
+                                ? f_cld * (c_rim/5.0)/a_m * (cloud_in - q_c_crit) * Snow : 0.0;
                         else  S_shed = 0.0;                             // rate of water shed by melting wet snow particles, < IX >
 
 

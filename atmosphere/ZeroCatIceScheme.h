@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "CloudFraction.h"
 #include "IceSchemeCommon.h"
 
 #include <algorithm>
@@ -16,7 +17,7 @@ using namespace AtomUtils;
 namespace ZeroCatIce {
     constexpr double tau_r = 3.3e3;                                     // s
     constexpr double tau_r_inv = 1.0 / tau_r;
-    constexpr double q_c_crit = 5.0e-4;                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining. Ported from TwoCat (project_overprecip_saturation_injection) — without it ALL cloud autoconverts every step -> ~25x over-precip.
+    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining. Ported from TwoCat (project_overprecip_saturation_injection) — without it ALL cloud autoconverts every step -> ~25x over-precip.
     constexpr double b_ev = 8.05;                                       // m2*s/kg
     constexpr double c_ac = 0.24;                                       // m2/kg
     constexpr int iter_prec_end = 2;                                    // COSMO iterations
@@ -128,10 +129,23 @@ private:
                             ? c_ac * cl_i * pow(Rain, 7.0/9.0)
                             : 0.0;
 
+                        // ATM_CLOUD_FRAC: the threshold is an IN-CLOUD quantity, so it is tested
+                        // against cl_i/f and the resulting rate scaled by f. See
+                        // TwoCatIceScheme for the full argument and the measurement; f = 1
+                        // off-branch, so this is the shipped expression exactly. Accretion above
+                        // is LINEAR in cl_i and therefore already invariant under the transform
+                        // (f * c_ac * (cl_i/f) = c_ac * cl_i), which is why it is untouched.
+                        const double f_cld = CloudFraction::effectiveFraction(
+                                std::max(0.0, m.c.x[i][j][k]) + std::max(0.0, cl_i)
+                                    + std::max(0.0, m.ice.x[i][j][k]),
+                                q_sat, m.p_stat.x[i][j][k],
+                                std::max(0.0, cl_i) + std::max(0.0, m.ice.x[i][j][k]));
+                        const double cl_in = cl_i / f_cld;              // in-cloud water
+
                         // Autoconversion: cloud water -> rain (Kessler with q_c_crit threshold —
                         // only the cloud excess above the reservoir rains, not all of it)
-                        double S_au = (cl_i > q_c_crit)
-                            ? (cl_i - q_c_crit) * tau_r_inv
+                        double S_au = (cl_in > q_c_crit)
+                            ? f_cld * (cl_in - q_c_crit) * tau_r_inv
                             : 0.0;
 
                         // Evaporation of rain

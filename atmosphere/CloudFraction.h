@@ -81,6 +81,27 @@ namespace CloudFraction {
         return f * f * D;
     }
 
+    // THE FRACTION A PROCESS SHOULD SEE WHEN CONDENSATE IS PRESENT.
+    //
+    // fraction() returns 0 wherever the grid mean sits at or below H_crit, and a cell can hold
+    // condensate there anyway -- advected in, or one the adjustment has since dried. Dividing a
+    // real condensate by a zero fraction is not physical, so the floor is the fraction that
+    // would hold this much water under the same closure: q_c = f^2*D, hence f = sqrt(q_c/D).
+    //
+    // Returns 1 when the closure is off, when there is no condensate, or when D degenerates, so
+    // every caller reduces EXACTLY to its grid-mean form on the shipped branch. That is the
+    // property that keeps the off-branch bit-identical without a guard at each call site.
+    inline double effectiveFraction(double q_t, double q_s, double p_hPa, double q_cond){
+        if (!enabled() || !(q_cond > 0.0)) return 1.0;
+        double f = fraction(q_t, q_s, p_hPa);
+        if (f > 0.0) return (f > 1.0) ? 1.0 : f;
+        const double D = (1.0 - hCrit(p_hPa)) * q_s;
+        if (!(D > 0.0)) return 1.0;
+        f = std::sqrt(q_cond / D);
+        if (!(f > 0.0)) return 1.0;
+        return (f > 1.0) ? 1.0 : f;
+    }
+
     // Saturation specific humidity, branched water/ice exactly as initCloudIce
     // branches it — the closure has to see the same q_sat that made the field.
     inline double qSat(double T_K, double p_hPa, double t_0, double hp, double ep){

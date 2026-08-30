@@ -2,6 +2,9 @@
 
 #include "cAtmosphereModel.h"
 
+#include <cstdlib>
+#include <iostream>
+
 // ============================================================================
 // Shared machinery for the ice / precipitation microphysics schemes
 // (Zero/One/Two/ThreeCatIceScheme). The four schemes share a large amount of
@@ -12,6 +15,32 @@
 // computeColumns(); only the common scaffolding is shared.
 // ============================================================================
 namespace IceSchemeCommon {
+
+    // ATM_QC_CRIT=<g/kg> -- the Kessler autoconversion threshold. Default 0.5 = shipped.
+    //
+    // UNITS ARE g/kg HERE AND kg/kg IN THE SCHEMES, deliberately: every comment and every
+    // discussion of this constant is in g/kg, and 5.0e-4 written as a bare number is the kind of
+    // thing that gets swept in the wrong decade. The value is printed once at first use.
+    //
+    // WHY IT IS A KNOB. 0.5 g/kg is not a measurement. It was added to cure "gross precip ~30x
+    // NASA" on a condensate ~20x too large, so it is a fitted companion to a broken field --
+    // the same cancelling pair as H_crit and the 1.25 humidity fudge. It is also applied, since
+    // 2026-08-30, to the IN-CLOUD water q_c/f rather than the grid mean, and an in-cloud
+    // threshold is a different quantity from a grid-mean one: observed stratiform in-cloud water
+    // is 0.1-1 g/kg, and this model's is ~0.08-0.2, so 0.5 sits above almost the whole
+    // distribution. Measured at nm = 100 with the fractional closure: the in-cloud repair alone
+    // takes rain 0.0092 -> 17.05 mm/a (x1850) and still leaves 18.17 mm/a against NASA's 978.
+    inline double qcCrit() {
+        static const double v = [](){
+            const char* e = getenv("ATM_QC_CRIT");
+            const double g = e ? atof(e) : 0.5;                  // g/kg
+            const double x = (g > 0.0 && g < 20.0) ? g : 0.5;
+            std::cout << "      AGCM: [MICROPHYS] q_c_crit = " << x << " g/kg"
+                      << (e ? "  (ATM_QC_CRIT)" : "  (default)") << std::endl;
+            return x * 1.0e-3;                                   // -> kg/kg
+        }();
+        return v;
+    }
 
     // Hard cap on a precipitation flux [kg/(m2*s)] (~260 mm/d, well above any
     // physical precip). Backstop against the ∝Snow riming/deposition runaways.
