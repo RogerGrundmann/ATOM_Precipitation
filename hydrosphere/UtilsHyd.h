@@ -152,7 +152,8 @@ public:
         m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.total_iter_count);
 
         // Panorama VTS fires whenever iter_n is a multiple of panorama_print (see comment
-        // in UtilsAtm.h::writeFile for why the panorama_cnt counter was replaced). The FIRING
+        // in UtilsAtm.h::writeFile for why the panorama_cnt counter was replaced, and finally
+        // removed on 2026-08-30 -- iter_n is now the only counter). The FIRING
         // stays on iter_n — that is the run-local cadence the caller asked for; only the
         // STAMP becomes total_iter_count, per the note above.
         if (m.paraview_panorama_vts_flag && m.panorama_print > 0

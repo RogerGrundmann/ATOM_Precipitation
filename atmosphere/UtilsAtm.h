@@ -305,6 +305,29 @@ public:
     }
 
     // ------------------------------------------------------------------
+    // PANORAMA VTS, ON ITS OWN CADENCE AND NOTHING ELSE'S.
+    //
+    // This used to live inside writeFile, which the 3D loop calls only when
+    // `iter_n % checkpoint == 0` (and only inside the `iter_n % momentum_stride` block). So the
+    // panorama fired on COMMON MULTIPLES of checkpoint and panorama_print, never on
+    // panorama_print alone: a panorama_print below checkpoint was silently rounded up to it, and
+    // one that did not divide evenly fired at the least common multiple instead of where it
+    // said. panorama_print = 100 against checkpoint = 20 happened to work, which is why this
+    // stood -- 100 is a multiple of 20. The config comment ("control when to write panorama
+    // files") described a knob that did not exist.
+    //
+    // Called from run_3D_loop OUTSIDE both gates, so panorama_print now means what it says.
+    // iter_n is the only iteration counter (see cAtmosphereModel.h); `iter_n > 0` keeps the
+    // pre-loop writeFile at iter_n = 0 from emitting one, exactly as before.
+    void writePanorama(std::string& bathymetry_name)
+    {
+        if (m.paraview_panorama_vts_flag && m.panorama_print > 0
+            && m.iter_n > 0 && m.iter_n % m.panorama_print == 0) {
+            m.paraview_panorama_vts(bathymetry_name, m.iter_n);
+//            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
+        }
+    }
+
     void writeFile(std::string& bathymetry_name, std::string& output_path, bool is_final_result)
     {
         using namespace std;
@@ -333,16 +356,6 @@ public:
 
             int k_zonal = 87;                                           // Mount Everest/Himalaya
             m.paraview_vtk_zonal(bathymetry_name, k_zonal, m.iter_n);
-        }
-
-        // Panorama VTS fires whenever iter_n is a multiple of panorama_print.
-        // (The previous panorama_cnt counter was incremented at the end of each iter and
-        // could never reach panorama_print inside writeFile due to an off-by-one, and
-        // it also failed to align with heavy_block_stride during inviscid spin-up.)
-        if (m.paraview_panorama_vts_flag && m.panorama_print > 0
-            && m.iter_n > 0 && m.iter_n % m.panorama_print == 0) {
-            m.paraview_panorama_vts(bathymetry_name, m.iter_n);
-//            m.paraview_sphere_vts(bathymetry_name, m.iter_n);
         }
 
         m.AtmosphereDataTransfer(bathymetry_name);

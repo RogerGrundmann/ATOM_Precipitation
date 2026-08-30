@@ -161,13 +161,15 @@ private:
         return !m_pole_temperature_curve.empty();
     }
 
-    // panorama_cnt IS DEAD AND WAS UNINITIALISED UNTIL 2026-08-30. UtilsHyd.h records that the
-    // counter it named was replaced by an `iter_n % panorama_print` test, and the member was left
-    // behind: no assignment exists anywhere in the tree, yet PrintMsg prints it on every
-    // iteration line. `cHydrosphereModel model;` is a STACK LOCAL in main, so the printed value
-    // was stack garbage and reading it was undefined behaviour -- it was found because the same defect was found in the atmosphere twin. Initialised here rather than removed, because dropping it
-    // from the print changes the format of every iteration line.
-    int panorama_cnt = 0, iter_n;
+    // ITER_N IS THE ONLY ITERATION COUNTER. `panorama_cnt` used to sit beside it and was
+    // REMOVED on 2026-08-30: UtilsHyd.h had already replaced it with an
+    // `iter_n % panorama_print` test (the old counter incremented at the end of each iter
+    // and could never reach panorama_print inside writeFile, an off-by-one, and it did not
+    // align with heavy_block_stride during inviscid spin-up), but the member was left
+    // behind with NO assignment anywhere while PrintMsg printed it on every iteration
+    // line. The model object is a stack local in main, so that print was stack garbage and
+    // reading it was undefined behaviour. Initialised here, so the same cannot recur.
+    int iter_n = 0;
 
     double t_paleo_total = 0.0;
     double t_pole_total = 0.0;

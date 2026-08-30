@@ -43,7 +43,7 @@ void cAtmosphereModel::print_loop_3D_headings(){
     cout << " max total iteration number nm = " << nm << endl << endl;
     cout << " present state of the computation " << endl << " current time slice Ma, number of iterations n " << endl
         << endl << " Ma = " << (int)*get_current_time() 
-        << "     n = " << iter_n << "     panorama_cnt = " << panorama_cnt << "     panorama_print = " << panorama_print << endl << endl;
+        << "     n = " << iter_n << "     panorama_print = " << panorama_print << endl << endl;
     return;
 }
 /*
