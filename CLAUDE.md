@@ -654,11 +654,38 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   (applied on both branches), so the plotted value is the ground value replicated downward and
   the excess is in the ground value itself — 360x the ocean's. `Epsilon` is NOT filled off-branch,
   so its 0.677 is MLR's own level-0 value, 38x the cell above it.
-  **The cause is `q_v` = 7.295 at level 0 and exactly 0.000 in every rock level above.** `BC_Atm`
-  Pass 3 copies the mountain-top humidity down (`c.x[0] = c.x[i_mount]`) while the rock is dry, so
-  in `tau_i = tau_dry*dp_i/Sum(dp) + tau_wv*vp_i/Sum(vp)` with `vp_i = c_i*dp_i`, level 0 holds
+  **THAT PARAGRAPH WAS WRONG AND THIS ONE REPLACES IT** (2026-08-30, measured). It read: "The
+  cause is `q_v` = 7.295 at level 0 and exactly 0.000 in every rock level above. `BC_Atm` Pass 3
+  copies the mountain-top humidity down (`c.x[0] = c.x[i_mount]`) while the rock is dry, so in
+  `tau_i = tau_dry*dp_i/Sum(dp) + tau_wv*vp_i/Sum(vp)` with `vp_i = c_i*dp_i`, level 0 holds
   essentially the whole sub-surface vapour path and collects a large share of the water-vapour
-  optical depth.
+  optical depth." **It does not. It holds about 1.3 %.**
+
+  `vp_i = c_i*dp_i` and level 0 is the THINNEST layer in pressure -- 4.55 hPa on a Tibet column,
+  against 30-64 hPa for the real air above the mountain -- so 7.46 g/kg over 4.55 hPa is a small
+  path however dry the rock is. Measured on `output_moist0`'s own written slices at iteration 400,
+  as level 0's share of its column:
+
+  | slice | land columns | dry | **water vapour** | condensate |
+  |---|---|---|---|---|
+  | 87E (`zonal_87`, all latitudes) | 77 | 0.54 % | **1.47 %** (max 3.60) | 0.71 % (max 6.6) |
+  | 28N (`longal_62`, all longitudes) | 148 | 0.45 % | **1.27 %** (max 2.78) | 0.28 % (max 2.54) |
+
+  **225 land columns, two independent slices, and the largest water-vapour share anywhere is
+  3.6 %.** Nothing here can make `tau_layer` = 7.9.
+
+  **AND ON THE BRANCH WHERE THE 7.9 WAS MEASURED, LEVEL 0 IS NOT IN THE COLUMN AT ALL.** With
+  `ATM_RAD_TOPO=1`, `i_mount = i_topography > 0` over land and every loop starts there, so the
+  Pass-3 copy cannot reach the radiation by construction. The refuted mechanism was proposed for
+  the one branch on which it is structurally impossible.
+
+  **THE REAL CAUSE IS `cwp_cap_col`, AND THIS BULLET ALREADY SAID SO TWO PARAGRAPHS EARLIER.** The
+  `tau_dry` note above records it: "The driver is `tau_cloud` ... `cwp_cap_col` caps the COLUMN
+  condensate path, and with the rock excluded that same 250 g/m2 is shared among fewer, thinner
+  air layers -- same column total, larger per-layer `LWP_i`, and `eps_i = 1-exp(-tau_i)`
+  saturates." Two contradictory explanations stood in the same bullet for two days and the
+  register carried the wrong one forward as its own item 9. **`BC_Atm` Pass 3 needs no change; it
+  is doing its documented job of giving surface-flux code the surface state at level 0.**
   **`ATM_RAD_TOPO=0` restores the sea-level column exactly.** The band constants are still tuned
   on the old branch — that caveat stands and is now the argument for re-checking them, not for
   leaving the radiation at sea level over every mountain.
