@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cAtmosphereModel.h"
+#include "CloudFraction.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,32 +32,13 @@ public:
     //     target  = q_t - q_c_eq
     // which reduces EXACTLY to the shipped target q_s when H_crit = 1 (D = 0, f = 1), so the
     // off-branch is unchanged by construction and not merely by a guard.
-    static bool cloudFrac(){
-        static const bool v = [](){
-            const char* e = getenv("ATM_CLOUD_FRAC"); return e && atoi(e) != 0; }();
-        return v;
-    }
-    // The same critical-humidity parabola initCloudIce uses, with the same ATM_RH_CRIT knob.
-    static double hCrit(double p_hPa){
-        static const double mid = [](){
-            const char* e = getenv("ATM_RH_CRIT");
-            const double v = e ? atof(e) : 0.8;
-            return (v > 0.0 && v < 1.0) ? v : 0.8; }();
-        const double x_mid = 0.55;
-        const double curv  = (1.0 - mid) / (x_mid * (1.0 - x_mid));
-        const double x     = p_hPa / 1000.0;
-        const double h     = 1.0 - curv * x * (1.0 - x);
-        return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
-    }
-    // Grid-mean condensate the closure supports for total water q_t at saturation q_s.
+    // The closure itself now lives in CloudFraction.h, because initCloudIce, this
+    // adjustment and MultiLayerRadiation all need the SAME f and the same H_crit.
+    // These stay as thin forwards so the call sites below read unchanged.
+    static bool   cloudFrac(){ return CloudFraction::enabled(); }
+    static double hCrit(double p_hPa){ return CloudFraction::hCrit(p_hPa); }
     static double qcEquilibrium(double q_t, double q_s, double p_hPa){
-        const double D = (1.0 - hCrit(p_hPa)) * q_s;
-        if (!(D > 0.0)) return std::max(0.0, q_t - q_s);      // H_crit = 1 -> grid-mean limit
-        double f = (q_t + D - q_s) / (2.0 * D);
-        if (f <= 0.0) return 0.0;
-        if (f >= 1.0) return std::max(0.0, q_t - q_s);
-        return f * f * D;
-    }
+        return CloudFraction::qcEquilibrium(q_t, q_s, p_hPa); }
 
     explicit SaturationAdjustment(cAtmosphereModel& model)
         : m(model)
