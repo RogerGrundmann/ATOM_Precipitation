@@ -2,6 +2,7 @@
 
 #include "cAtmosphereModel.h"
 #include "Utils.h"
+#include "CloudFraction.h"
 
 #include <vector>
 #include <cmath>
@@ -125,6 +126,57 @@ public:
         return v;
     }
 
+    // ATM_CLOUD_RAD_FRAC=1 -- weight the radiation by the sub-grid CLOUD FRACTION.
+    // Default 0 = shipped: every column overcast.
+    //
+    // ATM_CLOUD_FRAC gives every cell an area fraction f and a GRID-MEAN condensate
+    // q_c = f^2*D, and the radiation then reads that grid mean as if it filled the
+    // cell. That is wrong in BOTH directions at once and the errors do not cancel:
+    // the cover is overstated (a cell with f = 0.2 shades the whole box) while the
+    // in-cloud water is understated by 1/f (the cloud that is there is five times
+    // thicker than the mean). `cwp_cap_col`'s own note names this -- "the cap stands
+    // in for a cloud fraction the scheme does not have, so every column is treated as
+    // fully overcast with a thin cloud rather than 65 % of them with a thick one" --
+    // and this is the fraction it was standing in for.
+    //
+    // LONGWAVE: the layer emissivity becomes the area-weighted mean of a clear and a
+    // cloudy sub-column, with the cloudy one carrying the IN-CLOUD path LWP_i/f:
+    //
+    //     eps_i = (1-f)*(1 - exp(-tau_gas)) + f*(1 - exp(-tau_gas - tau_cloud_in))
+    //
+    // SHORTWAVE: MAXIMUM overlap -- the column cover is max_i f_i and the reflecting
+    // sub-column carries the summed in-cloud path -- so the albedo bump becomes
+    // alpha_surf + (alpha_cloud - alpha_surf)*refl*cover. Maximum overlap is the
+    // conservative choice of the three: random overlap over 41 layers at f ~ 0.2 each
+    // drives the cover to ~1 and would put the overcast treatment back by another
+    // route. Maximum-random is the better scheme and is NOT written here.
+    //
+    // At f = 1 every line above is the shipped expression exactly (LWP_i/1, cover 1,
+    // the eps mixture collapsing to its second term), so the off-branch is unchanged
+    // by CONSTRUCTION. It is also a null unless ATM_CLOUD_FRAC is on, because the
+    // shipped grid-mean closure does not produce an f -- hence the warning below.
+    static bool cloudRadFrac(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_CLOUD_RAD_FRAC"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
+    // ATM_RAD_COLDIAG=1 -- print the COLUMN DECOMPOSITION at the cell of maximum layer
+    // emissivity. Print-only, default off.
+    //
+    // Results_Atm.cpp:40 has been printing `max epsilon` and its height in every run log for
+    // months, and that print says WHERE the maximum is and nothing about WHAT it is made of.
+    // Every attempt to explain it -- cloud, water vapour, the rock-humidity copy -- has been an
+    // argument from the source rather than a measurement, which is the mistake this tree has now
+    // recorded three times. epsilon is a sum of four terms and the print collapses them into one
+    // number; this prints the four, plus the cell's water, so the attribution is read rather
+    // than reasoned.
+    static bool radColDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_RAD_COLDIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool radEquil(){
         static const bool v = [](){
             const char* e = getenv("ATM_RAD_EQUIL"); return e && atoi(e) != 0; }();
@@ -154,6 +206,15 @@ public:
             std::cout << "      AGCM: [RADIATION WARNING] ATM_RAD_EQUIL and ATM_SW_INSOL are a PAIR"
                       << " and only one is set. A warm-biased solver and a 2.25x-too-weak shortwave"
                       << " have been cancelling; either alone is worse than neither." << std::endl;
+
+        // The radiation's cloud fraction is the SAME f the condensate was made with. Read
+        // without ATM_CLOUD_FRAC it would be diagnosed from a humidity field the grid-mean
+        // closure never consulted, so it would rescale a condensate that does not correspond
+        // to it -- a fraction invented after the fact rather than the one in use.
+        if (cloudRadFrac() && !CloudFraction::enabled())
+            std::cout << "      AGCM: [RADIATION WARNING] ATM_CLOUD_RAD_FRAC is set without"
+                      << " ATM_CLOUD_FRAC. The radiation is weighting by a fraction that did not"
+                      << " make the condensate it is weighting; set both or neither." << std::endl;
     }
 
     void run()
@@ -240,6 +301,15 @@ public:
         // [j][i] so each OpenMP thread owns its own j and no reduction is needed.
         std::vector<double> cwp_prof;
         if (cwpCensus()) cwp_prof.assign((size_t)m.jm * m.im, 0.0);
+
+        // ATM_RAD_COLDIAG: the maximum-emissivity cell and what its optical depth is made of.
+        struct EpsMax {
+            double eps = -1.0;
+            int    i = 0, j = 0, k = 0, i_mount = 0;
+            double t_dry = 0.0, t_wv = 0.0, t_co2 = 0.0, t_cld = 0.0;
+            double cf = 1.0, cloud_scale = 1.0, LWP = 0.0, IWP = 0.0;
+            double q_v = 0.0, q_c = 0.0, q_i = 0.0, p = 0.0, T = 0.0, cwp_raw = 0.0;
+        } eps_max;
 
         // ---- per-column radiative balance (columns independent -> OpenMP over j) ----
         #pragma omp parallel for schedule(dynamic)
@@ -443,6 +513,8 @@ public:
                 const double cloud_scale = (cwp_raw > cwp_cap_col) ? (cwp_cap_col / cwp_raw) : 1.0;
 
                 double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated (scaled) condensate paths [g/m2] (for the SW albedo bump)
+                double lwp_in_col = 0.0, iwp_in_col = 0.0;            // ATM_CLOUD_RAD_FRAC: the same paths IN-CLOUD (grid mean / f)
+                double cf_col = 0.0;                                  // ATM_CLOUD_RAD_FRAC: column cover, MAXIMUM overlap
                 for (int i = i_mount; i <= i_trop; i++) {
                     // CO2 band contribution (the former MLR CO2 integration, restored and
                     // un-zeroed). Well-mixed CO2 partial pressure P_c -> layer absorber path
@@ -495,9 +567,34 @@ public:
                     const double rho_i = (T_i > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_i) : 0.0; // [kg/m3]
                     const double cw_l  = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0; // [kg/kg]
                     const double cw_i  = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0; // [kg/kg]
-                    double LWP_i = cloud_scale * cw_l * rho_i * dz * 1000.0;  // liquid water path [g/m2], capped
-                    double IWP_i = cloud_scale * cw_i * rho_i * dz * 1000.0;  // ice   water path [g/m2], capped
-                    double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;
+                    const double LWP_gm = cloud_scale * cw_l * rho_i * dz * 1000.0;  // GRID-MEAN liquid water path [g/m2], capped
+                    const double IWP_gm = cloud_scale * cw_i * rho_i * dz * 1000.0;  // GRID-MEAN ice   water path [g/m2], capped
+
+                    // ATM_CLOUD_RAD_FRAC: cloudy area fraction of this cell, from the SAME
+                    // uniform-PDF closure that made the condensate (CloudFraction.h). The
+                    // radiation sees the IN-CLOUD path LWP_gm/f over that fraction, not the
+                    // grid mean over the whole cell. f = 1 off-branch, so LWP_i is unchanged
+                    // bit for bit and every expression below collapses to the shipped one.
+                    double cf = 1.0;
+                    if (cloudRadFrac() && (cw_l > 0.0 || cw_i > 0.0)) {
+                        const double p_hPa = m.p_stat.x[i][j][k];
+                        const double q_s   = CloudFraction::qSat(T_i, p_hPa, m.t_0, m.hp, m.ep);
+                        const double q_t   = std::max(0.0, m.c.x[i][j][k]) + cw_l + cw_i;
+                        cf = CloudFraction::fraction(q_t, q_s, p_hPa);
+                        // The condensate is here, so the cell IS cloudy; a zero fraction with
+                        // non-zero water would divide the whole path into nothing. This happens
+                        // where the field was not made by the closure (advected in, or a cell
+                        // the adjustment has since dried), and the honest floor is the fraction
+                        // that would hold this much water: q_c = f^2*D -> f = sqrt(q_c/D).
+                        if (!(cf > 0.0)) {
+                            const double D = (1.0 - CloudFraction::hCrit(p_hPa)) * q_s;
+                            cf = (D > 0.0) ? std::min(1.0, sqrt((cw_l + cw_i) / D)) : 1.0;
+                            if (!(cf > 0.0)) cf = 1.0;
+                        }
+                    }
+                    double LWP_i = LWP_gm / cf;                               // IN-CLOUD paths [g/m2]
+                    double IWP_i = IWP_gm / cf;
+                    double tau_cloud = k_liq * LWP_i + k_ice * IWP_i;         // IN-CLOUD optical depth
 
                     // PER-LAYER CLOUD OPTICAL-DEPTH CEILING. cwp_cap_col above bounds the COLUMN
                     // condensate path; it does not bound a LAYER, and the two are not the same
@@ -542,13 +639,51 @@ public:
                         const double f = tau_cloud_max / tau_cloud;
                         LWP_i *= f;  IWP_i *= f;  tau_cloud = tau_cloud_max;
                     }
-                    lwp_col += LWP_i;  iwp_col += IWP_i;                          // column paths for the SW albedo bump
+                    lwp_col += cf * LWP_i;  iwp_col += cf * IWP_i;                // grid-mean column paths
+                    lwp_in_col += LWP_i;    iwp_in_col += IWP_i;                  // in-cloud column paths for the SW albedo bump
+                    if (cf > cf_col) cf_col = cf;                                 // maximum overlap
 
                     const double pw_i = (dp_col[i] > 0.0) ? wdp_col[i] / dp_col[i] : 1.0;
-                    double tau = tau_dry * wdp_col[i] * inv_dp
-                               + tau_wv * vpath_col[i] * pw_i * inv_vp
-                               + tau_co2 + tau_cloud;
-                    m.epsilon.x[i][j][k] = 1.0 - exp(-tau);
+                    const double tau_gas = tau_dry * wdp_col[i] * inv_dp
+                                         + tau_wv * vpath_col[i] * pw_i * inv_vp
+                                         + tau_co2;
+                    double tau, eps;
+                    if (cf >= 1.0) {                       // shipped path, bit for bit
+                        tau = tau_gas + tau_cloud;
+                        eps = 1.0 - exp(-tau);
+                    } else {
+                        // Area-weighted mean of a clear and a cloudy sub-column. Mixing the
+                        // EMISSIVITIES and not the optical depths is the point: a partly
+                        // cloudy layer is two columns seen side by side, and averaging tau
+                        // instead would give one column of intermediate opacity, which emits
+                        // differently because 1 - exp(-tau) is not linear in tau.
+                        eps = (1.0 - cf) * (1.0 - exp(-tau_gas))
+                            + cf * (1.0 - exp(-tau_gas - tau_cloud));
+                        // Effective layer optical depth, for the tau_above/tau_layer
+                        // instruments only. Equals tau_gas + tau_cloud when cf = 1.
+                        tau = (eps < 1.0) ? -log(1.0 - eps) : (tau_gas + tau_cloud);
+                    }
+                    m.epsilon.x[i][j][k] = eps;
+
+                    if (radColDiag() && eps > eps_max.eps) {
+                        #pragma omp critical (rad_coldiag)
+                        if (eps > eps_max.eps) {
+                            eps_max.eps = eps;
+                            eps_max.i = i; eps_max.j = j; eps_max.k = k; eps_max.i_mount = i_mount;
+                            eps_max.t_dry = tau_dry * wdp_col[i] * inv_dp;
+                            eps_max.t_wv  = tau_wv * vpath_col[i] * pw_i * inv_vp;
+                            eps_max.t_co2 = tau_co2;
+                            eps_max.t_cld = tau_cloud;
+                            eps_max.cf = cf; eps_max.cloud_scale = cloud_scale;
+                            eps_max.LWP = LWP_i; eps_max.IWP = IWP_i;
+                            eps_max.q_v = m.c.x[i][j][k] * 1000.0;
+                            eps_max.q_c = cw_l * 1000.0;
+                            eps_max.q_i = cw_i * 1000.0;
+                            eps_max.p = m.p_stat.x[i][j][k];
+                            eps_max.T = T_i;
+                            eps_max.cwp_raw = cwp_raw;
+                        }
+                    }
 
                     // Stash the LAYER optical depth; the downward pass below turns tau_above
                     // into the cumulative-from-the-lid value. Not recoverable from epsilon
@@ -594,12 +729,17 @@ public:
                     constexpr double alpha_cloud = 0.50;   // thick cloud-top SW albedo
                     constexpr double f_ice_sw    = 0.50;   // ice SW reflectivity weight vs liquid
                     constexpr double cwp_tau     = 100.0;  // g/m2 per unit effective optical thickness
-                    const double cwp_sw = lwp_col + f_ice_sw * iwp_col;          // already capped via cloud_scale above
+                    // ATM_CLOUD_RAD_FRAC: the reflecting sub-column carries the IN-CLOUD path
+                    // and covers cf_col of the column (maximum overlap), so the bump is
+                    // refl*cover rather than refl. Both reduce to the shipped values at f = 1.
+                    const double cwp_sw = cloudRadFrac() ? (lwp_in_col + f_ice_sw * iwp_in_col)
+                                                         : (lwp_col + f_ice_sw * iwp_col);
+                    const double cover  = cloudRadFrac() ? cf_col : 1.0;
                     const double tau    = cwp_sw / cwp_tau;
                     const double refl   = tau / (tau + 2.0);                     // gentle saturation (0.5 at tau=2)
                     const double a0     = m.albedo.y[j][k];                      // surface (ice-feedback) albedo
                     if (alpha_cloud > a0)
-                        m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * refl;
+                        m.albedo.y[j][k] = a0 + (alpha_cloud - a0) * refl * cover;
                 }
 
                 if (radEquil()) {
@@ -782,6 +922,30 @@ public:
                 }
             }  // k
         }  // j
+
+        if (radColDiag() && eps_max.eps >= 0.0) {
+            const double lat = 90.0 - eps_max.j;
+            const double lon = (eps_max.k <= 180) ? eps_max.k : eps_max.k - 360;
+            std::cout.precision(6);
+            std::cout << "      [RAD COLDIAG] max epsilon = " << std::fixed << eps_max.eps
+                      << "  at i=" << eps_max.i << " (" << (int)m.get_layer_height(eps_max.i) << " m)"
+                      << "  lat " << lat << "  lon " << lon
+                      << "  i_mount=" << eps_max.i_mount << std::endl;
+            const double t_tot = eps_max.t_dry + eps_max.t_wv + eps_max.t_co2 + eps_max.t_cld;
+            const double pc = (t_tot > 0.0) ? 100.0 / t_tot : 0.0;
+            std::cout << "      [RAD COLDIAG] tau = " << t_tot
+                      << "   dry " << eps_max.t_dry << " (" << eps_max.t_dry * pc << " %)"
+                      << "   wv " << eps_max.t_wv << " (" << eps_max.t_wv * pc << " %)"
+                      << "   co2 " << eps_max.t_co2 << " (" << eps_max.t_co2 * pc << " %)"
+                      << "   cloud " << eps_max.t_cld << " (" << eps_max.t_cld * pc << " %)" << std::endl;
+            std::cout << "      [RAD COLDIAG] q_v " << eps_max.q_v << " g/kg   q_c " << eps_max.q_c
+                      << "   q_i " << eps_max.q_i
+                      << "   p " << eps_max.p << " hPa   T " << eps_max.T << " K" << std::endl;
+            std::cout << "      [RAD COLDIAG] cloud fraction f = " << eps_max.cf
+                      << "   in-cloud LWP " << eps_max.LWP << " IWP " << eps_max.IWP << " g/m2"
+                      << "   column cwp_raw " << eps_max.cwp_raw
+                      << "   cwp cloud_scale " << eps_max.cloud_scale << std::endl;
+        }
 
         // ---- ATM_CWP_CENSUS: the distribution cwp_cap_col is standing in for --------------
         if (!cwp_census.empty()) {

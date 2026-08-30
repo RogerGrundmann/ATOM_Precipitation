@@ -857,6 +857,69 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
 - **No `div(rho u)/rho` diagnostic.** ATHAD prints it every iteration and judges the projection
   by it; here closure has to be computed from `meridional_streamfunction_*.csv`. Porting that
   print is the obvious next instrument.
+- **`max epsilon` SITS OVER ANTARCTICA AND TIBET, WHERE THERE IS ALMOST NO CLOUD, AND
+  `cwp_cap_col` IS WHY: IT INVERTS THE RANKING OF WHICH COLUMNS ARE OPTICALLY THICK**
+  (2026-08-30, measured from `output_moist0`'s own written slices — `nm` = 400, moist gate 0,
+  24 threads, no re-run needed).
+
+  The full-field `max epsilon` print puts the maximum at **73S 35E, 2986 m** in 38 of 42 prints
+  and at 14S 71W (the Andes) in the other two — high terrain both times, and both far from the
+  tropical cloud decks. Read off the 87E cross-section (`0Ma_smooth_Atm_zonal_87_400.vtk`, which
+  cuts Tibet) at iteration 400:
+
+  | column | eps-max cell | `q_c` | `q_i` | `q_v` | **Epsilon** |
+  |---|---|---|---|---|---|
+  | Antarctica 71S | i=23, 2.99 km | 0.011 g/kg | 0.022 | 0.12 g/kg | **0.5927** |
+  | Tibet 28N | i=28, 4.99 km | 0.070 | 0.005 | 7.5 | **0.5256** |
+  | ocean 10S | i=24, 3.32 km | **0.560** | 0.000 | 11.3 | 0.2487 |
+
+  **The ranking is inverted.** Seventeen times less condensate, twice the emissivity. Within the
+  Tibet column it is worse still: level 27 carries 0.244 g/kg at `eps` = 0.0195 while level 28
+  carries 0.070 g/kg at `eps` = 0.526 — more cloud, 27x less emissivity.
+
+  **THE INVERTER IS `cwp_cap_col`, AND IT IS A PER-COLUMN NORMALISER.**
+  `cloud_scale = cwp_cap_col/cwp_raw` rescales EVERY column to the same 20 g/m2, so a column is
+  divided by its own wetness:
+
+  | column | `cwp_raw` | `cloud_scale` | levels w/ condensate | fattest level's share | **path the radiation sees** |
+  |---|---|---|---|---|---|
+  | Antarctica 71S | 30.1 g/m2 | **0.665** | 9 | 36 % | **7.16 g/m2** |
+  | Tibet 28N | 528 | 0.0379 | 16 | 40 % | **8.00** |
+  | ocean 10S | 2007 | **0.00997** | 26 | 8.8 % | **1.76** |
+
+  The Antarctic column holds **67x less water** and is divided by 1.5 against the tropics' 100,
+  so its thickest layer ends up with **4.1x more optical depth**. A dry polar column also
+  concentrates what it has into a few levels at the terrain top (36 % in one) where a tropical
+  column spreads it over 26 (8.8 %), which compounds the inversion.
+
+  **AND THE RADIATION IS FAITHFUL TO THE SCALED FIELD, WHICH IS THE PROOF.** Over all 4418
+  condensate-bearing cells of that cross-section, `corr(Epsilon, RAW layer path)` = **0.689**
+  while `corr(Epsilon, SCALED layer path)` = **0.794**. The scheme is not misreading the cloud;
+  the cap has already deleted the relationship between how much cloud a column holds and how much
+  the radiation sees.
+
+  For Antarctica the arithmetic closes independently: `tau_layer` = 0.898 there, of which the dry
+  share is `dp/Sum(dp)` = 26.4/818.6 -> **0.037** and the vapour term is ~0.0001 (`e_surf` =
+  0.157 hPa, so `tau_wv` = 0.003 for the WHOLE column). Essentially all of the 0.898 is
+  `tau_cloud`, from 0.033 g/kg of condensate.
+
+  **THIS IS A DIFFERENT MECHANISM FROM THE HIMALAYA `tau_layer` = 7.9 RECORDED BELOW.** That one
+  is water vapour — `BC_Atm` Pass 3 copying mountain-top humidity into dry rock — and it is on
+  the `ATM_RAD_TOPO=1` branch. This one is condensate, on the shipped `ATM_RAD_TOPO=0` branch, and
+  the two were being run together. `q_v` at the Antarctic maximum is 0.12 g/kg; there is no
+  vapour artefact to blame.
+
+  **`ATM_RAD_COLDIAG=1`** (new, print-only, default off) prints the max-epsilon cell's four
+  optical-depth terms with their percentages, its `q_v`/`q_c`/`q_i`/p/T, its cloud fraction, and
+  its column `cwp_raw`/`cloud_scale`. Every number above took slice extraction; from now on it is
+  one line in the log. **Fifth instrument-shaped defect in this tree** — `Results_Atm.cpp:40` has
+  been printing `max epsilon` and its height all along, and a location is not an attribution.
+
+  **CONSEQUENCE FOR THE FLIP.** `ATM_CWP_CAP` must go off in the same step as `ATM_CLOUD_FRAC` —
+  already recorded — but the reason is stronger than "it divides the path by 4". It makes the
+  radiation's geography wrong: with the cap on, the optically thickest cell on the planet is over
+  the East Antarctic plateau.
+
 - **THE CLOUD OPTICAL DEPTH SATURATES ALOFT ON THE SHIPPED BRANCH, AND `ATM_CLOUD_TAU_MAX` IS
   DEFAULT ON SINCE 2026-08-28.** `cwp_cap_col` caps the COLUMN condensate path; it does not bound
   a LAYER, and the two are different constraints. Full-field `max epsilon` at iteration 100:
