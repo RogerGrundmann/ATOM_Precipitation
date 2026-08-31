@@ -714,10 +714,12 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
                 // doing real work and the fault is its VALUE: a tropopause temperature (~216.65,
                 // the US-standard stratosphere) is the physical bound, not a freezing point.
                 static const double t_floor_env = [](){
+                    // DEFAULT 216.65 K since 2026-08-31 (the US-standard stratosphere).
+                    // ATM_T_FLOOR=236.15 restores the shipped t_00 clamp.
                     const char* e = getenv("ATM_T_FLOOR");
-                    const double v = e ? atof(e) : 0.0;
-                    return (v > 0.0) ? v : 0.0; }();
-                const double t_floor = (t_floor_env > 0.0) ? t_floor_env : t_00;
+                    const double v = e ? atof(e) : 216.65;
+                    return (v > 0.0) ? v : 216.65; }();
+                const double t_floor = t_floor_env;
 
                 // The soft bound that used to stand here was DEAD: it was overwritten by the
                 // hard clamp on the very next line, so the comment promising an asymptotic
@@ -1093,7 +1095,8 @@ void cAtmosphereModel::initWaterWapour() {
             // 1.25 multiplier goes with it: its own comment says it exists to give "a nice cloud
             // around 1 km height", i.e. a cloud deck manufactured by a fudge factor.
             static const bool rh_profile = [](){
-                const char* e = getenv("ATM_RH_PROFILE"); return e && atoi(e) != 0; }();
+                // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+                const char* e = getenv("ATM_RH_PROFILE"); return e ? atoi(e) != 0 : true; }();
             const double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
@@ -1121,8 +1124,10 @@ void cAtmosphereModel::initWaterWapour() {
                 // minimum separately; taking the linear branch all the way to the lid is an
                 // extrapolation past where it was meant to hold. The floor restores that.
                 static const double rh_min = [](){
+                    // DEFAULT 0.65 since 2026-08-31 (the TROPICAL value; see ATM_RH_MIN_LAT).
+                    // ATM_RH_MIN=0 restores the unfloored Manabe-Wetherald profile.
                     const char* e = getenv("ATM_RH_MIN");
-                    const double v = e ? atof(e) : 0.0;
+                    const double v = e ? atof(e) : 0.65;
                     return (v > 0.0 && v < 1.0) ? v : 0.0; }();
 
                 // ATM_RH_MIN_LAT=1 -- give the floor the observed LATITUDE structure instead of
@@ -1152,7 +1157,8 @@ void cAtmosphereModel::initWaterWapour() {
                 // where THIS model's ITCZ actually is. Read any cloud-cover agreement it buys as
                 // assumed, not predicted.
                 static const bool rh_min_lat = [](){
-                    const char* e = getenv("ATM_RH_MIN_LAT"); return e && atoi(e) != 0; }();
+                    // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+                    const char* e = getenv("ATM_RH_MIN_LAT"); return e ? atoi(e) != 0 : true; }();
                 double rh_floor = rh_min;
                 if (rh_min_lat && rh_min > 0.0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
@@ -1183,9 +1189,12 @@ void cAtmosphereModel::initWaterWapour() {
                 // Confining the floor separates the two: the cirrus levels keep it, the liquid
                 // deck goes back to Manabe-Wetherald.
                 static const double rh_min_ptop = [](){
+                    // DEFAULT 475 hPa since 2026-08-31 -- the precipitation-optimal point,
+                    // predicted from the 450/500 bracket and confirmed at 992 mm/a vs NASA 978.
+                    // ATM_RH_MIN_PTOP=0 restores the unconfined floor.
                     const char* e = getenv("ATM_RH_MIN_PTOP");
-                    const double v = e ? atof(e) : 0.0;
-                    return (v > 0.0) ? v : 0.0; }();
+                    const double v = e ? atof(e) : 475.0;
+                    return (v >= 0.0) ? v : 475.0; }();
                 if (rh_min_ptop > 0.0) {
                     const double p_lo = rh_min_ptop + 200.0;          // no floor below this
                     double u = (p_lo - p_u) / (p_lo - rh_min_ptop);
@@ -1244,9 +1253,9 @@ void cAtmosphereModel::initCloudIce() {
     // touching this and the condensate collapses 1584 -> 0.0006 g/m2: no cell reaches threshold.
     // The two must move together, which is why this is a knob and not a constant.
     const double Hu_cr_mid = [](){
-        const char* e = getenv("ATM_RH_CRIT");
-        const double v = e ? atof(e) : 0.8;
-        return (v > 0.0 && v < 1.0) ? v : 0.8; }();
+        const char* e = getenv("ATM_RH_CRIT");           // default 0.30 since 2026-08-31
+        const double v = e ? atof(e) : 0.30;
+        return (v > 0.0 && v < 1.0) ? v : 0.30; }();
     const double Hu_diff   = Hu_cr_max - Hu_cr_mid;
 //    const double det_T_0   = t_0 - 3.0;
     const double det_T_0   = t_0;
@@ -1352,7 +1361,8 @@ void cAtmosphereModel::initCloudIce() {
                 // where needed rather than stored, so sizeof(cAtmosphereModel) is untouched and
                 // the stack-canary hazard in the README does not apply.
                 static const bool cloud_frac = [](){
-                    const char* e = getenv("ATM_CLOUD_FRAC"); return e && atoi(e) != 0; }();
+                    // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+                    const char* e = getenv("ATM_CLOUD_FRAC"); return e ? atoi(e) != 0 : true; }();
                 const double del_q_ls = std::max(0.0, c.x[i][j][k] - H_crit * q_sat);
                 double cloud_ls;
                 if (cloud_frac) {

@@ -40,16 +40,18 @@ namespace CloudFraction {
     // a set (ATM_RH_PROFILE, ATM_RH_CRIT, ATM_CWP_CAP) that must move together.
     inline bool enabled(){
         static const bool v = [](){
-            const char* e = getenv("ATM_CLOUD_FRAC"); return e && atoi(e) != 0; }();
+            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+            const char* e = getenv("ATM_CLOUD_FRAC"); return e ? atoi(e) != 0 : true; }();
         return v;
     }
 
     // ATM_RH_CRIT — the critical-humidity midpoint. Default 0.8 = shipped.
     inline double critMid(){
         static const double v = [](){
+            // DEFAULT 0.30 since 2026-08-31; ATM_RH_CRIT=0.8 restores the shipped value.
             const char* e = getenv("ATM_RH_CRIT");
-            const double x = e ? atof(e) : 0.8;
-            return (x > 0.0 && x < 1.0) ? x : 0.8; }();
+            const double x = e ? atof(e) : 0.30;
+            return (x > 0.0 && x < 1.0) ? x : 0.30; }();
         return v;
     }
 
@@ -192,7 +194,8 @@ namespace ColdCloud {
 
     inline bool enabled(){
         static const bool v = [](){
-            const char* e = getenv("ATM_ICE_COLD"); return e && atoi(e) != 0; }();
+            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+            const char* e = getenv("ATM_ICE_COLD"); return e ? atoi(e) != 0 : true; }();
         return v;
     }
 }

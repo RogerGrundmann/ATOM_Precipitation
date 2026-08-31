@@ -157,7 +157,8 @@ public:
     // shipped grid-mean closure does not produce an f -- hence the warning below.
     static bool cloudRadFrac(){
         static const bool v = [](){
-            const char* e = getenv("ATM_CLOUD_RAD_FRAC"); return e && atoi(e) != 0; }();
+            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
+            const char* e = getenv("ATM_CLOUD_RAD_FRAC"); return e ? atoi(e) != 0 : true; }();
         return v;
     }
 
@@ -484,9 +485,12 @@ public:
                 // cloud rather than 65 % of them with a thick one. The global mean is matched;
                 // the regional distribution is not.
                 static const double cwp_cap_col = [](){
+                    // DEFAULT DISABLED since 2026-08-31: the cap was compensating for a
+                    // condensate 20x too large and it INVERTS the geography (see CLAUDE.md).
+                    // ATM_CWP_CAP=20 restores the shipped cap.
                     const char* e = getenv("ATM_CWP_CAP");
-                    const double v = e ? atof(e) : 20.0;
-                    return v > 0.0 ? v : 20.0; }();
+                    const double v = e ? atof(e) : 1.0e9;
+                    return v > 0.0 ? v : 1.0e9; }();
                 double cwp_raw = 0.0;
                 for (int i = i_mount; i <= i_trop; i++) {
                     const double dz_i   = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
@@ -985,7 +989,7 @@ public:
                 while (pi < 7 && acc >= pct[pi] * w_tot) q[pi++] = v[n].first;
             }
             const double cap = [](){ const char* e = getenv("ATM_CWP_CAP");
-                                     const double x = e ? atof(e) : 20.0; return x > 0.0 ? x : 20.0; }();
+                                     const double x = e ? atof(e) : 1.0e9; return x > 0.0 ? x : 1.0e9; }();
             std::cout << "      AGCM: [CWP CENSUS] column condensate path g/m2, cos-lat weighted."
                       << "  mean=" << mean / w_tot
                       << "  cloudy(>5)=" << 100.0 * w_cloudy / w_tot << " %" << std::endl;

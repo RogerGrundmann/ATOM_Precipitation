@@ -33,8 +33,10 @@ namespace IceSchemeCommon {
     inline double qcCrit() {
         static const double v = [](){
             const char* e = getenv("ATM_QC_CRIT");
-            const double g = e ? atof(e) : 0.5;                  // g/kg
-            const double x = (g > 0.0 && g < 20.0) ? g : 0.5;
+            // DEFAULT 0.05 g/kg since 2026-08-31: the shipped 0.5 was fitted against a
+            // grid-mean condensate 20x too large. ATM_QC_CRIT=0.5 restores it.
+            const double g = e ? atof(e) : 0.05;                 // g/kg
+            const double x = (g > 0.0 && g < 20.0) ? g : 0.05;
             std::cout << "      AGCM: [MICROPHYS] q_c_crit = " << x << " g/kg"
                       << (e ? "  (ATM_QC_CRIT)" : "  (default)") << std::endl;
             return x * 1.0e-3;                                   // -> kg/kg

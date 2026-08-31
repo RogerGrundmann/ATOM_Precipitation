@@ -290,7 +290,25 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   ~67 %. And `nm` = 20 is the INITIAL field: this is the condensate the model starts from, not
   one a spun-up circulation maintained.
 
-  **STILL DEFAULT OFF, ALL FOUR** (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`, and the
+  **ACCEPTED AND FLIPPED ON BY DEFAULT 2026-08-31.** Eleven defaults moved together, because
+  every one of them is wrong alone: `ATM_RH_PROFILE` 0 -> 1, `ATM_RH_CRIT` 0.8 -> 0.30,
+  `ATM_CLOUD_FRAC` 0 -> 1, `ATM_CWP_CAP` 20 -> DISABLED, `ATM_CLOUD_RAD_FRAC` 0 -> 1,
+  `ATM_QC_CRIT` 0.5 -> 0.05 g/kg, `ATM_ICE_COLD` 0 -> 1, `ATM_T_FLOOR` 236.15 -> 216.65 K,
+  `ATM_RH_MIN` 0 -> 0.65, `ATM_RH_MIN_LAT` 0 -> 1, `ATM_RH_MIN_PTOP` 0 -> 475 hPa.
+  **Setting each variable back to the value above restores the old branch**, and both directions
+  are verified at 24 threads: a clean environment reproduces the `c475` arm (OLR clear 263.404
+  vs 263.396, cloudy 233.228 vs 233.227, temperature extremes bit-identical) and the full revert
+  reproduces the shipped branch (precip 1048.56 vs 1048.54, OLR 273.08818164 vs 273.08818780,
+  precipitable water 49.64 both, min T -37.151524 vs -37.151522) -- the residuals are the
+  documented fixed-thread-count non-determinism, not a configuration difference.
+  **TWO THINGS THE ACCEPTANCE DOES NOT CLAIM.** It is measured at `nm` = 100, which is 20
+  SECONDS of physical time, so it is the initial field plus a short transient and not a spun-up
+  climate. And the tropics are 100 % cirrus-covered against Earth's ~40 %, which comes WITH the
+  configuration rather than being something left to tune: a zonally uniform floor cannot make
+  longitudinally patchy cirrus.
+
+  **The paragraph below is the pre-acceptance record, kept because it is what the flip was
+  judged against.** STILL DEFAULT OFF, ALL FOUR (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`, and the
   fraction-aware adjustment they share). What has NOT been done: `cwp_cap_col` is still 20 and
   still divides the now-physical path by ~4, so it must be disabled in the same flip; the
   radiation still treats every column as overcast rather than weighting by `f`; and none of this
