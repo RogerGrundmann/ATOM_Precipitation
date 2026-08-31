@@ -307,6 +307,34 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   configuration rather than being something left to tune: a zonally uniform floor cannot make
   longitudinally patchy cirrus.
 
+  **AND THE FIRST LONG RUN SAYS THE PRECIPITATION IS NOT CONVERGED** (2026-08-31, restart from
+  the accepted configuration's own iteration-100 state, run to 1000 at 24 threads, 41 + 51 min;
+  no NaN anywhere, `max|w|` 18.5 -> 16.8 m/s against the +-100 clamp, so the old MoistConvection
+  runaway does NOT return). Precipitation, high parity of the 2dt sawtooth:
+
+  | iteration | 100 | 200 | 400 | 600 | 700 | 800 | 900 | 1000 |
+  |---|---|---|---|---|---|---|---|---|
+  | Precip mm/a | 992 | 988 | 979 | 1003 | 1021 | 1087 | 1141 | **1215** |
+  | low parity | 335 | 331 | 337 | 331 | 374 | 429 | 546 | **713** |
+
+  **FLAT TO ITERATION ~600, THEN RISING: +22 % on the high parity and +113 % on the low one over
+  the last 400 iterations, and still climbing at the end.** The sawtooth is collapsing as the low
+  parity catches up, which is what a growing signal does to a 2dt alternation.
+
+  **THE CLOUD AND THE RADIATION ARE STABLE WHILE THE RAIN IS NOT**, and that is the shape of the
+  problem: LWP 103.0 -> 107.5 -> 116.3 (+13 %), IWP 20.09 -> 20.30 -> 20.65 (+3 %), RH at 10.9 km
+  44.4 -> 44.4 -> 44.5 %, precipitable water 30.27 mm unchanged, clear OLR 263.40 -> 263.33,
+  all-sky 233.23 -> 233.07 at iterations 100 / 600 / 1000. **The precipitation is growing four
+  times faster than the condensate that feeds it**, so this is a conversion-efficiency drift, not
+  a moistening. `P_conv` also collapses over the same stretch, 0.32 -> **0.0196 mm/a**, while
+  `P_rain` goes 970 -> 1197: the stratiform path is taking over from the convective one.
+
+  **SO THE 992 mm/a THAT THE CONFIGURATION WAS ACCEPTED ON IS AN ITERATION-100 NUMBER, AND
+  ITERATION 100 IS 20 SECONDS.** At 1000 iterations -- 200 seconds -- it is 1215, 24 % above
+  NASA. Nothing here is spun up; the caveat recorded at acceptance is now measured rather than
+  merely stated. **Do not quote the accepted configuration's precipitation without its iteration
+  count.**
+
   **The paragraph below is the pre-acceptance record, kept because it is what the flip was
   judged against.** STILL DEFAULT OFF, ALL FOUR (`ATM_RH_PROFILE`, `ATM_RH_CRIT`, `ATM_CLOUD_FRAC`, and the
   fraction-aware adjustment they share). What has NOT been done: `cwp_cap_col` is still 20 and
