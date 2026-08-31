@@ -53,6 +53,31 @@ namespace CloudFraction {
         return v;
     }
 
+    // ATM_RH_CRIT_ICE -- a SEPARATE critical humidity for the ice-cloud branch aloft.
+    // Default 0 = disabled: hCrit() is exactly the single-parameter curve below.
+    //
+    // WHY IT IS NEEDED, MEASURED. With one H_crit the closure sets the liquid deck and the
+    // cirrus with the same number, so ice can only be bought with liquid at a fixed rate: the
+    // ATM_RH_MIN sweep gives LWP 74.7 -> 98.9 -> 263.6 as IWP goes 5.0 -> 13.5 -> 45.3, and the
+    // three targets never agree -- the radiation is best at RH_MIN 0.40 (all-sky OLR 242.7
+    // against ~240), the precipitation wants ~0.45-0.47, and the IWP wants higher still.
+    // Splitting the threshold decouples them: q_c = f^2*D with f = (RH - H_crit)/(2(1-H_crit))
+    // and D = (1-H_crit)*q_sat, so lowering H_crit ALOFT raises the ice at fixed humidity while
+    // leaving the liquid deck below p_mid untouched.
+    //
+    // Physically the discriminator is the PHASE, but hCrit is a function of pressure in every
+    // call site in the tree, so the split is made in pressure: the parabola is unchanged for
+    // p >= p_mid, then ramps linearly from critMid() at p_mid to critIce() at p_ice = 300 hPa
+    // and stays flat above. Continuous at p_mid by construction, because the parabola's minimum
+    // IS critMid() there -- a jump in H_crit would be a jump in cloud fraction.
+    inline double critIce(){
+        static const double v = [](){
+            const char* e = getenv("ATM_RH_CRIT_ICE");
+            const double x = e ? atof(e) : 0.0;
+            return (x > 0.0 && x < 1.0) ? x : 0.0; }();
+        return v;
+    }
+
     // Parabola H_crit(p): roots at p = 0 and p = p_crit, minimum critMid() at
     // p = p_mid. The same curve initCloudIce builds from Hu_cr_max / Hu_curv.
     //
@@ -73,11 +98,18 @@ namespace CloudFraction {
     // leaves the calibrated tropospheric branch untouched, and still degenerates to H_crit = 1
     // everywhere as critMid -> 1, so the grid-mean limit is preserved.
     inline double hCrit(double p_hPa){
-        constexpr double p_crit = 1000.0, x_mid = 0.55;
+        constexpr double p_crit = 1000.0, x_mid = 0.55, p_ice = 300.0;
         const double curv = (1.0 - critMid()) / (x_mid * (1.0 - x_mid));
         double x = p_hPa / p_crit;
         if (x < x_mid) x = x_mid;                     // no upturn toward the lid
-        const double h = 1.0 - curv * x * (1.0 - x);
+        double h = 1.0 - curv * x * (1.0 - x);        // == critMid() for p <= p_mid
+        const double h_ice = critIce();
+        constexpr double p_mid = x_mid * p_crit;
+        if (h_ice > 0.0 && p_hPa < p_mid) {           // ATM_RH_CRIT_ICE: ramp to the ice branch
+            double u = (p_mid - p_hPa) / (p_mid - p_ice);
+            if (u < 0.0) u = 0.0; else if (u > 1.0) u = 1.0;
+            h = critMid() + u * (h_ice - critMid());
+        }
         return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
     }
 

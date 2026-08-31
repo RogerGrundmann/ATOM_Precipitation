@@ -909,17 +909,28 @@ public:
                     m.epsilon.x[i][j][k]   = m.epsilon.x[i_mount][j][k];
                 }
 
-                // tau_above / tau_layer are fed to NOTHING -- print_min_max_atm and the four
-                // ParaView writers, and that is all; epsilon carries the physics. So their
-                // ground boundary condition is applied on BOTH branches: with ATM_RAD_TOPO off
-                // the loops above still walk the rock and leave an optical depth inside the
-                // mountain, which is what makes the plotted field wrong there. Filling from the
-                // ground costs nothing and cannot move a result.
+                // Ground boundary condition for the DIAGNOSTIC radiation fields, applied on
+                // BOTH branches. With ATM_RAD_TOPO off the loops above start at level 0 and walk
+                // the rock, so they leave an optical depth AND an emissivity inside the mountain.
+                //
+                // EPSILON WAS THE ONE FIELD LEFT OUT, and it is the one that is plotted against
+                // terrain. The note that used to stand here said tau is "fed to NOTHING ...
+                // epsilon carries the physics", and used that to justify filling tau and not
+                // epsilon. But the fill CANNOT reach the physics either way: MLR recomputes
+                // epsilon from i_mount at the top of every call, before anything reads it, and
+                // the only reader outside this file is column_olr, whose loop starts strictly
+                // ABOVE i_topography (cAtmosphereModel.cpp) precisely so it never integrates
+                // through rock. So the sub-surface values are write-only, they are what ParaView
+                // draws along a mountain surface, and leaving them at the emissivity of a
+                // sub-terrain "air" column is a boundary-condition gap, not a physics choice.
+                // Measured on the shipped branch, 87E section: mean epsilon in rock 0.031,
+                // max 0.24, against 0.023 in the ocean column at the same level.
                 {
                     const int i_g = std::min(std::max(m.i_topography[j][k], 0), i_trop);
                     for (int i = i_g - 1; i >= 0; i--) {
                         m.tau_above.x[i][j][k] = m.tau_above.x[i_g][j][k];
                         m.tau_layer.x[i][j][k] = m.tau_layer.x[i_g][j][k];
+                        m.epsilon.x[i][j][k]   = m.epsilon.x[i_g][j][k];
                     }
                 }
             }  // k
