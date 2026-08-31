@@ -144,7 +144,12 @@ private:
                         ? m.ep * E_sat / (p_local - E_sat)
                         : m.ep * 1e-5;
 
-                    const double alpha_entry = 1.0 / (1.0 + std::exp(-(T - m.t_00) / fade_K));
+                    // ATM_ICE_COLD: the entry weight fades the adjustment out below t_00, so
+                    // deposition stops exactly where the CND/DEP split below sends 100 % of the
+                    // condensation to the ice branch. With ice allowed to exist there, the
+                    // adjustment has to be allowed to make it.
+                    const double alpha_entry = ColdCloud::enabled() ? 1.0
+                        : 1.0 / (1.0 + std::exp(-(T - m.t_00) / fade_K));
 
                     // Under ATM_CLOUD_FRAC a cell can be cloudy while the GRID MEAN is
                     // subsaturated, so entry cannot be conditioned on q_v > q_sat alone: a cell
@@ -249,8 +254,16 @@ private:
                         }
  
                         if (T < m.t_00) {
+                            // ATM_ICE_COLD: below the homogeneous-freezing point LIQUID cannot
+                            // exist -- but ice must, and this is where cirrus lives. Freeze it
+                            // instead of deleting it. Default off, shipped branch unchanged.
+                            if (ColdCloud::enabled()) {
+                                ice_row[k]  += cloud_row[k];
+                                cloud_row[k] = 0.0;
+                            } else {
                             cloud_row[k] = 0.0;
                             ice_row[k]   = 0.0;
+                            }
                         }
                     }
                 }
@@ -337,10 +350,17 @@ private:
                     if (ice_row[k]   > cloud_cap) ice_row[k]   = cloud_cap;
 
                     // Existing cold fade: smoothly dry moisture toward 0 below t_00.
+                    // ATM_ICE_COLD restricts it to the LIQUID. Vapour is not a condensate and
+                    // must never be faded at all -- doing so deletes mass from the column --
+                    // and fading the ice is what forbids cirrus.
                     const double alpha = 1.0 / (1.0 + std::exp(-(T_dim - m.t_00) / fade_K));
+                    if (ColdCloud::enabled()) {
+                        cloud_row[k] *= alpha;
+                    } else {
                     c_row[k]     *= alpha;
                     cloud_row[k] *= alpha;
                     ice_row[k]   *= alpha;
+                    }
                 }
             }
         }

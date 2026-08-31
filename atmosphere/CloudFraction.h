@@ -55,11 +55,29 @@ namespace CloudFraction {
 
     // Parabola H_crit(p): roots at p = 0 and p = p_crit, minimum critMid() at
     // p = p_mid. The same curve initCloudIce builds from Hu_cr_max / Hu_curv.
+    //
+    // FLAT ABOVE THE MINIMUM, BECAUSE THE PARABOLA'S UPPER ROOT IS AN ARTEFACT OF THE FIT.
+    // The curve was built to reproduce the shipped Hu_cr profile over the TROPOSPHERE, and a
+    // parabola with roots at p = 0 and p = 1000 necessarily returns to H_crit = 1 at the top:
+    // measured on the flip arm it runs 0.298 at 6.1 km, 0.362 at 8.2 km, 0.499 at 10.9 km and
+    // 0.683 at 14.6 km -- it climbs back toward saturation exactly where the humidity is
+    // falling (RH 0.32 / 0.26 / 0.19 / 0.17 at those levels). The two curves cross at ~4.5 km
+    // and diverge above it, so NO cell aloft can be cloudy and the ice water path is 1.15 g/m2
+    // against an observed 20-30.
+    //
+    // A threshold going to 1 at p -> 0 also says the sub-grid variability of total water
+    // VANISHES at the tropopause, which is backwards, and it contradicts the closure's own
+    // purpose: H_crit = 1 is the grid-mean limit this scheme exists to replace. Every
+    // operational form (Sundqvist, ECMWF) has RH_crit decreasing from ~1 at the ground to a
+    // constant in the free troposphere. Holding x at x_mid below p_mid does exactly that,
+    // leaves the calibrated tropospheric branch untouched, and still degenerates to H_crit = 1
+    // everywhere as critMid -> 1, so the grid-mean limit is preserved.
     inline double hCrit(double p_hPa){
         constexpr double p_crit = 1000.0, x_mid = 0.55;
         const double curv = (1.0 - critMid()) / (x_mid * (1.0 - x_mid));
-        const double x    = p_hPa / p_crit;
-        const double h    = 1.0 - curv * x * (1.0 - x);
+        double x = p_hPa / p_crit;
+        if (x < x_mid) x = x_mid;                     // no upturn toward the lid
+        const double h = 1.0 - curv * x * (1.0 - x);
         return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
     }
 
@@ -109,5 +127,40 @@ namespace CloudFraction {
             ? hp * AtomUtils::exp_func(T_K, 17.2694, 35.86)
             : hp * AtomUtils::exp_func(T_K, 21.8747, 7.66);
         return (p_hPa > E_sat) ? ep * E_sat / (p_hPa - E_sat) : ep * 1e-5;
+    }
+}
+
+// ============================================================================
+// ColdCloud -- ATM_ICE_COLD: let ICE exist below t_00.
+//
+// t_00 = 236.15 K (-37 C) is the homogeneous-freezing temperature: the point below which
+// supercooled LIQUID cannot exist. This tree applies it to the ice as well, in five places,
+// and one of them deletes the water vapour too:
+//
+//   InitValues_Atm.cpp:1265   if (t_u <= t_00) { cloud = ice = gr = 0; }
+//   SaturationAdjustment:251  if (T   <  t_00) { cloud = ice = 0; }
+//   SaturationAdjustment:340  a logistic fade to 0 below t_00 applied to c, cloud AND ice
+//   SaturationAdjustment:147  the same fade on the adjustment's entry weight
+//   UtilsAtm.h:254            if (t_u <= t_00) { c = cloud = ice = gr = 0; }
+//
+// SO THE MODEL HAS NO CIRRUS BY CONSTRUCTION: cirrus lives at -40 to -70 C, and the whole
+// water cycle is switched off below -37 C. It is latent today only because this tree's upper
+// troposphere is ~20 K TOO WARM -- the lid reaches only -37.0 C, so the cutoff sits at the top
+// of the model instead of at 8-9 km where a correct profile would put it. Repair the radiation
+// (ATM_RAD_EQUIL + ATM_SW_INSOL, both still default off) and this cutoff removes EVERY cloud
+// above ~8 km. The warm bias and the cutoff are a cancelling pair, and fixing either alone
+// makes the cloud field worse -- the same shape as ATM_RAD_EQUIL / ATM_SW_INSOL themselves.
+//
+// Below t_00 the physics is: liquid cannot exist, so freeze it into ice rather than deleting
+// it; deposition continues (SaturationAdjustment's own CND/DEP split already sends 100 % to
+// the ice branch there); and vapour is not a condensate and must never be zeroed at all.
+// Default 0 = shipped, every site unchanged.
+// ============================================================================
+namespace ColdCloud {
+
+    inline bool enabled(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_ICE_COLD"); return e && atoi(e) != 0; }();
+        return v;
     }
 }

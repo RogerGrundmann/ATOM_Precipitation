@@ -819,9 +819,20 @@ public:
                     m.radiation.x[i][j][k] = alfa[i] * m.radiation.x[i + 1][j][k] + beta[i];
 
                 // Radiation -> temperature (add back the reference emission, invert sigma T^4).
+                //
+                // THE FLOOR IS NOT COSMETIC: the Thomas back-substitution can return a NEGATIVE
+                // emission on a cold, optically thin column, and pow(negative, 0.25) is NaN.
+                // The identical expression 75 lines above already carries this guard; this copy
+                // did not. It is latent on the shipped branch only because the initial
+                // temperature is clamped at t_00 = 236.15 K, so no column is ever cold enough --
+                // lower that floor to a physical tropopause value (ATM_T_FLOOR=216.65) and the
+                // model NaNs at initialisation, in apply_co2_perturbation, before the time loop.
+                // Another face of the register's item 3: this solver is not energy-closed, so
+                // nothing prevents a negative emission. ATM_RAD_EQUIL=1 replaces it outright.
                 for (int i = i_mount; i <= i_trop; i++) {
                     m.radiation.x[i][j][k] = radiation_original[i] + m.radiation.x[i][j][k];
-                    m.t.x[i][j][k] = pow(m.radiation.x[i][j][k] / m.sigma, 0.25) / m.t_0;
+                    m.t.x[i][j][k] = pow(std::max(1.0, m.radiation.x[i][j][k]) / m.sigma, 0.25)
+                                     / m.t_0;
                 }
 
                 // ---- Surface energy balance (radiative-CONVECTIVE) ----

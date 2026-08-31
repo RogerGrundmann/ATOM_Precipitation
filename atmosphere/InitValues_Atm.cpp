@@ -1,4 +1,5 @@
 #include "cAtmosphereModel.h"
+#include "CloudFraction.h"
 #include "Utils.h"
 
 using namespace std;
@@ -688,12 +689,41 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
                 const double t_curr = t_safe * s_i;  // [K]
                 const double p_val  = p_basis * exp(-tu_be * (1.0 - s_i));
 
-                // Smooth lower bound: approaches t_00 asymptotically rather than clamping hard
-                const double delta = t_curr - t_00;
-                const double sharpness = 5.0;                           // larger = closer to hard clamp
+                // ATM_T_FLOOR=<K> -- the floor on the initial barometric temperature profile.
+                // Default 236.15 = t_00 = shipped, bit-identical.
+                //
+                // THE FLOOR WAS THE HOMOGENEOUS-FREEZING POINT, AND THAT IS THE SAME CONSTANT
+                // THE MOIST PHYSICS USES TO DELETE ALL CONDENSATE. t_00 is a PHASE-TRANSITION
+                // temperature -- the point below which supercooled liquid cannot exist -- and
+                // using it as a bound on the ATMOSPHERE guarantees the model is never colder
+                // than the cutoff at which it throws its cloud away. Measured: 22.2 % of the
+                // initial air column sits at EXACTLY 236.15 K, every level from 2987 m to the
+                // lid in some columns and 100 % of the lid; `t_top_init` then snapshots the
+                // clamped lid and BC_Atm re-imposes it every iteration, so at iteration 100 the
+                // coldest cell in the whole atmosphere is still exactly -37.0000 C.
+                //
+                // CONSEQUENCE: NO CIRRUS IS POSSIBLE. Cirrus lives at -40 to -70 C. With the
+                // floor at -37 C, q_sat aloft is 3-14x too large (measured against US-standard:
+                // +21.9 K at 10.9 km, e_ice ratio 13.8x), so RH_ice reads 0.19 where the SAME
+                // vapour at a correct temperature would be at 2.5 -- the model's upper-level
+                // water is not too little, its saturation ceiling is too high.
+                //
+                // The unclamped profile is sound over the troposphere (-49.1 C at 10.9 km
+                // against a US-standard -56.0) and overshoots only in the stratosphere, where it
+                // has no tropopause and keeps lapsing to -86 C at the 16 km lid. So the floor is
+                // doing real work and the fault is its VALUE: a tropopause temperature (~216.65,
+                // the US-standard stratosphere) is the physical bound, not a freezing point.
+                static const double t_floor_env = [](){
+                    const char* e = getenv("ATM_T_FLOOR");
+                    const double v = e ? atof(e) : 0.0;
+                    return (v > 0.0) ? v : 0.0; }();
+                const double t_floor = (t_floor_env > 0.0) ? t_floor_env : t_00;
 
-                t.x[i][j][k] = t_00 + delta / (1.0 + std::exp(-sharpness * delta));
-                t.x[i][j][k] = std::max(t_00, t_curr);                  // Ensure minimum temperature
+                // The soft bound that used to stand here was DEAD: it was overwritten by the
+                // hard clamp on the very next line, so the comment promising an asymptotic
+                // approach described code that never ran. Removed, not revived -- removing a
+                // dead store cannot change a result, and the identity test confirms it.
+                t.x[i][j][k] = std::max(t_floor, t_curr);
                 p_stat.x[i][j][k] = p_val;
 
                 // Density calculations
@@ -1076,10 +1106,29 @@ void cAtmosphereModel::initWaterWapour() {
                 const double q_sat = (p_u > E_sat) ? ep * E_sat / (p_u - E_sat)
                                                     : ep * FALLBACK_Q_FACTOR;
 
+                // ATM_RH_MIN=<RH> -- floor under the Manabe-Wetherald profile aloft.
+                // Default 0 = unfloored, bit-identical to the ATM_RH_PROFILE branch as shipped.
+                //
+                // MW is linear in sigma and therefore drives RH to ZERO at p -> 0: at sigma =
+                // 0.23 (10.9 km) it prescribes 0.75*0.21 = 0.16, against an observed
+                // upper-tropospheric RH over ice of 0.4-0.7. That is what forbids cirrus, and
+                // it is NOT reachable by fixing the temperature: the initial humidity is set as
+                // c = RH*q_sat, so cooling the column lowers q_sat and the vapour together and
+                // leaves RH where it was -- measured, ATM_T_FLOOR=216.65 took 10.9 km from
+                // -34.1 to -42.4 C and moved RH there from 26.6 % to 27.1 %.
+                //
+                // MW's own paper applies the profile to a troposphere and pins a stratospheric
+                // minimum separately; taking the linear branch all the way to the lid is an
+                // extrapolation past where it was meant to hold. The floor restores that.
+                static const double rh_min = [](){
+                    const char* e = getenv("ATM_RH_MIN");
+                    const double v = e ? atof(e) : 0.0;
+                    return (v > 0.0 && v < 1.0) ? v : 0.0; }();
                 double rh_i = RH_init;
                 if (rh_profile) {
                     const double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
+                    if (rh_i < rh_min) rh_i = rh_min;
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes
@@ -1202,7 +1251,15 @@ void cAtmosphereModel::initCloudIce() {
                 const double q_sat = ep * E_sat / (p_u - E_sat);
 
                 const double x_norm = p_u * inv_p_crit;
-                double H_crit = Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
+                // ONE H_crit CURVE, NOT TWO. The parabola is duplicated here and in
+                // CloudFraction.h, and the header's own note says a third copy is where the
+                // three modules would drift apart -- they already had, because the flattening
+                // above p_mid that lets cloud exist aloft went into the header only. On the
+                // fractional branch take the header's curve; the shipped branch keeps its own,
+                // bit for bit.
+                double H_crit = CloudFraction::enabled()
+                    ? CloudFraction::hCrit(p_u)
+                    : Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
                 if (H_crit > 1.0)  H_crit = 1.0;
 
                 // ---- ATM_CLOUD_FRAC: sub-grid cloud fraction (default 0 = shipped) ----
@@ -1263,9 +1320,17 @@ void cAtmosphereModel::initCloudIce() {
                 gr.x[i][j][k]  = 0.1 * cloud_val * h_T;
  
                 if (t_u <= t_00) {
+                    // ATM_ICE_COLD: liquid cannot exist below the homogeneous-freezing point;
+                    // ice can, and must -- this is the cirrus range. Default off.
+                    if (ColdCloud::enabled()) {
+                        ice.x[i][j][k]  += cloud.x[i][j][k];
+                        gr.x[i][j][k]    = 0.1 * ice.x[i][j][k];
+                        cloud.x[i][j][k] = 0.0;
+                    } else {
                     cloud.x[i][j][k] = 0.0;
                     ice.x[i][j][k]   = 0.0;
                     gr.x[i][j][k]    = 0.0;
+                    }
                 }
             }  // i
         }  // k
@@ -1324,7 +1389,9 @@ void cAtmosphereModel::initCloudIce() {
                         : hp * AtomUtils::exp_func(t_u, MAGNUS_A_ICE,   MAGNUS_B_ICE);
                     const double q_sat  = ep * E_sat / (p_u - E_sat);
                     const double x_norm = p_u * inv_p_crit;
-                    double H_crit = Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
+                    double H_crit = CloudFraction::enabled()          // the diagnostic must
+                        ? CloudFraction::hCrit(p_u)                   // report the curve the
+                        : Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);  // field was built with
                     if (H_crit > 1.0) H_crit = 1.0;
                     if (q_sat > 0.0) { sum_rh += w * (c.x[i][j][k] / q_sat);
                                        if (c.x[i][j][k] > 0.8 * q_sat) n_rh80++; }

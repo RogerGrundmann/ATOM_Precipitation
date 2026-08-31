@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CloudFraction.h"
+
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -251,7 +253,12 @@ public:
                     if (m.ice.x[i][j][k]   <  0.0)   m.ice.x[i][j][k]   = 0.0;
 
                     double t_u = m.t.x[i][j][k] * m.t_0;
-                    if (t_u <= m.t_00) {
+                    if (t_u <= m.t_00 && ColdCloud::enabled()) {
+                        // ATM_ICE_COLD: freeze the liquid, keep the ice and the VAPOUR.
+                        // Zeroing c here deletes water from the column outright.
+                        m.ice.x[i][j][k]  += m.cloud.x[i][j][k];
+                        m.cloud.x[i][j][k] = 0.0;
+                    } else if (t_u <= m.t_00) {
                         m.c.x[i][j][k]     = 0.0;
                         m.cloud.x[i][j][k] = 0.0;
                         m.ice.x[i][j][k]   = 0.0;
