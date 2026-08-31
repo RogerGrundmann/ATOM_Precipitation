@@ -158,9 +158,32 @@ private:
 *
 */
 // ==================== COLUMN COMPUTATION ====================
+    // ATM_SR_DIAG=1 -- decompose the RAIN FLUX budget into the six terms of dP_rain.
+    // Print-only, default off, nothing is written to a field.
+    //
+    // dP_rain = (S_c_au + S_ac + S_shed + S_s_melt - S_ev - S_r_frz) * mass_layer, integrated
+    // down the column with P_rain[i] = min(P_max, max(0, P_rain[i+1] + dP_rain)). None of the
+    // six is written to ANY output file -- only their sum S_r is -- so a drift in the rain
+    // cannot be attributed from the written slices, only from this print.
+    //
+    // As with ATM_MC_DIAG, the raw sums are not a budget: the max(0, ...) and the P_max cap
+    // truncate, so each level is charged only what it could take and the truncation is
+    // reported separately. Then G - sinks - truncation = P_rain(ground) is an identity.
+    static bool srDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_SR_DIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     void computeColumns() {
         using namespace std;
         using namespace TwoCatIce;
+
+        // Per-column slots for the final iter_prec pass; each (j,k) is owned by one thread.
+        const bool srd_on = srDiag();
+        const int  NSR = 9;   // c_au, ac, shed, s_melt, ev, r_frz, r_cri, ground, truncated
+        std::vector<double> srd;
+        if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
 
         #pragma omp parallel for collapse(2)
         for(int k = 1; k < m.km-1; k++){
@@ -187,6 +210,9 @@ private:
                 double P_rain_diff = 0.0;
 
                 for(int iter_prec = 1; iter_prec <= iter_prec_end; iter_prec++){
+
+                    if (srd_on) for (int q = 0; q < NSR; q++)
+                        srd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
 
                     m.P_rain.x[m.im-1][j][k] = 0.0;
                     m.P_snow.x[m.im-1][j][k] = 0.0;
@@ -507,6 +533,20 @@ private:
                         double dP_rain = (S_c_au + S_ac + S_shed + S_s_melt
                             - S_ev - S_r_frz) * mass_layer;
 
+                        if (srd_on) {
+                            const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                            srd[0*N+b] += S_c_au   * mass_layer;
+                            srd[1*N+b] += S_ac     * mass_layer;
+                            srd[2*N+b] += S_shed   * mass_layer;
+                            srd[3*N+b] += S_s_melt * mass_layer;
+                            srd[4*N+b] += S_ev     * mass_layer;
+                            srd[5*N+b] += S_r_frz  * mass_layer;
+                            srd[6*N+b] += S_r_cri  * mass_layer;   // in S_r, NOT in dP_rain
+                            const double raw = m.P_rain.x[i+1][j][k] + dP_rain;
+                            const double kept = std::min(P_max, max(0.0, raw));
+                            srd[8*N+b] += (raw - kept);            // what the clamp/cap removed
+                        }
+
                         m.P_rain.x[i][j][k] = std::min(P_max,
                             max(0.0, m.P_rain.x[i+1][j][k] + dP_rain));
 
@@ -553,9 +593,43 @@ private:
                             << " .... P_rain[i_check] = " << m.P_rain.x[i_check][j][k] * 8.64e4
                             << " .... P_rain_diff = " << P_rain_diff << endl << endl << endl;
                     }
+                    if (srd_on) {
+                        const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
+                        srd[(size_t)7 * m.jm * m.km + (size_t)j * m.km + k]
+                            = m.P_rain.x[i_g][j][k];
+                    }
                 }  // end iter_prec
             }  // end j
         }  // end k
+
+        if (srd_on) {
+            const double yr = 365.0 * 8.64e4;                       // [mm/s] -> [mm/a]
+            const size_t N = (size_t)m.jm * m.km;
+            double acc[9] = {0,0,0,0,0,0,0,0,0}, w_tot = 0.0;
+            for (int j = 0; j < m.jm; j++) {
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for (int k = 0; k < m.km; k++) {
+                    w_tot += w;
+                    for (int q = 0; q < 9; q++) acc[q] += w * srd[(size_t)q * N + (size_t)j * m.km + k];
+                }
+            }
+            for (int q = 0; q < 9; q++) acc[q] *= yr / w_tot;
+            const double src = acc[0] + acc[1] + acc[2] + acc[3];
+            const double snk = acc[4] + acc[5];
+            printf("      AGCM: [SR DIAG] iter %d.  rain-flux budget, cos-lat GLOBAL mean, mm/a:"
+                   "  autoconv S_c_au %.2f  + accretion S_ac %.2f  + shed %.4f  + snowmelt %.2f"
+                   "  =  sources %.2f\n", m.iter_n, acc[0], acc[1], acc[2], acc[3], src);
+            printf("      AGCM: [SR DIAG] sinks:  evaporation S_ev %.2f  + freezing S_r_frz %.4f"
+                   "  =  %.2f;   clamp/cap removed %.2f;   ->  P_rain(ground) %.2f"
+                   "   (S_r_cri %.4f is in S_r but not in dP_rain)\n",
+                   acc[4], acc[5], snk, acc[8], acc[7], acc[6]);
+            if (src > 0.0)
+                printf("      AGCM: [SR DIAG] as shares of the sources:  S_c_au %.1f %%,"
+                       "  S_ac %.1f %%,  S_s_melt %.1f %%;   S_ev removes %.1f %%,"
+                       "  the clamp %.1f %%,  surviving %.1f %%\n",
+                       1e2*acc[0]/src, 1e2*acc[1]/src, 1e2*acc[3]/src,
+                       1e2*acc[4]/src, 1e2*acc[8]/src, 1e2*acc[7]/src);
+        }
     }
 /*
 *
