@@ -417,6 +417,28 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   from a missing area weight; `e_d` has no dependence on `M_d` either, so a downdraft that does
   not exist still evaporates. The test is one knob.
 
+  **THE MISSING HIGH CLOUD, AS AN ICE WATER PATH** (2026-08-31, measured from `output_mcd_ctl`
+  and `output_mcd_flip`'s own written slices at iteration 100 — no re-run, two independent cuts):
+
+  | column condensate g/m2 | control | flip | Earth |
+  |---|---|---|---|
+  | total, 87E cos-lat wt. | 1242 | **69.1** | ~80-120 |
+  | total, 28N all longitudes | 1629 | **91.9** | |
+  | **LWP** 87E | 1122 | **68.0** | **~50-80** |
+  | **IWP** 87E | 119 | **1.15** | **~20-30** |
+  | max cell `q_c` | 0.605 g/kg | 0.063 | grid mean over 1x1 deg |
+  | levels carrying cloud | 36 of 41 | 20 of 41 | |
+
+  **THE FLIP'S LIQUID IS RIGHT AND ITS ICE IS TWENTY TIMES TOO LOW.** 68 g/m2 of LWP against an
+  observed 50-80, with a grid-mean peak of 0.063 g/kg implying a physical in-cloud value once
+  divided by `f` ~ 0.2-0.3; the control's 1122 is 15-22x the observation and its 0.605 g/kg peak
+  is an ordinary IN-CLOUD number carried as a grid mean. **IWP is the better handle on the
+  missing cirrus than the LW forcing is, because it has an observational target**: 1.15 against
+  20-30, with 10927 m at 0.00 g/m2 against the control's 9.10.
+  And the control's ice is only ~4-6x too high where its liquid is 15-22x, **which is why its LW
+  forcing lands at 25.35 W/m2 against Earth's ~25 — bought, not earned**, since `cwp_cap_col`
+  then divides the whole column by ~79.
+
   **RAW SUMS OF `e_d` AND `e_p` ARE NOT A BUDGET.** They are a DEMAND that the `max(0, ...)`
   truncates at every level: summed raw they read 45 000 % of generation with a compensating
   negative clamp, which says only that the demand is large. The unmet remainder is reported
