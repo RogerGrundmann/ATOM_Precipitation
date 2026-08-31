@@ -55,13 +55,13 @@ namespace ThreeCatIce {
     // same one: an un-reduced riming term monopolises the proportional cloud-water limiter and
     // starves the autoconversion->rain pathway, so the same factor of 5 applies.
     //
-    // AND NOTE WHICH CONSTANT THE COLD SIDE WAS USING. `c_g_rim` = 4.43 exists, is named for
-    // graupel riming, and is used ONLY by the warm-side shedding S_g_shed; the cold-side
-    // S_g_rim reached for the SNOW constant c_rim = 18.6, 4.2x larger. That looks like a
-    // wrong-constant bug independent of this port and it is NOT fixed here -- fixing both at
-    // once would confound a 5x reduction with a 4.2x one, and this reduction is the one that
-    // was asked for. If graupel is still too large after this, `c_g_rim/5` is the next arm.
-    constexpr double c_rim_graupel = 18.6 / 5.0;                        // m2/kg (reduced graupel riming)
+    // AND THE COLD SIDE WAS USING THE SNOW CONSTANT, WHICH IS FIXED HERE TOO. `c_g_rim` = 4.43
+    // exists, is named for graupel riming, and was used ONLY by the warm-side shedding
+    // S_g_shed; the cold-side S_g_rim reached for the SNOW constant c_rim = 18.6, 4.2x larger.
+    // The two corrections were measured SEPARATELY rather than together, so neither is
+    // confounded with the other: c_rim/5 = 3.72 first (graupel 919 -> 578), then c_g_rim/5 =
+    // 0.886 (see CLAUDE.md for the second number).
+    constexpr double c_rim_graupel = 4.43 / 5.0;                        // m2/kg = c_g_rim/5
     constexpr double c_agg = 10.3;                                      // m2/kg
     constexpr double c_i_cri = 0.24;                                    // m2
     constexpr double c_r_cri = 3.2e-5;                                  // m2

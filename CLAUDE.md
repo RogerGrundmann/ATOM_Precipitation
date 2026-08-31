@@ -252,11 +252,30 @@ only 37 % rather than 80 % because riming is one of several graupel sources — 
 snow is **38 % of the total** against Earth's 5-10 %, where the same fix took TwoCat to 16 %. So
 the port helped and did not finish the job in ThreeCat.
 
-**AND THE COLD-SIDE GRAUPEL RIMING WAS USING THE SNOW CONSTANT.** `c_g_rim` = 4.43 exists, is
-named for graupel riming, and is used ONLY by the warm-side shedding `S_g_shed`; the cold-side
-`S_g_rim` reached for `c_rim` = 18.6, **4.2x larger**. That looks like a wrong-constant bug
-independent of the port, and it is deliberately NOT fixed in the same change — doing both at
-once would confound a 5x reduction with a 4.2x one. `c_g_rim/5` is the next arm.
+**THE COLD-SIDE GRAUPEL RIMING WAS ALSO USING THE SNOW CONSTANT, AND THAT IS NOW FIXED — BUT
+GRAUPEL IS NOT RIMING-LIMITED.** `c_g_rim` = 4.43 exists, is named for graupel riming, and was
+used ONLY by the warm-side shedding `S_g_shed`; the cold-side `S_g_rim` reached for `c_rim` =
+18.6, **4.2x larger**. The two corrections were measured SEPARATELY so neither is confounded:
+
+| arm, 6 iterations from iteration 600 | P_rain | P_snow | P_graupel | total | x NASA | snow frac |
+|---|---|---|---|---|---|---|
+| before any port | 1190 | 2751 | 921 | 4862 | 4.97 | 56.6 % |
+| + snow port | 1118 | 1047 | 919 | 3084 | 3.15 | 33.9 % |
+| + graupel `c_rim/5` | 1118 | 1047 | 578 | 2743 | 2.80 | 38.2 % |
+| **+ graupel `c_g_rim/5`** | **1118** | **1046** | **515** | **2679** | **2.74** | **39.0 %** |
+| *Earth / NASA* | *~880* | *~70* | *~0* | *978* | *1.00* | *5-10 %* |
+
+**A FURTHER 4.2x CUT IN THE RIMING COEFFICIENT BUYS 11 %** (578 -> 515). The constant is now the
+right one and the change is free, but it settles the question: **the remaining graupel is not
+riming, it is `S_g_agg`, `S_g_shed` and deposition**, none of which the port touches. That was
+already visible in the first graupel arm falling 37 % where an 80 % fall was the naive
+expectation.
+
+**WHAT IS LEFT IS SNOW.** 1046 mm/a, **39 % of the total** against Earth's 5-10 %, and the
+riming fix that took TwoCat to 16 % has already been applied. ThreeCat has snow sources TwoCat
+lacks — `S_s_agg`, and the graupel/snow exchanges — and none of them has been looked at.
+Precipitation is 2.74x NASA and the composition is wrong in the same direction: rain 42 %,
+snow 39 %, graupel 19 %, against roughly 90 / 7 / 0.
 
 **AND ONE MORE GAP, NOT CLOSED: `ThreeCatIceScheme`'s AUTOCONVERSION IS STILL GRID-MEAN.** It
 reads `S_c_au = c_c_au*(q_c - 0.0002)` — a hardcoded 0.2 g/kg threshold on the GRID MEAN, where
