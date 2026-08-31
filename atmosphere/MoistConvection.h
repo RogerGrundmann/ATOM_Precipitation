@@ -114,6 +114,8 @@ public:
         rhsForcing();
         subTerrainFill();
 
+        if(mcDiag()) convDiag();
+
 
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -1531,6 +1533,206 @@ void findCloudBaseLFS() {
                 }
             }
         }
+    }
+/*
+*
+*/
+// ==================== ATM_MC_DIAG: the convective precipitation budget ====================
+    // ATM_MC_DIAG=1 -- print the COLUMN BUDGET of the convective precipitation chain.
+    // Print-only, default off, no field is written.
+    //
+    // `P_conv` is an integral of three tendencies down the column,
+    //
+    //     P_conv[i] = max(0, P_conv[i+1] + dz*rho*(g_p - e_d - e_p)),
+    //
+    // and the surface value alone cannot say which of the four terms decided it. That is
+    // exactly the question the fraction-aware flip left open: with `ATM_CLOUD_FRAC` on,
+    // convection FIRES -- `M_u` in 1107 cells against the control's 1367 -- and 0.287 mm/a
+    // reaches the ground against the control's 12.7. Generation looked healthy, so the loss
+    // is somewhere between the cloud and the ground, and "somewhere" has four candidates:
+    // generation `g_p` never forms; the downdraft evaporates it (`e_d`); the sub-cloud layer
+    // evaporates it (`e_p`, which scales with `q_sat - q_v_d` and so with how DRY the
+    // sub-cloud air is -- the flip's sub-cloud RH is ~0.6-0.7 against the control's 0.94);
+    // or the max(0, ...) clamp truncates the column before the ground.
+    //
+    // The fifth candidate is upstream of all four: `K_p` is zero for shallow and midlevel
+    // convection (`delta_i_c` = 1e9), so a column can be fully active with `M_u`, `q_c_u` and
+    // a cloud base and still generate NOTHING because it was classified non-precipitating.
+    // The census below counts that too.
+    //
+    // `g_p`, `e_d`, `e_p`, `q_c_u` and `M_u` are written to NO output file -- their block in
+    // `Paraview_Atm.cpp` is commented out -- so this print is the only way to read them
+    // without adding fields to the VTK writers.
+    static bool mcDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_MC_DIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
+    void convDiag() {
+        using namespace AtomMoistConvection;
+        using namespace std;
+
+        // Same units as ThermoAtm's per-component print: P_conv is [kg/(m2 s)] = [mm/s].
+        const double s_per_year = 365.0 * 8.64e4;
+
+        double w_tot = 0.0, w_act = 0.0, w_kp = 0.0, w_dead = 0.0;
+        double w_deep = 0.0, w_shallow = 0.0, w_midlevel = 0.0;
+        double G = 0.0, Ed = 0.0, Ep = 0.0, Unmet = 0.0;      // APPLIED, cos-lat weighted
+        double Pbase = 0.0, Pwalk = 0.0, Pfield = 0.0;
+        double qcu_sum = 0.0, qcu_w = 0.0, qcu_max = 0.0;
+        int qmi = 0, qmj = 0, qmk = 0;
+        double mu_sum = 0.0, sig_sum = 0.0, hbase_sum = 0.0, htop_sum = 0.0;
+        double rh_sub = 0.0, rh_w = 0.0, dq_sub = 0.0, rh_all = 0.0, rh_all_w = 0.0;
+
+        for(int j = 0; j < m.jm; j++){
+            const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+            for(int k = 0; k < m.km; k++){
+                w_tot += w;
+
+                const int i_mount = m.i_topography[j][k];
+                Pfield += w * m.P_conv.x[i_mount][j][k];
+
+                const int i_base = i_Base_local[j][k];
+                const int i_lfs  = i_LFS_local[j][k];
+                if(i_base < 0 || i_lfs <= i_base) continue;
+                w_act += w;
+
+                // The same classification updraftEntrainment applies, recomputed rather
+                // than stored: a column that is shallow or midlevel has K_p = 0 and cannot
+                // generate precipitation however much condensate its updraft carries.
+                const bool is_shallow  = m.convection_mode >= 1
+                                         && (m.p_stat.x[i_base][j][k]
+                                             - m.p_stat.x[i_lfs][j][k]) < p_stat_diff;
+                const bool is_midlevel = m.convection_mode >= 2
+                                         && m.p_stat.x[i_base][j][k] < p_stat_midlevel;
+                if(is_shallow)       w_shallow  += w;
+                else if(is_midlevel) w_midlevel += w;
+                else                 w_deep     += w;
+
+                const double delta_i_c = (is_shallow || is_midlevel) ? 1.0e9
+                                       : (land_surf[j * m.km + k] ? 1000.0 : 500.0);
+                const double height_base = height_table[i_base];
+
+                hbase_sum += w * height_base;
+                htop_sum  += w * height_table[i_lfs];
+                mu_sum    += w * m.M_u.x[i_base][j][k];
+
+                // Nordeng's precipitating area fraction, as downdraftEntrainment forms it.
+                double w_u_cb = fabs(m.w_u.x[i_base][j][k]) * m.u_0;
+                if(w_u_cb > 0.0)
+                    sig_sum += w * std::min(1.0, fabs(m.M_u.x[i_base][j][k])
+                               / (safe_r_humid(m.r_humid.x[i_base][j][k]) * w_u_cb));
+
+                // ---- the column budget, walked exactly as downdraftRecurrence walks it ----
+                //
+                // RAW SUMS OF e_d AND e_p DO NOT FORM A BUDGET, and the first version of this
+                // print showed it: the evaporation terms are a DEMAND, and every level truncates
+                // that demand at the flux actually present through the max(0, ...). Summed raw
+                // they came out at 45 000 % of generation with a compensating negative "clamp",
+                // which says only that the demand is large, never how much water it removed.
+                // Walking the recurrence and charging each level only what it could take gives
+                // an identity instead: G - e_d(applied) - e_p(applied) = P_conv(ground), and
+                // the unmet remainder is reported separately as what the sub-cloud layer WOULD
+                // have evaporated had the flux been there.
+                double P = 0.0;                                    // P_conv[i_lfs] = 0
+                double P_at_base = 0.0;                            // this column's flux at cloud base
+                bool died = false;
+                for(int i = i_lfs-1; i >= i_mount; i--){
+                    const double dz  = step[i];
+                    const double rho = m.r_humid.x[i][j][k];
+                    const double gen   = dz * rho * m.g_p.x[i][j][k];
+                    const double dem_d = dz * rho * m.e_d.x[i][j][k];
+                    const double dem_p = dz * rho * m.e_p.x[i][j][k];
+                    const double avail = P + gen;
+                    const double dem   = dem_d + dem_p;
+                    const double app   = std::min(avail, dem);
+                    const double f_app = dem > 0.0 ? app / dem : 0.0;
+                    G     += w * gen;
+                    Ed    += w * f_app * dem_d;
+                    Ep    += w * f_app * dem_p;
+                    Unmet += w * (dem - app);
+                    P = std::max(0.0, avail - dem);
+                    if(i == i_base){ P_at_base = P; Pbase += w * P; }  // flux entering sub-cloud air
+                    if(i < i_base && P <= 0.0) died = true;
+                }
+                Pwalk += w * P;
+                if(died && P_at_base > 0.0) w_dead += w;
+
+                bool any_kp = false;
+                for(int i = i_base+1; i <= i_lfs; i++){
+                    if(height_table[i] > height_base + delta_i_c) any_kp = true;
+                    if(m.M_u.x[i][j][k] > 0.0){
+                        const double q = m.q_c_u.x[i][j][k];
+                        qcu_sum += w * q; qcu_w += w;
+                        if(q > qcu_max){ qcu_max = q; qmi = i; qmj = j; qmk = k; }
+                    }
+                }
+                if(any_kp) w_kp += w;
+
+                // Sub-cloud air: what e_p is proportional to. q_v_d is the downdraft's
+                // vapour, q_sat the environment's ceiling, and the difference is the
+                // evaporative demand the falling precipitation meets on its way down.
+                for(int i = i_mount; i < i_base; i++){
+                    const double p_u   = m.p_stat.x[i][j][k];
+                    const double t_u   = m.t.x[i][j][k] * m.t_0;
+                    const double E_sat = m.hp * AtomUtils::exp_func(t_u, 17.2694, 35.86);
+                    const double q_sat = safe_q_sat(m.ep, E_sat, p_u);
+                    if(q_sat <= 0.0) continue;
+                    rh_sub += w * m.c.x[i][j][k] / q_sat;
+                    dq_sub += w * (q_sat - m.q_v_d.x[i][j][k]);
+                    rh_w   += w;
+                }
+
+                // The same RH over the whole atmospheric column, so the sub-cloud figure
+                // can be read against something.
+                for(int i = i_mount; i < m.im; i++){
+                    const double E_sat = m.hp * AtomUtils::exp_func(m.t.x[i][j][k] * m.t_0,
+                                                                    17.2694, 35.86);
+                    const double q_sat = safe_q_sat(m.ep, E_sat, m.p_stat.x[i][j][k]);
+                    if(q_sat <= 0.0) continue;
+                    rh_all += w * m.c.x[i][j][k] / q_sat; rh_all_w += w;
+                }
+            }
+        }
+
+        if(w_tot <= 0.0) return;
+        const double Gy  = G  * s_per_year / w_tot, Edy = Ed * s_per_year / w_tot;
+        const double Epy = Ep * s_per_year / w_tot, Uny = Unmet * s_per_year / w_tot;
+        const double Pby = Pbase * s_per_year / w_tot;
+        const double Pwy = Pwalk * s_per_year / w_tot, Pfy = Pfield * s_per_year / w_tot;
+        auto pc = [&](double x){ return Gy > 0.0 ? 1e2 * x / Gy : 0.0; };
+
+        printf("      AGCM: [MC DIAG] iter %d.  active columns (i_LFS > i_base >= 0): "
+               "%.2f %% of the globe, cos-lat weighted;  of those deep %.2f %%, shallow %.2f %%, "
+               "midlevel %.2f %%;  columns reaching a level with K_p > 0: %.2f %%\n",
+               m.iter_n, 1e2 * w_act / w_tot,
+               w_act > 0.0 ? 1e2 * w_deep / w_act : 0.0,
+               w_act > 0.0 ? 1e2 * w_shallow / w_act : 0.0,
+               w_act > 0.0 ? 1e2 * w_midlevel / w_act : 0.0,
+               1e2 * w_kp / w_tot);
+        printf("      AGCM: [MC DIAG] column budget, APPLIED, cos-lat GLOBAL mean, mm/a:"
+               "  generation g_p %.4f  -  downdraft e_d %.4f  -  sub-cloud e_p %.4f"
+               "  =  ground %.4f   (P_conv field at i_topography %.4f)\n",
+               Gy, Edy, Epy, Pwy, Pfy);
+        printf("      AGCM: [MC DIAG] as shares of generation:  e_d %.2f %%,  e_p %.2f %%,"
+               "  surviving to the ground %.2f %%;  flux leaving cloud base %.4f mm/a;"
+               "  UNMET evaporative demand %.4f mm/a = %.1f x generation;"
+               "  columns whose flux dies below cloud base %.2f %%\n",
+               pc(Edy), pc(Epy), pc(Pwy), Pby, Uny, Gy > 0.0 ? Uny / Gy : 0.0,
+               1e2 * w_dead / w_tot);
+        printf("      AGCM: [MC DIAG] updraft above cloud base:  mean q_c_u = %.6f g/kg over"
+               " %.2f cells per active column,  max %.6f g/kg @(i=%d,j=%d,k=%d)\n",
+               qcu_w > 0.0 ? 1e3 * qcu_sum / qcu_w : 0.0,
+               w_act > 0.0 ? qcu_w / w_act : 0.0, 1e3 * qcu_max, qmi, qmj, qmk);
+        printf("      AGCM: [MC DIAG] cloud base:  mean M_u = %.6f kg/m2/s,  mean sigma_p ="
+               " %.6f,  mean base %.0f m,  mean LFS %.0f m\n",
+               w_act > 0.0 ? mu_sum / w_act : 0.0, w_act > 0.0 ? sig_sum / w_act : 0.0,
+               w_act > 0.0 ? hbase_sum / w_act : 0.0, w_act > 0.0 ? htop_sum / w_act : 0.0);
+        printf("      AGCM: [MC DIAG] sub-cloud layer of the active columns:  mean RH = %.4f,"
+               "  mean (q_sat - q_v_d) = %.4f g/kg;  whole-column mean RH = %.4f\n",
+               rh_w > 0.0 ? rh_sub / rh_w : 0.0, rh_w > 0.0 ? 1e3 * dq_sub / rh_w : 0.0,
+               rh_all_w > 0.0 ? rh_all / rh_all_w : 0.0);
     }
 };
 /*
