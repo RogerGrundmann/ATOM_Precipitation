@@ -682,10 +682,10 @@ environment variable before launching the atmosphere to change behaviour.
 | `ATM_V_MASSBAL` | **`1` (ON since 2026-08-28)** | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section. **`0` restores the old unbalanced profile exactly** — every measurement in this file dated before 2026-08-28 was made on that branch |
 | `ATM_PROJECT_IN_LOOP` | `0` (off) | `<sweeps>`: a real velocity projection inside the time loop — seed `aux` from `u/v/w`, relax, apply `v <- v - grad(p)`, with `p_dyn` saved/restored. Distinct from the solver's own `run()`, which projects the momentum TENDENCY, not the velocity. Measured a null on `Psi(ground)` at 10 sweeps AND at 200 (-0.013 %) |
 | `ATM_ANELASTIC` | `0` (off) | Solves `div(rho_bar u) = 0` instead of `div(u) = 0`. Null on a full run (-0.006 %) because the time loop never applies the pressure to the velocity; measured **2.0x the volume projection** across the INITIAL projection, where it is applied |
-| `ATM_RAD_TOPO` | **`1` (ON since 2026-08-28)** | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them; and level 0, which `BC_Atm` stuffs with the mountain-top humidity while the rock stays dry, collects a large share of the water-vapour optical depth. Off-branch at 100 iterations: max `tau_layer` **7.885** over the Himalaya against 0.022 over ocean. `0` restores the sea-level column |
+| `ATM_RAD_TOPO` | `0` (off) | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them. **It was flipped on 2026-08-28 and reverted the same day; the default is OFF and this row said otherwise until 2026-08-31.** The mechanism once claimed for it here — that level 0 collects a large share of the water-vapour optical depth because `BC_Atm` stuffs it with mountain-top humidity — is REFUTED: level 0 holds about 1.3 % of the column vapour path, and on the `=1` branch it is not in the column at all. The real driver is `cwp_cap_col`; see the cloud section below |
 | `ATM_RHIE_CHOW` | `0` (off) | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
 | `ATM_CLOUD_TAU_MAX` | **`2.0` (ON since 2026-08-28)** | Per-layer ceiling on the CLOUD optical depth, scaling `LWP_i` and `IWP_i` together so the LW (`tau_cloud`) and SW (albedo bump) stay balanced. `cwp_cap_col` bounds the COLUMN condensate path and does not bound a LAYER: without this the shipped branch reaches layer emissivity **0.99962** aloft with 1773 cells above 0.9 per latitude slice — the near-blackbody pathology the de-saturation split exists to prevent. Clear-sky OLR is bit-identical across the flip (180.33882 W/m2), cloudy OLR +0.053. `0` disables |
-| `ATM_CWP_CAP` | **`20.0` (was 250, changed 2026-08-28)** | Column condensate cap in g/m2, the single lever on the cloud longwave forcing. 250 gave a forcing of **80.6 W/m2** against Earth's ~25 and 26 of the column's 28 optical depths; 20 gives **25.6**, confirmed stable to 0.05 % over iterations 20-100. Only became tunable once `column_olr()` replaced the old "top radiation" print, which was the lid temperature. `250` restores the old branch |
+| `ATM_CWP_CAP` | **DISABLED since 2026-08-31** (was 20.0) | Column condensate cap in g/m2. It was the single lever on the cloud longwave forcing only while the condensate was 20x too large — it divided the column path by ~79 — and it **inverts the geography**: normalising every column to the same 20 g/m2 divides a column by its own wetness, so the optically thickest cell on the planet came out over the East Antarctic plateau. With the sub-grid cloud scheme on it is no longer needed. `20` restores it |
 | `ATM_PSI_PROJ_DUMP` | `0` (off) | Writes the streamfunction either side of `project_initial_velocity`, as iterations `-1` and `-2`. Print/CSV only |
 | `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
 
@@ -1170,6 +1170,102 @@ been cancelling — the family's `mue_ch4` pattern (ATNEPT item 2) a third time.
 Rayleigh scattering, so with `albedo_equator` = 0.1 it absorbs 387.7 W/m2 at the equator against
 Earth's ~316 — the albedo constants are a SURFACE albedo doing a PLANETARY albedo's job. Read
 342.02 K as "the scheme's clear-sky RE, correctly solved", not as a claim about Earth.
+
+## 2026-08-31: the cloud and ice chain, and the accepted configuration
+
+The shipped model matched NASA's precipitation (1046 mm/a against 978) from a condensate **20x
+too large in 98.9 % of columns**, held up by a `cwp_cap_col` dividing the column path by 79.
+Eleven defaults now replace that with a physically sized cloud field. **They move together
+because every one is wrong alone** — four separate cancelling-error pairs turned up on the way,
+and an incremental flip regresses at each step.
+
+### What changed
+
+| knob | was | now | why |
+|---|---|---|---|
+| `ATM_RH_PROFILE` | 0 | **1** | The shipped column sits at RH 0.9375 from the surface to the lid. Manabe-Wetherald replaces it |
+| `ATM_RH_CRIT` | 0.8 | **0.30** | `H_crit` 0.80-0.98 is only ever exceeded by a saturated column |
+| `ATM_CLOUD_FRAC` | 0 | **1** | Uniform-PDF (Smith/Sundqvist) sub-grid closure. Real cloud forms from sub-grid variability; the shipped scheme diagnoses it from the GRID-MEAN supersaturation |
+| `ATM_CWP_CAP` | 20.0 | **disabled** | Was compensating for the over-large condensate, and inverts the radiation's geography |
+| `ATM_CLOUD_RAD_FRAC` | 0 | **1** | The radiation must weight by `f` rather than treat every column as overcast |
+| `ATM_QC_CRIT` | 0.5 | **0.05 g/kg** | The autoconversion threshold was fitted against the 20x condensate and applied to the GRID MEAN |
+| `ATM_ICE_COLD` | 0 | **1** | `t_00` = -37 C is where supercooled LIQUID stops existing; the tree used it to delete ICE too, in five places, one of which also deleted the vapour |
+| `ATM_T_FLOOR` | 236.15 | **216.65 K** | The initial temperature was clamped at `t_00` — the same constant — so the atmosphere was never cold enough for cirrus and would have deleted it if it were |
+| `ATM_RH_MIN` | 0 | **0.65** | Manabe-Wetherald is linear in sigma and drives RH to ZERO at p -> 0: 0.16 at 10.9 km against an observed 0.4-0.7 over ice |
+| `ATM_RH_MIN_LAT` | 0 | **1** | A uniform floor makes uniform cirrus. The tropical value is the knob; subtropics and storm track follow at the observed ratios 1 : 0.45 : 0.70 |
+| `ATM_RH_MIN_PTOP` | 0 | **475 hPa** | Unconfined, a 0.65 floor binds from 800 hPa up — through the liquid deck it was never meant to touch |
+
+**Setting each variable back to the value in the "was" column restores the old branch.** Both
+directions are verified at 24 threads: a clean environment reproduces the arm the configuration
+was chosen from (OLR clear 263.404 against 263.396, cloudy 233.228 against 233.227, temperature
+extremes bit-identical), and the full revert reproduces the shipped branch (precip 1048.56
+against 1048.54, OLR 273.08818164 against 273.08818780, precipitable water 49.64 both, min T
+-37.151524 against -37.151522). The residuals are this tree's documented fixed-thread-count
+non-determinism.
+
+### What it produces
+
+| | shipped | accepted | Earth |
+|---|---|---|---|
+| **Precipitation** | 1046 mm/a | **992-997** | **978 (NASA)** |
+| column condensate path | 1583 g/m2 | **103 + 20 = 123** | 50-80 liquid, 20-30 ice |
+| ice water path | 119 | **20.1** | **20-30** |
+| liquid water path | 1122 | **103** | **50-80** |
+| cloud LW forcing | 25.4 | 30.2 | ~25 |
+| OLR clear-sky | 273.1 | **263.4** | **~265** |
+| OLR all-sky | 247.7 | **233.2** | **~240** |
+| precipitable water | 49.6 mm | **30.3** | ~25 |
+| coldest cell | -37.15 C | **-56.5** | ~-56 (US standard) |
+| high cloud, 15-35 deg | — | **18.2 %** | ~15 % |
+| high cloud, 35-65 deg | — | **45.7 %** | ~35 % |
+
+### What it does NOT claim
+
+- **It is measured at `nm` = 100, which is 20 SECONDS of physical time** (`[TIMESCALES]` prints
+  this at every run). That is the initial field plus a short transient, not a spun-up climate.
+- **The tropics are 100 % cirrus-covered against Earth's ~40 %**, and that comes WITH the
+  configuration rather than being left to tune: `ATM_RH_MIN_LAT` is a ZONALLY UNIFORM floor and
+  cannot make longitudinally patchy cirrus. Its Gaussians also know nothing about where this
+  model's ITCZ actually is, so the cover agreement in the subtropics and storm track is
+  **assumed, not predicted**.
+- Every remaining bias has the same sign and about the same size — LWP +29 %, LW forcing +21 %,
+  precipitable water +21 %, all-sky OLR -3 % — which is **one** excess of low liquid cloud and
+  vapour, not four independent errors, and it traces to that tropical cover.
+
+The one number that was predicted before it was measured: interpolating the `ATM_RH_MIN_PTOP`
+sweep put NASA's 978 mm/a at 475 hPa with LWP ~104 and IWP ~20, and the arm returned 992.2,
+103.0 and 20.09.
+
+### Two further knobs from the same work, both default off
+
+| Env variable | Default | Effect |
+|---|---|---|
+| `ATM_RH_CRIT_ICE` | `0` (disabled) | A SEPARATE critical humidity for the ice branch: `H_crit` is unchanged for `p >= 550` hPa, then ramps to this value at 300 hPa and stays flat above. With one `H_crit` the closure sets the liquid deck and the cirrus from the same number, so ice can only be bought with liquid at a fixed rate. Measured at 0.15 it puts IWP in the observed band at LWP 95 — but drives high-cloud cover to 98 %, because a threshold below every latitude's humidity floor makes cloud everywhere. Not part of the accepted configuration for that reason |
+| `ATM_MC_DIAG` | `0` (off) | Print-only. Walks the `P_conv` recurrence exactly as `downdraftRecurrence` walks it and charges each level only the evaporation it could take, so `G - e_d - e_p = P_conv(ground)` is an IDENTITY (it closes against the model's own field to every printed digit). Raw sums of `e_d`/`e_p` are NOT a budget — they are a demand the `max(0, ...)` truncates at every level, and summed raw they read 45 000 % of generation. It also reports the unmet demand, the deep/shallow/midlevel census, cloud-base `M_u` and `sigma_p`, and the sub-cloud humidity |
+
+**What `ATM_MC_DIAG` found**: under the cloud flip the convection generates **12.7x MORE**
+precipitation than the shipped model (357.8 against 28.3 mm/a) and the DOWNDRAFT evaporates
+**99.92 %** of it. `e_p`, sub-cloud evaporation — the term this tree's notes had named as the
+suspect — removes **0.00 %**. The flux leaving cloud base already equals the flux at the ground
+in both arms, so all of the loss is in-cloud. Open, and code-level: `e_p` carries the convective
+area fraction `sigma_p` (~0.045) and `e_d` carries nothing, so the same water is ~22x more
+evaporable by the downdraft term purely from a missing area weight — and `e_d` has no dependence
+on `M_d` at all, so a downdraft that does not exist still evaporates. The stratiform `S_ev` in
+`TwoCatIceScheme` has the same gap.
+
+### Two latent bugs the chain exposed
+
+- **`MultiLayerRadiation` inverts `sigma T^4` unguarded**, `pow(radiation/sigma, 0.25)`, while
+  the identical expression 75 lines earlier carries `max(1.0, ...)`. The Thomas back-substitution
+  returns a NEGATIVE emission on a cold, optically thin column, so the model NaNs at
+  initialisation inside `apply_co2_perturbation`. Latent on the shipped branch only because the
+  temperature was clamped at -37 C. Guarded.
+- **`epsilon` had no ground boundary condition.** `tau_above` and `tau_layer` already got the
+  `i_topography` fill; `epsilon` did not, and with `ATM_RAD_TOPO` off the solve starts at level 0
+  and walks the rock, so ParaView drew a real emissivity inside every mountain (a Tibet column ran
+  0.0174, 0.0166, ..., 0.0436, 0.0130 under a ground value of 0.0303). Fixed, and verified
+  physics-neutral: of the six written files that change, the only field that differs is `Epsilon`,
+  in 1237 cells, all of them below terrain.
 
 ## Output
 
