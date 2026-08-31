@@ -390,6 +390,38 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   the dead convective scheme and the missing high cloud, NOT the microphysics constant. Default
   stays 0.5.
 
+  **THE CONVECTIVE GAP IS THE DOWNDRAFT, AND THE SUSPECT NAMED HERE WAS WRONG** (`ATM_MC_DIAG=1`,
+  new, print-only, default off, 2026-08-31). It walks the `P_conv` recurrence exactly and charges
+  each level only the evaporation it could take, so `G - e_d - e_p = P_conv(ground)` is an
+  IDENTITY — it closes against the model's own field to every printed digit (12.7029 vs 12.7029
+  control, 0.2867 vs 0.2867 flip). `nm` = 100, gate 0, 24 threads, cos-lat global means mm/a:
+
+  | iter 100 | control | flip |
+  |---|---|---|
+  | generation `g_p` | 28.28 | **357.79** |
+  | `e_d` applied | 15.25 (53.9 %) | **357.51 (99.92 %)** |
+  | `e_p` applied | 0.32 (1.1 %) | **0.0000 (0.00 %)** |
+  | **ground** | **12.70** | **0.287** |
+
+  **THE FLIP GENERATES 12.7x MORE CONVECTIVE PRECIPITATION THAN THE CONTROL AND THE DOWNDRAFT
+  EVAPORATES 99.92 % OF IT.** `P_conv` = 0.287 is not a generation failure — convection fires and
+  makes more rain than the shipped model does. `e_p`, sub-cloud evaporation, removes **0.00 %**.
+  The drier sub-cloud air is real (RH 0.719 against 0.933) and it acts through the WRONG TERM:
+  `e_d` is not a sub-cloud process, it runs at every level from the LFS down, and in BOTH arms
+  the flux leaving cloud base already equals the flux at the ground. **All of the loss is
+  in-cloud.**
+
+  **AND THE TWO EVAPORATION TERMS ARE NOT WEIGHTED THE SAME WAY** — code-level, not yet measured.
+  `e_p` carries the convective area fraction `sigma_p` (~0.045 here) and `e_d` carries nothing, so
+  the same water is ~22x more evaporable by the downdraft term than by the sub-cloud one purely
+  from a missing area weight; `e_d` has no dependence on `M_d` either, so a downdraft that does
+  not exist still evaporates. The test is one knob.
+
+  **RAW SUMS OF `e_d` AND `e_p` ARE NOT A BUDGET.** They are a DEMAND that the `max(0, ...)`
+  truncates at every level: summed raw they read 45 000 % of generation with a compensating
+  negative clamp, which says only that the demand is large. The unmet remainder is reported
+  separately (753x generation under the flip, 2747x in the control).
+
   *The two figures per point are the two PARITIES*: `printDataAtm` runs every iteration while
   `moist_stride` = 2 runs the ice scheme every other one, so precipitation carries a 2dt
   sawtooth -- **x1.22 in the control, x2.5 under the flip**. Quote both or neither, and do not
