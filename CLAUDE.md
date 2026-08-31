@@ -586,6 +586,32 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   longitudinally patchy cirrus**, and real tropical cirrus is convective and patchy in longitude.
   No prescribed profile can fix that.
 
+  **THE `ATM_RH_MIN_PTOP` SWEEP, AND IT SEPARATES THE TWO PHASES CLEANLY** (lat floor 0.65,
+  unsplit threshold, `nm` = 100, 24 threads):
+
+  | `PTOP` hPa | LWP | IWP | LW forc | OLR all | Precip | 15-35 deg cover |
+  |---|---|---|---|---|---|---|
+  | 400 | **82.2** | 14.85 | 28.97 | 234.4 | 779 | **13.0 %** |
+  | 450 | 94.7 | 18.48 | 29.83 | 233.5 | **897** | **15.6 %** |
+  | 500 | 113.5 | **21.20** | 30.44 | 233.0 | **1061** | 18.2 % |
+  | 550 | 135.2 | 22.02 | 30.74 | 232.7 | 1282 | 18.2 % |
+  | unconfined | 208.0 | 22.08 | 30.90 | 232.4 | 1558 | 18.2 % |
+  | *Earth* | *50-80* | *20-30* | *~25* | *~240* | *978* | *~15 %* |
+
+  **THE ICE SATURATES BY 500 hPa AND THE LIQUID NEVER DOES.** IWP runs 14.9 -> 18.5 -> 21.2 ->
+  22.0 -> 22.1 and the LW forcing 29.0 -> 29.8 -> 30.4 -> 30.7 -> 30.9, both flat from 500
+  downward; LWP runs 82 -> 95 -> 113 -> 135 -> **208** and precipitation 779 -> 897 -> 1061 ->
+  1282 -> **1558**, both still climbing at the end. **So the cirrus lives above ~500 hPa and
+  everything the floor adds below that is liquid** -- which is exactly what the knob was written
+  to separate, and it is the evidence that it does. Extending the floor below 500 hPa buys no
+  ice and no radiation, only rain.
+
+  **PRECIPITATION BRACKETS NASA BETWEEN 450 AND 500** (897 and 1061 against 978), so the
+  precipitation-optimal point is `PTOP` ~ 475, where LWP would be ~104 and IWP ~20. **The
+  residual is the LIQUID**: even at `PTOP` = 400, where the ice is starved to 14.9, LWP is 82
+  against a 50-80 band and the LW forcing 29.0 against ~25. No value of this knob removes that,
+  and it is consistent with the tropics still being 100 % covered.
+
   **THE BEST CONFIGURATION FOUND (2026-08-31), AND WHAT IT IS WORTH:** `ATM_RH_PROFILE=1
   ATM_RH_CRIT=0.30 ATM_CLOUD_FRAC=1 ATM_CWP_CAP=off ATM_CLOUD_RAD_FRAC=1 ATM_QC_CRIT=0.05
   ATM_ICE_COLD=1 ATM_T_FLOOR=216.65 ATM_RH_MIN_LAT=1 ATM_RH_MIN=0.65 ATM_RH_MIN_PTOP=500`
