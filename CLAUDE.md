@@ -194,6 +194,37 @@ projection calls the solver 200 times, so one knob would make "10 sweeps in the 
 mean 2000 relaxations at startup, and any comparison would differ in its INITIAL STATE as well
 as in the quantity under test. ATHAD lost an attribution exactly that way.
 
+## The ice scheme is ThreeCat since 2026-08-31, and its record was stale
+
+`CategoryIceScheme` = **3** in `param.py` and in all four tracked configs (was 2). The user had
+asked for this some days earlier and it had not been carried out; `param.py` still had the
+ThreeCat line commented out above a live TwoCat line.
+
+**"ThreeCat is BROKEN (NaN)" IS STALE.** Run from the accepted configuration's own iteration-600
+checkpoint, 600 -> 700 at 24 threads: exit 0, **zero NaN**, `max|w|` **17.97 m/s** against the
++-100 clamp, 10 min 27 s. `TwoCatIceScheme.h:189` still carries a comment citing "the ThreeCat
+NaN blow-up" as the reason for a floor it added; whatever that was, it does not reproduce here.
+
+**IT OVER-PRODUCES BY 3.8x AND THE EXCESS IS ALMOST ENTIRELY SNOW**, from the same checkpoint at
+iteration 700:
+
+| | TwoCat | ThreeCat | NASA |
+|---|---|---|---|
+| **Precipitation** | ~1200 | **3749 mm/a** | **978** |
+| P_rain | 738 | 1056 | |
+| **P_snow** | **0.29** | **2470** | |
+| P_graupel | 0 | 464 | |
+| P_conv | 0.23 | 0.049 | |
+| max cell, all species | 1.8e+04 | **9.46e+04 mm/a** (259 mm/d) | |
+
+**So the flip is a 3.8x regression on the model's headline output and it was made deliberately,
+at the user's instruction, with this measurement in front of it.** The snow is the whole story:
+2470 against 0.29 mm/a. `P_graupel` alone (464-920 mm/a depending on the print parity) is half
+of NASA's total precipitation. Every species pegs the same 9.46e+04 mm/a per-cell ceiling, so a
+cap is binding somewhere in all three.
+**`CategoryIceScheme` = 2 in the config restores TwoCat exactly**, and every measurement in this
+file dated on or before 2026-08-31 was taken on TwoCat.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
