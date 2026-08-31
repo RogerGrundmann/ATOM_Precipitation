@@ -1124,11 +1124,79 @@ void cAtmosphereModel::initWaterWapour() {
                     const char* e = getenv("ATM_RH_MIN");
                     const double v = e ? atof(e) : 0.0;
                     return (v > 0.0 && v < 1.0) ? v : 0.0; }();
+
+                // ATM_RH_MIN_LAT=1 -- give the floor the observed LATITUDE structure instead of
+                // applying one number everywhere. Default 0 = the flat floor, bit-identical.
+                //
+                // WHY A FLAT FLOOR CANNOT WORK, MEASURED. It lifts every column to the same RH
+                // aloft, so every column sits the same distance above H_crit and every column
+                // makes the same cirrus: high-cloud cover comes out at 96.8 / 97.9 / 100.0 % over
+                // the ATM_RH_CRIT_ICE sweep, against Earth's ~20-25 %. The model then reaches the
+                // right TOTAL ice (IWP 21.4, observed 20-30) by spreading a thin cirrus over the
+                // whole globe, and a global thin cirrus forces about twice what a patchy one does
+                // -- 51.2 W/m2 against ~25. **This is the shipped model's "cloud in 99 % of
+                // columns" pathology reproduced one layer up**: there it came from a constant-RH
+                // column, here from a constant-RH FLOOR. A uniform field cannot make patchy cloud.
+                //
+                // The real structure is the overturning circulation: upper-tropospheric humidity
+                // is high where air RISES (the ITCZ, and the mid-latitude storm track) and low
+                // where it DESCENDS (the subtropical highs, the Hadley descending branch). The
+                // annual-mean 300 hPa RH over ice runs ~0.60 at the equator, ~0.27 near 25 deg,
+                // ~0.42 near 55 deg. ATM_RH_MIN sets the TROPICAL value and the other two follow
+                // it at the observed RATIOS 1 : 0.45 : 0.70, so the knob keeps one meaning and no
+                // second amplitude is introduced.
+                //
+                // This is a SCAFFOLD, not the physics. The humidity aloft should be carried there
+                // by the model's own circulation; prescribing its latitude structure puts the
+                // answer in by hand, and the tell is that these Gaussians know nothing about
+                // where THIS model's ITCZ actually is. Read any cloud-cover agreement it buys as
+                // assumed, not predicted.
+                static const bool rh_min_lat = [](){
+                    const char* e = getenv("ATM_RH_MIN_LAT"); return e && atoi(e) != 0; }();
+                double rh_floor = rh_min;
+                if (rh_min_lat && rh_min > 0.0) {
+                    const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
+                    constexpr double phi_itcz = 12.0, w_itcz = 14.0;   // ITCZ centre / width [deg]
+                    constexpr double phi_storm = 55.0, w_storm = 15.0; // storm track centre/width
+                    constexpr double r_sub = 0.45, r_mid = 0.70;       // observed ratios to tropics
+                    const double a = (phi_deg - 0.0) / w_itcz;
+                    const double b = (phi_deg - phi_storm) / w_storm;
+                    const double trop  = std::exp(-a * a);
+                    const double storm = std::exp(-b * b);
+                    // subtropical floor, plus a tropical bump, plus a storm-track bump
+                    rh_floor = rh_min * (r_sub
+                                         + (1.0   - r_sub) * trop
+                                         + (r_mid - r_sub) * storm);
+                    (void)phi_itcz;                                    // centre is the equator
+                }
+                // ATM_RH_MIN_PTOP=<hPa> -- confine the floor to the UPPER troposphere, ramped
+                // in over the 200 hPa below it. Default 0 = unconfined, bit-identical.
+                //
+                // ATM_RH_MIN is meant to be an upper-tropospheric humidity, and unconfined it is
+                // not one: Manabe-Wetherald gives RH = 0.665 at 900 hPa and 0.589 at 800, so a
+                // floor of 0.65 BINDS FROM 800 hPa UPWARD -- through the entire free troposphere,
+                // including the liquid deck it was never meant to touch. Measured, with the
+                // latitude floor at a tropical 0.65: the cover structure comes out right
+                // (subtropics 18.2 % against Earth's ~15 %, mid-latitudes 45.7 % against ~35 %,
+                // global 46.4 % from 97.9 %) and the LW forcing falls 51.2 -> 30.9, but LWP goes
+                // to 208 against a 50-80 band and precipitation to 1558 against NASA's 978.
+                // Confining the floor separates the two: the cirrus levels keep it, the liquid
+                // deck goes back to Manabe-Wetherald.
+                static const double rh_min_ptop = [](){
+                    const char* e = getenv("ATM_RH_MIN_PTOP");
+                    const double v = e ? atof(e) : 0.0;
+                    return (v > 0.0) ? v : 0.0; }();
+                if (rh_min_ptop > 0.0) {
+                    const double p_lo = rh_min_ptop + 200.0;          // no floor below this
+                    double u = (p_lo - p_u) / (p_lo - rh_min_ptop);
+                    if (u < 0.0) u = 0.0; else if (u > 1.0) u = 1.0;
+                    rh_floor *= u;
+                }
                 double rh_i = RH_init;
                 if (rh_profile) {
                     const double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
-                    if (rh_i < rh_min) rh_i = rh_min;
+                    if (rh_i < rh_floor) rh_i = rh_floor;
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes

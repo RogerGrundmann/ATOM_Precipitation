@@ -552,6 +552,52 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   is not a knob; until then read `ATM_RH_MIN` as a scaffold and do not tune the LW forcing
   against it.
 
+  **A LATITUDE-DEPENDENT FLOOR, CONFINED TO THE UPPER TROPOSPHERE, AND THE MODEL NOW MAKES
+  NASA-MATCHING RAIN FROM A PHYSICALLY SIZED CLOUD** (`ATM_RH_MIN_LAT`, `ATM_RH_MIN_PTOP`, both
+  new and default off, each verified byte-identical over 20 files at 1 thread). `ATM_RH_MIN` sets
+  the TROPICAL value; the subtropics and storm track follow at the observed ratios 1 : 0.45 :
+  0.70 (annual-mean 300 hPa RH over ice ~0.60 / 0.27 / 0.42), via Gaussians at the equator and
+  55 deg. `ATM_RH_MIN_PTOP=<hPa>` ramps the floor in over the 200 hPa below it.
+
+  | arm | LWP | IWP | LW forc | OLR all | Precip | 0-15 | 15-35 | 35-65 | 65-90 | global |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | flat 0.40, ICE 0.15 | 95.5 | 21.4 | 51.2 | 212 | 931 | 100 % | 100 % | 100 % | 79 % | 97.9 % |
+  | lat 0.65, unconfined | 208.0 | 22.1 | 30.9 | 232 | 1558 | 100 % | 18.2 % | 45.7 % | 0 % | 46.4 % |
+  | lat 0.65, ICE 0.25 | 216.5 | 28.3 | 37.1 | 226 | 1549 | 100 % | 38.5 % | 82.8 % | 18.4 % | 66.7 % |
+  | lat 0.65, PTOP 400 | **82.2** | 14.9 | **29.0** | **234** | 779 | 100 % | **13.0 %** | 45.7 % | 0 % | 44.8 % |
+  | **lat 0.65, PTOP 500** | 113.5 | **21.2** | **30.4** | **233** | **1061** | 100 % | **18.2 %** | 45.7 % | 0 % | 46.4 % |
+  | *Earth* | *50-80* | *20-30* | *~25* | *~240* | *978* | *~40 %* | *~15 %* | *~35 %* | *~30 %* | *~20-25 %* |
+
+  **THREE SEPARATE LESSONS, IN ORDER.**
+  (1) **A FLAT FLOOR PAIRED WITH A LOW ICE THRESHOLD CANNOT MAKE PATCHY CLOUD**, and neither can
+  the latitude structure on its own: with `ATM_RH_CRIT_ICE` = 0.15 the threshold sits BELOW every
+  latitude's floor, so cover stays 93-98 % however the floor is shaped. The two knobs have to be
+  set so the SUBTROPICAL floor falls below `H_crit` and the tropical one well above it -- at the
+  unsplit 0.30 the subtropics land at 0.31 and go essentially clear.
+  (2) **THE FLOOR WAS NOT AN UPPER-TROPOSPHERIC FLOOR.** Manabe-Wetherald gives RH 0.665 at
+  900 hPa and 0.589 at 800, so an unconfined 0.65 BINDS FROM 800 hPa UP -- through the liquid
+  deck it was never meant to touch. That is the whole of LWP 208 and precipitation 1558.
+  Confining it takes LWP 208 -> 82 and precipitation 1558 -> 779 while KEEPING the cover
+  structure and the LW forcing.
+  (3) **THE COVER STRUCTURE IS NOW RIGHT WHERE THE CIRCULATION HAS STRUCTURE AND WRONG WHERE IT
+  DOES NOT.** Subtropics 18.2 % against ~15 % and mid-latitudes 45.7 % against ~35 % are good;
+  the tropics saturate at **100 % against ~40 %** and the poles are **0 % against ~30 %**. The
+  tropical failure is the same defect one axis over: **a zonally uniform floor cannot make
+  longitudinally patchy cirrus**, and real tropical cirrus is convective and patchy in longitude.
+  No prescribed profile can fix that.
+
+  **THE BEST CONFIGURATION FOUND (2026-08-31), AND WHAT IT IS WORTH:** `ATM_RH_PROFILE=1
+  ATM_RH_CRIT=0.30 ATM_CLOUD_FRAC=1 ATM_CWP_CAP=off ATM_CLOUD_RAD_FRAC=1 ATM_QC_CRIT=0.05
+  ATM_ICE_COLD=1 ATM_T_FLOOR=216.65 ATM_RH_MIN_LAT=1 ATM_RH_MIN=0.65 ATM_RH_MIN_PTOP=500`
+  gives **Precip 1061 mm/a against NASA's 978 (+8 %)**, IWP 21.2 in the observed 20-30 band, LWP
+  113 against 50-80, cloud LW forcing 30.4 against ~25, all-sky OLR 233 against ~240 and
+  clear-sky 263 against ~265. **The shipped model matches NASA too -- from a condensate 20x too
+  large, cloud in 98.9 % of columns, and a `cwp_cap_col` dividing the column by 79.** The
+  difference is that this one does it from a physically sized cloud field. **It is still not a
+  prediction**: `ATM_RH_MIN_LAT`'s Gaussians know nothing about where THIS model's ITCZ is, so
+  the cover agreement is assumed. Read the whole set as a scaffold that makes the microphysics
+  testable, not as a tuned climate.
+
   **AND LOWERING THE FLOOR EXPOSED A NaN IN THE SHIPPED RADIATION.** `MultiLayerRadiation.h`
   inverts `sigma T^4` as `pow(rad/sigma, 0.25)` **unguarded**, while the identical expression 75
   lines earlier carries `max(1.0, ...)`. The Thomas back-substitution returns a NEGATIVE emission
