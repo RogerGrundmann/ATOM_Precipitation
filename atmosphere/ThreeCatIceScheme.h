@@ -49,6 +49,19 @@ namespace ThreeCatIce {
     // WARM-SIDE SHEDDING (S_s_shed) KEEPS THE FULL c_rim, exactly as in TwoCat, and so does the
     // GRAUPEL riming S_g_rim -- TwoCat has no graupel, so the port has nothing to say about it.
     constexpr double c_rim_snow = 18.6 / 5.0;                           // m2/kg (reduced snow riming)
+    // Reduced GRAUPEL-side riming, the same treatment applied to S_g_rim. The snow port left
+    // graupel at 919 mm/a -- 94 % of NASA's entire precipitation from one species -- because
+    // TwoCat has no graupel and `c4d1bd1` therefore says nothing about it. The mechanism is the
+    // same one: an un-reduced riming term monopolises the proportional cloud-water limiter and
+    // starves the autoconversion->rain pathway, so the same factor of 5 applies.
+    //
+    // AND NOTE WHICH CONSTANT THE COLD SIDE WAS USING. `c_g_rim` = 4.43 exists, is named for
+    // graupel riming, and is used ONLY by the warm-side shedding S_g_shed; the cold-side
+    // S_g_rim reached for the SNOW constant c_rim = 18.6, 4.2x larger. That looks like a
+    // wrong-constant bug independent of this port and it is NOT fixed here -- fixing both at
+    // once would confound a 5x reduction with a 4.2x one, and this reduction is the one that
+    // was asked for. If graupel is still too large after this, `c_g_rim/5` is the next arm.
+    constexpr double c_rim_graupel = 18.6 / 5.0;                        // m2/kg (reduced graupel riming)
     constexpr double c_agg = 10.3;                                      // m2/kg
     constexpr double c_i_cri = 0.24;                                    // m2
     constexpr double c_r_cri = 3.2e-5;                                  // m2
@@ -280,7 +293,7 @@ private:
                         double S_s_rim, S_g_rim, S_s_shed, S_g_shed;
                         if(t_u < m.t_0){
                             S_s_rim  = c_rim_snow * cl_i * Snow;   // reduced riming (see c_rim_snow)
-                            S_g_rim  = c_rim * cl_i * rh_rqg_95;
+                            S_g_rim  = c_rim_graupel * cl_i * rh_rqg_95;  // reduced riming
                             S_s_shed = 0.0;
                             S_g_shed = 0.0;
                         }else{

@@ -234,9 +234,29 @@ iterations from the same checkpoint:
 | P_graupel | 921 | 919 (untouched) | |
 | **total** | **4862** | **3084** (-37 %) | **978** |
 
-**STILL 3.2x NASA, AND THE REMAINDER IS NOW EVENLY SPLIT THREE WAYS** — rain 1118, snow 1047,
-graupel 919. **Graupel is what the port cannot reach**: TwoCat has no graupel, so `c4d1bd1` says
-nothing about `S_g_rim`, and 919 mm/a of graupel alone is 94 % of NASA's entire precipitation.
+**AND THE SAME TREATMENT APPLIED TO THE GRAUPEL RIMING** (`S_g_rim`, which TwoCat has no
+equivalent of), six iterations from the same checkpoint:
+
+| mm/a | before any port | + snow port | **+ graupel port** | NASA |
+|---|---|---|---|---|
+| P_rain | 1190 | 1118 | **1118** | |
+| P_snow | 2751 | 1047 | **1047** | |
+| P_graupel | 921 | 919 | **578** (-37 %) | |
+| **total** | **4862** | **3084** | **2743** | **978** |
+
+Rain and snow are unchanged to four figures, so the term is cleanly separated. Graupel falls
+only 37 % rather than 80 % because riming is one of several graupel sources — `S_g_agg`,
+`S_g_shed` and deposition are untouched.
+
+**STILL 2.8x NASA, AND THE SNOW FRACTION IS THE NEXT THING.** Rain 1118, snow 1047, graupel 578:
+snow is **38 % of the total** against Earth's 5-10 %, where the same fix took TwoCat to 16 %. So
+the port helped and did not finish the job in ThreeCat.
+
+**AND THE COLD-SIDE GRAUPEL RIMING WAS USING THE SNOW CONSTANT.** `c_g_rim` = 4.43 exists, is
+named for graupel riming, and is used ONLY by the warm-side shedding `S_g_shed`; the cold-side
+`S_g_rim` reached for `c_rim` = 18.6, **4.2x larger**. That looks like a wrong-constant bug
+independent of the port, and it is deliberately NOT fixed in the same change — doing both at
+once would confound a 5x reduction with a 4.2x one. `c_g_rim/5` is the next arm.
 
 **AND ONE MORE GAP, NOT CLOSED: `ThreeCatIceScheme`'s AUTOCONVERSION IS STILL GRID-MEAN.** It
 reads `S_c_au = c_c_au*(q_c - 0.0002)` — a hardcoded 0.2 g/kg threshold on the GRID MEAN, where
