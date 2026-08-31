@@ -517,6 +517,41 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   rate (LWP 74.7 -> 98.9 -> 263.6 as IWP goes 5.0 -> 13.5 -> 45.3). A separate upper-level
   critical humidity is the obvious next knob, and it is NOT written.
 
+  **THE THRESHOLD SPLIT WORKS, IWP AND PRECIPITATION BOTH LAND, AND IT EXPOSES A NEW DEFECT:
+  THE CIRRUS COVERS THE WHOLE GLOBE** (`ATM_RH_CRIT_ICE`, new, default 0 = disabled and verified
+  byte-identical over 20 files at 1 thread; `608b3be`). Ramps `H_crit` from `critMid()` at
+  550 hPa to `critIce()` at 300 hPa, flat above. All four earlier fixes on, `ATM_RH_MIN` = 0.40:
+
+  | `ATM_RH_CRIT_ICE` | LWP | IWP | >7 km | high-cloud cover | LW forc | OLR all-sky | Precip |
+  |---|---|---|---|---|---|---|---|
+  | none (0.30) | 74.65 | 4.98 | 5.09 | 58.3 % | 20.48 | 242.7 | 579 |
+  | 0.20 | 86.84 | 14.92 | 20.79 | 96.8 % | 42.51 | 220.7 | 738 |
+  | **0.15** | 95.47 | **21.39** | 31.89 | 97.9 % | 51.17 | 212.1 | **931** |
+  | 0.10 | 105.33 | **29.57** | 45.39 | 100.0 % | 58.61 | 204.8 | 1197 |
+  | *Earth* | *50-80* | *20-30* | | *~20-25 %* | *~25* | *~240* | *978* |
+
+  **THE DECOUPLING IS REAL.** RH aloft is 40.6 / 43.3 % at EVERY point -- the knob moves the
+  threshold and not the humidity, by construction -- and ice is now much cheaper in liquid: the
+  `ATM_RH_MIN` route needed LWP 98.9 to reach IWP 13.5, this reaches IWP 14.9 at LWP 86.8 and
+  IWP 21.4 at 95.5. **IWP lands in the observed 20-30 band for the first time, and
+  precipitation reaches 931 mm/a against NASA's 978 -- 95 %, from 59 % this morning.**
+
+  **AND THE LW FORCING IS STILL 2x TOO LARGE AT THE RIGHT IWP, WHICH IS A NEW AND CLEANLY
+  ISOLATED DEFECT.** 51.2 W/m2 at IWP 21.4 against Earth's ~25 at IWP 20-30. It is NOT the
+  optical constants -- `k_liq` = 0.12 and `k_ice` = 0.055 m2/g are already phase-differentiated
+  after Stephens (1978). **It is the COVER: the cirrus sits in 97.9 % of columns against Earth's
+  ~20-25 %.** The model reaches the right total ice by spreading a thin cirrus over the entire
+  globe, and a global thin cirrus forces about twice what a patchy realistic one does.
+
+  **AND THE CAUSE IS THE REPAIR ITSELF, NOT SOMETHING IT UNCOVERED.** `ATM_RH_MIN` is a UNIFORM
+  floor: every column is lifted to the same RH aloft, so every column sits the same distance
+  above `H_crit` and every column makes the same cirrus. **This is the original "cloud in 99 % of
+  columns" pathology reproduced one layer up** -- the shipped model got it from a constant-RH
+  column, and this gets it from a constant-RH FLOOR. A flat floor cannot produce patchy cloud.
+  The real fix is upper-level humidity carried by the circulation rather than prescribed, which
+  is not a knob; until then read `ATM_RH_MIN` as a scaffold and do not tune the LW forcing
+  against it.
+
   **AND LOWERING THE FLOOR EXPOSED A NaN IN THE SHIPPED RADIATION.** `MultiLayerRadiation.h`
   inverts `sigma T^4` as `pow(rad/sigma, 0.25)` **unguarded**, while the identical expression 75
   lines earlier carries `max(1.0, ...)`. The Thomas back-substitution returns a NEGATIVE emission
