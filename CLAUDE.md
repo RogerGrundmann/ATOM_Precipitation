@@ -592,7 +592,8 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   | `PTOP` hPa | LWP | IWP | LW forc | OLR all | Precip | 15-35 deg cover |
   |---|---|---|---|---|---|---|
   | 400 | **82.2** | 14.85 | 28.97 | 234.4 | 779 | **13.0 %** |
-  | 450 | 94.7 | 18.48 | 29.83 | 233.5 | **897** | **15.6 %** |
+  | 450 | 94.7 | 18.48 | 29.83 | 233.5 | 897 | **15.6 %** |
+  | **475** | 103.0 | **20.09** | 30.17 | 233.2 | **992** | 18.2 % |
   | 500 | 113.5 | **21.20** | 30.44 | 233.0 | **1061** | 18.2 % |
   | 550 | 135.2 | 22.02 | 30.74 | 232.7 | 1282 | 18.2 % |
   | unconfined | 208.0 | 22.08 | 30.90 | 232.4 | 1558 | 18.2 % |
@@ -606,18 +607,24 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   to separate, and it is the evidence that it does. Extending the floor below 500 hPa buys no
   ice and no radiation, only rain.
 
-  **PRECIPITATION BRACKETS NASA BETWEEN 450 AND 500** (897 and 1061 against 978), so the
-  precipitation-optimal point is `PTOP` ~ 475, where LWP would be ~104 and IWP ~20. **The
+  **`PTOP` = 475 IS THE PRECIPITATION-OPTIMAL POINT AND IT WAS PREDICTED BEFORE IT WAS RUN.**
+  Interpolating 897 (450) and 1061 (500) put NASA's 978 at ~475 with LWP ~104 and IWP ~20;
+  measured, it gives **Precip 992.2 mm/a (+1.5 % on NASA), IWP 20.09 (inside the observed
+  20-30), LWP 103.0**. That is the first time a value in this chain has been predicted from the
+  curve and then confirmed, which is the difference between a sweep and a calibration. **The
   residual is the LIQUID**: even at `PTOP` = 400, where the ice is starved to 14.9, LWP is 82
   against a 50-80 band and the LW forcing 29.0 against ~25. No value of this knob removes that,
   and it is consistent with the tropics still being 100 % covered.
 
   **THE BEST CONFIGURATION FOUND (2026-08-31), AND WHAT IT IS WORTH:** `ATM_RH_PROFILE=1
   ATM_RH_CRIT=0.30 ATM_CLOUD_FRAC=1 ATM_CWP_CAP=off ATM_CLOUD_RAD_FRAC=1 ATM_QC_CRIT=0.05
-  ATM_ICE_COLD=1 ATM_T_FLOOR=216.65 ATM_RH_MIN_LAT=1 ATM_RH_MIN=0.65 ATM_RH_MIN_PTOP=500`
-  gives **Precip 1061 mm/a against NASA's 978 (+8 %)**, IWP 21.2 in the observed 20-30 band, LWP
-  113 against 50-80, cloud LW forcing 30.4 against ~25, all-sky OLR 233 against ~240 and
-  clear-sky 263 against ~265. **The shipped model matches NASA too -- from a condensate 20x too
+  ATM_ICE_COLD=1 ATM_T_FLOOR=216.65 ATM_RH_MIN_LAT=1 ATM_RH_MIN=0.65 ATM_RH_MIN_PTOP=475`
+  gives **Precip 992 mm/a against NASA's 978 (+1.5 %)**, IWP 20.1 in the observed 20-30 band, LWP
+  103 against 50-80, cloud LW forcing 30.2 against ~25, all-sky OLR 233 against ~240 and
+  clear-sky 263 against ~265. **Every remaining bias has the same sign and about the same size**
+  -- LWP +29 %, LW forcing +21 %, precipitable water +21 % (30.3 mm against ~25), all-sky OLR
+  -3 % -- which is one excess of low liquid cloud and vapour, not four independent errors, and it
+  traces to the tropics still being 100 % covered. **The shipped model matches NASA too -- from a condensate 20x too
   large, cloud in 98.9 % of columns, and a `cwp_cap_col` dividing the column by 79.** The
   difference is that this one does it from a physically sized cloud field. **It is still not a
   prediction**: `ATM_RH_MIN_LAT`'s Gaussians know nothing about where THIS model's ITCZ is, so
