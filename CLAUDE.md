@@ -439,6 +439,67 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   forcing lands at 25.35 W/m2 against Earth's ~25 — bought, not earned**, since `cwp_cap_col`
   then divides the whole column by ~79.
 
+  **WHY NO CIRRUS FORMS ALOFT: FOUR BARRIERS, EACH HIDING THE NEXT, AND THE FIRST IS A DEAD
+  STORE** (2026-08-31, `dd35c76`. New knobs `ATM_ICE_COLD`, `ATM_T_FLOOR`, `ATM_RH_MIN`, all
+  default = shipped; `CloudFraction::hCrit` flattened; one unguarded fourth root in MLR. Shipped
+  branch byte-identical at 1 thread, 20 of 20 files, after every step.)
+
+  1. **THE ATMOSPHERE COULD NOT BE COLDER THAN -37 C.** `initTemperatureData` computed a soft
+     asymptotic bound and **overwrote it on the next line** with `t = max(t_00, t_curr)`, so the
+     comment promising the asymptote described code that never ran. **22.2 % of the initial air
+     column sat at EXACTLY 236.15 K** -- every level from 2987 m up in some columns, 100 % of the
+     lid -- and `t_top_init` snapshots the clamped lid so `BC_Atm` re-imposes it every iteration.
+     At iteration 100 the coldest cell in the whole atmosphere was still exactly **-37.0000 C in
+     every arm**. `t_00` is a PHASE-TRANSITION constant; the physical bound is a tropopause
+     temperature (`ATM_T_FLOOR=216.65`).
+  2. **ICE WAS DELETED BELOW -37 C IN FIVE PLACES**, one of which also deleted the water vapour
+     (`InitValues_Atm.cpp`, `SaturationAdjustment` x3, `UtilsAtm.h`). Cirrus lives at -40 to
+     -70 C. Below `t_00` liquid must FREEZE, not vanish; deposition must continue; vapour is not
+     a condensate. `ATM_ICE_COLD` fixes all five.
+  3. **`H_crit` TURNED BACK UP ABOVE 550 hPa** -- roots at p = 0 AND p = 1000, so 0.50 at 10.9 km
+     and 0.68 at the lid, climbing exactly where RH falls. Flattened above the minimum.
+  4. **AND THE BINDING CONSTRAINT WAS THE PRESCRIBED HUMIDITY, WHICH THE TEMPERATURE CANNOT
+     REACH.** Manabe-Wetherald is linear in sigma and drives RH to ZERO at p -> 0: **0.16 at
+     10.9 km against an observed 0.4-0.7 over ice.** Cooling cannot fix it -- the initial vapour
+     is `c = RH*q_sat`, so `ATM_T_FLOOR` took 10.9 km from -34.1 C to -42.4 C and moved RH there
+     **26.6 % -> 27.1 %**. `ATM_RH_MIN` floors the profile.
+
+  **EACH OF 1-3 IS A NULL ALONE, BECAUSE EACH IS HIDDEN BY THE ONE BEFORE.** The ice cutoff
+  cannot bite when the temperature floor is the SAME CONSTANT; the threshold cannot bite when the
+  humidity is prescribed below it. `nm` = 100, gate 0, 24 threads, 87E section:
+
+  | arm | LWP | IWP | >7 km | LW forcing | Precip |
+  |---|---|---|---|---|---|
+  | flip base | 67.98 | 1.15 | 0.035 | 9.02 | 577 |
+  | + `H_crit` flat | 67.41 | 1.08 | 0.024 | 8.94 | 586 |
+  | + `ATM_ICE_COLD` | 67.86 | 1.28 | 0.026 | 8.91 | 587 |
+  | + `ATM_T_FLOOR` | 67.70 | 1.29 | 0.026 | 9.02 | 583 |
+  | + `ATM_RH_MIN` 0.35 | 68.26 | 1.62 | 0.463 | 11.02 | 571 |
+  | **+ `ATM_RH_MIN` 0.45** | **98.92** | **13.54** | **15.701** | **35.92** | **836** |
+  | *Earth* | *50-80* | *20-30* | | *~25* | *978* |
+
+  **ALL FOUR TOGETHER GIVE THIS MODEL CIRRUS FOR THE FIRST TIME**: `q_i` at 10.9 km 0.00000 ->
+  **0.00280 g/kg**, condensate above 7 km 0.026 -> **15.70 g/m2**, IWP 1.29 -> **13.54** against
+  an observed 20-30, precipitation 583 -> **836 mm/a** against NASA's 978. **0.45 IS PAST THE
+  MARK AND IS NOT A CALIBRATION**: the LW forcing overshoots (35.9 against ~25) and the LWP
+  leaves its band (98.9 against 50-80). Observed upper-tropospheric RH over ice is 0.4-0.7 and
+  the answer is inside that range; do not fit it to the forcing.
+
+  **AND LOWERING THE FLOOR EXPOSED A NaN IN THE SHIPPED RADIATION.** `MultiLayerRadiation.h`
+  inverts `sigma T^4` as `pow(rad/sigma, 0.25)` **unguarded**, while the identical expression 75
+  lines earlier carries `max(1.0, ...)`. The Thomas back-substitution returns a NEGATIVE emission
+  on a cold, optically thin column, so the model NaNs at initialisation inside
+  `apply_co2_perturbation`, before the time loop. Latent on the shipped branch **only because the
+  temperature was clamped at -37 C**. Guarded. This is item 3 again: the solver is not
+  energy-closed, so nothing prevents a negative emission.
+
+  **THE TEMPERATURE IS ALSO NOT REACHABLE BY THE RADIATION KNOBS AT THIS `nm`.** `ATM_RAD_EQUIL=1
+  ATM_SW_INSOL=1361` as a full-model arm moved the cloud LW forcing 8.94 -> 49.5 W/m2 and left
+  the profile **unchanged** (-28.0 vs -28.1 C at 9 km): MLR reaches `t` only through `t_eq` on a
+  `teq_refresh_stride` = 20 cadence, and 100 iterations is 20 seconds. The INITIAL profile is the
+  only lever on this timescale -- which is what makes `ATM_T_FLOOR` the temperature fix and not
+  `ATM_RAD_EQUIL`.
+
   **RAW SUMS OF `e_d` AND `e_p` ARE NOT A BUDGET.** They are a DEMAND that the `max(0, ...)`
   truncates at every level: summed raw they read 45 000 % of generation with a compensating
   negative clamp, which says only that the demand is large. The unmet remainder is reported
