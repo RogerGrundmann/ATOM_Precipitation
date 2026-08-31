@@ -485,6 +485,38 @@ as in the quantity under test. ATHAD lost an attribution exactly that way.
   leaves its band (98.9 against 50-80). Observed upper-tropospheric RH over ice is 0.4-0.7 and
   the answer is inside that range; do not fit it to the forcing.
 
+  **THE `ATM_RH_MIN` SWEEP, AND IT BRACKETS AT 0.40-0.45** (2026-08-31, `nm` = 100, gate 0,
+  24 threads, all four fixes on, 87E section; `ATM_RH_CRIT` = 0.30 throughout):
+
+  | `ATM_RH_MIN` | LWP | IWP | >7 km | RH 7.4 km | RH 10.9 km | LW forc | OLR clear | OLR all-sky | Precip |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 0 (unfloored) | 67.70 | 1.29 | 0.026 | 32.0 % | 27.1 % | 9.02 | 263.71 | 254.70 | 583 |
+  | 0.35 | 68.26 | 1.62 | 0.463 | 35.5 % | 37.2 % | 11.02 | 263.39 | 252.37 | 571 |
+  | **0.40** | **74.65** | **4.98** | **5.086** | **40.2 %** | **42.6 %** | **20.48** | **263.21** | **242.73** | **579** |
+  | 0.45 | 98.92 | 13.54 | 15.701 | 45.6 % | 48.5 % | 35.92 | 263.03 | 227.11 | 836 |
+  | **0.55** | **263.62** | **45.30** | **53.965** | 56.5 % | 60.3 % | **64.72** | 263.09 | **198.38** | **3908** |
+  | *Earth* | *50-80* | *20-30* | | *40-70 %* | *40-70 %* | *~25* | *~265* | *~240* | *978* |
+
+  **0.40 IS THE BEST SINGLE POINT AND NOTHING IN THIS TREE HAS EVER PUT THIS MANY QUANTITIES ON
+  THEIR OBSERVED VALUES AT ONCE**: clear-sky OLR 263.2 against ~265, **all-sky OLR 242.7 against
+  ~240**, LWP 74.7 inside the 50-80 band, and RH 40 / 43 % inside the observed 40-70 %. The LW
+  forcing is 20.5 against ~25, low but the closest this model has been.
+
+  **AND THE RESPONSE IS VIOLENTLY SUPER-LINEAR, SO THE USABLE RANGE IS NARROW.** `q_c = f^2*D`
+  with `f = (RH - H_crit)/(2(1 - H_crit))` is QUADRATIC in the excess over `H_crit`, and the
+  precipitation then compounds it through accretion. IWP goes 1.6 -> 5.0 -> 13.5 -> **45.3** and
+  precipitation 571 -> 579 -> 836 -> **3908 mm/a, four times NASA**, for RH_MIN steps of 0.05.
+  **0.55 is not "a bit more": it is a different climate.** Do not extrapolate off the top of
+  this table.
+
+  **THE THREE TARGETS DISAGREE, AND THAT IS THE NEXT FINDING RATHER THAN A TUNING PROBLEM.**
+  Radiation wants 0.40; precipitation wants ~0.45-0.47 (836 at 0.45 against NASA's 978); IWP
+  wants higher still (13.5 at 0.45 against 20-30). No single value satisfies all three, and the
+  reason is structural: **`ATM_RH_CRIT` is ONE `H_crit` doing two jobs** -- setting the liquid
+  deck below 550 hPa and the cirrus above it -- so buying ice costs liquid at a fixed exchange
+  rate (LWP 74.7 -> 98.9 -> 263.6 as IWP goes 5.0 -> 13.5 -> 45.3). A separate upper-level
+  critical humidity is the obvious next knob, and it is NOT written.
+
   **AND LOWERING THE FLOOR EXPOSED A NaN IN THE SHIPPED RADIATION.** `MultiLayerRadiation.h`
   inverts `sigma T^4` as `pow(rad/sigma, 0.25)` **unguarded**, while the identical expression 75
   lines earlier carries `max(1.0, ...)`. The Thomas back-substitution returns a NEGATIVE emission
