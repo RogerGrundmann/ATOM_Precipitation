@@ -222,6 +222,30 @@ at the user's instruction, with this measurement in front of it.** The snow is t
 2470 against 0.29 mm/a. `P_graupel` alone (464-920 mm/a depending on the print parity) is half
 of NASA's total precipitation. Every species pegs the same 9.46e+04 mm/a per-cell ceiling, so a
 cap is binding somewhere in all three.
+**THE SNOW FIX IS NOW PORTED (2026-08-31), AND IT CUTS THE SNOW BY 62 %.** `c4d1bd1`'s two
+changes — `c_c_au` 4.0e-4 -> 1.0e-3 and the SNOW-side riming `c_rim` -> `c_rim/5` — applied to
+`ThreeCatIceScheme`. Warm-side shedding keeps the full `c_rim`, exactly as in TwoCat. Six
+iterations from the same checkpoint:
+
+| mm/a | before the port | ported | NASA |
+|---|---|---|---|
+| P_rain | 1190 | 1118 | |
+| **P_snow** | **2751** | **1047** (-62 %) | |
+| P_graupel | 921 | 919 (untouched) | |
+| **total** | **4862** | **3084** (-37 %) | **978** |
+
+**STILL 3.2x NASA, AND THE REMAINDER IS NOW EVENLY SPLIT THREE WAYS** — rain 1118, snow 1047,
+graupel 919. **Graupel is what the port cannot reach**: TwoCat has no graupel, so `c4d1bd1` says
+nothing about `S_g_rim`, and 919 mm/a of graupel alone is 94 % of NASA's entire precipitation.
+
+**AND ONE MORE GAP, NOT CLOSED: `ThreeCatIceScheme`'s AUTOCONVERSION IS STILL GRID-MEAN.** It
+reads `S_c_au = c_c_au*(q_c - 0.0002)` — a hardcoded 0.2 g/kg threshold on the GRID MEAN, where
+TwoCat/OneCat/ZeroCat were all made fraction-aware in `3ea78e3` and now use `ATM_QC_CRIT`
+(default 0.05 g/kg) against the IN-CLOUD value `q_c/f`. Under the now-default `ATM_CLOUD_FRAC`
+the grid-mean `q_c` peaks near 0.06 g/kg, so `q_c - 0.0002` is negative almost everywhere and
+ThreeCat's autoconversion is effectively OFF — its rain comes from accretion and melting. This
+is the fifth occurrence of the grid-mean defect and the one module that never got the fix.
+
 **`CategoryIceScheme` = 2 in the config restores TwoCat exactly**, and every measurement in this
 file dated on or before 2026-08-31 was taken on TwoCat.
 

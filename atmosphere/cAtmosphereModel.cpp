@@ -1188,6 +1188,51 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // does so BY CONSTRUCTION rather than by tuning. Any surface-physics knob measured in this
     // configuration is measuring the relaxation.
     //
+    // [RUN CONFIG] -- WHICH RUN IS THIS? Printed unconditionally at startup AND written to
+    // <output_path>/RUN_CONFIG.txt, so a log and an output DIRECTORY are both self-identifying.
+    //
+    // This tree now has an ice scheme selector and eleven cloud/ice environment knobs, and the
+    // arms differ only in those. Without this block a log or an output_*/ directory cannot be
+    // told apart from another at a glance -- the values live in a config file that may since
+    // have been edited and in environment variables that leave no trace at all. Every number in
+    // CLAUDE.md had to be labelled by hand with the arm it came from; this makes that automatic.
+    {
+        auto ev = [](const char* n, const char* dflt){
+            const char* e = getenv(n); return std::string(e ? e : dflt); };
+        static const char* scheme_name[] = {"ZeroCat (warm rain)", "OneCat", "TwoCat (rain+snow)",
+                                            "ThreeCat (rain+snow+graupel)"};
+        std::ostringstream b;
+        b << "      AGCM: [RUN CONFIG] ice scheme " << CategoryIceScheme << " = "
+          << ((CategoryIceScheme >= 0 && CategoryIceScheme <= 3)
+                 ? scheme_name[CategoryIceScheme] : "none")
+          << ";  nm = " << nm
+          << ";  restart_from_iter = " << restart_from_iter
+          << ";  moist_phys_start_iter = " << moist_phys_start_iter
+          << ";  radiation_mode = " << radiation_mode
+          << ";  output " << output_path << "\n";
+        b << "      AGCM: [RUN CONFIG] cloud/ice knobs (blank = default):"
+          << "  RH_PROFILE="   << ev("ATM_RH_PROFILE",   "1*")
+          << "  RH_CRIT="      << ev("ATM_RH_CRIT",      "0.30*")
+          << "  RH_MIN="       << ev("ATM_RH_MIN",       "0.65*")
+          << "  RH_MIN_LAT="   << ev("ATM_RH_MIN_LAT",   "1*")
+          << "  RH_MIN_PTOP="  << ev("ATM_RH_MIN_PTOP",  "475*")
+          << "  RH_CRIT_ICE="  << ev("ATM_RH_CRIT_ICE",  "off*") << "\n";
+        b << "      AGCM: [RUN CONFIG]"
+          << "  CLOUD_FRAC="   << ev("ATM_CLOUD_FRAC",   "1*")
+          << "  CLOUD_RAD_FRAC=" << ev("ATM_CLOUD_RAD_FRAC", "1*")
+          << "  CWP_CAP="      << ev("ATM_CWP_CAP",      "off*")
+          << "  QC_CRIT="      << ev("ATM_QC_CRIT",      "0.05*")
+          << "  ICE_COLD="     << ev("ATM_ICE_COLD",     "1*")
+          << "  T_FLOOR="      << ev("ATM_T_FLOOR",      "216.65*")
+          << "  RAD_TOPO="     << ev("ATM_RAD_TOPO",     "0*")
+          << "  RAD_EQUIL="    << ev("ATM_RAD_EQUIL",    "0*")
+          << "  SW_INSOL="     << ev("ATM_SW_INSOL",     "0*")
+          << "   (* = compiled-in default, not set in the environment)\n";
+        std::cout << b.str();
+        std::ofstream rc(output_path + "/RUN_CONFIG.txt");
+        if (rc) rc << b.str();
+    }
+
     // Printed unconditionally: it is information, it changes no field, and its absence is what
     // let a 20-second run be read as a spin-up.
     {

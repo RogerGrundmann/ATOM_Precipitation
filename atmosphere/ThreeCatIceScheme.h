@@ -29,10 +29,26 @@ namespace ThreeCatIce {
     constexpr double v_g_0 = 442.0;
 
     // microphysical rate coefficients
-    constexpr double c_c_au = 4.0e-4;                                  // 1/s COSMO
+    // Cloud->rain autoconversion rate. Raised from the COSMO 4.0e-4 to 1.0e-3 as the rain-side
+    // partner of the reduced snow riming (c_rim_snow) -- PORTED FROM TwoCatIceScheme (`c4d1bd1`,
+    // 2026-07-07), which ThreeCat never received: Zero/One/ThreeCat were frozen at the
+    // 2026-04-14 initial commit and only TwoCat carries the tuning. Reducing riming frees cloud
+    // water that must reach the ground as RAIN rather than accumulate as cloud, so the
+    // cloud->rain drain is sped up to match. project_snow_overproduction.
+    constexpr double c_c_au = 1.0e-3;                                  // 1/s (COSMO original 4.0e-4)
     constexpr double c_i_au = 1.0e-3;                                  // 1/s COSMO
     constexpr double c_ac = 0.24;                                       // m2/kg
     constexpr double c_rim = 18.6;                                      // m2/kg
+    // Reduced SNOW-side riming coefficient, ported from TwoCatIceScheme (`c4d1bd1`). Un-reduced
+    // riming (S_s_rim = c_rim*cloud*Snow) dominated snow production ~10x every other source and
+    // monopolised the proportional cloud-water limiter, routing ~90 % of cloud water into SNOW
+    // and starving the autoconversion->rain pathway. In TwoCat it took the snow fraction from
+    // ~45 % to ~16 % at fixed total precipitation. Measured here before the port, from the
+    // accepted configuration's iteration-600 checkpoint: P_snow 2470 mm/a against TwoCat's 0.29
+    // and a total of 3749 against NASA's 978.
+    // WARM-SIDE SHEDDING (S_s_shed) KEEPS THE FULL c_rim, exactly as in TwoCat, and so does the
+    // GRAUPEL riming S_g_rim -- TwoCat has no graupel, so the port has nothing to say about it.
+    constexpr double c_rim_snow = 18.6 / 5.0;                           // m2/kg (reduced snow riming)
     constexpr double c_agg = 10.3;                                      // m2/kg
     constexpr double c_i_cri = 0.24;                                    // m2
     constexpr double c_r_cri = 3.2e-5;                                  // m2
@@ -263,7 +279,7 @@ private:
 
                         double S_s_rim, S_g_rim, S_s_shed, S_g_shed;
                         if(t_u < m.t_0){
-                            S_s_rim  = c_rim * cl_i * Snow;
+                            S_s_rim  = c_rim_snow * cl_i * Snow;   // reduced riming (see c_rim_snow)
                             S_g_rim  = c_rim * cl_i * rh_rqg_95;
                             S_s_shed = 0.0;
                             S_g_shed = 0.0;
