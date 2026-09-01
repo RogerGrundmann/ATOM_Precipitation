@@ -437,8 +437,8 @@ private:
                                 S_s_melt = c_s_melt
                                     * (1.0 + b_s_melt * pow(Snow, exp_5_26))
                                     * (t_u - m.t_0) * pow(Snow, exp_1_3);
-                                const double avail_sm = arriving ? m.P_snow.x[i+1][j][k] : Snow;
-                                S_s_melt = std::min(S_s_melt, avail_sm/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                                if(!arriving)
+                                    S_s_melt = std::min(S_s_melt, Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                             }else S_s_melt = 0.0;
 
                             // melting of cloud ice to cloud water/rain
@@ -469,18 +469,16 @@ private:
                         if(t_u > m.t_0 && Rain > 1e-12 && m.c.x[i][j][k] < q_sat){
                             S_ev = a_ev * (1.0 + b_ev * pow(Rain, exp_1_6))
                                    * (q_sat - m.c.x[i][j][k]) * Rain_pow_4_9;
-                            const double avail_r = arriving ? m.P_rain.x[i+1][j][k] : Rain;
-                            S_ev = std::min(S_ev, avail_r / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                            if(!arriving)                              // see limitArriving()
+                                S_ev = std::min(S_ev, Rain / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_ev = 0.0;
 
                         // snow deposition/sublimation (at T < 0°C)
                         if(t_u < m.t_0 && Snow > 1e-12){
                             S_s_dep = c_s_dep * (1.0 + b_s_dep * pow(Snow, exp_5_26))
                                       * (m.c.x[i][j][k] - q_Ice) * pow(Snow, exp_8_13);
-                            if(S_s_dep < 0.0){                          // sublimation limiting
-                                const double avail_s = arriving ? m.P_snow.x[i+1][j][k] : Snow;
-                                S_s_dep = max(S_s_dep, -avail_s/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
-                            }
+                            if(S_s_dep < 0.0 && !arriving)              // sublimation limiting
+                                S_s_dep = max(S_s_dep, -Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_s_dep = 0.0;                            // no deposition above freezing or without snow
 
                         // freezing of rain to form snow
@@ -491,6 +489,35 @@ private:
                                 * pow(Rain, exp_3_2);                   // c_r_frz = 3.75e-2, m²/(K*kg)
                         }else  S_r_frz = 0.0;
 
+
+                        // ATM_ICE_LIMIT_ARRIVING: the falling-species limiter, done once here
+                        // where every term is known, instead of three inline clips against a
+                        // stale same-level flux. AVAILABLE is what arrives from above PLUS what
+                        // this level makes, because the mass constraint is only that the flux
+                        // must not go negative and both act on P_x[i+1] in the same expression.
+                        // Clipping against the arriving flux alone would forbid rain that
+                        // condenses and evaporates inside one layer, which is a real process.
+                        // Rain is limited before snow, because S_r_frz is a snow source.
+                        if(arriving){
+                            const double P_r = m.P_rain.x[i+1][j][k] / mass_layer;
+                            const double P_s = m.P_snow.x[i+1][j][k] / mass_layer;
+
+                            const double src_r = S_c_au + S_ac + S_shed + S_s_melt;
+                            double snk_r = S_ev + S_r_frz + S_r_cri;
+                            if(snk_r > P_r + src_r && snk_r > 0.0){
+                                const double f = (P_r + src_r) / snk_r;
+                                S_ev *= f; S_r_frz *= f; S_r_cri *= f;
+                            }
+                            const double src_s = S_i_au + S_d_au + S_rim + S_agg
+                                               + std::max(0.0, S_s_dep) + S_i_cri + S_r_cri
+                                               + S_r_frz;
+                            double snk_s = S_s_melt + max(0.0, -S_s_dep);
+                            if(snk_s > P_s + src_s && snk_s > 0.0){
+                                const double f = (P_s + src_s) / snk_s;
+                                S_s_melt *= f;
+                                if(S_s_dep < 0.0) S_s_dep *= f;
+                            }
+                        }
 
                         // cloud water limiter
                         double S_cloud_total = S_c_au + S_ac + S_rim + S_c_frz + S_shed;

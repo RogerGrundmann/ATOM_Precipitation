@@ -607,6 +607,16 @@ private:
                                     ? std::min(IceSchemeCommon::P_max_flux, std::max(0.0, raw))
                                     : 0.0;
                             };
+                            // AVAILABLE = what arrives from above PLUS what this level makes.
+                            // Clipping against the arriving flux alone would over-clip: the mass
+                            // constraint is only that the flux must not go NEGATIVE, and the
+                            // level's own sources are added to it in the same expression the
+                            // sinks are subtracted from. Rain that condenses and evaporates
+                            // inside one layer is a real process and this must not forbid it.
+                            //
+                            // Rain is limited first, then snow, then graupel, because the rain
+                            // sinks S_r_cri and S_r_frz are snow and graupel SOURCES, and S_csg
+                            // moves snow into graupel. The order is a choice, not a derivation.
                             const double P_r = arriving(m.P_rain.x[i+1][j][k],
                                                         m.S_r.x[i+1][j][k],
                                                         (t_u >= m.t_0)) / mass_arr;
@@ -617,20 +627,26 @@ private:
                                                         m.S_g.x[i+1][j][k],
                                                         (t_u < m.t_0 && t_u >= m.t_00)) / mass_arr;
 
+                            const double src_r = S_c_au + S_ac + S_s_shed + S_g_shed
+                                               + S_s_melt + S_g_melt;
                             double tot_r = S_ev + S_r_cri + S_r_frz;
-                            if(tot_r > P_r && tot_r > 0.0){
-                                const double f = P_r / tot_r;
+                            if(tot_r > P_r + src_r && tot_r > 0.0){
+                                const double f = (P_r + src_r) / tot_r;
                                 S_ev *= f; S_r_cri *= f; S_r_frz *= f;
                             }
+                            const double src_s = S_i_au + S_d_au + S_s_agg + S_s_rim
+                                               + std::max(0.0, S_s_dep) + S_i_cri + S_r_cri;
                             double tot_s = S_s_melt + S_csg + std::max(0.0, -S_s_dep);
-                            if(tot_s > P_s && tot_s > 0.0){
-                                const double f = P_s / tot_s;
+                            if(tot_s > P_s + src_s && tot_s > 0.0){
+                                const double f = (P_s + src_s) / tot_s;
                                 S_s_melt *= f; S_csg *= f;
                                 if(S_s_dep < 0.0) S_s_dep *= f;
                             }
+                            const double src_g = S_g_agg + S_g_rim + std::max(0.0, S_g_dep)
+                                               + S_i_cri + S_r_cri + S_r_frz + S_csg;
                             double tot_g = S_g_melt + std::max(0.0, -S_g_dep);
-                            if(tot_g > P_g && tot_g > 0.0){
-                                const double f = P_g / tot_g;
+                            if(tot_g > P_g + src_g && tot_g > 0.0){
+                                const double f = (P_g + src_g) / tot_g;
                                 S_g_melt *= f;
                                 if(S_g_dep < 0.0) S_g_dep *= f;
                             }

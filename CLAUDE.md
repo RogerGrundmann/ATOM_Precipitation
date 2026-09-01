@@ -421,48 +421,64 @@ to delete. "Rain formed above the freezing level never reaches the ground" descr
 does not exist.
 
 **WHAT LIMITED THE REPAIRED RAIN WAS THE FLOOR, BECAUSE THE LIMITER WAS CHARGING THE WRONG
-QUANTITY — NOW FIXED, AND IT DRIVES THE FLOOR AND THE CAP TO EXACTLY ZERO.** The first version of
-the clip read `m.P_rain.x[i][j][k]`, which at that point in the loop is the PREVIOUS pass's value
-at this level. The sink computed at level i is not charged against that at all: it is charged one
-level lower, as `P_x[i-1] = clamp(P_x[i] + rho[i]*S_x[i]*dz[i-1])`, so the flux it can take from
-is `P_x[i]` — which the iteration is about to compute from `P_x[i+1]` and `S_x[i+1]`, both already
-known — over a layer mass `rho[i]*dz[i-1]`, not `rho[i]*dz[i]`. With the arriving form (same
-probe, ThreeCat + `ATM_ICE_RAW_FLUX` + `ATM_ICE_LIMITERS`):
+QUANTITY.** The first version of the clip read `m.P_rain.x[i][j][k]`, which at that point in the
+loop is the PREVIOUS pass's value at this level. The sink computed at level i is not charged
+against that at all: it is charged one level lower, as
+`P_x[i-1] = clamp(P_x[i] + rho[i]*S_x[i]*dz[i-1])`, so the flux it can take from is `P_x[i]` —
+which the iteration is about to compute from `P_x[i+1]` and `S_x[i+1]`, both already known — over
+a layer mass `rho[i]*dz[i-1]`, not `rho[i]*dz[i]`.
 
-| | `S_ev` | floor | cap | window | ground rain | total precip |
+**AND THE FIRST REPAIR OF IT OVER-CLIPPED, BY A FACTOR OF TEN.** Charging a sink against the
+ARRIVING flux alone forbids a level from evaporating the rain it makes in that same level, and
+rain that condenses and evaporates inside one layer is a real process. The mass constraint is
+only that the flux must not go NEGATIVE, and the level's own sources enter the same expression
+the sinks are subtracted from, so the availability is **arriving + this level's sources**.
+ThreeCat + `ATM_ICE_RAW_FLUX` + `ATM_ICE_LIMITERS`, same probe:
+
+| clip charged against | `S_ev` | floor | cap | window | ground rain | total precip |
 |---|---|---|---|---|---|---|
-| stale clip | -7620 | **+5930** | 0.0 | 0.0 | 9.0 | 9.4 |
-| **arriving clip** | **-1653** | **+0.0** | **0.0** | **0.0** | **5.3** | **5.5** |
+| stale same-level value (first try) | -7620 | **+5930** | 0.0 | 0.0 | 9.0 | 9.4 |
+| arriving flux only (over-clips) | -1653 | +0.0 | 0.0 | 0.0 | 5.3 | 5.5 |
+| **arriving + local sources** | **-1585** | **+0.0** | **0.0** | 0.0 | **72.0** | **72.9** |
 
-**EVERY GRAM NOW LEAVES THROUGH A NAMED TERM.** Rain sources are 1658 and `S_ev` takes 1653, so
-the ground value 5.3 is a difference of rates with no clamp in it anywhere. The only non-rate
-remover left in the whole scheme is the SNOW temperature window, -498.9 of a generated 495.7.
-On the shipped normalisation the same fix takes the floor to zero as well (total precipitation
-76 -> 45.9).
+**EVERY GRAM NOW LEAVES THROUGH A NAMED TERM.** Floor and cap are EXACTLY zero for all three
+species; the only non-rate remover left in the scheme is the SNOW temperature window, -498.6 of
+a generated 499.6.
 
-**AND THE SAME DEFECT IS IN TWOCAT, WHICH IS THE DEFAULT SCHEME, WHERE IT IS WORTH A FACTOR OF
-11** (`ATM_ICE_LIMIT_ARRIVING`, new, default 0 = shipped; TwoCat's own three clips read
-`m.P_rain.x[i]`/`m.P_snow.x[i]` where its integration charges the level-i sink against
-`P_x[i+1]`). Same checkpoint, same six iterations, `ATM_SR_DIAG`:
+### The accepted configuration's 992 mm/a is 63 % floor injection
 
-| TwoCat | sources | `S_ev` | `S_r_frz` | clamp | **P_rain(ground)** | surviving |
+**THE SAME DEFECT IS IN TWOCAT, THE DEFAULT SCHEME, AND IT IS MEASURED ON THE ACCEPTED
+CONFIGURATION ITSELF** (`ATM_ICE_LIMIT_ARRIVING`, new, default 0 = shipped; `config_accept.xml`,
+`nm` = 100 from scratch, moist gate 0, 24 threads — the run that produced the 992 mm/a every
+cloud, humidity and radiation constant accepted on 2026-08-31 was fitted against):
+
+| TwoCat, iteration 100 | sources | `S_ev` | `S_r_frz` | clamp | `P_rain(ground)` | **Precip mean** |
 |---|---|---|---|---|---|---|
-| shipped | 2955 | **11562 (391 %)** | 2853 | -11816 | **350** | 11.8 % |
-| **arriving clip** | 2926 | **2408 (82 %)** | 2361 | **-1880** | **32** | 1.1 % |
+| **shipped** | 2846 | **7749 (272 %)** | 2231 | **+8116 INJECTED** | 366 | **992.2** |
+| **arriving + local sources** | 3097 | **2347 (76 %)** | **388** | **-0.66 (0.0 %)** | 122 | **369.2** |
+| *NASA* | | | | | | *978* |
 
-**SO ~90 % OF TWOCAT'S PRECIPITATION FROM THIS STATE WAS CLAMP-SUPPORTED TOO** — 350 mm/a against
-32 once each sink can only take water that is there. Total precipitation 362 -> 39.
+**THE HEADLINE NUMBER WAS 63 % WATER THE FLOOR MADE.** `S_ev` demanded 272 % of every rain source
+in the model and `max(0, ...)` quietly manufactured the difference — 8116 mm/a, eight times
+NASA's entire precipitation — and what reached the ground was the residue. With each sink able to
+take only water that is there, the same configuration rains **369 mm/a, 38 % of NASA**, and the
+clamp is **0.0 %**: the budget closes on rates alone for the first time in this tree.
 
-**THE FIX DOES NOT CLOSE TWOCAT THE WAY IT CLOSES THREECAT, AND THE REASON IS NAMED: `S_r_frz`
-HAS NO CLIP AT ALL.** Freezing still demands 2361 against 2926 of sources, unclipped, so the
-residual clamp is 64 % of the sources rather than 0. ThreeCat's limiter covers `S_r_frz` because
-it was written from the general form; TwoCat's three clips were added one at a time.
+**THE OFF-BRANCH IS UNCHANGED, VERIFIED ON THE SAME RUN.** The control re-run with the new binary
+reproduces the old one to every printed digit — sources 2846.40 against 2846.41, `Precip mean`
+9.922e+02 against 9.922e+02, `P_rain mean` 9.704e+02 against 9.703e+02 — the documented
+fixed-thread-count non-determinism and nothing else.
 
-**THE CHECKPOINT THESE ARMS RUN FROM WAS SPUN UP BY THE UNREPAIRED THREECAT, SO THE TWOCAT
-NUMBERS ABOVE ARE NOT THE ACCEPTED CONFIGURATION'S.** Whether the headline 992 mm/a at iteration
-100 is clamp-supported to the same degree is a from-scratch `nm` = 100 pair, and it is the most
-important open measurement in this tree: every cloud, humidity and radiation constant accepted on
-2026-08-31 was fitted with that number as the target.
+**SO THE PRECIPITATION AGREEMENT WAS A SIXTH CANCELLING PAIR, AND IT IS THE ONE THAT MATTERED
+MOST.** An over-large evaporation sink and a floor that manufactured water to feed it. Both of
+this tree's NASA matches — the shipped 1046 and the accepted 992 — are now explained, and neither
+was a result. **Do not quote either as validation.** What can be said after today is narrower and
+firmer: the microphysics can be made mass-conserving, and when it is, this model rains about a
+third of what Earth does.
+
+**AND THE FIX DOES NOT CLOSE TWOCAT COMPLETELY WHERE IT CLOSES THREECAT.** `S_r_frz` falls
+2231 -> 388 because it is now clipped with the rest, but TwoCat's shipped code has no clip on it
+at all; the residual -0.66 is 0.02 % and the remaining gap to NASA is a physics gap, not a clamp.
 
 **READ EVERY NUMBER IN THIS SUBSECTION AS A SIX-ITERATION RESPONSE TO A FIELD THAT WAS SPUN UP BY
 THE UNREPAIRED SCHEME**, not as a climate. The checkpoint's cloud, ice and vapour were made by
