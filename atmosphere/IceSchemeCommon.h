@@ -44,6 +44,59 @@ namespace IceSchemeCommon {
         return v;
     }
 
+    // ATM_RAIN_AREA=<fraction> -- the fraction of the grid box the rain shaft occupies.
+    // Default 0 = disabled = shipped.
+    //
+    // Rain evaporation is written as a function of the GRID-MEAN flux, `S_ev ∝ R^(4/9)`, which
+    // says the rain is spread evenly over the whole box. It is not: it falls in shafts. This is
+    // the same defect, in the same shape, as the grid-mean autoconversion fixed in `3ea78e3` and
+    // the grid-mean saturation adjustment fixed in `6d163a0` -- a grid-mean test inside a
+    // consumer of a sub-grid field -- and it is the FIFTH place it has turned up.
+    //
+    // Evaporation is local, so the grid-mean tendency of a shaft covering a fraction `f` is
+    // `f*E(R/f)`, and because `E` is a sub-linear power the transform REDUCES it: with
+    // `E ∝ R^(4/9)`, `f*(R/f)^(4/9) = f^(5/9)*R^(4/9)`, a factor `f^(5/9)` -- 0.28 at f = 0.1.
+    // The `(1 + b_ev*R^(1/6))` factor is transformed with it, as one expression.
+    //
+    // WHAT THIS DOES NOT DO, and it means the correction is a LOWER BOUND: the air inside a rain
+    // shaft is moister than the grid mean, so `(q_sat - c)` is over-large there too. That driver
+    // is left at its grid-mean value because the in-shaft humidity is not a quantity this model
+    // carries. Only the area/flux-density half of the transform is applied.
+    //
+    // The value is a scaffold, not a measurement -- like `ATM_RH_MIN`. Observed stratiform rain
+    // covers a large fraction of a 1x1 degree box and convective rain a few per cent; one
+    // constant cannot be both.
+    inline double rainArea() {
+        static const double v = [](){
+            const char* e = getenv("ATM_RAIN_AREA");
+            const double f = e ? atof(e) : 0.0;
+            const double x = (f > 0.0 && f <= 1.0) ? f : 0.0;
+            if(x > 0.0)
+                std::cout << "      AGCM: [MICROPHYS] rain area fraction = " << x
+                          << "  (ATM_RAIN_AREA; S_ev scaled by f^(5/9) = "
+                          << pow(x, 5.0/9.0) << ")" << std::endl;
+            return x;
+        }();
+        return v;
+    }
+
+    // WHAT THE max(0, ...) FLOOR MANUFACTURED, reported unconditionally.
+    //
+    // The floor in `P_x[i] = max(0, P_x[i+1] + dP)` is not a guard, it is a SOURCE: wherever the
+    // sinks at a level exceed the flux present, it creates the difference out of nothing and the
+    // flux continues downward as if the water had been there. On the accepted configuration it
+    // manufactured 8116 mm/a -- eight times NASA's entire precipitation -- and the number the
+    // model reports as its precipitation is what survived of it.
+    //
+    // This was found by an instrument that had to be written for the purpose, after the
+    // reported total had been quoted as agreeing with NASA to 7 % for a week. It is printed in
+    // every run from now on, beside the total it belongs to, so that cannot happen again.
+    struct FloorAudit {
+        double injected_mm_a = 0.0;    // cos-lat mean, mm/a, summed down every column
+        bool   valid = false;          // false until an ice scheme has run
+    };
+    inline FloorAudit& floorAudit(){ static FloorAudit a; return a; }
+
     // Hard cap on a precipitation flux [kg/(m2*s)] (~260 mm/d, well above any
     // physical precip). Backstop against the ∝Snow riming/deposition runaways.
     constexpr double P_max_flux = 3.0e-3;

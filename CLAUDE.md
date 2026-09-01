@@ -445,7 +445,7 @@ ThreeCat + `ATM_ICE_RAW_FLUX` + `ATM_ICE_LIMITERS`, same probe:
 species; the only non-rate remover left in the scheme is the SNOW temperature window, -498.6 of
 a generated 499.6.
 
-### The accepted configuration's 992 mm/a is 63 % floor injection
+### The accepted configuration's 992 mm/a stands on 8116 mm/a of manufactured water
 
 **THE SAME DEFECT IS IN TWOCAT, THE DEFAULT SCHEME, AND IT IS MEASURED ON THE ACCEPTED
 CONFIGURATION ITSELF** (`ATM_ICE_LIMIT_ARRIVING`, new, default 0 = shipped; `config_accept.xml`,
@@ -458,11 +458,20 @@ cloud, humidity and radiation constant accepted on 2026-08-31 was fitted against
 | **arriving + local sources** | 3097 | **2347 (76 %)** | **388** | **-0.66 (0.0 %)** | 122 | **369.2** |
 | *NASA* | | | | | | *978* |
 
-**THE HEADLINE NUMBER WAS 63 % WATER THE FLOOR MADE.** `S_ev` demanded 272 % of every rain source
-in the model and `max(0, ...)` quietly manufactured the difference — 8116 mm/a, eight times
-NASA's entire precipitation — and what reached the ground was the residue. With each sink able to
-take only water that is there, the same configuration rains **369 mm/a, 38 % of NASA**, and the
-clamp is **0.0 %**: the budget closes on rates alone for the first time in this tree.
+**THE HEADLINE NUMBER DOES NOT SURVIVE MASS CONSERVATION, AND THE ARITHMETIC IS WORSE THAN A
+PERCENTAGE.** `S_ev` demands **272 % of every rain source in the model**, so the shipped rain
+budget is NEGATIVE — 2846 of sources against 9979 of sinks — and what reaches the ground is not a
+reduced version of the sources, it is what `max(0, ...)` manufactured: **8116 mm/a, 8.2x the
+reported total and eight times NASA's entire precipitation.** The identity closes on it:
+2846 - 9979 + 8116 = **983**, against a reported `Precip mean` of 992.
+
+*An earlier version of this paragraph called the total "63 % floor injection", which conflates
+two numbers. 63 % is what is LOST when conservation is enforced (992 -> 369). The injection
+itself is 8116 — larger than the reported total, not a fraction of it.*
+
+With each sink able to take only water that is there, the same configuration rains **369 mm/a,
+38 % of NASA**, and the clamp is **0.0 %**: the budget closes on rates alone for the first time
+in this tree.
 
 **THE OFF-BRANCH IS UNCHANGED, VERIFIED ON THE SAME RUN.** The control re-run with the new binary
 reproduces the old one to every printed digit — sources 2846.40 against 2846.41, `Precip mean`
@@ -475,6 +484,67 @@ this tree's NASA matches — the shipped 1046 and the accepted 992 — are now e
 was a result. **Do not quote either as validation.** What can be said after today is narrower and
 firmer: the microphysics can be made mass-conserving, and when it is, this model rains about a
 third of what Earth does.
+
+### The evaporation was un-weighted, and weighting it recovers the whole number
+
+**`S_ev` IS THE SINK THAT FORCES THE FLOOR, AND IT WAS SPREAD OVER THE WHOLE GRID BOX**
+(`ATM_RAIN_AREA=<fraction>`, new, default 0 = shipped, both schemes). Rain falls in shafts, not
+evenly; evaporation is local, so the grid-mean tendency of a shaft covering a fraction `f` is
+`f*E(R/f)`, and because `E ∝ R^(4/9)` is SUB-linear the transform reduces it by `f^(5/9)`.
+**Fifth occurrence of the grid-mean defect** — the same shape as the autoconversion (`3ea78e3`),
+the saturation adjustment (`6d163a0`), the convective trigger and the updraft condensate. The
+`(q_sat - c)` driver is left grid-mean, because the in-shaft humidity is not a quantity this
+model carries, so the correction is a LOWER bound.
+
+`config_accept.xml`, `nm` = 100 from scratch, 24 threads, mm/a:
+
+| arm | sources | `S_ev` | clamp | **floor injected** | **Precip mean** |
+|---|---|---|---|---|---|
+| **shipped** | 2846 | **7746 (272 %)** | -8114 | **8128 (819 % of the total)** | **992.8** |
+| shipped + area 0.10 | 2825 | 2315 (82 %) | -2445 | 2458 (279 %) | 880.5 |
+| mass-conserving, no area | 3097 | 2347 (76 %) | -0.66 | ~0 | **369.2** |
+| + area 0.30 | 2770 | 1493 (54 %) | -0.03 | 0.44 | 892.9 |
+| **+ area 0.10** | 2718 | **1362 (50 %)** | **-0.01** | **0.20** | **975.8** |
+| + area 0.05 | 2749 | 1494 (54 %) | 0.00 | 0.10 | 877.6 |
+| *NASA* | | | | | *978* |
+
+**A MASS-CONSERVING CONFIGURATION LANDS ON NASA.** `ATM_ICE_LIMIT_ARRIVING=1 ATM_RAIN_AREA=0.10`
+gives **975.8 mm/a against 978, with the floor injecting 0.20 mm/a instead of 8128** — the first
+time this model's headline output has been a difference of rates rather than a residue of
+manufactured water. The identity closes exactly: 2718 - 1749 + 0.01 = **968.46**, the printed
+`P_rain(ground)` to the digit.
+
+**THE TWO KNOBS ARE A PAIR AND EITHER ALONE IS WORSE.** Conservation alone gives 369; area
+weighting alone leaves 2458 mm/a of injection standing and still moves the total to 880. Sixth
+time in this file that fixing one of a cancelling pair makes the model worse.
+
+**AND THE AGREEMENT SITS ON A PEAK, NOT A PLATEAU — READ IT AS A FITTED CONSTANT.** 877.6 at
+0.05, 975.8 at 0.10, 892.9 at 0.30: the response is NON-MONOTONIC and one step either way costs
+10 %. Two effects oppose each other — a smaller `f` cuts `S_ev` by `f^(5/9)` but raises the flux
+density `R/f` that `S_ev` is computed FROM, and the larger surviving flux then feeds back through
+accretion (55 -> 84 -> 125 as `f` falls) and snowmelt (89 -> 18 -> 7.5). **0.10 was chosen
+because it lands on 978**, and a single constant cannot represent both stratiform rain, which
+covers most of a 1-degree box, and convective rain, which covers a few per cent. This is a
+scaffold in exactly the sense `ATM_RH_MIN` is one.
+
+**WHAT IT IS AND IS NOT.** It IS: the microphysics conserving mass, one cancelling pair removed,
+and the number no longer standing on an injection. It is NOT a validation — `nm` = 100 is 20
+seconds of physical time, the 1000-iteration run had precipitation still climbing, and the
+PATTERN has never been compared with the NASA field at all, only its global mean.
+
+**THE FLOOR INJECTION IS NOW PRINTED IN EVERY RUN**, unconditionally, directly under
+`Precip mean`, as an absolute figure and as a percentage of the reported total. On the shipped
+branch it reads 819 %. It is a function-local static in `IceSchemeCommon` rather than a model
+member, deliberately: adding a member moves `sizeof(cAtmosphereModel)` and that is the
+stack-canary hazard.
+
+**AND `ATM_SR_DIAG`'s GROUND BUCKET WAS UNDER-COUNTING, WHICH IS HOW THE IDENTITY EXPOSED IT.**
+The budget closed on 983 while the print's own `P_rain(ground)` read 366. The ground value was
+assigned AFTER the convergence test, and that test `break`s — so every column that settled on
+that pass skipped its own assignment and contributed zero. Fixed: it is written before the test.
+**The sources, sinks and clamp were never affected**, so every number quoted from this instrument
+stands; only its ground column was low. Fourth instrument-shaped defect found by making a budget
+close.
 
 **AND THE FIX DOES NOT CLOSE TWOCAT COMPLETELY WHERE IT CLOSES THREECAT.** `S_r_frz` falls
 2231 -> 388 because it is now clipped with the rest, but TwoCat's shipped code has no clip on it

@@ -68,6 +68,7 @@ namespace TwoCatIce {
 
     // precomputed exponent fractions
     constexpr double exp_1_6  = 1.0 / 6.0;
+    constexpr double exp_4_9  = 4.0 / 9.0;   // used by the rain-area transform
     constexpr double exp_1_3  = 1.0 / 3.0;
     constexpr double exp_2_3  = 2.0 / 3.0;
     constexpr double exp_8_13 = 8.0 / 13.0;
@@ -208,6 +209,10 @@ private:
         // Per-column slots for the final iter_prec pass; each (j,k) is owned by one thread.
         const bool srd_on = srDiag();
         const bool arriving = limitArriving();
+        const double f_rain = IceSchemeCommon::rainArea();
+
+        // Floor audit, unconditional: one column slot, reset per iter_prec pass.
+        std::vector<double> inj((size_t)m.jm * m.km, 0.0);
         const int  NSR = 9;   // c_au, ac, shed, s_melt, ev, r_frz, r_cri, ground, truncated
         std::vector<double> srd;
         if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
@@ -240,6 +245,8 @@ private:
 
                     if (srd_on) for (int q = 0; q < NSR; q++)
                         srd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
+
+                    inj[(size_t)j * m.km + k] = 0.0;
 
                     m.P_rain.x[m.im-1][j][k] = 0.0;
                     m.P_snow.x[m.im-1][j][k] = 0.0;
@@ -467,8 +474,13 @@ private:
 
                         // evaporation (rain to water vapour under subsaturation)
                         if(t_u > m.t_0 && Rain > 1e-12 && m.c.x[i][j][k] < q_sat){
-                            S_ev = a_ev * (1.0 + b_ev * pow(Rain, exp_1_6))
-                                   * (q_sat - m.c.x[i][j][k]) * Rain_pow_4_9;
+                            // f*E(R/f): evaporation is local, so a shaft covering a
+                            // fraction f of the box evaporates from the flux DENSITY R/f.
+                            // See IceSchemeCommon::rainArea().
+                            const double R_ev = (f_rain > 0.0) ? Rain / f_rain : Rain;
+                            const double w_ev = (f_rain > 0.0) ? f_rain : 1.0;
+                            S_ev = w_ev * a_ev * (1.0 + b_ev * pow(R_ev, exp_1_6))
+                                   * (q_sat - m.c.x[i][j][k]) * pow(R_ev, exp_4_9);
                             if(!arriving)                              // see limitArriving()
                                 S_ev = std::min(S_ev, Rain / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_ev = 0.0;
@@ -605,6 +617,10 @@ private:
                             srd[8*N+b] += (raw - kept);            // what the clamp/cap removed
                         }
 
+                        {   // what the floor made, before the cap is applied
+                            const double raw = m.P_rain.x[i+1][j][k] + dP_rain;
+                            inj[(size_t)j * m.km + k] += max(0.0, raw) - raw;
+                        }
                         m.P_rain.x[i][j][k] = std::min(P_max,
                             max(0.0, m.P_rain.x[i+1][j][k] + dP_rain));
 
@@ -615,6 +631,10 @@ private:
                         double dP_snow = (S_i_au + S_d_au + S_rim + S_agg
                             + S_r_frz - S_s_melt) * mass_layer;
 
+                        {
+                            const double raw = m.P_snow.x[i+1][j][k] + dP_snow;
+                            inj[(size_t)j * m.km + k] += max(0.0, raw) - raw;
+                        }
                         m.P_snow.x[i][j][k] = (t_u < m.t_0 && t_u >= m.t_000)
                             ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
                             : 0.0;
@@ -624,6 +644,16 @@ private:
 
                     }  // end i
 
+
+                    // The ground bucket is written HERE, before the convergence test: the
+                    // converged branch below BREAKS, so a column that settled on this pass used
+                    // to skip its own assignment and contribute zero. That is why the printed
+                    // "P_rain(ground)" read 366 while the budget's own identity closed on ~983.
+                    if (srd_on) {
+                        const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
+                        srd[(size_t)7 * m.jm * m.km + (size_t)j * m.km + k]
+                            = m.P_rain.x[i_g][j][k];
+                    }
 
                     P_rain_diff = fabs(m.P_rain.x[i_check][j][k] - Rain_check) * 8.64e4;
 
@@ -651,14 +681,22 @@ private:
                             << " .... P_rain[i_check] = " << m.P_rain.x[i_check][j][k] * 8.64e4
                             << " .... P_rain_diff = " << P_rain_diff << endl << endl << endl;
                     }
-                    if (srd_on) {
-                        const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
-                        srd[(size_t)7 * m.jm * m.km + (size_t)j * m.km + k]
-                            = m.P_rain.x[i_g][j][k];
-                    }
                 }  // end iter_prec
             }  // end j
         }  // end k
+
+        {   // publish the floor audit for printDataAtm
+            double acc = 0.0, w_tot = 0.0;
+            for (int j = 0; j < m.jm; j++) {
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for (int k = 0; k < m.km; k++) {
+                    w_tot += w;
+                    acc += w * inj[(size_t)j * m.km + k];
+                }
+            }
+            IceSchemeCommon::floorAudit().injected_mm_a = acc * 365.0 * 8.64e4 / w_tot;
+            IceSchemeCommon::floorAudit().valid = true;
+        }
 
         if (srd_on) {
             const double yr = 365.0 * 8.64e4;                       // [mm/s] -> [mm/a]

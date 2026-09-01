@@ -316,6 +316,10 @@ private:
         // Per-column budget slots; each (j,k) is owned by one thread, so no synchronisation.
         const bool raw_flux = rawFlux();
         const bool limiters = iceLimiters();
+        const double f_rain = IceSchemeCommon::rainArea();
+
+        // Floor audit, unconditional: one column slot, reset per iter_prec pass.
+        std::vector<double> inj((size_t)m.jm * m.km, 0.0);
         const bool ssd_on = ssDiag();
         std::vector<double> ssd;
         if(ssd_on) ssd.assign((size_t)NSSD * m.jm * m.km, 0.0);
@@ -338,6 +342,8 @@ private:
                 for(int iter_prec = 1; iter_prec <= iter_prec_end; iter_prec++){
 
                     double Rain_check = m.P_rain.x[23][j][k];
+
+                    inj[(size_t)j * m.km + k] = 0.0;
 
                     if(ssd_on){
                         for(int q = 0; q < NSSD; q++)
@@ -483,8 +489,14 @@ private:
                         double S_ev = 0.0;
                         if(t_u >= m.t_0 && Rain > 0.0){
                             double a_ev = 2.76e-3 * exp(0.055 * (m.t_0 - t_u));
-                            S_ev = a_ev * (1.0 + b_ev * Rain_16)
-                                 * (q_sat - c_ijk) * Rain_49;
+                            // f*E(R/f) -- see IceSchemeCommon::rainArea(). The shipped branch
+                            // (f_rain = 0) reduces to the grid-mean form exactly.
+                            const double R_ev = (f_rain > 0.0) ? Rain / f_rain : Rain;
+                            const double w_ev = (f_rain > 0.0) ? f_rain : 1.0;
+                            const double R16 = (f_rain > 0.0) ? pow(R_ev, 1.0/6.0) : Rain_16;
+                            const double R49 = (f_rain > 0.0) ? pow(R_ev, 4.0/9.0) : Rain_49;
+                            S_ev = w_ev * a_ev * (1.0 + b_ev * R16)
+                                 * (q_sat - c_ijk) * R49;
                         }
 
                         // --- Deposition/sublimation of snow and graupel ---
@@ -690,6 +702,17 @@ private:
                                 + m.r_humid.x[i+1][j][k] * m.S_g.x[i+1][j][k] * step_i))
                             : 0.0;
 
+                        {   // what the floor made, before cap and window
+                            const double rho_up = m.r_humid.x[i+1][j][k];
+                            const double raws[3] = {
+                                m.P_rain.x[i+1][j][k]    + rho_up*m.S_r.x[i+1][j][k]*step_i,
+                                m.P_snow.x[i+1][j][k]    + rho_up*m.S_s.x[i+1][j][k]*step_i,
+                                m.P_graupel.x[i+1][j][k] + rho_up*m.S_g.x[i+1][j][k]*step_i };
+                            double add = 0.0;
+                            for(int q = 0; q < 3; q++) add += std::max(0.0, raws[q]) - raws[q];
+                            inj[(size_t)j * m.km + k] += add;
+                        }
+
                         // Track column maxima (thread-local via reduction)
                         local_max_rain    = std::max(local_max_rain,    m.P_rain.x[i][j][k]);
                         local_max_snow    = std::max(local_max_snow,    m.P_snow.x[i][j][k]);
@@ -776,6 +799,19 @@ private:
                 } // end iter_prec
             } // end k
         } // end j
+
+        {   // publish the floor audit for printDataAtm
+            double acc = 0.0, w_tot = 0.0;
+            for(int j = 0; j < m.jm; j++){
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for(int k = 0; k < m.km; k++){
+                    w_tot += w;
+                    acc += w * inj[(size_t)j * m.km + k];
+                }
+            }
+            IceSchemeCommon::floorAudit().injected_mm_a = acc * 365.0 * 8.64e4 / w_tot;
+            IceSchemeCommon::floorAudit().valid = true;
+        }
 
         global_max_rain    = local_max_rain;
         global_max_snow    = local_max_snow;

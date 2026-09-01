@@ -621,12 +621,38 @@ public:
                      << " mm/a  @(i=" << mi << ",j=" << mj
                      << ",k=" << mk << ")" << fixed << endl;
             };
+            const double mean_precip_mm_a =
+                AtomUtils::GetMean_3D(m.jm, m.km, m.Precipitation) * s_per_year;
             cout << " precipitation by component (mm/a, surface-equivalent):" << endl;
             component("Precip",    m.Precipitation);   // sanity check vs model total above
             component("P_rain",    m.P_rain);
             component("P_snow",    m.P_snow);
             component("P_graupel", m.P_graupel);
             component("P_conv",    m.P_conv);
+
+            // WHAT THE FLOOR MANUFACTURED, printed beside the total it belongs to.
+            //
+            // `P_x[i] = max(0, P_x[i+1] + dP)` is not a guard, it is a SOURCE: wherever the
+            // sinks at a level exceed the flux present it creates the difference out of nothing,
+            // and the flux continues down the column as if the water had been there. On the
+            // accepted configuration it manufactures 8116 mm/a -- eight times NASA's entire
+            // precipitation -- and the total above is what survived of it. Enforcing mass
+            // conservation (ATM_ICE_LIMIT_ARRIVING, TwoCat) takes the same configuration from
+            // 992 mm/a to 369.
+            //
+            // This is printed unconditionally because the reported total was quoted as agreeing
+            // with NASA to 7 % for a week before anyone asked what it was made of.
+            const auto& fa = IceSchemeCommon::floorAudit();
+            if(fa.valid){
+                const double tot = mean_precip_mm_a;
+                cout << "    " << setw(8) << setfill(' ') << "floor"
+                     << " injected " << scientific << setprecision(3) << fa.injected_mm_a
+                     << " mm/a of water no source produced";
+                if(tot > 0.0)
+                    cout << "  = " << fixed << setprecision(1)
+                         << 1e2 * fa.injected_mm_a / tot << " % of the reported total";
+                cout << fixed << endl;
+            }
         }
 
         row(" precipitable water average", precipitablewater_average, " mm",
