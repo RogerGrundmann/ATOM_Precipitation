@@ -541,6 +541,55 @@ The new default reproduces the measured arm to every printed digit (975.8, `P_ra
 fixed-thread-count non-determinism. **Setting those two variables back restores the old branch**,
 and the `[RUN CONFIG]` banner prints both with `*` when they are compiled-in.
 
+### Scored against the NASA FIELD at last, and the mean was hiding a tropical spike
+
+**THE MODEL HAS BEEN COMPARED WITH `precipitation_NASA` BY ITS GLOBAL MEAN ALONE SINCE THE
+BEGINNING.** The field is read into memory, written to VTK and printed as one scalar beside the
+model's; the two have never been differenced. `printDataAtm` now scores them — cos-lat weighted
+on the same weights `GetMean_3D` uses, so the model mean it reports IS the `Precip mean` above
+it. Unconditional, one 2-D pass, `nm` = 100:
+
+| | model mean | bias | **pattern r** | centred RMS | sigma model/NASA |
+|---|---|---|---|---|---|
+| **new default** | 975.8 | **-0.3 %** | **+0.456** | **1432** | **2.33** |
+| `LIMIT_ARRIVING=0 RAIN_AREA=0` | 993.6 | +1.6 % | **+0.214** | 2016 | 2.97 |
+| *NASA* | *978.3* | | | | |
+
+**THE FLIP IS VINDICATED BY SOMETHING IT WAS NOT TUNED AGAINST.** The pattern correlation more
+than DOUBLES, 0.214 -> 0.456, the centred RMS falls 29 % and the variance ratio moves toward 1 —
+and none of that was visible in a mean that was already "right" on both branches. The land/ocean
+partition is the clearest single line:
+
+| mm/a | model, new default | model, old branch | NASA |
+|---|---|---|---|
+| **land** | **766.3** | **2217.0** | **782.3** |
+| **ocean** | **1058.7** | **509.4** | **1055.8** |
+
+**The old branch was 2.8x too wet over land and 2x too dry over ocean, and its global mean was
+right to 1.6 %.** The injection was concentrated where the sub-cloud air is driest — over land —
+so removing it repaired the partition almost exactly. That is the strongest evidence the flip is
+a physics repair and not a re-tune: nothing in it knew about the land mask.
+
+**AND THE REMAINING ERROR IS ALL ONE SHAPE: A TROPICAL SPIKE WITH NOTHING POLEWARD OF IT.**
+
+| mm/a by \|latitude\| | 0-15 | 15-35 | 35-65 | 65-90 |
+|---|---|---|---|---|
+| **model** (new default) | **3352.5** | **261.9** | **157.1** | **7.6** |
+| model (old branch) | 2611.5 | 954.6 | 111.1 | 7.2 |
+| *NASA* | *1487.0* | *761.4* | *981.1* | *364.2* |
+
+2.3x too much rain in the deep tropics, 3x too little in the subtropics, **6x too little in the
+storm-track band and 48x too little at the poles.** `sigma` = 2.33 is that spike measured a
+second way. **This is a CIRCULATION result, not a microphysics one**: mid-latitude precipitation
+is made by baroclinic eddies, and this tree's recorded jet spin-down, its `Psi(ground)`
+non-closure at ~40 % of the Hadley cell, and its dead convective scheme are exactly the items
+that would starve 35-65 degrees. The microphysics work of 2026-09-01 has taken the water budget
+as far as it can go on its own.
+
+**SO THE GLOBAL MEAN WAS NEVER THE PROBLEM AND IS NOT THE TARGET.** Two configurations match it
+to 2 % with pattern correlations of 0.21 and 0.46 and land/ocean splits that differ by a factor
+of three. Quote `r`, `sigma` and the four bands, or quote nothing.
+
 **WHAT IT IS AND IS NOT.** It IS: the microphysics conserving mass, one cancelling pair removed,
 and the number no longer standing on an injection. It is NOT a validation — `nm` = 100 is 20
 seconds of physical time, the 1000-iteration run had precipitation still climbing, and the

@@ -653,6 +653,72 @@ public:
                          << 1e2 * fa.injected_mm_a / tot << " % of the reported total";
                 cout << fixed << endl;
             }
+
+            // ================= SCORED AGAINST THE NASA FIELD, NOT ITS MEAN =================
+            //
+            // `precipitation_NASA` has been read into memory, written to VTK and printed as a
+            // GLOBAL MEAN beside the model's since the beginning, and the two fields have never
+            // been differenced. A global mean is one scalar against a model with several free
+            // constants per module: this tree has matched it twice -- 1046 shipped and 992
+            // accepted -- and BOTH matches turned out to be a floor injecting eight times NASA's
+            // precipitation. A matched mean is not agreement, and nothing printed until now
+            // could tell the difference.
+            //
+            // Cos-lat weighted throughout, on the same weights GetMean_3D uses, so the model
+            // mean below is the `Precip` mean above. NASA is mm/d in the file; x365 -> mm/a.
+            {
+                const double yr = 365.0;
+                double w_t = 0.0, m_s = 0.0, n_s = 0.0;
+                double mm = 0.0, nn = 0.0, mn = 0.0, se = 0.0;
+                // 0-15, 15-35, 35-65, 65-90 degrees of |latitude|, then land / ocean
+                double bw[4] = {0,0,0,0}, bm[4] = {0,0,0,0}, bn[4] = {0,0,0,0};
+                double lw = 0.0, lm = 0.0, ln_ = 0.0, ow = 0.0, om = 0.0, on = 0.0;
+
+                for(int j = 0; j < m.jm; j++){
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                    const int b = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
+                    for(int k = 0; k < m.km; k++){
+                        const double mv = m.Precipitation.x[0][j][k] * s_per_year;
+                        const double nv = m.precipitation_NASA.y[j][k] * yr;
+                        w_t += w;  m_s += w * mv;  n_s += w * nv;
+                        bw[b] += w;  bm[b] += w * mv;  bn[b] += w * nv;
+                        if(is_land(m.h, 0, j, k)){ lw += w; lm += w * mv; ln_ += w * nv; }
+                        else                     { ow += w; om += w * mv; on  += w * nv; }
+                    }
+                }
+                const double mbar = m_s / w_t, nbar = n_s / w_t;
+                for(int j = 0; j < m.jm; j++){
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    for(int k = 0; k < m.km; k++){
+                        const double dm = m.Precipitation.x[0][j][k] * s_per_year - mbar;
+                        const double dn = m.precipitation_NASA.y[j][k] * yr - nbar;
+                        mm += w * dm * dm;  nn += w * dn * dn;  mn += w * dm * dn;
+                        const double d = dm - dn;
+                        se += w * d * d;
+                    }
+                }
+                const double sm = sqrt(mm / w_t), sn = sqrt(nn / w_t);
+                const double r  = (sm > 0.0 && sn > 0.0) ? (mn / w_t) / (sm * sn) : 0.0;
+                const double rmse = sqrt(se / w_t + (mbar - nbar) * (mbar - nbar));
+
+                cout << " precipitation scored against SurfacePrecipitation_NASA.xyz"
+                        " (cos-lat weighted, surface, mm/a):" << endl;
+                printf("      model %8.1f   NASA %8.1f   bias %+8.1f (%+.1f %%)"
+                       "   pattern r = %+.3f   centred RMS %7.1f   sigma model/NASA = %.2f\n",
+                       mbar, nbar, mbar - nbar,
+                       nbar > 0.0 ? 1e2 * (mbar - nbar) / nbar : 0.0,
+                       r, rmse, sn > 0.0 ? sm / sn : 0.0);
+                printf("      by |latitude|   0-15 %7.1f /%7.1f   15-35 %7.1f /%7.1f"
+                       "   35-65 %7.1f /%7.1f   65-90 %7.1f /%7.1f   (model / NASA)\n",
+                       bw[0] > 0 ? bm[0]/bw[0] : 0.0, bw[0] > 0 ? bn[0]/bw[0] : 0.0,
+                       bw[1] > 0 ? bm[1]/bw[1] : 0.0, bw[1] > 0 ? bn[1]/bw[1] : 0.0,
+                       bw[2] > 0 ? bm[2]/bw[2] : 0.0, bw[2] > 0 ? bn[2]/bw[2] : 0.0,
+                       bw[3] > 0 ? bm[3]/bw[3] : 0.0, bw[3] > 0 ? bn[3]/bw[3] : 0.0);
+                printf("      land %8.1f /%8.1f      ocean %8.1f /%8.1f   (model / NASA)\n",
+                       lw > 0 ? lm/lw : 0.0, lw > 0 ? ln_/lw : 0.0,
+                       ow > 0 ? om/ow : 0.0, ow > 0 ? on/ow : 0.0);
+            }
         }
 
         row(" precipitable water average", precipitablewater_average, " mm",
