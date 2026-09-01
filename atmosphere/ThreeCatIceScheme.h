@@ -198,6 +198,39 @@ private:
     // increment, P_x[im-2] <- rho*S_x[im-1]*dz, which reads S_x at the LID -- a value this call
     // never wrote, left behind by the previous one. And the budget is accumulated only down to
     // `i_topography`, so the ground value is the physical surface rather than sea level.
+    // ATM_ICE_RAW_FLUX=1 -- feed the precipitation fluxes to the microphysics in SI units
+    // instead of normalised by the column's own surface flux. Default 0 = shipped.
+    //
+    // ThreeCat divides every flux by the value at the ground before using it,
+    //
+    //     Rain = P_rain[i] / max(P_rain[0], 1e-6),
+    //
+    // and then hands that RATIO to relations that are dimensional in kg/(m2 s). The mass
+    // content of falling rain, `r_q_r = A_r*B_rad^(-8/9)*Rain^(8/9)`, is the clearest case: with
+    // the raw flux, a typical 1e-5 kg/(m2 s) gives r_q_r = 7.8e-5 kg/m3, an ordinary 0.08 g/m3
+    // of rain water. With the ratio, which the 1e-6 floor lets reach P_max_flux/1e-6 = 3000, the
+    // same expression returns ~2.5e3 kg/m3 -- denser than liquid water. Every collection term is
+    // a power of these quantities, so all of them inflate together.
+    //
+    // TWOCAT USES THE RAW FLUX (`TwoCatIceScheme.h:241`, `double Rain = m.P_rain.x[i][j][k];`)
+    // and so does the COSMO documentation the constants come from; the normalisation is
+    // ThreeCat's alone and has been there since the initial commit. It is also the reason the
+    // scheme once produced NaN: `P_snow_0` in the denominator with `S_s_rim` proportional to
+    // `Snow` is a geometric amplifier down the column, which is what the `P_norm_floor` and the
+    // `P_max_flux` cap were added to contain. Both treat the symptom.
+    //
+    // Measured with ATM_SS_DIAG on the shipped branch, six iterations from the accepted
+    // configuration's iteration-600 checkpoint: the snow budget's gross demand is 7.35e10 mm/a
+    // and the clamp removes 7.35e10, leaving 1166. The ground flux is a residual of a demand
+    // seven orders of magnitude larger, so it is set by `P_max_flux` and the max(0, ...) floor
+    // rather than by any microphysical rate -- which is why cutting a riming coefficient by 5
+    // and then by a further 4.2 bought 37 % and then 11 %.
+    static bool rawFlux(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_ICE_RAW_FLUX"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool ssDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_SS_DIAG"); return e && atoi(e) != 0; }();
@@ -245,6 +278,7 @@ private:
         double local_max_rain = 0.0, local_max_snow = 0.0, local_max_graupel = 0.0;
 
         // Per-column budget slots; each (j,k) is owned by one thread, so no synchronisation.
+        const bool raw_flux = rawFlux();
         const bool ssd_on = ssDiag();
         std::vector<double> ssd;
         if(ssd_on) ssd.assign((size_t)NSSD * m.jm * m.km, 0.0);
@@ -291,9 +325,12 @@ private:
                         double P_snow_0    = std::max(m.P_snow.x[0][j][k],    P_norm_floor);
                         double P_graupel_0 = std::max(m.P_graupel.x[0][j][k], P_norm_floor);
 
-                        double Rain    = m.P_rain.x[i][j][k]    / P_rain_0;
-                        double Snow    = m.P_snow.x[i][j][k]    / P_snow_0;
-                        double Graupel = m.P_graupel.x[i][j][k] / P_graupel_0;
+                        double Rain    = raw_flux ? m.P_rain.x[i][j][k]
+                                                  : m.P_rain.x[i][j][k]    / P_rain_0;
+                        double Snow    = raw_flux ? m.P_snow.x[i][j][k]
+                                                  : m.P_snow.x[i][j][k]    / P_snow_0;
+                        double Graupel = raw_flux ? m.P_graupel.x[i][j][k]
+                                                  : m.P_graupel.x[i][j][k] / P_graupel_0;
 
                         // pow() calls guarded — skip entirely when base is zero
                         double Rain_79  = (Rain > 0.0) ? pow(Rain, 7.0/9.0)  : 0.0;
@@ -444,7 +481,14 @@ private:
                             S_r_frz = c_r_frz * pow(t_frz, 1.5)
                                     * pow(r_h_i * r_q_r, 27.0/16.0);
                         }else{
-                            S_r_frz = Rain / dt_rain_dim;
+                            // Below the homogeneous-nucleation temperature every raindrop
+                            // freezes within the fall time. The quantity that has to be divided
+                            // by that time is a MIXING RATIO, kg/kg, so on the raw-flux branch
+                            // it is the rain mass content over the air density; the shipped
+                            // branch's `Rain` is a dimensionless ratio and only looks like one
+                            // by accident.
+                            S_r_frz = raw_flux ? r_q_r / (r_h_i * dt_rain_dim)
+                                               : Rain / dt_rain_dim;
                         }
 
                         // --- Snow-to-graupel conversion ---
