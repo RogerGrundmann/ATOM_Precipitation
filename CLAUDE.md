@@ -683,11 +683,52 @@ nothing drives it. **Removing the filter stops the decay; it does not give the m
 is maintained by a temperature gradient**, and the thermal-wind balance that maintains a real jet
 is not acting here. That is the next question and it is a separate one.
 
-**WHAT THIS DOES NOT YET LICENSE.** The filter guards a real near-surface 2dt checkerboard and
-the post-155 CFL blow-up. No NaN appeared in any arm and `max|u|` stayed at 0.0216 -> 0.0236 as
-the strength fell — but 100 iterations from a settled iteration-600 field cannot clear a guard
-whose documented failures are at iterations 155, 357 and 483 from scratch. **A from-scratch run
-past 500 at reduced strength is the test, and it has not been run.**
+**THE FROM-SCRATCH TEST HAS NOW BEEN RUN, THE GUARD HOLDS AT QUARTER STRENGTH, AND THE JET IS
+23 % STRONGER — AND IT BUYS NOTHING IN MID-LATITUDE RAIN** (2026-09-01, default TwoCat
+configuration, `config_accept.xml` at `nm` = 600, moist physics from iteration 0, 24 threads,
+62 min per arm). Zonal-mean jet above 3 km, from the run's own budget files:
+
+| iteration | 20 | 160 | 320 | **600** | core height at 600 |
+|---|---|---|---|---|---|
+| **strength 1.0** | 26.488 | 22.573 | 20.422 | **18.303** | **5513 m** |
+| **strength 0.25** | 27.190 | 25.590 | 24.277 | **22.599** | **6719 m** |
+
+**BOTH ARMS RAN 600 ITERATIONS FROM SCRATCH, EXIT 0, ZERO NaN** — past 155, 357 AND 483, the
+three documented failure points. `max|u|` ends at 0.0412 against the control's 0.0237: larger, as
+expected from a weaker filter, and three orders below anything resembling the +-100 m/s coastal
+blow-ups the guard exists for. **At quarter strength the guard still holds.**
+
+**BUT THE ATTRIBUTION IS WEAKER HERE THAN THE RESTART TEST SAID, AND THE TWO DISAGREE.** Over the
+settled late stretch (iterations 400 -> 600) the decay is **0.674 per 100 iterations at strength
+1.0 and 0.517 at 0.25**. Fitting `decay = A*s + B`, the filter-proportional part is A = 0.210 and
+the residual **B = 0.464 — so the filter is only 31 % of the late decay here**, against ~100 % in
+the 600 -> 700 restart test where strength 0 froze the jet outright. The two measurements are on
+different configurations (ThreeCat restart vs TwoCat from scratch) and different fields, and the
+from-scratch core is still migrating downward in BOTH arms at iteration 600, so part of `B` is
+plausibly the analytic initial condition still adjusting rather than a steady drain. **The
+discrepancy is real and unexplained; the clean resolution is a strength-0 arm on THIS
+configuration, and it has not been run.**
+
+**AND THE STORM TRACK DOES NOT COME BACK. AT ALL.**
+
+| iteration 600 | Precip | pattern r | 0-15 | 15-35 | **35-65** | 65-90 |
+|---|---|---|---|---|---|---|
+| strength 1.0 | 998.4 | +0.457 | 3432.2 | 271.0 | **156.6** | 7.5 |
+| strength 0.25 | 1001.4 | +0.461 | 3443.0 | 272.0 | **156.6** | 7.5 |
+| *NASA* | *978.3* | | *1487.0* | *761.4* | ***981.1*** | *364.2* |
+
+**156.6 in both arms, identical to four figures**, with `r` moving 0.457 -> 0.461 and the
+land/ocean split unchanged. **A 23 % stronger, 1.2 km higher jet buys nothing.** That is the
+prediction made before the run and it is confirmed: `pgf` at the jet core is 1.5e-11, so the jet
+is unmaintained whether or not it is being eroded, and **the eddies are STARVED, not damped.**
+Easing the filter preserves the shear; it does not create the baroclinic growth that turns shear
+into rain. **Do not expect a filter setting to fix the 35-65 degree band.**
+
+*Useful by-product*: the control is `Precip` 998.4 at `r` = 0.457 after 600 iterations against
+975.8 at `r` = 0.456 at `nm` = 100 — so under the 2026-09-01 defaults the precipitation field is
+STABLE between iterations 100 and 600, where the pre-flip 1000-iteration run climbed 992 -> 1215.
+And both arms wrote `atm_restart_0Ma_600.bin`, the first spun-up checkpoints on the CURRENT
+default configuration; every probe before this restarted from a ThreeCat-conditioned state.
 
 **AND THE PRECIPITATION NUMBERS IN THOSE FOUR ARMS ARE WORTHLESS — WRONG CONFIG, MY ERROR.** They
 were run from `config_ggrim.xml`, which is a ThreeCat probe with the raw-flux and limiter knobs
