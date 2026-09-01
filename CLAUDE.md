@@ -385,13 +385,50 @@ because a small flux evaporates faster than it falls (`S_ev ∝ Rain^(4/9)` agai
 ∝ `Rain`). TwoCat from the same state has the same shape and survives it: sources 2955, `S_ev`
 demand 11562, **11.8 % surviving** against ThreeCat's 0.5 %.
 
-**AND THE DIFFERENCE IS A THIRD STRUCTURAL DEFECT, NOT YET MEASURED SEPARATELY: ThreeCat DELETES
-FLUX AT THE PHASE BOUNDARIES.** `P_rain[i]` is set to **0** wherever `t_u < t_0`, `P_snow[i]`
-wherever `t_u >= t_0`, `P_graupel[i]` likewise — so rain formed above the freezing level never
-reaches the ground and snow crossing the melting level is discarded rather than melted, in a
-scheme that HAS `S_s_melt` and `S_r_frz` to do those conversions. **TwoCat's rain integration
-carries no temperature window at all.** The `ATM_SS_DIAG` clamp bucket currently lumps the window
-in with the floor and the cap; splitting it is one print and is the next measurement.
+**THE CLAMP IS NOW SPLIT INTO FLOOR / CAP / WINDOW, AND IT IS A DIFFERENT MECHANISM ON EACH
+BRANCH AND FOR EACH SPECIES** (2026-09-01, same probe, mm/a):
+
+| | net demand | floor (injects) | cap (truncates) | window (deletes) | ground |
+|---|---|---|---|---|---|
+| **shipped** snow | 2.174e+10 | +1.23e+07 | **-2.175e+10** | -1.26e+05 | 1166 |
+| shipped graupel | 6.290e+09 | +0.0 | **-6.289e+09** | -7.51e+04 | 517 |
+| shipped rain | -3.827e+09 | **+6.294e+09** | -2.466e+09 | **0.0** | 730 |
+| **repaired** snow | 491.1 | +4.6 | **0.0** | **-499.0** | 0.7 |
+| repaired rain | -5920.9 | **+5929.9** | **0.0** | **0.0** | 9.0 |
+
+**ON THE SHIPPED BRANCH IT IS THE CAP, AND NOTHING ELSE.** 99.94 % of the snow removal and
+essentially all of the graupel removal is `P_max_flux`; the window accounts for 0.0006 %. So
+"`P_snow` = 1046 mm/a is `P_max_flux` applied level by level" is now measured rather than
+inferred.
+
+**AND THE SHIPPED RAIN IS NOT TRUNCATED, IT IS MANUFACTURED.** Its net demand is NEGATIVE —
+-3.83e+09 mm/a, because `S_r_cri` removes rain at 6.15e+09 — and the floor **injects
++6.29e+09 mm/a of rain that no source produced**, six million times NASA's entire precipitation,
+to keep the flux non-negative. The cap then removes 2.47e+09 of it. The rain reaching the ground
+on the shipped branch is the residue of an injection, not of a generation.
+
+**THE CAP IS INERT ONCE THE FLUXES ARE PHYSICAL** — 0.0 for every species on the repaired branch,
+which is the independent confirmation that `ATM_ICE_RAW_FLUX` is the right diagnosis: no cell
+reaches 3.0e-3 kg/(m2 s) any more.
+
+**THE WINDOW IS THE WHOLE OF THE SNOW LOSS ON THE REPAIRED BRANCH, AND ZERO FOR RAIN — WHICH
+HALF-REFUTES THE PARAGRAPH THIS ONE REPLACES.** Snow: the column generates 491 mm/a and the
+window deletes **499**, leaving 0.7 at the ground. Snow crossing the melting level is discarded
+rather than melted, in a scheme that HAS `S_s_melt`. That half stands and is now measured.
+**The rain half was wrong**: the window removes **exactly 0.0**, because `S_c_au` and `S_ac` are
+both gated on `t_u >= m.t_0`, so no rain is ever FORMED above the freezing level for the window
+to delete. "Rain formed above the freezing level never reaches the ground" described a flux that
+does not exist.
+
+**WHAT LIMITS THE REPAIRED RAIN IS THE FLOOR, AND THE LIMITER DOES NOT STOP IT.** With
+`ATM_ICE_LIMITERS` on, the floor still injects **+5930 mm/a against 1699 of sources**: the
+evaporation demand drives the flux negative at essentially every level and the `max(0, ...)`
+silently makes the water back. The limiter clips `S_ev` against `m.P_rain.x[i][j][k]`, which at
+that point in the loop is the PREVIOUS pass's value at the SAME level, not the flux arriving from
+above — and the sink at level i is charged one level later, against `P[i]`. **TwoCat's limiter
+has the identical structure** (`Rain = m.P_rain.x[i][j][k]`), which is why its `S_ev` demand also
+runs at 391 % of its sources. Charging each sink against `P[i+1] + rho*S[i+1]*dz`, the flux that
+will actually be there, is the next thing to write, and it is a change to both schemes.
 
 **READ EVERY NUMBER IN THIS SUBSECTION AS A SIX-ITERATION RESPONSE TO A FIELD THAT WAS SPUN UP BY
 THE UNREPAIRED SCHEME**, not as a climate. The checkpoint's cloud, ice and vapour were made by

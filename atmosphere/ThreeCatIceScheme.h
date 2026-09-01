@@ -271,7 +271,13 @@ private:
         SG_agg, SG_rim, SG_dep, SG_i_cri, SG_r_cri, SG_r_frz, SG_melt, SG_csg,
         SR_c_au, SR_ac, SR_ev, SR_s_shed, SR_g_shed, SR_r_cri, SR_r_frz, SR_s_melt, SR_g_melt,
         SS_END = SG_agg, SG_END = SR_c_au, SR_END = 26,
-        SX_clamp_s = 26, SX_clamp_g, SX_clamp_r,
+        // The clamp is three different mechanisms and they are not interchangeable: the FLOOR
+        // injects mass where the net tendency would drive the flux negative, the CAP truncates
+        // at P_max_flux, and the WINDOW deletes the whole flux at a phase boundary. Their sum is
+        // what a single clamp bucket used to report.
+        SX_floor_s = 26, SX_floor_g, SX_floor_r,
+        SX_cap_s, SX_cap_g, SX_cap_r,
+        SX_win_s, SX_win_g, SX_win_r,
         SX_top_s, SX_top_g, SX_top_r,
         SX_gnd_s, SX_gnd_g, SX_gnd_r,
         NSSD
@@ -672,9 +678,24 @@ private:
                                 ssd[SX_top_g*N+b] += rho_up * m.S_g.x[i+1][j][k] * step_i;
                                 ssd[SX_top_r*N+b] += rho_up * m.S_r.x[i+1][j][k] * step_i;
                             }
-                            ssd[SX_clamp_s*N+b] += m.P_snow.x[i][j][k]    - raw_s;
-                            ssd[SX_clamp_g*N+b] += m.P_graupel.x[i][j][k] - raw_g;
-                            ssd[SX_clamp_r*N+b] += m.P_rain.x[i][j][k]    - raw_r;
+                            // Walked exactly as the integration applies them, in order:
+                            // floor, then cap, then the temperature window. Their sum is
+                            // kept - raw, which is what closes the budget.
+                            auto split = [&](double raw, bool window_open,
+                                             int q_floor, int q_cap, int q_win){
+                                const double floored = std::max(0.0, raw);
+                                const double capped  = std::min(P_max_flux, floored);
+                                const double kept    = window_open ? capped : 0.0;
+                                ssd[q_floor*N+b] += floored - raw;
+                                ssd[q_cap  *N+b] += capped  - floored;
+                                ssd[q_win  *N+b] += kept    - capped;
+                            };
+                            split(raw_s, (t_u < m.t_0 && t_u >= m.t_000),
+                                  SX_floor_s, SX_cap_s, SX_win_s);
+                            split(raw_g, (t_u < m.t_0 && t_u >= m.t_00),
+                                  SX_floor_g, SX_cap_g, SX_win_g);
+                            split(raw_r, (t_u >= m.t_0),
+                                  SX_floor_r, SX_cap_r, SX_win_r);
                         }
                         if(ssd_on){
                             pv[SS_i_au]  = S_i_au;   pv[SS_d_au]  = S_d_au;
@@ -768,34 +789,34 @@ private:
                "  S_s_rim %9.1f  S_s_dep %9.1f\n"
                "      AGCM: [SS DIAG]           S_i_cri %8.1f  S_r_cri %8.1f  S_s_melt %8.1f"
                "  S_csg %11.1f  ->  net %9.1f\n"
-               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
-               " %9.1f   (residual %.3e)\n",
+               "      AGCM: [SS DIAG]           stale top %6.1f  floor +%.1f  cap %.1f"
+               "  window %.1f  =  ground %9.1f   (residual %.3e)\n",
                a[SS_i_au], a[SS_d_au], a[SS_agg], a[SS_rim], a[SS_dep],
                a[SS_i_cri], a[SS_r_cri], a[SS_melt], a[SS_csg], net_s,
-               a[SX_top_s], a[SX_clamp_s], a[SX_gnd_s],
-               net_s + a[SX_top_s] + a[SX_clamp_s] - a[SX_gnd_s]);
+               a[SX_top_s], a[SX_floor_s], a[SX_cap_s], a[SX_win_s], a[SX_gnd_s],
+               net_s + a[SX_top_s] + a[SX_floor_s] + a[SX_cap_s] + a[SX_win_s] - a[SX_gnd_s]);
 
         printf("      AGCM: [SS DIAG] GRAUPEL   S_g_agg %8.1f  S_g_rim %8.1f  S_g_dep %8.1f"
                "  S_i_cri %8.1f  S_r_cri %8.1f\n"
                "      AGCM: [SS DIAG]           S_r_frz %8.1f  S_g_melt %7.1f  S_csg %11.1f"
                "  ->  net %9.1f\n"
-               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
-               " %9.1f   (residual %.3e)\n",
+               "      AGCM: [SS DIAG]           stale top %6.1f  floor +%.1f  cap %.1f"
+               "  window %.1f  =  ground %9.1f   (residual %.3e)\n",
                a[SG_agg], a[SG_rim], a[SG_dep], a[SG_i_cri], a[SG_r_cri],
                a[SG_r_frz], a[SG_melt], a[SG_csg], net_g,
-               a[SX_top_g], a[SX_clamp_g], a[SX_gnd_g],
-               net_g + a[SX_top_g] + a[SX_clamp_g] - a[SX_gnd_g]);
+               a[SX_top_g], a[SX_floor_g], a[SX_cap_g], a[SX_win_g], a[SX_gnd_g],
+               net_g + a[SX_top_g] + a[SX_floor_g] + a[SX_cap_g] + a[SX_win_g] - a[SX_gnd_g]);
 
         printf("      AGCM: [SS DIAG] RAIN      S_c_au %9.1f  S_ac %11.1f  S_ev %11.1f"
                "  S_s_shed %7.1f  S_g_shed %7.1f\n"
                "      AGCM: [SS DIAG]           S_r_cri %8.1f  S_r_frz %8.1f  S_s_melt %8.1f"
                "  S_g_melt %7.1f  ->  net %9.1f\n"
-               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
-               " %9.1f   (residual %.3e)\n",
+               "      AGCM: [SS DIAG]           stale top %6.1f  floor +%.1f  cap %.1f"
+               "  window %.1f  =  ground %9.1f   (residual %.3e)\n",
                a[SR_c_au], a[SR_ac], a[SR_ev], a[SR_s_shed], a[SR_g_shed],
                a[SR_r_cri], a[SR_r_frz], a[SR_s_melt], a[SR_g_melt], net_r,
-               a[SX_top_r], a[SX_clamp_r], a[SX_gnd_r],
-               net_r + a[SX_top_r] + a[SX_clamp_r] - a[SX_gnd_r]);
+               a[SX_top_r], a[SX_floor_r], a[SX_cap_r], a[SX_win_r], a[SX_gnd_r],
+               net_r + a[SX_top_r] + a[SX_floor_r] + a[SX_cap_r] + a[SX_win_r] - a[SX_gnd_r]);
 
         // Shares of the GROSS sources, which is the number a coefficient change acts on: a term
         // worth 2 % of the sources cannot be the lever however wrong its constant is.
