@@ -1229,6 +1229,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SW_INSOL="     << ev("ATM_SW_INSOL",     "0*")
           << "  ICE_RAW_FLUX=" << ev("ATM_ICE_RAW_FLUX", "0*")
           << "  ICE_LIMITERS=" << ev("ATM_ICE_LIMITERS", "0*")
+          << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
+          << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");

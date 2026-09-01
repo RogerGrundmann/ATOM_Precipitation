@@ -189,10 +189,20 @@ private:
     // through a named term. TwoCat's own `S_ev` demand runs at 391 % of its sources
     // (`ATM_SR_DIAG`), which is the same signature.
     //
-    // Default off because TwoCat is the default ice scheme and this changes its precipitation.
+    // DEFAULT ON SINCE 2026-09-01, at the user's instruction, flipped as a PAIR with
+    // ATM_RAIN_AREA = 0.10 because each is worse alone: this alone takes the accepted
+    // configuration from 992.8 to 369.2 mm/a, the area weighting alone leaves 2458 mm/a of floor
+    // injection standing at 880.5. Together: 975.8 mm/a against NASA's 978, with the floor
+    // injecting 0.20 instead of 8128, and the budget identity closing to the printed digit
+    // (2718 - 1749 + 0.01 = 968.46 = P_rain(ground)).
+    //
+    // `ATM_ICE_LIMIT_ARRIVING=0` restores the shipped three inline clips exactly; with
+    // `ATM_RAIN_AREA=0` beside it, the whole shipped branch.
     static bool limitArriving(){
         static const bool v = [](){
-            const char* e = getenv("ATM_ICE_LIMIT_ARRIVING"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_ICE_LIMIT_ARRIVING");
+            return e ? (atoi(e) != 0) : true;              // DEFAULT ON since 2026-09-01
+        }();
         return v;
     }
 

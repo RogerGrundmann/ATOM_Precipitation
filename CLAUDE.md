@@ -527,6 +527,20 @@ because it lands on 978**, and a single constant cannot represent both stratifor
 covers most of a 1-degree box, and convective rain, which covers a few per cent. This is a
 scaffold in exactly the sense `ATM_RH_MIN` is one.
 
+**FLIPPED ON BY DEFAULT 2026-09-01, AT THE USER'S INSTRUCTION, AS A PAIR.**
+`ATM_ICE_LIMIT_ARRIVING` 0 -> 1 and `ATM_RAIN_AREA` 0 -> 0.10. Both directions verified on
+`config_accept.xml`, 24 threads:
+
+| | `S_ev` | clamp | floor injected | `Precip mean` |
+|---|---|---|---|---|
+| **new default**, clean environment | 1362 (50.1 %) | -0.01 | **0.199 (0.0 %)** | **975.8** |
+| `ATM_ICE_LIMIT_ARRIVING=0 ATM_RAIN_AREA=0` | 7748 (272 %) | -8116 | 8129 (819.2 %) | **992.4** |
+
+The new default reproduces the measured arm to every printed digit (975.8, `P_rain(ground)`
+968.46, `S_ev` 1362.00) and the restore reproduces the shipped branch to 0.04 % — the documented
+fixed-thread-count non-determinism. **Setting those two variables back restores the old branch**,
+and the `[RUN CONFIG]` banner prints both with `*` when they are compiled-in.
+
 **WHAT IT IS AND IS NOT.** It IS: the microphysics conserving mass, one cancelling pair removed,
 and the number no longer standing on an injection. It is NOT a validation — `nm` = 100 is 20
 seconds of physical time, the 1000-iteration run had precipitation still climbing, and the
@@ -1036,7 +1050,13 @@ are MOSTLY rates, not one that is clean.
   against a 50-80 band and the LW forcing 29.0 against ~25. No value of this knob removes that,
   and it is consistent with the tropics still being 100 % covered.
 
-  **THE BEST CONFIGURATION FOUND (2026-08-31), AND WHAT IT IS WORTH:** `ATM_RH_PROFILE=1
+  **THE PRECIPITATION FIGURE IN THE PARAGRAPH BELOW IS PRE-FLIP AND STANDS ON 8129 mm/a OF
+MANUFACTURED WATER** (measured 2026-09-01; see *The accepted configuration's 992 mm/a* above).
+The same configuration under the 2026-09-01 defaults gives **975.8 mm/a with the floor injecting
+0.20** — the radiation, cloud and humidity numbers in it are unaffected, only the precipitation
+line is.
+
+**THE BEST CONFIGURATION FOUND (2026-08-31), AND WHAT IT IS WORTH:** `ATM_RH_PROFILE=1
   ATM_RH_CRIT=0.30 ATM_CLOUD_FRAC=1 ATM_CWP_CAP=off ATM_CLOUD_RAD_FRAC=1 ATM_QC_CRIT=0.05
   ATM_ICE_COLD=1 ATM_T_FLOOR=216.65 ATM_RH_MIN_LAT=1 ATM_RH_MIN=0.65 ATM_RH_MIN_PTOP=475`
   gives **Precip 992 mm/a against NASA's 978 (+1.5 %)**, IWP 20.1 in the observed 20-30 band, LWP

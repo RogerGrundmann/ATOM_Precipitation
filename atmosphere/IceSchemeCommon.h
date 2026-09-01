@@ -66,15 +66,25 @@ namespace IceSchemeCommon {
     // The value is a scaffold, not a measurement -- like `ATM_RH_MIN`. Observed stratiform rain
     // covers a large fraction of a 1x1 degree box and convective rain a few per cent; one
     // constant cannot be both.
+    //
+    // DEFAULT 0.10 SINCE 2026-09-01, flipped together with ATM_ICE_LIMIT_ARRIVING because each
+    // is worse alone: conservation without the area weighting gives 369 mm/a, the weighting
+    // without conservation leaves 2458 mm/a of floor injection standing. Together they give
+    // 975.8 mm/a against NASA's 978 with the floor injecting 0.20.
+    // **0.10 WAS CHOSEN BECAUSE IT LANDS ON 978, AND THE RESPONSE IS NON-MONOTONIC** -- 877.6 at
+    // 0.05, 975.8 at 0.10, 892.9 at 0.30 -- so the agreement sits on a PEAK and one step either
+    // way costs 10 %. A smaller f cuts S_ev by f^(5/9) but raises the flux density R/f that S_ev
+    // is computed FROM, and the larger surviving flux feeds back through accretion and snowmelt.
+    // `ATM_RAIN_AREA=0` restores the un-weighted grid-mean form exactly.
     inline double rainArea() {
         static const double v = [](){
             const char* e = getenv("ATM_RAIN_AREA");
-            const double f = e ? atof(e) : 0.0;
+            const double f = e ? atof(e) : 0.10;              // DEFAULT 0.10 since 2026-09-01
             const double x = (f > 0.0 && f <= 1.0) ? f : 0.0;
-            if(x > 0.0)
-                std::cout << "      AGCM: [MICROPHYS] rain area fraction = " << x
-                          << "  (ATM_RAIN_AREA; S_ev scaled by f^(5/9) = "
-                          << pow(x, 5.0/9.0) << ")" << std::endl;
+            std::cout << "      AGCM: [MICROPHYS] rain area fraction = " << x
+                      << (e ? "  (ATM_RAIN_AREA)" : "  (default)")
+                      << (x > 0.0 ? "" : "  -- DISABLED, S_ev is grid-mean")
+                      << std::endl;
             return x;
         }();
         return v;
