@@ -631,6 +631,72 @@ TwoCat's answer is also partly set by the `max(0, ...)` floor, by a factor of ~4
 ~1e+7, and its `S_ev` carries no rain-area fraction either. Reverting buys a scheme whose numbers
 are MOSTLY rates, not one that is clean.
 
+## The jet spin-down is the radial Shapiro filter, measured two ways and 100 % attributed
+
+**THE JET IS NOT SPINNING DOWN. IT IS BEING FILTERED AWAY** (2026-09-01). Over the 1000-iteration
+run the zonal-wind maximum falls **27.58 -> 18.55 m/s** and its core **sinks 9007 -> 5512 m**, in
+a quasi-linear decay that shows no sign of equilibrating.
+
+**THE ATTRIBUTION WAS ALREADY WRITTEN AND NOBODY HAD OPENED IT.** That run left 45
+`w_momentum_budget_*.csv` files in `output_spin1000/`. At the jet core (31S, 4988 m,
+`wbar` = 16.48 m/s), per iteration:
+
+| stage | dw, m/s |
+|---|---|
+| **`dw_radial`** — the radial (vertical) Shapiro filter | **-3.707e-03** |
+| `dw_dyn` — ALL the physics: PGF + Coriolis + advection + diffusion + drag | **-8.47e-06** |
+| `dw_polar`, `dw_orog` | 0.000 — the jet sits at 31 deg, outside both |
+| sum of the four captured stages | -3.715e-03 |
+| **actual `wbar` change, 980 -> 1000** | **-3.750e-03** |
+
+The budget closes to 99.1 %, and a NUMERICAL SMOOTHER is **99.8 % of what it captures, 437x the
+entire resolved dynamics.** *Seventh occurrence of "the answer was in output nobody opened".*
+
+**AND THE A/B CONFIRMS IT EXACTLY, ON A KNOB THAT WAS ADDED FOR THIS ON 2026-07-21 AND NEVER
+SWEPT.** `ATM_RADIAL_SHAPIRO_STRENGTH` (default 1.0) appears in no results table in this file.
+Four arms, 600 -> 700 from the same checkpoint, 24 threads:
+
+| strength | jet at 620 | jet at 700 | decay over 80 iters | per 20 iters |
+|---|---|---|---|---|
+| **1.0 (shipped)** | 18.4293 | 17.9733 | **0.4560** | 0.1140 |
+| 0.5 | 18.4842 | 18.2586 | 0.2256 | 0.0564 |
+| 0.25 | 18.5120 | 18.3941 | 0.1179 | 0.0295 |
+| **0.0 (off)** | 18.5396 | **18.5388** | **0.0008** | 0.0002 |
+
+**EXACTLY LINEAR IN THE STRENGTH** — 0.456 x 0.5 = 0.228, x 0.25 = 0.114, x 0 = 0 — and with the
+filter off the jet is FROZEN to four decimal places, 570x less decay. **The spin-down is the
+filter and nothing else.**
+
+**THE MECHANISM IS THE STRETCHED GRID, AND IT EXPLAINS THE SINKING CORE.** `dw_radial` down the
+31S column: **+9.1e-04 at 1211 m, +2.0e-03 at 2163 m** — the filter ADDS momentum on the lower
+flank — then **-3.7e-03 at the 4988 m core and -5.6e-03 at 6719 m**, removing most ABOVE the
+maximum. A smoother eating a vertical maximum takes from the peak and gives to the flanks; the
+removal is top-heavy because the filter is uniform in INDEX space while the layer spacing runs
+from 38.9 m at the bottom to over a kilometre aloft. **This tree's stretch spread is 23.21x, the
+worst in the family**, so the same filter is far harsher in physical terms at the top of the jet
+than at its base — and the maximum migrates downward, 9007 -> 5512 m.
+
+**AND THERE IS NO GENERATION TERM, WHICH THE FILTER HAS BEEN HIDING.** `pgf` at the jet core is
+**+1.5e-11 m/s per iteration** — zero for practical purposes — against Coriolis -4.5e-06 and
+diffusion -3.9e-06. At strength 0 the jet does not recover, it FREEZES: nothing damps it and
+nothing drives it. **Removing the filter stops the decay; it does not give the model a jet that
+is maintained by a temperature gradient**, and the thermal-wind balance that maintains a real jet
+is not acting here. That is the next question and it is a separate one.
+
+**WHAT THIS DOES NOT YET LICENSE.** The filter guards a real near-surface 2dt checkerboard and
+the post-155 CFL blow-up. No NaN appeared in any arm and `max|u|` stayed at 0.0216 -> 0.0236 as
+the strength fell — but 100 iterations from a settled iteration-600 field cannot clear a guard
+whose documented failures are at iterations 155, 357 and 483 from scratch. **A from-scratch run
+past 500 at reduced strength is the test, and it has not been run.**
+
+**AND THE PRECIPITATION NUMBERS IN THOSE FOUR ARMS ARE WORTHLESS — WRONG CONFIG, MY ERROR.** They
+were run from `config_ggrim.xml`, which is a ThreeCat probe with the raw-flux and limiter knobs
+OFF, so all four report ~13300 mm/a at `r` = -0.02: ThreeCat's clamp residual, identical across
+arms because the clamp does not care about the jet. **The storm-track question — does easing the
+filter recover the 35-65 deg band, 157 against NASA's 981 — is UNANSWERED**, needs the default
+TwoCat configuration, and needs far longer than 100 iterations because baroclinic eddies have to
+grow before they rain.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
