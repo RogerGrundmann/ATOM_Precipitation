@@ -34,7 +34,7 @@ void cHydrosphereModel::SetDefaultConfig() {
   use_NASA_temperature = true;
   use_NASA_salinity = true;
   Ma_switch = 100;
-  CategoryIceScheme = 3;
+  CategoryIceScheme = 2;
   p_0 = 1013.25;
   t_0 = 273.15;
   r_air = 1.2041;

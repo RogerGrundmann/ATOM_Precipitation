@@ -194,7 +194,14 @@ projection calls the solver 200 times, so one knob would make "10 sweeps in the 
 mean 2000 relaxations at startup, and any comparison would differ in its INITIAL STATE as well
 as in the quantity under test. ATHAD lost an attribution exactly that way.
 
-## The ice scheme is ThreeCat since 2026-08-31, and its record was stale
+## The ice scheme was ThreeCat for one day, and is TwoCat again since 2026-09-01
+
+**`CategoryIceScheme` = 2 (TwoCat) IS THE DEFAULT AGAIN**, in `param.py` and in all four tracked
+configs, at the user's instruction on 2026-09-01 and for the reason in the subsection at the end
+of this section: **ThreeCat's precipitation is a clamp residual, not a sum of rates.** Set 3 to
+get ThreeCat back; its three repairs are written or named and none is finished. The rest of this
+section is the ThreeCat record, kept because it is what the revert was decided on.
+
 
 `CategoryIceScheme` = **3** in `param.py` and in all four tracked configs (was 2). The user had
 asked for this some days earlier and it had not been carried out; `param.py` still had the
@@ -288,8 +295,9 @@ ThreeCat's autoconversion is effectively OFF — its rain comes from accretion a
 is the fifth occurrence of the grid-mean defect and the one module that never got the fix.
 **CLOSED 2026-09-01** -- ported, and it is worth -598 mm/a; see the subsection below.
 
-**`CategoryIceScheme` = 2 in the config restores TwoCat exactly**, and every measurement in this
-file dated on or before 2026-08-31 was taken on TwoCat.
+**`CategoryIceScheme` = 3 in the config selects ThreeCat**, and every measurement in this file
+dated on or before 2026-08-31, or after 2026-09-01, was taken on TwoCat. The ThreeCat arms are
+the ones dated 2026-08-31 evening and 2026-09-01, and they are labelled.
 
 ### The snow question was the wrong question: EVERY ThreeCat number is a clamp residual
 
@@ -391,10 +399,17 @@ THE UNREPAIRED SCHEME**, not as a climate. The checkpoint's cloud, ice and vapou
 re-equilibrate them. The arms are comparable to each other because they start from one state, and
 none of them is a prediction.
 
-**AND THE DEFAULT ICE SCHEME IS THE ONE WHOSE OUTPUT IS A CLAMP RESIDUAL.** `CategoryIceScheme`
-= 3 was set at the user's instruction with a 3.8x regression in front of it; that regression is
-now explained. TwoCat (`= 2`) is the only scheme in this tree whose precipitation is made of
-rates rather than of caps, and it is one config line away.
+**SO THE DEFAULT WENT BACK TO TWOCAT ON 2026-09-01**, at the user's instruction, on this
+evidence: the calibration record through 2026-08-31 was all measured against TwoCat, and TwoCat
+is the only scheme here whose precipitation is made of rates rather than of caps. `= 3` restores
+ThreeCat.
+
+**AND TWOCAT HAS THE SAME DISEASE, FAR MILDER, WHICH THE REVERT DOES NOT CURE.** From the same
+checkpoint (`ATM_SR_DIAG`, 6 iterations): sources 2955, `S_ev` demand **11562 -- 391 % of the
+sources** -- clamp -11816, ground 350, **11.8 % surviving** against ThreeCat's 0.5 %. So
+TwoCat's answer is also partly set by the `max(0, ...)` floor, by a factor of ~4 rather than
+~1e+7, and its `S_ev` carries no rain-area fraction either. Reverting buys a scheme whose numbers
+are MOSTLY rates, not one that is clean.
 
 ## Open risks
 

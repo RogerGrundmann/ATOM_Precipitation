@@ -82,8 +82,19 @@ def main():
 #            ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 50),
             ('Ma_switch', 'switch initial temperatur from NASA to parabolic approach', 'int', 100),
 
-            ('CategoryIceScheme', 'number chooses Three(3)-Category Ice Scheme with rain, snow and graupel', 'int', 3),
-#            ('CategoryIceScheme', 'number chooses Two(2)-Category Ice Scheme with rain, snow', 'int', 2),
+# THREECAT IS DEFAULT-OFF SINCE 2026-09-01, AND IT IS NOT A PREFERENCE. Its precipitation is a
+# CLAMP RESIDUAL, not a sum of rates: ATM_SS_DIAG measures the snow budget's gross demand at
+# 7.35e+10 mm/a with the floor and P_max_flux removing 7.35e+10 of it, so the 9.46e+04 mm/a
+# per-cell ceiling that every species pegs IS the answer. Three defects, all ThreeCat's alone:
+# the fluxes are normalised by their own ground value before entering laws that are dimensional
+# in kg/(m2 s) (ATM_ICE_RAW_FLUX), there are no availability limiters at all where TwoCat has
+# five (ATM_ICE_LIMITERS), and flux is DELETED at the phase boundaries rather than converted.
+# The first two are written and measured, both default off because each alone makes the model
+# worse; the third is not written. Until all three land, TwoCat is the only scheme in this tree
+# whose precipitation is made of rates -- and the whole cloud/humidity/radiation calibration
+# through 2026-08-31 was measured against it. Set 3 to get ThreeCat back.
+#            ('CategoryIceScheme', 'number chooses Three(3)-Category Ice Scheme with rain, snow and graupel', 'int', 3),
+            ('CategoryIceScheme', 'number chooses Two(2)-Category Ice Scheme with rain, snow', 'int', 2),
 #            ('CategoryIceScheme', 'number chooses One(1)-Category Ice Scheme with rain, snow', 'int', 1),
 #            ('CategoryIceScheme', 'number chooses Zero(0)-Category Ice Scheme with rain (Warm Rain Scheme)', 'int', 0),
 #            ('CategoryIceScheme', 'number chooses no scheme(-1) no precipitation', 'int', -1),

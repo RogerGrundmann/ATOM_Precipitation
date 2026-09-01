@@ -28,7 +28,7 @@
         <use_NASA_temperature>true</use_NASA_temperature>  <!-- if use NASA temperature to initialise surface temperature(bool) -->
         <use_NASA_salinity>true</use_NASA_salinity>  <!-- if use NASA sea-surface salinity to initialise surface salinity: Ma=0 uses the 2D field, Ma>0 its zonal-mean latitude profile; false = invert the Gill density equation(bool) -->
         <Ma_switch>100</Ma_switch>  <!-- switch initial temperatur from NASA to parabolic approach(int) -->
-        <CategoryIceScheme>3</CategoryIceScheme>  <!-- number chooses Three(3)-Category Ice Scheme with rain, snow and graupel(int) -->
+        <CategoryIceScheme>2</CategoryIceScheme>  <!-- number chooses Two(2)-Category Ice Scheme with rain, snow(int) -->
         <p_0>1013.25</p_0>  <!-- pressure at sea level in hPa(double) -->
         <t_0>273.15</t_0>  <!-- temperature in K compare to 0°C(double) -->
         <r_air>1.2041</r_air>  <!-- density of dry air in kg/m³ at 20°C(double) -->
