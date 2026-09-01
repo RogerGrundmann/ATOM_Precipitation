@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iostream>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 using namespace AtomUtils;
@@ -168,6 +169,54 @@ private:
     }
 
 
+    // ==================== ATM_SS_DIAG: the snow / graupel / rain flux budgets ====================
+    // ATM_SS_DIAG=1 -- print the COLUMN BUDGET of all three precipitation fluxes, decomposed
+    // into every source and sink term that feeds them. Print-only, default off, no field is
+    // written and no physics changes.
+    //
+    // The scheme integrates three fluxes down the column,
+    //
+    //     P_x[i] = min(P_max_flux, max(0, P_x[i+1] + rho[i+1]*S_x[i+1]*dz_i))       (x = s, g, r)
+    //
+    // and only the SUM S_x is written to any output file, so the surface value cannot say which
+    // of its eight or nine terms decided it. That is the open question left by the riming ports:
+    // snow is 1046 mm/a, 39 % of a total precipitation 2.74x NASA, against Earth's 5-10 %, and
+    // the riming fix that took TwoCat's snow fraction to 16 % has ALREADY been applied here. So
+    // the residual snow is coming from terms TwoCat does not have -- `S_s_agg`, `S_s_dep`, the
+    // graupel/snow exchange `S_csg` -- and guessing which one costs a run per coefficient.
+    //
+    // As with ATM_MC_DIAG and ATM_SR_DIAG, a raw sum of the terms is NOT a budget: the
+    // max(0, ...) floor, the P_max_flux cap and the temperature window each truncate the flux at
+    // every level. The truncation is therefore charged to its own bucket, signed, and then
+    //
+    //     sources - sinks + clamp = P_x(ground)
+    //
+    // is an IDENTITY that closes against the model's own field to every printed digit. The
+    // residual is printed too, so a broken decomposition announces itself.
+    //
+    // Two buckets have no counterpart in the TwoCat print. `stale top` is the very first
+    // increment, P_x[im-2] <- rho*S_x[im-1]*dz, which reads S_x at the LID -- a value this call
+    // never wrote, left behind by the previous one. And the budget is accumulated only down to
+    // `i_topography`, so the ground value is the physical surface rather than sea level.
+    static bool ssDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_SS_DIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
+    // Bucket layout. The first 26 are TERM values carrying the sign with which they enter their
+    // own S_x, so that summing a species' range reproduces S_x exactly.
+    enum {
+        SS_i_au = 0, SS_d_au, SS_agg, SS_rim, SS_dep, SS_i_cri, SS_r_cri, SS_melt, SS_csg,
+        SG_agg, SG_rim, SG_dep, SG_i_cri, SG_r_cri, SG_r_frz, SG_melt, SG_csg,
+        SR_c_au, SR_ac, SR_ev, SR_s_shed, SR_g_shed, SR_r_cri, SR_r_frz, SR_s_melt, SR_g_melt,
+        SS_END = SG_agg, SG_END = SR_c_au, SR_END = 26,
+        SX_clamp_s = 26, SX_clamp_g, SX_clamp_r,
+        SX_top_s, SX_top_g, SX_top_r,
+        SX_gnd_s, SX_gnd_g, SX_gnd_r,
+        NSSD
+    };
+
     // ==================== COLUMN COMPUTATION ====================
     void computeColumns() {
         using namespace ThreeCatIce;
@@ -195,6 +244,11 @@ private:
         // Thread-local accumulators for the OMP reduction
         double local_max_rain = 0.0, local_max_snow = 0.0, local_max_graupel = 0.0;
 
+        // Per-column budget slots; each (j,k) is owned by one thread, so no synchronisation.
+        const bool ssd_on = ssDiag();
+        std::vector<double> ssd;
+        if(ssd_on) ssd.assign((size_t)NSSD * m.jm * m.km, 0.0);
+
         #pragma omp parallel for collapse(2) schedule(static) \
             reduction(max:local_max_rain, local_max_snow, local_max_graupel)
         for(int j = 1; j < m.jm - 1; j++){
@@ -202,9 +256,24 @@ private:
 
                 m.P_rain.x[23][j][k] = 0.0;
 
+                // Budget state, carried DOWN the column: the flux increment at level i is
+                // built from the terms at level i+1, so each level saves its own for the next.
+                double pv[SR_END];
+                double pv_rho = 0.0;
+                bool   pv_valid = false;
+                const int i_gnd = ssd_on
+                    ? std::min(std::max(m.i_topography[j][k], 0), m.im - 1) : 0;
+
                 for(int iter_prec = 1; iter_prec <= iter_prec_end; iter_prec++){
 
                     double Rain_check = m.P_rain.x[23][j][k];
+
+                    if(ssd_on){
+                        for(int q = 0; q < NSSD; q++)
+                            ssd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
+                        for(int q = 0; q < SR_END; q++) pv[q] = 0.0;
+                        pv_valid = false;
+                    }
 
                     m.P_rain.x[m.im-1][j][k] = 0.0;
                     m.P_snow.x[m.im-1][j][k] = 0.0;
@@ -429,7 +498,62 @@ private:
                         m.Precipitation.x[i][j][k] = m.P_rain.x[i][j][k]
                             + m.P_snow.x[i][j][k] + m.P_graupel.x[i][j][k];
 
+                        // ---- ATM_SS_DIAG: charge this level's increment to its terms ----
+                        // The increment that produced P_x[i] was built from the terms at i+1,
+                        // which the previous pass of this loop saved in pv[]. The raw value is
+                        // re-formed from the model's own S_x[i+1] rather than from the sum of
+                        // pv[], so the clamp bucket absorbs any floating-point reassociation and
+                        // the identity closes exactly.
+                        if(ssd_on && i >= i_gnd){
+                            const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                            const double rho_up = m.r_humid.x[i+1][j][k];
+                            const double raw_s = m.P_snow.x[i+1][j][k]
+                                               + rho_up * m.S_s.x[i+1][j][k] * step_i;
+                            const double raw_g = m.P_graupel.x[i+1][j][k]
+                                               + rho_up * m.S_g.x[i+1][j][k] * step_i;
+                            const double raw_r = m.P_rain.x[i+1][j][k]
+                                               + rho_up * m.S_r.x[i+1][j][k] * step_i;
+                            if(pv_valid){
+                                for(int q = 0;      q < SS_END; q++) ssd[q*N+b] += pv_rho * pv[q] * step_i;
+                                for(int q = SG_agg; q < SG_END; q++) ssd[q*N+b] += pv_rho * pv[q] * step_i;
+                                for(int q = SR_c_au;q < SR_END; q++) ssd[q*N+b] += pv_rho * pv[q] * step_i;
+                            }else{
+                                // i = im-2: S_x at the lid was never written by this call.
+                                ssd[SX_top_s*N+b] += rho_up * m.S_s.x[i+1][j][k] * step_i;
+                                ssd[SX_top_g*N+b] += rho_up * m.S_g.x[i+1][j][k] * step_i;
+                                ssd[SX_top_r*N+b] += rho_up * m.S_r.x[i+1][j][k] * step_i;
+                            }
+                            ssd[SX_clamp_s*N+b] += m.P_snow.x[i][j][k]    - raw_s;
+                            ssd[SX_clamp_g*N+b] += m.P_graupel.x[i][j][k] - raw_g;
+                            ssd[SX_clamp_r*N+b] += m.P_rain.x[i][j][k]    - raw_r;
+                        }
+                        if(ssd_on){
+                            pv[SS_i_au]  = S_i_au;   pv[SS_d_au]  = S_d_au;
+                            pv[SS_agg]   = S_s_agg;  pv[SS_rim]   = S_s_rim;
+                            pv[SS_dep]   = S_s_dep;  pv[SS_i_cri] = S_i_cri;
+                            pv[SS_r_cri] = S_r_cri;  pv[SS_melt]  = -S_s_melt;
+                            pv[SS_csg]   = -S_csg;
+                            pv[SG_agg]   = S_g_agg;  pv[SG_rim]   = S_g_rim;
+                            pv[SG_dep]   = S_g_dep;  pv[SG_i_cri] = S_i_cri;
+                            pv[SG_r_cri] = S_r_cri;  pv[SG_r_frz] = S_r_frz;
+                            pv[SG_melt]  = -S_g_melt; pv[SG_csg]  = S_csg;
+                            pv[SR_c_au]  = S_c_au;   pv[SR_ac]    = S_ac;
+                            pv[SR_ev]    = -S_ev;    pv[SR_s_shed]= S_s_shed;
+                            pv[SR_g_shed]= S_g_shed; pv[SR_r_cri] = -S_r_cri;
+                            pv[SR_r_frz] = -S_r_frz; pv[SR_s_melt]= S_s_melt;
+                            pv[SR_g_melt]= S_g_melt;
+                            pv_rho   = m.r_humid.x[i][j][k];
+                            pv_valid = true;
+                        }
+
                     } // end i
+
+                    if(ssd_on){
+                        const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                        ssd[SX_gnd_s*N+b] = m.P_snow.x[i_gnd][j][k];
+                        ssd[SX_gnd_g*N+b] = m.P_graupel.x[i_gnd][j][k];
+                        ssd[SX_gnd_r*N+b] = m.P_rain.x[i_gnd][j][k];
+                    }
 
                     double P_rain_diff = fabs(m.P_rain.x[23][j][k] - Rain_check) * conv_mmd;
                     if(P_rain_diff <= 1.0e-3) break;
@@ -441,6 +565,8 @@ private:
         global_max_rain    = local_max_rain;
         global_max_snow    = local_max_snow;
         global_max_graupel = local_max_graupel;
+
+        if(ssd_on) printBudget(ssd);
 
         // Locate global max positions (single cheap pass, outside hot loop)
         if(global_max_rain > 0.0 || global_max_snow > 0.0 || global_max_graupel > 0.0){
@@ -464,6 +590,76 @@ private:
                 }
             }
         }
+    }
+
+
+    // ==================== ATM_SS_DIAG REPORT ====================
+    void printBudget(const std::vector<double>& ssd) const {
+        using namespace ThreeCatIce;
+        const double yr = 365.0 * 8.64e4;              // [kg/(m2 s)] = [mm/s]  ->  [mm/a]
+        const size_t N = (size_t)m.jm * m.km;
+        std::vector<double> a((size_t)NSSD, 0.0);
+        double w_tot = 0.0;
+        for(int j = 0; j < m.jm; j++){
+            const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+            for(int k = 0; k < m.km; k++){
+                w_tot += w;
+                for(int q = 0; q < NSSD; q++) a[q] += w * ssd[(size_t)q * N + (size_t)j * m.km + k];
+            }
+        }
+        for(int q = 0; q < NSSD; q++) a[q] *= yr / w_tot;
+
+        auto sum = [&](int lo, int hi){ double t = 0.0; for(int q = lo; q < hi; q++) t += a[q]; return t; };
+        const double net_s = sum(0, SS_END), net_g = sum(SG_agg, SG_END), net_r = sum(SR_c_au, SR_END);
+
+        printf("\n      AGCM: [SS DIAG] iter %d.  ThreeCat flux budgets, cos-lat GLOBAL mean, mm/a."
+               "  Every number is that term's contribution to the ground flux.\n", m.iter_n);
+
+        printf("      AGCM: [SS DIAG] SNOW      S_i_au %9.1f  S_d_au %9.1f  S_s_agg %9.1f"
+               "  S_s_rim %9.1f  S_s_dep %9.1f\n"
+               "      AGCM: [SS DIAG]           S_i_cri %8.1f  S_r_cri %8.1f  S_s_melt %8.1f"
+               "  S_csg %11.1f  ->  net %9.1f\n"
+               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
+               " %9.1f   (residual %.3e)\n",
+               a[SS_i_au], a[SS_d_au], a[SS_agg], a[SS_rim], a[SS_dep],
+               a[SS_i_cri], a[SS_r_cri], a[SS_melt], a[SS_csg], net_s,
+               a[SX_top_s], a[SX_clamp_s], a[SX_gnd_s],
+               net_s + a[SX_top_s] + a[SX_clamp_s] - a[SX_gnd_s]);
+
+        printf("      AGCM: [SS DIAG] GRAUPEL   S_g_agg %8.1f  S_g_rim %8.1f  S_g_dep %8.1f"
+               "  S_i_cri %8.1f  S_r_cri %8.1f\n"
+               "      AGCM: [SS DIAG]           S_r_frz %8.1f  S_g_melt %7.1f  S_csg %11.1f"
+               "  ->  net %9.1f\n"
+               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
+               " %9.1f   (residual %.3e)\n",
+               a[SG_agg], a[SG_rim], a[SG_dep], a[SG_i_cri], a[SG_r_cri],
+               a[SG_r_frz], a[SG_melt], a[SG_csg], net_g,
+               a[SX_top_g], a[SX_clamp_g], a[SX_gnd_g],
+               net_g + a[SX_top_g] + a[SX_clamp_g] - a[SX_gnd_g]);
+
+        printf("      AGCM: [SS DIAG] RAIN      S_c_au %9.1f  S_ac %11.1f  S_ev %11.1f"
+               "  S_s_shed %7.1f  S_g_shed %7.1f\n"
+               "      AGCM: [SS DIAG]           S_r_cri %8.1f  S_r_frz %8.1f  S_s_melt %8.1f"
+               "  S_g_melt %7.1f  ->  net %9.1f\n"
+               "      AGCM: [SS DIAG]           stale top %6.1f  clamp/cap %10.1f  =  ground"
+               " %9.1f   (residual %.3e)\n",
+               a[SR_c_au], a[SR_ac], a[SR_ev], a[SR_s_shed], a[SR_g_shed],
+               a[SR_r_cri], a[SR_r_frz], a[SR_s_melt], a[SR_g_melt], net_r,
+               a[SX_top_r], a[SX_clamp_r], a[SX_gnd_r],
+               net_r + a[SX_top_r] + a[SX_clamp_r] - a[SX_gnd_r]);
+
+        // Shares of the GROSS sources, which is the number a coefficient change acts on: a term
+        // worth 2 % of the sources cannot be the lever however wrong its constant is.
+        double gross_s = 0.0;
+        for(int q = 0; q < SS_END; q++) if(a[q] > 0.0) gross_s += a[q];
+        if(gross_s > 0.0)
+            printf("      AGCM: [SS DIAG] snow sources by share:  S_i_au %.1f %%  S_d_au %.1f %%"
+                   "  S_s_agg %.1f %%  S_s_rim %.1f %%  S_s_dep %.1f %%  S_i_cri %.1f %%"
+                   "  S_r_cri %.1f %%\n",
+                   1e2*std::max(0.0,a[SS_i_au])/gross_s, 1e2*std::max(0.0,a[SS_d_au])/gross_s,
+                   1e2*std::max(0.0,a[SS_agg])/gross_s, 1e2*std::max(0.0,a[SS_rim])/gross_s,
+                   1e2*std::max(0.0,a[SS_dep])/gross_s, 1e2*std::max(0.0,a[SS_i_cri])/gross_s,
+                   1e2*std::max(0.0,a[SS_r_cri])/gross_s);
     }
 
 
