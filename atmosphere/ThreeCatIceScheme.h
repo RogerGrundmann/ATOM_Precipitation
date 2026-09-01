@@ -232,6 +232,32 @@ private:
         return v;
     }
 
+    // ATM_ICE_LIMITERS=1 -- charge every sink against the water that is actually there.
+    // Default 0 = shipped.
+    //
+    // TwoCat carries five availability limiters; ThreeCat has NONE, and its own comments cite a
+    // "proportional cloud-water limiter" that exists only in the other file. Nothing stops a
+    // ThreeCat sink from removing more cloud water, cloud ice or falling flux than the cell
+    // holds: the only thing that keeps the scheme finite is the max(0, ...) floor and the
+    // `P_max_flux` cap on the INTEGRATED flux, applied one level later. Measured with
+    // ATM_SS_DIAG on the dimensionally-repaired branch, rain evaporation `S_ev` demands
+    // 5074 mm/a against 1664 mm/a of rain sources -- three times the water present -- and the
+    // floor then discards the difference.
+    //
+    // Ported term for term from `TwoCatIceScheme.h:463`, with the two categories TwoCat does not
+    // have (graupel, and the snow<->graupel conversion) folded into the same totals, and the
+    // per-species clips written against the RAW flux so they mean the same thing on both
+    // branches of ATM_ICE_RAW_FLUX.
+    //
+    // The non-negativity of melting is part of the same repair: `melt_driver` carries a
+    // `(c - q_sat(t_0))` term that goes negative in subsaturated air, and a negative `S_s_melt`
+    // is an unphysical rain->snow conversion, not a melting rate.
+    static bool iceLimiters(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_ICE_LIMITERS"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool ssDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_SS_DIAG"); return e && atoi(e) != 0; }();
@@ -283,6 +309,7 @@ private:
 
         // Per-column budget slots; each (j,k) is owned by one thread, so no synchronisation.
         const bool raw_flux = rawFlux();
+        const bool limiters = iceLimiters();
         const bool ssd_on = ssDiag();
         std::vector<double> ssd;
         if(ssd_on) ssd.assign((size_t)NSSD * m.jm * m.km, 0.0);
@@ -519,6 +546,60 @@ private:
                         double S_csg = (t_u <= m.t_0 && cl_i > 0.0002)
                             ? z_csg * cl_i * ((r_q_s > 0.0) ? pow(r_h_i * r_q_s, 0.75) : 0.0)
                             : 0.0;
+
+                        // --- Availability limiters (ATM_ICE_LIMITERS) ---
+                        if(limiters){
+                            const double mass_layer = r_h_i * step_i;   // kg/m2 of this shell
+
+                            // Melting is a one-way process.
+                            S_s_melt = std::max(0.0, S_s_melt);
+                            S_g_melt = std::max(0.0, S_g_melt);
+
+                            // Cloud water: seven sinks share what the cell holds.
+                            double tot_c = S_c_au + S_ac + S_c_frz
+                                         + S_s_rim + S_g_rim + S_s_shed + S_g_shed;
+                            double max_c = cl_i / dt_snow_dim;
+                            if(tot_c > max_c && tot_c > 0.0){
+                                const double f = max_c / tot_c;
+                                S_c_au *= f; S_ac *= f; S_c_frz *= f;
+                                S_s_rim *= f; S_g_rim *= f; S_s_shed *= f; S_g_shed *= f;
+                            }
+
+                            // Cloud ice: six sinks share what the cell holds.
+                            double tot_i = S_i_au + S_d_au + S_s_agg + S_g_agg
+                                         + S_i_cri + S_i_melt;
+                            double max_i = ice_i / dt_snow_dim;
+                            if(tot_i > max_i && tot_i > 0.0){
+                                const double f = max_i / tot_i;
+                                S_i_au *= f; S_d_au *= f; S_s_agg *= f; S_g_agg *= f;
+                                S_i_cri *= f; S_i_melt *= f;
+                            }
+
+                            // Falling species: a sink cannot take more than the flux carries.
+                            // Written against the raw fluxes so the clip is a mass statement on
+                            // either branch of ATM_ICE_RAW_FLUX.
+                            const double P_r = m.P_rain.x[i][j][k]    / mass_layer;
+                            const double P_s = m.P_snow.x[i][j][k]    / mass_layer;
+                            const double P_g = m.P_graupel.x[i][j][k] / mass_layer;
+
+                            double tot_r = S_ev + S_r_cri + S_r_frz;
+                            if(tot_r > P_r && tot_r > 0.0){
+                                const double f = P_r / tot_r;
+                                S_ev *= f; S_r_cri *= f; S_r_frz *= f;
+                            }
+                            double tot_s = S_s_melt + S_csg + std::max(0.0, -S_s_dep);
+                            if(tot_s > P_s && tot_s > 0.0){
+                                const double f = P_s / tot_s;
+                                S_s_melt *= f; S_csg *= f;
+                                if(S_s_dep < 0.0) S_s_dep *= f;
+                            }
+                            double tot_g = S_g_melt + std::max(0.0, -S_g_dep);
+                            if(tot_g > P_g && tot_g > 0.0){
+                                const double f = P_g / tot_g;
+                                S_g_melt *= f;
+                                if(S_g_dep < 0.0) S_g_dep *= f;
+                            }
+                        }
 
                         // --- Sinks and sources ---
                         double S_c_c_ijk = m.S_c_c.x[i][j][k];
