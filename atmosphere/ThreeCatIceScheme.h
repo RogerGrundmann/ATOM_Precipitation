@@ -2,6 +2,7 @@
 
 #include "cAtmosphereModel.h"
 #include "IceSchemeCommon.h"
+#include "CloudFraction.h"
 
 #include <algorithm>
 #include <cmath>
@@ -274,6 +275,9 @@ private:
         // Precompute E_sat at t_0 (constant, used in every cell)
         const double E_sat_t_0_Pa = 1e2 * m.hp * AtomUtils::exp_func(m.t_0, 17.2694, 35.86);
 
+        // Kessler autoconversion threshold, in-cloud [kg/kg]; ATM_QC_CRIT, default 0.05 g/kg.
+        const double q_c_crit = IceSchemeCommon::qcCrit();
+
         // Thread-local accumulators for the OMP reduction
         double local_max_rain = 0.0, local_max_snow = 0.0, local_max_graupel = 0.0;
 
@@ -386,15 +390,35 @@ private:
                         // --- Deposition growth of cloud ice (shared throttle) ---
                         double S_i_dep = thr.S_i_dep;
 
-                        // --- Autoconversion ---
-                        double S_c_au = (t_u >= m.t_0 && cl_i > 0.0)
-                            ? std::max(c_c_au * (cl_i - 0.0002), 0.0) : 0.0;
+                        // --- Autoconversion, IN-CLOUD (ported from `3ea78e3`) ---
+                        // The shipped test was `c_c_au*(q_c - 0.0002)` on the GRID MEAN, a
+                        // hardcoded 0.2 g/kg threshold. TwoCat, OneCat and ZeroCat were all made
+                        // fraction-aware in `3ea78e3` and ThreeCat, then not the default scheme,
+                        // was missed. Autoconversion is a LOCAL process, so the grid-mean
+                        // tendency is `f*R(q_c/f)`; only the thresholded, nonlinear terms move
+                        // under that transform. Under the now-default `ATM_CLOUD_FRAC` the
+                        // grid-mean cloud water peaks near 0.06 g/kg, so `q_c - 0.0002` is
+                        // negative almost everywhere and this scheme's autoconversion was
+                        // effectively OFF -- its rain came from accretion and melting alone.
+                        const double q_t_frac = c_ijk + std::max(0.0, cl_i)
+                                              + std::max(0.0, ice_i);
+                        const double f_cld = CloudFraction::effectiveFraction(
+                                q_t_frac, q_sat, p_u,
+                                std::max(0.0, cl_i) + std::max(0.0, ice_i));
+                        const double cloud_in = cl_i / f_cld;            // in-cloud water
+                        double S_c_au = (t_u >= m.t_0 && cloud_in > q_c_crit)
+                            ? f_cld * c_c_au * (cloud_in - q_c_crit) : 0.0;
 
                         double S_i_au = thr.S_i_au;   // shared throttle (ice aggregation -> snow)
                         double S_d_au = thr.S_d_au;   // shared throttle (ice deposition -> snow)
 
                         // --- Collection ---
-                        double S_ac = (t_u >= m.t_0) ? c_ac * cl_i * Rain_79 : 0.0;
+                        // Accretion, in-cloud and above the same reservoir threshold, exactly
+                        // as TwoCat carries it: only cloud water in excess of `q_c_crit` is
+                        // collected by falling rain, so the reservoir that autoconversion cannot
+                        // drain is not drained by accretion round the back either.
+                        double S_ac = (t_u >= m.t_0 && cloud_in > q_c_crit)
+                            ? f_cld * c_ac * (cloud_in - q_c_crit) * Rain_79 : 0.0;
 
                         double S_s_rim, S_g_rim, S_s_shed, S_g_shed;
                         if(t_u < m.t_0){
