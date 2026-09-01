@@ -222,6 +222,8 @@ at the user's instruction, with this measurement in front of it.** The snow is t
 2470 against 0.29 mm/a. `P_graupel` alone (464-920 mm/a depending on the print parity) is half
 of NASA's total precipitation. Every species pegs the same 9.46e+04 mm/a per-cell ceiling, so a
 cap is binding somewhere in all three.
+**IDENTIFIED 2026-09-01**: it is `IceSchemeCommon::P_max_flux` = 3.0e-3 kg/(m2 s), and it is
+not merely binding -- it is what sets the answer. See below.
 **THE SNOW FIX IS NOW PORTED (2026-08-31), AND IT CUTS THE SNOW BY 62 %.** `c4d1bd1`'s two
 changes — `c_c_au` 4.0e-4 -> 1.0e-3 and the SNOW-side riming `c_rim` -> `c_rim/5` — applied to
 `ThreeCatIceScheme`. Warm-side shedding keeps the full `c_rim`, exactly as in TwoCat. Six
@@ -284,9 +286,115 @@ TwoCat/OneCat/ZeroCat were all made fraction-aware in `3ea78e3` and now use `ATM
 the grid-mean `q_c` peaks near 0.06 g/kg, so `q_c - 0.0002` is negative almost everywhere and
 ThreeCat's autoconversion is effectively OFF — its rain comes from accretion and melting. This
 is the fifth occurrence of the grid-mean defect and the one module that never got the fix.
+**CLOSED 2026-09-01** -- ported, and it is worth -598 mm/a; see the subsection below.
 
 **`CategoryIceScheme` = 2 in the config restores TwoCat exactly**, and every measurement in this
 file dated on or before 2026-08-31 was taken on TwoCat.
+
+### The snow question was the wrong question: EVERY ThreeCat number is a clamp residual
+
+**THE SNOW FRACTION WAS TO BE CHASED THROUGH `S_s_agg` AND THE GRAUPEL/SNOW EXCHANGES, ONE
+COEFFICIENT PER RUN. THE INSTRUMENT ANSWERED IT IN ONE RUN AND THE ANSWER IS THAT NO COEFFICIENT
+IN THIS SCHEME IS THE LEVER** (2026-09-01). `ATM_SS_DIAG=1`, new, print-only, default off: the
+per-term budget of all three fluxes, walked exactly as the scheme integrates them, with the
+`max(0, ...)` floor, the `P_max_flux` cap and the temperature window charged to their own bucket
+so that `sources - sinks + clamp = P_x(ground)` is an IDENTITY. It closes to 1e-3 mm/a against
+numbers of 1e+10, and to 1e-12 once the fluxes are physical.
+
+Six iterations from the accepted configuration's iteration-600 checkpoint, 24 threads, cos-lat
+global means in mm/a, on the SHIPPED scheme:
+
+| snow | `S_i_au` | `S_s_agg` | `S_s_rim` | `S_s_dep` | `S_r_cri` | net demand | clamp | ground |
+|---|---|---|---|---|---|---|---|---|
+| mm/a | 538 | **8.1e+09** | **1.1e+10** | -7.5e+08 | **5.5e+10** | **7.35e+10** | **-7.35e+10** | **1166** |
+
+**THE CLAMP REMOVES 99.999998 % OF THE DEMAND AND THE GROUND FLUX IS WHAT IS LEFT OVER.**
+`P_snow` = 1046 mm/a is not the sum of any set of microphysical rates; it is `P_max_flux` and the
+zero floor, applied level by level to a demand seven orders of magnitude larger. That is why
+cutting the snow riming by 5 bought 62 %, the graupel riming by 5 bought 37 %, and a further 4.2
+bought 11 %: **a saturated term does not care about its coefficient.** Every species pegging the
+same 9.46e+04 mm/a per-cell ceiling — recorded above as "a cap binds somewhere in all three" — is
+this, and the cap is `IceSchemeCommon::P_max_flux` = 3.0e-3 kg/(m2 s).
+
+**THE CAUSE IS DIMENSIONAL: ThreeCat DIVIDES EVERY FLUX BY ITS OWN GROUND VALUE BEFORE USING IT.**
+
+    Rain = P_rain[i] / max(P_rain[0], 1e-6)
+
+and then hands that RATIO to relations that are dimensional in kg/(m2 s). The clearest case is
+the mass content of falling rain, `r_q_r = A_r*B_rad^(-8/9)*Rain^(8/9)`: with the raw flux a
+typical 1e-5 kg/(m2 s) gives **7.8e-5 kg/m3**, an ordinary 0.08 g/m3 of rain water; with the
+ratio, which the 1e-6 floor lets reach `P_max_flux`/1e-6 = **3000**, the same expression returns
+**~2.5e+3 kg/m3 — denser than liquid water.** Every collection term is a power of these
+quantities, so all of them inflate together, and `S_r_cri ∝ ice/m_i * Rain^(13/9)` inflates most.
+
+**TWOCAT USES THE RAW FLUX** (`TwoCatIceScheme.h:241`), and so does the COSMO documentation the
+constants come from. The normalisation is ThreeCat's alone and has been there since the initial
+commit. It is also the origin of the "ThreeCat NaN blow-up": `P_snow_0` in a denominator with
+`S_s_rim ∝ Snow` is a geometric amplifier down the column, which is exactly what `P_norm_floor`
+and `P_max_flux` were added to contain. **Both contain the symptom, and the containment is now
+the model's precipitation.**
+
+**AND THERE ARE NO AVAILABILITY LIMITERS AT ALL.** TwoCat carries five — a proportional
+cloud-water limiter, a proportional ice limiter, and per-species clips on `S_ev`, `S_s_dep` and
+`S_s_melt`. ThreeCat has none, and its own riming comments cite "the proportional cloud-water
+limiter" as the mechanism they act through: **the comments were ported and the limiter they
+describe was not.** Nothing stops a sink removing more water than the cell holds; the only bound
+is the floor and the cap, applied one level later to the integrated flux. Measured on the
+dimensionally-repaired branch, rain evaporation demands **5074 mm/a against 1664 mm/a of rain
+sources** — three times the water present.
+
+**THREE CHANGES, MEASURED SEPARATELY SO NONE IS CONFOUNDED** (same checkpoint, 6 iterations,
+24 threads, mm/a):
+
+| arm | P_rain | P_snow | P_graupel | total | vs NASA |
+|---|---|---|---|---|---|
+| shipped ThreeCat | 1118 | 1046 | 515 | **2679** | 2.74x |
+| **+ in-cloud autoconversion (NOW THE DEFAULT)** | 661 | 1050 | 521 | **2081** | 2.13x |
+| + `ATM_ICE_LIMITERS=1` | 52 | 22.6 | 1.5 | **76** | 0.08x |
+| `ATM_ICE_RAW_FLUX=1` alone | 0.003 | 0.69 | 0.0 | **0.73** | 0.0007x |
+| `ATM_ICE_RAW_FLUX` + in-cloud autoconversion | 93.0 | 0.69 | 0.0 | **93** | 0.10x |
+| + `ATM_ICE_LIMITERS` (all three) | 8.7 | 0.69 | 0.0 | **9.4** | 0.010x |
+| *TwoCat, same checkpoint, same 6 iterations* | *359* | *2.4* | — | *362* | *0.37x* |
+| *NASA* | | | | *978* | |
+
+**THE IN-CLOUD AUTOCONVERSION IS FLIPPED ON** — it is `3ea78e3`'s repair, which TwoCat, OneCat
+and ZeroCat all received and ThreeCat did not (gap 2 above), and it is the same defect in the
+same place: `c_c_au*(q_c - 0.0002)` tests a 0.2 g/kg threshold against the GRID MEAN, which under
+the default `ATM_CLOUD_FRAC` peaks near 0.06, so ThreeCat's autoconversion was **off**. With the
+fractional form `f*c_c_au*(q_c/f - q_c_crit)` and the matching accretion it takes total
+precipitation 2679 -> 2081 and rain 1118 -> 661.
+
+**THE OTHER TWO ARE DEFAULT OFF, AND THE REASON IS NOT DOUBT ABOUT THE PHYSICS.** A ratio fed to
+a dimensional law is wrong and a sink that removes water that is not there is wrong. But each,
+alone or together, takes precipitation to **10-90 mm/a** — the flip pattern this file has now
+recorded six times, where removing one error of a cancelling pair makes the model worse. Read
+them as measured, not as ready.
+
+**WHAT THE REPAIRED BRANCH IS LIMITED BY, WHICH IS THE NEXT THING.** With the fluxes physical the
+budget is legible for the first time: rain sources are `S_c_au` **1602** and `S_ac` 98, and the
+sink is `S_ev` at **-5074** — evaporation removes essentially the whole flux at every level,
+because a small flux evaporates faster than it falls (`S_ev ∝ Rain^(4/9)` against an availability
+∝ `Rain`). TwoCat from the same state has the same shape and survives it: sources 2955, `S_ev`
+demand 11562, **11.8 % surviving** against ThreeCat's 0.5 %.
+
+**AND THE DIFFERENCE IS A THIRD STRUCTURAL DEFECT, NOT YET MEASURED SEPARATELY: ThreeCat DELETES
+FLUX AT THE PHASE BOUNDARIES.** `P_rain[i]` is set to **0** wherever `t_u < t_0`, `P_snow[i]`
+wherever `t_u >= t_0`, `P_graupel[i]` likewise — so rain formed above the freezing level never
+reaches the ground and snow crossing the melting level is discarded rather than melted, in a
+scheme that HAS `S_s_melt` and `S_r_frz` to do those conversions. **TwoCat's rain integration
+carries no temperature window at all.** The `ATM_SS_DIAG` clamp bucket currently lumps the window
+in with the floor and the cap; splitting it is one print and is the next measurement.
+
+**READ EVERY NUMBER IN THIS SUBSECTION AS A SIX-ITERATION RESPONSE TO A FIELD THAT WAS SPUN UP BY
+THE UNREPAIRED SCHEME**, not as a climate. The checkpoint's cloud, ice and vapour were made by
+1e+10 mm/a of demand being clamped; six iterations is ~1.2 seconds of physical time and cannot
+re-equilibrate them. The arms are comparable to each other because they start from one state, and
+none of them is a prediction.
+
+**AND THE DEFAULT ICE SCHEME IS THE ONE WHOSE OUTPUT IS A CLAMP RESIDUAL.** `CategoryIceScheme`
+= 3 was set at the user's instruction with a 3.8x regression in front of it; that regression is
+now explained. TwoCat (`= 2`) is the only scheme in this tree whose precipitation is made of
+rates rather than of caps, and it is one config line away.
 
 ## Open risks
 
