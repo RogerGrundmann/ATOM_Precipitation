@@ -420,15 +420,49 @@ both gated on `t_u >= m.t_0`, so no rain is ever FORMED above the freezing level
 to delete. "Rain formed above the freezing level never reaches the ground" described a flux that
 does not exist.
 
-**WHAT LIMITS THE REPAIRED RAIN IS THE FLOOR, AND THE LIMITER DOES NOT STOP IT.** With
-`ATM_ICE_LIMITERS` on, the floor still injects **+5930 mm/a against 1699 of sources**: the
-evaporation demand drives the flux negative at essentially every level and the `max(0, ...)`
-silently makes the water back. The limiter clips `S_ev` against `m.P_rain.x[i][j][k]`, which at
-that point in the loop is the PREVIOUS pass's value at the SAME level, not the flux arriving from
-above — and the sink at level i is charged one level later, against `P[i]`. **TwoCat's limiter
-has the identical structure** (`Rain = m.P_rain.x[i][j][k]`), which is why its `S_ev` demand also
-runs at 391 % of its sources. Charging each sink against `P[i+1] + rho*S[i+1]*dz`, the flux that
-will actually be there, is the next thing to write, and it is a change to both schemes.
+**WHAT LIMITED THE REPAIRED RAIN WAS THE FLOOR, BECAUSE THE LIMITER WAS CHARGING THE WRONG
+QUANTITY — NOW FIXED, AND IT DRIVES THE FLOOR AND THE CAP TO EXACTLY ZERO.** The first version of
+the clip read `m.P_rain.x[i][j][k]`, which at that point in the loop is the PREVIOUS pass's value
+at this level. The sink computed at level i is not charged against that at all: it is charged one
+level lower, as `P_x[i-1] = clamp(P_x[i] + rho[i]*S_x[i]*dz[i-1])`, so the flux it can take from
+is `P_x[i]` — which the iteration is about to compute from `P_x[i+1]` and `S_x[i+1]`, both already
+known — over a layer mass `rho[i]*dz[i-1]`, not `rho[i]*dz[i]`. With the arriving form (same
+probe, ThreeCat + `ATM_ICE_RAW_FLUX` + `ATM_ICE_LIMITERS`):
+
+| | `S_ev` | floor | cap | window | ground rain | total precip |
+|---|---|---|---|---|---|---|
+| stale clip | -7620 | **+5930** | 0.0 | 0.0 | 9.0 | 9.4 |
+| **arriving clip** | **-1653** | **+0.0** | **0.0** | **0.0** | **5.3** | **5.5** |
+
+**EVERY GRAM NOW LEAVES THROUGH A NAMED TERM.** Rain sources are 1658 and `S_ev` takes 1653, so
+the ground value 5.3 is a difference of rates with no clamp in it anywhere. The only non-rate
+remover left in the whole scheme is the SNOW temperature window, -498.9 of a generated 495.7.
+On the shipped normalisation the same fix takes the floor to zero as well (total precipitation
+76 -> 45.9).
+
+**AND THE SAME DEFECT IS IN TWOCAT, WHICH IS THE DEFAULT SCHEME, WHERE IT IS WORTH A FACTOR OF
+11** (`ATM_ICE_LIMIT_ARRIVING`, new, default 0 = shipped; TwoCat's own three clips read
+`m.P_rain.x[i]`/`m.P_snow.x[i]` where its integration charges the level-i sink against
+`P_x[i+1]`). Same checkpoint, same six iterations, `ATM_SR_DIAG`:
+
+| TwoCat | sources | `S_ev` | `S_r_frz` | clamp | **P_rain(ground)** | surviving |
+|---|---|---|---|---|---|---|
+| shipped | 2955 | **11562 (391 %)** | 2853 | -11816 | **350** | 11.8 % |
+| **arriving clip** | 2926 | **2408 (82 %)** | 2361 | **-1880** | **32** | 1.1 % |
+
+**SO ~90 % OF TWOCAT'S PRECIPITATION FROM THIS STATE WAS CLAMP-SUPPORTED TOO** — 350 mm/a against
+32 once each sink can only take water that is there. Total precipitation 362 -> 39.
+
+**THE FIX DOES NOT CLOSE TWOCAT THE WAY IT CLOSES THREECAT, AND THE REASON IS NAMED: `S_r_frz`
+HAS NO CLIP AT ALL.** Freezing still demands 2361 against 2926 of sources, unclipped, so the
+residual clamp is 64 % of the sources rather than 0. ThreeCat's limiter covers `S_r_frz` because
+it was written from the general form; TwoCat's three clips were added one at a time.
+
+**THE CHECKPOINT THESE ARMS RUN FROM WAS SPUN UP BY THE UNREPAIRED THREECAT, SO THE TWOCAT
+NUMBERS ABOVE ARE NOT THE ACCEPTED CONFIGURATION'S.** Whether the headline 992 mm/a at iteration
+100 is clamp-supported to the same degree is a from-scratch `nm` = 100 pair, and it is the most
+important open measurement in this tree: every cloud, humidity and radiation constant accepted on
+2026-08-31 was fitted with that number as the target.
 
 **READ EVERY NUMBER IN THIS SUBSECTION AS A SIX-ITERATION RESPONSE TO A FIELD THAT WAS SPUN UP BY
 THE UNREPAIRED SCHEME**, not as a climate. The checkpoint's cloud, ice and vapour were made by

@@ -169,6 +169,32 @@ private:
     // As with ATM_MC_DIAG, the raw sums are not a budget: the max(0, ...) and the P_max cap
     // truncate, so each level is charged only what it could take and the truncation is
     // reported separately. Then G - sinks - truncation = P_rain(ground) is an identity.
+    // ATM_ICE_LIMIT_ARRIVING=1 -- clip a falling-species sink against the flux that ARRIVES at
+    // this level from above, not against the previous pass's value at this level. Default 0 =
+    // shipped.
+    //
+    // The three clips below read `Rain` and `Snow`, which are `m.P_rain.x[i][j][k]` and
+    // `m.P_snow.x[i][j][k]` as they stood when this level's body began -- values written by the
+    // PREVIOUS iter_prec pass, or by the previous call to the scheme. The sink they are clipping
+    // is not charged against that. The integration is
+    //
+    //     P_x[i] = clamp(P_x[i+1] + (sources - sinks)*mass_layer),
+    //
+    // so the flux a level-i sink can take from is `P_x[i+1]`, which the previous turn of this
+    // loop has already computed. Measured in ThreeCat, which has the identical defect: with the
+    // stale form the max(0, ...) floor still injected 5930 mm/a of rain against 1699 mm/a of
+    // sources WITH the limiter on -- the clip did not bind at all -- and with the arriving form
+    // the floor and the cap both go to EXACTLY zero, so every gram that leaves the flux leaves
+    // through a named term. TwoCat's own `S_ev` demand runs at 391 % of its sources
+    // (`ATM_SR_DIAG`), which is the same signature.
+    //
+    // Default off because TwoCat is the default ice scheme and this changes its precipitation.
+    static bool limitArriving(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_ICE_LIMIT_ARRIVING"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool srDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_SR_DIAG"); return e && atoi(e) != 0; }();
@@ -181,6 +207,7 @@ private:
 
         // Per-column slots for the final iter_prec pass; each (j,k) is owned by one thread.
         const bool srd_on = srDiag();
+        const bool arriving = limitArriving();
         const int  NSR = 9;   // c_au, ac, shed, s_melt, ev, r_frz, r_cri, ground, truncated
         std::vector<double> srd;
         if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
@@ -410,7 +437,8 @@ private:
                                 S_s_melt = c_s_melt
                                     * (1.0 + b_s_melt * pow(Snow, exp_5_26))
                                     * (t_u - m.t_0) * pow(Snow, exp_1_3);
-                                S_s_melt = std::min(S_s_melt, Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                                const double avail_sm = arriving ? m.P_snow.x[i+1][j][k] : Snow;
+                                S_s_melt = std::min(S_s_melt, avail_sm/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                             }else S_s_melt = 0.0;
 
                             // melting of cloud ice to cloud water/rain
@@ -441,15 +469,18 @@ private:
                         if(t_u > m.t_0 && Rain > 1e-12 && m.c.x[i][j][k] < q_sat){
                             S_ev = a_ev * (1.0 + b_ev * pow(Rain, exp_1_6))
                                    * (q_sat - m.c.x[i][j][k]) * Rain_pow_4_9;
-                            S_ev = std::min(S_ev, Rain / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                            const double avail_r = arriving ? m.P_rain.x[i+1][j][k] : Rain;
+                            S_ev = std::min(S_ev, avail_r / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_ev = 0.0;
 
                         // snow deposition/sublimation (at T < 0°C)
                         if(t_u < m.t_0 && Snow > 1e-12){
                             S_s_dep = c_s_dep * (1.0 + b_s_dep * pow(Snow, exp_5_26))
                                       * (m.c.x[i][j][k] - q_Ice) * pow(Snow, exp_8_13);
-                            if(S_s_dep < 0.0)                           // sublimation limiting
-                                S_s_dep = max(S_s_dep, -Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                            if(S_s_dep < 0.0){                          // sublimation limiting
+                                const double avail_s = arriving ? m.P_snow.x[i+1][j][k] : Snow;
+                                S_s_dep = max(S_s_dep, -avail_s/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                            }
                         }else S_s_dep = 0.0;                            // no deposition above freezing or without snow
 
                         // freezing of rain to form snow

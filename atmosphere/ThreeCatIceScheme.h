@@ -555,8 +555,6 @@ private:
 
                         // --- Availability limiters (ATM_ICE_LIMITERS) ---
                         if(limiters){
-                            const double mass_layer = r_h_i * step_i;   // kg/m2 of this shell
-
                             // Melting is a one-way process.
                             S_s_melt = std::max(0.0, S_s_melt);
                             S_g_melt = std::max(0.0, S_g_melt);
@@ -582,11 +580,42 @@ private:
                             }
 
                             // Falling species: a sink cannot take more than the flux carries.
-                            // Written against the raw fluxes so the clip is a mass statement on
-                            // either branch of ATM_ICE_RAW_FLUX.
-                            const double P_r = m.P_rain.x[i][j][k]    / mass_layer;
-                            const double P_s = m.P_snow.x[i][j][k]    / mass_layer;
-                            const double P_g = m.P_graupel.x[i][j][k] / mass_layer;
+                            //
+                            // CHARGED AGAINST THE ARRIVING FLUX, NOT THE STALE ONE. The first
+                            // version of this clip read `m.P_rain.x[i][j][k]`, which at this
+                            // point in the loop is the PREVIOUS pass's value at this level --
+                            // and the sink computed here is not charged against that at all. It
+                            // is charged one level LOWER, as
+                            //
+                            //     P_x[i-1] = clamp(P_x[i] + rho[i]*S_x[i]*dz[i-1]),
+                            //
+                            // so the flux it can take from is `P_x[i]`, which this iteration is
+                            // about to compute from `P_x[i+1]` and `S_x[i+1]` -- both already
+                            // known -- and the mass it is spread over is `rho[i]*dz[i-1]`, NOT
+                            // `rho[i]*dz[i]`. Measured with the stale form: the floor still
+                            // injected 5930 mm/a of rain against 1699 of sources WITH the
+                            // limiter on, i.e. the clip did not bind at all.
+                            //
+                            // The temperature window is applied here too, because a species
+                            // whose window is shut at this level arrives with nothing.
+                            const double dz_cons  = step_table[(i > 0) ? (i - 1) : 0];
+                            const double mass_arr = r_h_i * dz_cons;
+                            const double rho_up   = m.r_humid.x[i+1][j][k];
+                            auto arriving = [&](double P_up, double S_up, bool window_open){
+                                const double raw = P_up + rho_up * S_up * step_i;
+                                return window_open
+                                    ? std::min(IceSchemeCommon::P_max_flux, std::max(0.0, raw))
+                                    : 0.0;
+                            };
+                            const double P_r = arriving(m.P_rain.x[i+1][j][k],
+                                                        m.S_r.x[i+1][j][k],
+                                                        (t_u >= m.t_0)) / mass_arr;
+                            const double P_s = arriving(m.P_snow.x[i+1][j][k],
+                                                        m.S_s.x[i+1][j][k],
+                                                        (t_u < m.t_0 && t_u >= m.t_000)) / mass_arr;
+                            const double P_g = arriving(m.P_graupel.x[i+1][j][k],
+                                                        m.S_g.x[i+1][j][k],
+                                                        (t_u < m.t_0 && t_u >= m.t_00)) / mass_arr;
 
                             double tot_r = S_ev + S_r_cri + S_r_frz;
                             if(tot_r > P_r && tot_r > 0.0){
