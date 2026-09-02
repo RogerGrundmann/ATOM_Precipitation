@@ -1231,6 +1231,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  ICE_LIMITERS=" << ev("ATM_ICE_LIMITERS", "0*")
           << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
           << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
+          << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
+          << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
+          << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
+          << "  POISSON_METRIC_FIX=" << ev("ATM_POISSON_METRIC_FIX", "0*")
+          << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
+          << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
+          << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");

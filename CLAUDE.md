@@ -861,14 +861,118 @@ is part of that repair rather than a follow-up. *Sixth instrument-shaped defect 
 after `Psi`'s constant density, `Q_Sensible`, `brunt_N2`'s terrain extrema, the "OLR" that was the
 lid temperature, and `ATM_SR_DIAG`'s ground bucket.*
 
+### The hydrostatic term is now written: `ATM_HYDRO_PGF`, default 0.0 and byte-identical off
+
+**THE REPAIR NAMED ABOVE IS IN** (2026-09-02, `RHS_Atm_Turb.cpp`). A strength, not a flag:
+`ATM_HYDRO_PGF=<s>` adds `-s*(100/(rho*u_0^2))*inv_rm*d(p_hyd)/dthe` to `rhs_v` and the matching
+`inv_rmsinthe` term to `rhs_w`. **Off-branch verified BYTE-IDENTICAL over all 6 physics files at
+1 thread**; the only file that differs is `RUN_CONFIG.txt`, by the new `[RUN CONFIG] dynamics
+knobs` line (which also prints `POISSON_METRIC_FIX`, `RADIAL_SHAPIRO_STRENGTH`, `V_MASSBAL` and
+`BUOY_CONSISTENT`, none of which any run was recording).
+
+**IT CARRIES AN EULER NUMBER AND `p_dyn` DOES NOT, AND THAT IS THE WHOLE POINT OF THE SUBSECTION
+ABOVE.** `p_dyn` is normalised by `rho*u_0^2` so its three `dpd*` lines need no coefficient;
+`p_stat` is a real pressure in hPa, so this term needs `100/(rho u_0^2)` and gets it.
+
+**HORIZONTAL ONLY, AND THE RADIAL OMISSION IS THE MEASURED PART, NOT AN OVERSIGHT.** In the
+radial direction the hydrostatic gradient is gravity to within a per cent, and `rhs_u` does not
+contain `-g` — the model is Boussinesq, so `rhs_u` carries only the RESIDUAL, as
+`buoyancy*g*dt/u_0*(t - t_ref)`. Measured at 31S on the 87E section:
+
+| z | `-(1/rho)dp/dz` | g | residual |
+|---|---|---|---|
+| 938 m | +9.7920 | 9.81 | **-0.018** |
+| 5513 m | +9.7230 | 9.81 | **-0.087** |
+| 9923 m | +9.6377 | 9.81 | **-0.172** |
+
+In the model's own non-dimensional radial tendency (x `L/u_0^2` = 250.4) the full gradient is
+**+2434.3** against `ubud_pgf` = 0.0823, `ubud_diff` = 0.00235 and `ubud_buoy` = 0.0000246 —
+**29 586x the largest term in `rhs_u`**, which unbalanced would accelerate every cell upward by
+**1.95 m/s per iteration** and peg the +-100 m/s clamp globally in ~50 iterations. The
+normalisation does not save it either: dividing by `p_stat(1)` removes the horizontal offset, not
+the vertical structure. **Adding it radially means adding `-g` with it, and their difference IS
+the buoyancy term already there.** So the radial direction was the one place this model was
+already doing the right thing. Do not "complete" the port with a third line.
+
+**TWO FORMS, AND THE BAROCLINIC ONE IS THE DEFAULT WHEN THE KNOB IS ON.** `ATM_HYDRO_PGF_RAW=1`
+differences `p_stat` as `ThermoAtm` builds it. That is the literal reading, and it is wrong at the
+surface for a reason worth recording on its own: **`densities()` sets the sea-level pressure to
+`p_sl = 1e-2*r_air*R_Air*T_surface`** — a CONSTANT-DENSITY sea-level pressure, correlating
+**+1.0000** with surface temperature by construction and spanning **749..1046 hPa** against
+Earth's ~980..1040. The default instead normalises every column at a common HEIGHT,
+`p_hyd = p_0*p_stat(i)/p_stat(1)`, which leaves the BAROCLINIC part — the thermal wind. Level 1
+rather than level 0 because `densities()` overwrites `p_stat.x[0]` with the value at
+`i_topography`, and normalising a column at its own ground is the sigma-coordinate error (Tibet's
+ground is at ~4 km: `p_hyd` at 5 km would be 0.88`p_0` against 0.51`p_0` over the neighbouring
+ocean). Level 1 is never overwritten and holds the true barometric value in rock as in air.
+**`p_hyd` is then an analytic function of (height, surface temperature) alone, so it is
+horizontally smooth across every coastline and plateau edge and cannot produce the
+sigma-coordinate pressure-gradient error at all.** The price is that it knows nothing about
+topography: there is no mountain in this pressure field, only a temperature pattern.
+
+**WHAT IT GIVES, READ OFF THE MODEL'S OWN FIELD BEFORE IT WAS RUN** (87E, 31S, dp/dy northward in
+hPa/deg, and the zonal wind that gradient is in geostrophic balance with):
+
+| z | 39 m | 938 | 2163 | 5513 | 9923 |
+|---|---|---|---|---|---|
+| raw `dp/dy` | 2.143 | 2.134 | 2.100 | 1.906 | 1.533 |
+| **baroclinic** | **-0.000** | **0.208** | **0.438** | **0.816** | **0.937** |
+| -> `u_g` | -0.00 | +2.27 | +5.41 | **+14.32** | **+26.88** |
+| the model's own `w` | +0.62 | +2.51 | +7.29 | **+17.75** | **+6.60** |
+
+**THE FLOW IS ALREADY CLOSE TO THERMAL-WIND BALANCE THROUGH THE LOWER AND MIDDLE TROPOSPHERE —
+to ~20 % — AND NOTHING WAS HOLDING IT THERE.** That is the finding restated from the other side.
+The exception is the top row: at 9.9 km the temperature calls for **26.9 m/s** and the model has
+**6.6**, so this term builds the upper-tropospheric jet the 35-65 deg storm track needs.
+
+**THREE ARMS, 600 -> 700 from `output_rsfull100/atm_restart_0Ma_600.bin`, `config_accept.xml`
+defaults, 24 threads, all exit 0 with ZERO NaN** (`max|w|` 18.0-18.1, `max|u|` 0.022, i.e. the
+CFL guard is nowhere near touched at FULL physical strength):
+
+| iteration 700 | control | **`ATM_HYDRO_PGF=1.0`** | `+ _RAW=1` |
+|---|---|---|---|
+| v-eq `pgf` at the jet core | +2.85e-08 | **+1.989e-04** | +4.55e-04 |
+| `pgf`/\|`coriolis`\| there | 0.0001 | **0.7502** | 1.7144 |
+| **ageostrophic residual there** | **0.9999** | **0.2498** | 0.7144 |
+| band median `pgf`/\|`cor`\| | 0.0000 | 2.209 | 4.378 |
+| band median residual | 1.000 | 1.209 | 3.378 |
+| **band p05 residual** | **0.997** | **0.079** | 0.615 |
+| median \|`pgf`\| below 1 km | 3.04e-09 | **1.48e-05** | **3.43e-04** |
+| jet, m/s | 17.7201 | **17.7201** | 17.7222 |
+| Precip / r | 1014.9 / +0.458 | 1014.8 / +0.458 | 1014.9 / +0.458 |
+
+**THE MODEL HAS GEOSTROPHICALLY BALANCED CELLS FOR THE FIRST TIME.** The p05 of the ageostrophic
+residual goes **0.997 -> 0.079**: before, the MOST balanced cell in the extratropical free
+troposphere was 99.7 % out of balance; now the balance closes to 8 %. At the jet core Coriolis is
+75 % opposed where it was 0.01 % opposed.
+
+**AND THE RAW BRANCH IS WORSE ON EVERY MEASURE, WHICH IS THE PREDICTION CONFIRMED.** Residual at
+the core 0.714 against 0.250, band p05 0.615 against 0.079, and **23x the baroclinic term's
+near-surface pressure gradient** — that last row is `p_sl ∝ T_surface` measured directly, a
+barotropic surface gradient that should not exist. Use the default.
+
+**WHAT IT DOES NOT DO, AND THIS IS THE LIMIT THAT MATTERS: THE VELOCITY DOES NOT MOVE.** The jet
+is 17.7201 in both the control and the full-strength arm — identical to six figures — and every
+precipitation number is identical to the printed digit. That is not a failure of the term, it is
+the timescale recorded above: geostrophic adjustment takes `1/f`, which at 31 deg is **13 315 s =
+66 500 iterations** at `dt` = 0.2 s. This ran 100, i.e. **0.15 % of one inertial time unit**, and
+showing a circulation response would take ~155 hours of wall clock at the current step.
+**So the term is verified CONNECTED, CORRECTLY SIZED and STABLE, and it is NOT yet verified to do
+anything to the climate.** The lever is `dt`, exactly as this file already concluded for
+`ATM_SFC_FLUX` — one hour of physical time is 17 973 iterations.
+
+**DEFAULT STAYS 0.0** for that reason and no other: nothing about it has been shown on a spun-up
+field, and this tree flips defaults on measurements, not on arguments.
 ### What this does and does not say
 
 It IS: the meridional pressure gradient measured against Coriolis on a spun-up default-
 configuration field; the mechanism read off the source; the leading candidate repair swept and
-retired; the pressure's normalisation corrected. **It is NOT a repair.** The three routes that
-would give this model a thermal wind are all unwritten or unmeasured — a hydrostatic pressure term
-in the horizontal momentum equations, `ATM_BUOY_CONSISTENT` (which this file expects to be
-unstable, and says so), or a balanced initial state in the manner of ATHAD's `initBalancedState`.
+retired; the pressure's normalisation corrected; and the first of the three repairs written and
+measured (the subsection above). **It is NOT yet a repair of the CLIMATE**: `ATM_HYDRO_PGF` is
+verified connected, correctly sized, stable at full strength and byte-identical off, and it moves
+no velocity on any run this tree can afford. The other two routes remain unwritten or unmeasured —
+`ATM_BUOY_CONSISTENT` (which this file expects to be unstable, and says so), and a balanced initial
+state in the manner of ATHAD's `initBalancedState`.
 And one more caveat with teeth: **one iteration is 0.2 s, so 1/f at 31 deg is 13 315 s = 66 500
 iterations.** The longest run in this tree is 1000. Nothing here has been integrated for 2 % of an
 inertial time unit — which does NOT excuse the missing balance (a projection pressure is

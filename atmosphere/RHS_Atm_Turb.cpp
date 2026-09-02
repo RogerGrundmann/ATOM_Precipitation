@@ -934,6 +934,124 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double dpdthe_invrm  = dpdthe * inv_rm;
     double dpdphi_invrs  = dpdphi * inv_rmsinthe;
 
+    // ==================================================================================
+    // ATM_HYDRO_PGF -- THE HYDROSTATIC PRESSURE GRADIENT IN THE HORIZONTAL MOMENTUM
+    // EQUATIONS. Default 0.0 = OFF and bit-identical.
+    //
+    // WHY. The three `dpd*` lines above read `p_dyn` and nothing else, and `p_dyn` is a
+    // PROJECTION pressure: its Poisson source is div(tendency), so it removes the divergent
+    // part of forces already present and cannot manufacture the pressure a mass field
+    // implies. `p_stat` -- which ThermoAtm rebuilds every iteration and which carries the
+    // whole thermal structure -- appears in NO momentum equation. The Boussinesq buoyancy is
+    // the only other route from `t` into momentum, it is RADIAL only, and it measures 0.03 %
+    // of `ubud_pgf`. So nothing here carries the temperature, and the model has no
+    // geostrophic balance: |vbud_pgf|/|vbud_cor| is 2.5e-05 median over 20-70 deg above 3 km,
+    // against the 1.0 geostrophy requires. Measured 2026-09-02; see CLAUDE.md.
+    //
+    // HORIZONTAL ONLY, AND THAT IS NOT AN OMISSION. The RADIAL hydrostatic gradient is
+    // balanced by gravity, and this model handles the radial direction in the Boussinesq way
+    // (buoyancy anomaly + p_dyn). Adding dp_stat/dr to rhs_u without the matching -g would be
+    // a ~1e5 spurious downward acceleration. Do not "complete" this by adding a third line.
+    //
+    // THE EULER NUMBER, WHICH `p_dyn` DOES NOT NEED AND THIS TERM DOES. `p_dyn` is
+    // non-dimensionalised by rho*u_0^2 -- there is no Euler number anywhere in the three lines
+    // above, which is precisely what fixes its normalisation (the VTK writes it * p_0 and is
+    // therefore 2320x too large; see CLAUDE.md). `p_stat` is a REAL pressure in hPa, so it
+    // needs the conversion the projection pressure does not:
+    //     dv*/dt* = -(P_scale/(rho u_0^2)) * inv_rm * d(p_hyd)/dthe,   P_scale = 100 Pa/hPa.
+    //
+    // TWO FORMS, AND THE DEFAULT ONE IS THE BAROCLINIC HALF.
+    //   ATM_HYDRO_PGF_RAW=1 differences `p_stat` as ThermoAtm builds it. That is the literal
+    //   reading of "add the hydrostatic term", and it is measurably wrong at the surface,
+    //   because ThermoAtm sets the sea-level pressure to p_sl = 1e-2*r_air*R_Air*T_surface --
+    //   a CONSTANT-DENSITY sea-level pressure, correlating +1.0000 with surface temperature by
+    //   construction and spanning 749..1046 hPa against Earth's ~980..1040. Differenced raw it
+    //   puts a +21 m/s geostrophic wind at the GROUND, where the model's own surface wind is
+    //   0.62 m/s.
+    //   THE DEFAULT (RAW unset) removes that by renormalising every column to a common
+    //   pressure at a common HEIGHT, p_hyd = p_0 * p_stat(i) / p_stat(1). The near-surface
+    //   gradient then vanishes identically and what is left is the BAROCLINIC part -- the
+    //   thermal wind. Measured on the 87E section at 31S:
+    //
+    //   Measured on the 87E section at 31S, dp/dy northward in hPa per degree, and the zonal
+    //   wind that gradient is in geostrophic balance with:
+    //
+    //     z              39 m     938    2163    5513    9923
+    //     raw dp/dy      2.143   2.134   2.100   1.906   1.533
+    //     baroclinic    -0.000   0.208   0.438   0.816   0.937
+    //     -> u_g         -0.00   +2.27   +5.41  +14.32  +26.88   m/s
+    //     model's own w  +0.62   +2.51   +7.29  +17.75   +6.60   m/s
+    //
+    //   Zero at the reference level by construction, and through the lower and middle
+    //   troposphere the thermal wind implied by the model's own temperature tracks the model's
+    //   own zonal wind to ~20 %. So the flow is ALREADY close to thermal-wind balance -- there
+    //   is simply no force holding it there, which is the whole finding. The exception is the
+    //   top row: at 9.9 km the temperature calls for 26.9 m/s and the model has 6.6, i.e. this
+    //   term would build the upper-tropospheric jet the 35-65 deg storm track needs and the
+    //   model does not have.
+    //
+    // WHY IT IS SAFE ACROSS TERRAIN, WHICH IS THE USUAL OBJECTION. p_hyd is an ANALYTIC
+    // function of (layer height, surface temperature) alone -- ThermoAtm's barometric formula
+    // -- so it is horizontally smooth whether or not a cell is rock, and differencing it over a
+    // coastline or a plateau edge cannot produce the sigma-coordinate pressure-gradient error.
+    // The price is that it knows nothing about topography: there is no mountain in this
+    // pressure field, only a temperature pattern. That is a limitation, not a hazard.
+    //
+    // WHAT TO EXPECT, SO THE FIRST RUN IS NOT MISREAD. The term is ~18 000x the `p_dyn`
+    // gradient it sits beside and ~1.8x Coriolis, so the v-budget changes at once. The
+    // VELOCITY will not: geostrophic adjustment takes 1/f, which at 31 deg is 13 315 s = 66 500
+    // iterations at dt = 0.2 s, and the longest run in this tree is 1000. Expect the budget to
+    // move and the wind not to, on any run this tree can currently afford.
+    // ATM_HYDRO_PGF is a STRENGTH, not a flag, so the approach can be ramped.
+    // ==================================================================================
+    static const double hydro_pgf = [](){
+        const char* e = getenv("ATM_HYDRO_PGF"); return e ? atof(e) : 0.0; }();
+    static const bool hydro_raw = [](){
+        const char* e = getenv("ATM_HYDRO_PGF_RAW"); return e && atoi(e) != 0; }();
+
+    double hydro_the = 0.0, hydro_phi = 0.0;
+    if(hydro_pgf != 0.0 && !land_ijk
+       && j > 0 && j < jm-1 && k > 0 && k < km-1){
+        // The normalising reference is `p_stat` AT A COMMON INDEX, and both halves of the
+        // ratio are therefore the same field at the same time level. Two things forced that
+        // choice and both are worth keeping:
+        //
+        //   (a) NOT the column's own GROUND value. Normalising each column at its own surface
+        //       is the sigma-coordinate normalisation, and over a plateau it is catastrophic:
+        //       Tibet's ground is at ~4 km, so p_hyd at 5 km would be p_0*p(5)/p(4) ~ 0.88*p_0
+        //       against ~0.51*p_0 over the neighbouring ocean -- a spurious gradient far larger
+        //       than the real one. The reference has to be a common HEIGHT.
+        //   (b) i = 1, not i = 0. `densities()` overwrites `p_stat.x[0]` with the value at
+        //       i_topography (ThermoAtm.h:914), so level 0 is the local GROUND pressure over
+        //       land and would reintroduce (a). Level 1 (~38.9 m) is never overwritten and
+        //       holds the true barometric value in every column, rock or air.
+        //
+        // An earlier version recomputed the sea-level pressure from `t.x[0]` instead. That was
+        // wrong in a way worth recording: `densities()` runs inside the `iter_n % moist_stride`
+        // block (cAtmosphereModel.cpp:1367, stride 2) while this RHS runs EVERY iteration, so
+        // `p_stat` is one iteration stale on odd steps while `t` is not -- and a ratio of two
+        // different time levels puts a 2dt sawtooth into the horizontal gradient. Same-array
+        // normalisation cancels it exactly. (This is the trap the `Q_Latent` note below
+        // records, met a second time.)
+        auto p_hyd = [&](int jj, int kk, int ii) -> double {
+            const double ps = p_stat.x[ii][jj][kk];
+            if(!AtomUtils::is_finite_safe(ps)) return 0.0;
+            if(hydro_raw) return ps;
+            const double p_ref = p_stat.x[1][jj][kk];
+            return (AtomUtils::is_finite_safe(p_ref) && p_ref > 0.0) ? (p_0 * ps / p_ref) : 0.0;
+        };
+        double rho_c = r_humid.x[i][j][k];
+        if(!AtomUtils::is_finite_safe(rho_c) || rho_c <= 0.0) rho_c = r_air;
+        const double eu = hydro_pgf * 100.0 / (rho_c * u_0 * u_0);   // hPa -> Pa, / (rho u_0^2)
+
+        const double dphyd_dthe = (p_hyd(j+1, k, i) - p_hyd(j-1, k, i)) * inv_2dthe;
+        const double dphyd_dphi = (p_hyd(j, k+1, i) - p_hyd(j, k-1, i)) * inv_2dphi;
+        hydro_the = eu * dphyd_dthe * inv_rm;
+        hydro_phi = eu * dphyd_dphi * inv_rmsinthe;
+        if(!AtomUtils::is_finite_safe(hydro_the)) hydro_the = 0.0;
+        if(!AtomUtils::is_finite_safe(hydro_phi)) hydro_phi = 0.0;
+    }
+
     // Latent heating: signed microphysical mass-exchange × specific latent heat ×
     // density.  S_c+S_r (vapour↔liquid, factor lv), S_i+S_s+S_g (vapour↔ice/solid,
     // factor ls).  The laminar path (RHS_Atm.cpp) uses the same form.
@@ -1134,7 +1252,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     if(drag_profile > 1.0) drag_profile = 1.0;
     double surf_drag = (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile;
 
-    rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
+    rhs_v.x[i][j][k] = -dpdthe_invrm - hydro_the - transport_v + diffusion_v
         + coriolis * force_nd * coriolis_the
         + coeff_MC_vel * MC_v.x[i][j][k]
         - surf_drag * v_ijk;
@@ -1145,7 +1263,10 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // (-u·∂v/∂r) and horizontal advection. The four RK4 stages overwrite the same
     // cell; the last (stage 4) wins, which differs from stage 1 only by O(dt)~0.05%.
     if(vbudget_capture){
-        vbud_pgf.x[i][j][k]   = -dpdthe_invrm;
+        // With ATM_HYDRO_PGF on this bucket is the TOTAL pressure gradient, projection
+        // plus hydrostatic, so `dyn_sum` stays equal to `dv_dyn` and the budget remains an
+        // identity. Separate the two by comparing against an ATM_HYDRO_PGF=0 arm.
+        vbud_pgf.x[i][j][k]   = -dpdthe_invrm - hydro_the;
         vbud_cor.x[i][j][k]   =  coriolis * force_nd * coriolis_the;
         vbud_advv.x[i][j][k]  = -(u_exp * dvdr_adv);
         vbud_advh.x[i][j][k]  = -(v_invrm * dvdthe_adv + w_invrs * dvdphi_adv);
@@ -1153,7 +1274,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         vbud_other.x[i][j][k] =  coeff_MC_vel * MC_v.x[i][j][k] - surf_drag * v_ijk;
     }
 
-    rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
+    rhs_w.x[i][j][k] = -dpdphi_invrs - hydro_phi - transport_w + diffusion_w
         + coriolis * force_nd * coriolis_phi
         + coeff_MC_vel * MC_w.x[i][j][k]
         - surf_drag * w_ijk;
@@ -1164,7 +1285,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // into easterlies); a growing wbud_diff / wbud_other (diffusion / drag) or the post-RK4
     // filters (captured separately in run_3D_loop) would be the SINK.
     if(wbudget_capture){
-        wbud_pgf.x[i][j][k]   = -dpdphi_invrs;
+        wbud_pgf.x[i][j][k]   = -dpdphi_invrs - hydro_phi;   // total PGF; see the vbud_pgf note
         wbud_cor.x[i][j][k]   =  coriolis * force_nd * coriolis_phi;
         wbud_advv.x[i][j][k]  = -(u_exp * dwdr_adv);
         wbud_advh.x[i][j][k]  = -(v_invrm * dwdthe_adv + w_invrs * dwdphi_adv);
