@@ -958,11 +958,74 @@ the timescale recorded above: geostrophic adjustment takes `1/f`, which at 31 de
 66 500 iterations** at `dt` = 0.2 s. This ran 100, i.e. **0.15 % of one inertial time unit**, and
 showing a circulation response would take ~155 hours of wall clock at the current step.
 **So the term is verified CONNECTED, CORRECTLY SIZED and STABLE, and it is NOT yet verified to do
-anything to the climate.** The lever is `dt`, exactly as this file already concluded for
-`ATM_SFC_FLUX` — one hour of physical time is 17 973 iterations.
+anything to the climate.** The obvious lever is `dt`, exactly as this file concluded for
+`ATM_SFC_FLUX` — one hour of physical time is 17 973 iterations. **THAT LEVER HAS NOW BEEN TRIED
+AND IT DOES NOT REACH: the next subsection measures the `dt` ceiling at ~4x on the model's own
+precipitation, where `1/f` needs 16x and 16 600 iterations.**
 
 **DEFAULT STAYS 0.0** for that reason and no other: nothing about it has been shown on a spun-up
-field, and this tree flips defaults on measurements, not on arguments.
+field, and this tree flips defaults on measurements, not on arguments. **The attempt to reach the
+spun-up measurement by raising `dt` failed, and failed in an instructive way — see the next
+subsection before repeating it.**
+### `dt` CANNOT BE RAISED FAR ENOUGH TO REACH THE ADJUSTMENT, AND THE LADDER THAT SAID IT COULD WAS JUDGED ON THE WRONG CRITERION
+
+**THE ATTEMPT.** Geostrophic adjustment takes `1/f` = 13 315 s at 31 deg = **66 500 iterations** at
+`dt_visc` = 1e-4, so `ATM_HYDRO_PGF`'s effect on the CIRCULATION is unreachable at the shipped
+step. `dt_visc` was swept 2x, 4x, 8x, 16x, 60 iterations each from the iteration-600 checkpoint,
+and **all four passed exit 0, zero NaN, and `max|u|` within 5 % of the control.** On that basis a
+paired 1000-iteration run (`ATM_HYDRO_PGF` on / off, `dt_visc` = 16e-4 = 3.20 s/iter) was launched
+and reached iteration 1600 clean.
+
+**THE LADDER WAS WRONG, AND THE MODEL'S OWN PRIMARY DIAGNOSTIC SAYS SO.** Precipitation at
+iteration 660, which nobody looked at until the long run had finished:
+
+| `dt_visc` | s/iter | Precip mm/a | vs 1e-4 | pattern r | `max|w|` |
+|---|---|---|---|---|---|
+| **1e-4 (shipped)** | 0.20 | **1014.9** | — | +0.458 | 17.97 |
+| 2e-4 | 0.40 | 1019.4 | +0.4 % | +0.454 | 18.27 |
+| 4e-4 | 0.80 | 1048.4 | +3.3 % | +0.456 | 18.57 |
+| 8e-4 | 1.60 | 1127.3 | **+11 %** | +0.454 | 19.17 |
+| **16e-4** | 3.20 | **1598.1** | **+57 %** | +0.422 | 20.35 |
+
+And at iteration 1600 the 16e-4 pair reports **8733 mm/a — 793 % of NASA** — with `r` degraded
+0.458 -> 0.263 and `max|w|` **90.2 m/s** in the hydrostatic arm against a +-100 clamp. **The runs
+never NaN'd and were never valid.**
+
+**SO THE USABLE CEILING IS ~4x, NOT 16x**, and that does not help: `1/f` is 16 600 iterations at
+`dt` = 4e-4, ~46 hours of wall clock, and at 4x the per-iteration filters are already 4x weaker per
+unit physical time. **"Raise `dt` and run to adjustment" is not reachable in this model.**
+
+*This is the tree's own recorded trap, and it was walked into with the warning in the file.*
+CLAUDE.md already says **"Check `Precip mean` against the NASA line before calling any moisture
+change an improvement"**, recorded as the sixth occurrence of "the answer was in output nobody
+opened". A `dt` change is not a moisture change, which is exactly why the rule was not applied —
+and `dt` multiplies every rate in the microphysics. **Exit 0 and no NaN is not a stability
+criterion in this tree.** Seventh occurrence.
+
+**TWO CLAIMS MADE FROM THAT RUN ARE RETRACTED.** An interim reading at iteration 660 reported
+`Psi(ground)` **-14.9 %** with its growth arrested. Neither survives: by iteration 1200 the sign
+reverses and at 1600 the hydrostatic arm is **+22.6 %** ABOVE the control (4.734e+11 against
+3.863e+11), and the run it came from is invalid anyway. **`ATM_HYDRO_PGF`'s effect on
+`Psi(ground)` is UNMEASURED.**
+
+**AND THE ONE THING THE INVALID RUN SUGGESTED IS TRUE FOR A REASON THAT NEEDS NO RUN AT ALL.**
+In the hydrostatic arm `vbar` at the jet core did not settle toward balance — it crossed zero near
+iteration 1100 and ran away the other way, -0.21 -> -0.20 -> **+3.40**, while the control ran away
+negatively, -0.21 -> **-3.46**. That is what the structure requires: **`p_stat` is DIAGNOSED from
+the temperature** — `densities()` builds it as an analytic barometric function of layer height and
+`t.x[0]` — **and it does not respond to the flow's mass convergence at all.** So a prescribed
+hydrostatic pressure gradient is a FORCING, not an adjustment mechanism: there is no restoring
+feedback, and `v` integrates whatever residual imbalance is left rather than settling into
+geostrophy. Real adjustment needs the pressure to answer the flow, i.e. a prognostic surface
+pressure or a mass-continuity equation, and this model's only flow-responsive pressure is `p_dyn`
+— which the section above measures at four to five orders too weak.
+
+**WHAT THAT MEANS FOR THE KNOB.** `ATM_HYDRO_PGF` can hold the model NEAR thermal-wind balance
+where the temperature field is right; it cannot drive the model TOWARD it. The measurements that
+stand are the ones taken at the shipped `dt` in the subsection above — connected, correctly sized,
+stable, byte-identical off, and the first geostrophically balanced cells this model has had. The
+circulation response remains unmeasured, and the obstacle is no longer "run it longer": it is that
+this model has no pressure that answers to the flow.
 ### What this does and does not say
 
 It IS: the meridional pressure gradient measured against Coriolis on a spun-up default-

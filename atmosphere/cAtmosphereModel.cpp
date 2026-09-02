@@ -1238,6 +1238,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
+          << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "1*")
+          << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");
@@ -1563,8 +1565,33 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // the CSV were always correct; only the printed extrema were behind.
                 write_meridional_streamfunction(iter_n);   // Hadley/Ferrel cell strength (zonal-mean v + Ψ) per vtk checkpoint
                 print_min_max_atm();
-                UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
-                cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
+
+                // ATM_VTK_STRIDE -- write the VTK SLICES only every n-th checkpoint. Default 1
+                // = every checkpoint, i.e. exactly what this has always done.
+                //
+                // WHY IT IS A SEPARATE KNOB AND NOT JUST A LARGER `checkpoint`. One `checkpoint`
+                // gated four things of wildly different cost: the streamfunction CSV (~20 kB),
+                // the min/max print, the v/w momentum budgets (~1 MB) -- and the VTK slices, at
+                // ~27 MB a set. Raising `checkpoint` to thin the disk also thins the momentum
+                // budgets, which are the instrument the jet spin-down and the thermal-wind work
+                // are read from, and this tree has already lost an attribution to a diagnostic
+                // that was coarser than the thing it measured. The cheap diagnostics stay on
+                // `checkpoint`; only the expensive dump moves.
+                //
+                // Measured on the 2026-09-02 dt=16e-4 pair: 1000 iterations at checkpoint = 20
+                // wrote 3.0 GB of VTK per arm. ATM_VTK_STRIDE=5 makes that 0.6 GB and leaves
+                // every CSV in place.
+                static const int vtk_stride = [](){
+                    const char* e = getenv("ATM_VTK_STRIDE");
+                    const int v = e ? atoi(e) : 1; return v > 0 ? v : 1; }();
+                static int vtk_tick = 0;
+                if(vtk_tick++ % vtk_stride == 0){
+                    UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
+                    cout << endl << "      AGCM: write_file in run_3D_loop atm ......................." << endl;
+                }else{
+                    cout << endl << "      AGCM: write_file SKIPPED (ATM_VTK_STRIDE=" << vtk_stride
+                         << ") ......................." << endl;
+                }
             }
         }  // iter_n % momentum_stride == 0
 
@@ -1813,7 +1840,15 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // output_path/atm_restart_<Ma>Ma_<total_iter_count>.bin (Ma+iter stamped, so a
         // paleo chain of several time-slices never clobbers another slice's restart).
         {
-            constexpr int restart_save_stride = 100;
+            // ATM_RESTART_STRIDE -- how often the 621 MB full-state restart is written.
+            // Default 100, which is the hardcoded value this has always used, so unset is
+            // unchanged. 0 disables periodic restarts entirely (checkpoint_save_iter still
+            // works). Every file is KEPT: nothing here deletes a restart, and nothing should
+            // -- but a 1000-iteration run writes ten of them, 6.2 GB, which is more disk than
+            // all the VTK put together, and until 2026-09-02 there was no way to say no.
+            static const int restart_save_stride = [](){
+                const char* e = getenv("ATM_RESTART_STRIDE");
+                const int v = e ? atoi(e) : 100; return v >= 0 ? v : 100; }();
             if(restart_save_stride > 0 && total_iter_count > 0
                && total_iter_count % restart_save_stride == 0){
                 bool clean = true;
