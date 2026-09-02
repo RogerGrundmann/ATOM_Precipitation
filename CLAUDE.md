@@ -63,7 +63,7 @@ times out of four.**
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
 | `ATM_BUOY_TREF` / `_CONSISTENT` | unmeasured, and the budget says not worth it | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
-| `ATM_RAD_TOPO` | **NEW HERE, DEFAULT ON since 2026-08-28** — this tree's defect, not ATHAD's | inapplicable — no topography |
+| `ATM_RAD_TOPO` | **NEW HERE, AND STILL DEFAULT OFF** — this tree's defect, not ATHAD's. The two "flipped on" claims below are WRONG, corrected 2026-09-02: `MultiLayerRadiation.h:293` is `e && atoi(e) != 0`, and every run's own `[RUN CONFIG]` banner prints `RAD_TOPO=0*` | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
 | `ATM_V_MASSBAL` | **NEW HERE, AND DEFAULT ON SINCE 2026-08-28**: -94.8 % of `Psi(ground)` at init, -71.2 % at iter 100 | not ported yet |
 | `ATM_CONV_ADJ` | **NEW HERE**: surface lapse -19.45 -> -9.76 K/km | ATHAD's own file, default off there too |
@@ -676,12 +676,15 @@ from 38.9 m at the bottom to over a kilometre aloft. **This tree's stretch sprea
 worst in the family**, so the same filter is far harsher in physical terms at the top of the jet
 than at its base — and the maximum migrates downward, 9007 -> 5512 m.
 
-**AND THERE IS NO GENERATION TERM, WHICH THE FILTER HAS BEEN HIDING.** `pgf` at the jet core is
-**+1.5e-11 m/s per iteration** — zero for practical purposes — against Coriolis -4.5e-06 and
-diffusion -3.9e-06. At strength 0 the jet does not recover, it FREEZES: nothing damps it and
-nothing drives it. **Removing the filter stops the decay; it does not give the model a jet that
-is maintained by a temperature gradient**, and the thermal-wind balance that maintains a real jet
-is not acting here. That is the next question and it is a separate one.
+**AND THERE IS NO GENERATION TERM, WHICH THE FILTER HAS BEEN HIDING.** At strength 0 the jet does
+not recover, it FREEZES: nothing damps it and nothing drives it. **Removing the filter stops the
+decay; it does not give the model a jet that is maintained by a temperature gradient**, and the
+thermal-wind balance that maintains a real jet is not acting here.
+**THE `pgf` = 1.5e-11 THAT WAS QUOTED HERE AS THE EVIDENCE IS AN IDENTITY, NOT A MEASUREMENT**
+(2026-09-02) — it is the ZONAL pressure gradient in a ZONAL MEAN, which is zero over a periodic
+domain by construction. The CONCLUSION survives and is now measured in the right equation: see
+*There is no thermal wind* below, where the MERIDIONAL `pgf`/`coriolis` is 2.5e-05 and the cause
+is that no term in the horizontal momentum equations carries the temperature at all.
 
 **THE FROM-SCRATCH TEST HAS NOW BEEN RUN, THE GUARD HOLDS AT QUARTER STRENGTH, AND THE JET IS
 23 % STRONGER — AND IT BUYS NOTHING IN MID-LATITUDE RAIN** (2026-09-01, default TwoCat
@@ -719,8 +722,10 @@ configuration, and it has not been run.**
 
 **156.6 in both arms, identical to four figures**, with `r` moving 0.457 -> 0.461 and the
 land/ocean split unchanged. **A 23 % stronger, 1.2 km higher jet buys nothing.** That is the
-prediction made before the run and it is confirmed: `pgf` at the jet core is 1.5e-11, so the jet
-is unmaintained whether or not it is being eroded, and **the eddies are STARVED, not damped.**
+prediction made before the run and it is confirmed: the jet is unmaintained whether or not it is
+being eroded, and **the eddies are STARVED, not damped.** (The `pgf` = 1.5e-11 first cited here is
+the wrong instrument — see below — but the eddy statement stands on `wbud_advh` = +4.0e-08 against
+`wbud_cor` = -3.2e-06, 80x smaller.)
 Easing the filter preserves the shear; it does not create the baroclinic growth that turns shear
 into rain. **Do not expect a filter setting to fix the 35-65 degree band.**
 
@@ -737,6 +742,138 @@ arms because the clamp does not care about the jet. **The storm-track question �
 filter recover the 35-65 deg band, 157 against NASA's 981 — is UNANSWERED**, needs the default
 TwoCat configuration, and needs far longer than 100 iterations because baroclinic eddies have to
 grow before they rain.
+
+## There is no thermal wind, because nothing in the horizontal momentum equations carries the temperature
+
+**THE QUESTION THIS FILE ASKED — "why is `pgf` = 1.5e-11 at the jet core?" — HAS AN ARITHMETIC
+ANSWER, AND THE PHYSICS QUESTION IS NEXT DOOR** (2026-09-02).
+
+`wbud_pgf` is `-dpdphi_invrs`, the ZONAL pressure gradient, and `write_w_momentum_budget` reports
+it as a ZONAL MEAN. The zonal mean of a zonal derivative over a periodic domain is zero to
+round-off, so 1.5e-11 is an identity, not a measurement: median `|wbud_pgf|/|wbud_cor|` over
+20-70 deg above 3 km is **4.2e-06**. **The zonal-mean zonal momentum equation has no
+pressure-gradient term by construction, and nothing about the jet's forcing can be read off that
+print.** What CAN be read off it is that the jet's two real sources are Coriolis on the mean
+meridional flow (-3.16e-06) and eddy momentum flux convergence (`adv_horiz`, **+3.98e-08, 80x
+smaller**) — which is the "eddies are starved" statement, measured.
+
+**THE BALANCE THAT MAINTAINS A JET IS THERMAL WIND, AND IT LIVES IN THE MERIDIONAL EQUATION.
+THERE IS NONE.** From the same run's `v_momentum_budget_600.csv` (`output_rsfull100`, the
+from-scratch default-configuration checkpoint), 20-70 deg, above 3 km, n = 1632:
+
+| v-equation term | median \|term\| | at the jet core (31S, 5513 m) |
+|---|---|---|
+| `coriolis` | 1.390e-04 | -2.7392e-04 |
+| `diffusion` | 6.500e-08 | +4.78e-08 |
+| `adv_vert` + `adv_horiz` | ~8e-09 | -2.6e-08 |
+| **`pgf`** | **2.769e-09** | **+2.7413e-08** |
+| **\|pgf\|/\|coriolis\|** | **2.49e-05** (p95 3.2e-03) | **1.00e-04** |
+
+**The meridional momentum equation is `dv/dt = -f w` and nothing else.** Coriolis is 50 000x the
+pressure gradient. The model is not geostrophic anywhere, at any latitude, at any height.
+
+**AND THE MODEL'S OWN TEMPERATURE FIELD ASKS FOR SIX TIMES THE JET IT HAS.** At 31S on the 87E
+section, `dT/dy` = **0.683 K per degree** over 1-10 km, which by thermal wind
+(`du/dz = -(g/fT) dT/dy`) calls for **+28.1 m/s** of westerly shear over that depth. The model's
+own shear there is **+4.56 m/s — 16 %**. The shear is present in the temperature and absent from
+the wind.
+
+### The cause is one sentence, and it is structural rather than a mis-scaling
+
+**NOTHING IN `rhs_u`/`rhs_v`/`rhs_w` CARRIES THE TEMPERATURE FIELD.**
+
+1. **The only pressure in the momentum equations is `p_dyn`** (`RHS_Atm_Turb.cpp:95-340` — every
+   one of the twelve `dpdr`/`dpdthe`/`dpdphi` branches reads `p_dyn` and nothing else).
+   **`p_stat` — which `ThermoAtm` builds barometrically and which holds the entire hydrostatic,
+   thermal structure — appears in no momentum equation.**
+2. **`p_dyn` is a divergence-removal pressure, not a mass-field pressure.** Its Poisson source is
+   `div(aux)`, the divergence of the momentum TENDENCY (`PressureSolverAtm.h:427`). A projection
+   pressure removes the divergent part of the forces already present; it cannot manufacture the
+   geostrophic pressure a mass field implies, because no mass field is given to it.
+3. **The Boussinesq buoyancy is the one surrogate route from `t` into momentum, it is RADIAL
+   only, and it is inert.** Measured in this very run (`output_pmf_ctl`, iteration 700):
+   `ubud_buoy` = **2.46e-05** against `ubud_pgf` = **8.23e-02** — **0.03 %, a factor of 3346.**
+   `ATM_BUOY_CONSISTENT` puts the correctly non-dimensionalised value 5e5 higher (the 400 000x
+   recorded in the knob section above).
+
+So thermal-wind balance is impossible here **by construction**, and the jet is what
+`VelocityInitializer`'s analytic profile left behind, being eroded by the radial Shapiro filter.
+**That closes yesterday's result from the other side**: easing the filter bought a 23 % stronger,
+1.2 km higher jet and moved the 35-65 deg band by 0.0 mm/a, because a jet with no thermal-wind
+generation is a decaying initial condition whichever rate it decays at.
+
+### The obvious suspect was swept, and it is a null — `ATM_POISSON_METRIC_FIX`
+
+**THE POISSON OPERATOR'S HORIZONTAL METRIC REALLY IS INCONSISTENT WITH ITS OWN div AND grad.**
+The source (`:427`) and the gradient correction (`:1019` in the time loop, `:1092` in
+`project_initial_velocity`) each carry ONE power of `inv_rm`, so the composition `div.grad`
+carries two; the Laplacian (`:240-241`) carries one. The RADIAL term already does it right —
+`exp_2_rm` in the Laplacian against `exp_rm` once each in div and grad. **So the horizontal
+pressure response is under-resolved by `rmet` = 397.5 by construction**, and the knob has existed
+since 2026-07-21 and appeared in no results table. Swept at last, 600 -> 700 from
+`output_rsfull100/atm_restart_0Ma_600.bin`, `config_accept.xml` defaults, 24 threads, exit 0:
+
+| iteration 700 | control | `ATM_POISSON_METRIC_FIX=1` |
+|---|---|---|
+| v-eq `pgf` at the jet core | +2.850e-08 | **+3.339e-08 (+17 %)** |
+| `pgf`/`coriolis` | 1.075e-04 | 1.259e-04 |
+| **jet, m/s** | **17.720** | **17.720** |
+| `div(u)` rms | 1.888e-03 | 1.888e-03 |
+| `Psi(ground)` | — | identical to six figures |
+| **Precip / r / all four bands / land / ocean** | 1014.9 / +0.458 | **identical to every printed digit** |
+| rms `p_dyn` | 6.412e-04 | 6.560e-04 |
+| `p_dyn` checkerboard index | 0.0164 | **0.0429 (2.6x)** |
+
+**IT BUYS 17 % WHERE THE OPERATOR ALGEBRA PREDICTS 398x, AND THE REASON RETIRES THE KNOB.** The
+Poisson operator is RADIALLY DOMINATED. At the jet level `c_r = 2*exp_2_rm/dr^2` = **431** against
+`c_the = 2*inv_rm/dthe^2` = **16.5** — a ratio of 26 shipped, and **10 400 with the fix**. The
+pressure amplitude is set by `c_r*k_r^2`, so the horizontal Laplacian coefficient is not the lever
+on the horizontal pressure gradient at all; making it consistent moves the pressure by 2 % and the
+velocity by nothing, while multiplying the checkerboard by 2.6. **Default stays 0.** (This is also
+the resolution of `c_phi/c_r` = 0.0322 recorded above: the horizontal directions are weakly
+constrained, and making them *more* weakly constrained is the consistent choice and changes
+nothing.)
+
+### And `p_dyn` is not in the units this tree has always said it is
+
+**THERE IS NO EULER NUMBER IN THE PRESSURE-GRADIENT TERM.** `rhs_v` gets `-inv_rm * dp/dthe` with
+no `p_0/(rho u_0^2)` coefficient, so for the momentum equation to be dimensionally consistent
+`p_dyn` must be non-dimensionalised by **`rho*u_0^2` ~ 43.7 Pa**, not by `p_0` = 1013.25 hPa.
+`PressureSolverAtm.h:98` states the wrong one, and **every VTK writes `p_dyn * p_0`, i.e. 2320x
+too large.** Verified three independent ways:
+
+| check | predicted | measured |
+|---|---|---|
+| the code's `pgf` rebuilt from the written `p_dyn` | 3.558e-05 | 3.427e-05 (zonal mean vs 87E) |
+| the code's Coriolis rebuilt from `force_nd` | -0.3446 | -0.3424 |
+| **`pgf`/`cor` from the field under `rho u_0^2`** | **1.03e-04** | **1.00e-04 (the budget's own)** |
+
+Under the `p_0` normalisation the third line would read **0.240**, and the budget would have to be
+wrong. It is not; the label is.
+
+**CONSEQUENCE: THE TWO PRESSURE CLAMPS ARE THREE ORDERS SMALLER THAN THEIR COMMENTS SAY.**
+`p_dyn_cap` = 2.0 is **87 Pa**, not 2000 hPa; `p_dyn_ceiling` = 3.0 is **131 Pa**. A
+geostrophically balanced mid-latitude pressure field in these units is `p_dyn` ~ **70** — **23x
+above the ceiling.** **Neither binds today** — max \|`p_dyn`\| is 0.017 at iteration 600, 176x
+below the ceiling — so they are a LATENT barrier and not the present cause. But any repair that
+gives this model a real thermal pressure field will hit them before it works, and re-sizing them
+is part of that repair rather than a follow-up. *Sixth instrument-shaped defect in this tree,
+after `Psi`'s constant density, `Q_Sensible`, `brunt_N2`'s terrain extrema, the "OLR" that was the
+lid temperature, and `ATM_SR_DIAG`'s ground bucket.*
+
+### What this does and does not say
+
+It IS: the meridional pressure gradient measured against Coriolis on a spun-up default-
+configuration field; the mechanism read off the source; the leading candidate repair swept and
+retired; the pressure's normalisation corrected. **It is NOT a repair.** The three routes that
+would give this model a thermal wind are all unwritten or unmeasured — a hydrostatic pressure term
+in the horizontal momentum equations, `ATM_BUOY_CONSISTENT` (which this file expects to be
+unstable, and says so), or a balanced initial state in the manner of ATHAD's `initBalancedState`.
+And one more caveat with teeth: **one iteration is 0.2 s, so 1/f at 31 deg is 13 315 s = 66 500
+iterations.** The longest run in this tree is 1000. Nothing here has been integrated for 2 % of an
+inertial time unit — which does NOT excuse the missing balance (a projection pressure is
+diagnostic and re-solved every step, so it does not need an inertial period to appear), but does
+mean no arm in this file can be read as an adjusted state.
 
 ## Open risks
 
@@ -1584,7 +1721,11 @@ line is.
   place of a number.** Off-branch bit-identical. With it on at 4 iterations: `epsilon_2D` max
   relocates from Angola to **29N 88E, the Himalaya** (0.088 -> 0.119), `tau_layer` max +25 % and
   also to the Himalaya, `tau_above` max -2.7 %, `radiation` min 95.2 -> 111.2 W/m2.
-  **FLIPPED ON BY DEFAULT 2026-08-28, AND THE LONGER RUN IS WHY — THE 4-ITERATION COMPARISON WAS
+  **THE HEADING BELOW SAYS THIS WAS FLIPPED ON AND IT WAS NOT** (checked 2026-09-02 against
+  `MultiLayerRadiation.h:293` and against the `[RUN CONFIG]` banner of every run in
+  `output_rsfull100/`: `RAD_TOPO=0*`). The evidence in it stands; only the flip did not happen.
+
+  **THE ARGUMENT FOR FLIPPING IT ON, 2026-08-28, AND THE LONGER RUN IS WHY — THE 4-ITERATION COMPARISON WAS
   TAKEN BEFORE THE DEFECT APPEARS.** Off branch, `nm = 100`, level-0 radial slice:
 
   | iter | max `epsilon_2D` | at | max `tau_layer` | at |
