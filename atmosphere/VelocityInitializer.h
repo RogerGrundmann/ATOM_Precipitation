@@ -291,6 +291,198 @@ public:
         return v;
     }
 
+    // ==================================================================
+    // THERMAL-WIND BALANCED INITIAL STATE
+    // ATM_TW_BALANCE=<strength>, DEFAULT 0.0 = OFF and byte-identical unset.
+    //
+    // WHY THIS IS AN INITIAL CONDITION AND NOT A FORCE. CLAUDE.md records that nothing in
+    // rhs_u/rhs_v/rhs_w carries the temperature field: p_stat appears in no momentum equation,
+    // p_dyn is a projection pressure, and the Boussinesq buoyancy -- the one surrogate route --
+    // measures 0.03 % of the radial PGF on the shipped branch. Two repairs have been tried
+    // against that from the FORCE side. ATM_HYDRO_PGF injects the hydrostatic gradient and takes
+    // the jet-core ageostrophic residual 0.9999 -> 0.2498; ATM_BUOY_CONSISTENT restores the
+    // buoyancy's non-dimensionalisation and takes the band p05 residual 0.996 -> 0.437 through
+    // the model's OWN elliptic pressure. NEITHER MOVES THE VELOCITY, and the reason is not the
+    // size of either term: geostrophic adjustment takes 1/f, which at 31 deg is 13 315 s =
+    // 66 500 iterations at dt = 0.2 s. The longest run in this tree is 1600. The `dt` route to
+    // reach it was tried and failed -- the usable ceiling is ~4x on the model's own
+    // precipitation, where 1/f still needs 16 600 iterations.
+    //
+    // SO THE ADJUSTMENT MUST NOT BE WAITED FOR. IT MUST BE SUPPLIED. This is the same move
+    // balance_column_mass_flux() makes one function above -- impose the constraint on the
+    // initial state rather than hope the dynamics find it -- and that one removed 94.8 % of
+    // Psi(ground) at initialisation where two solver knobs had moved it 0.085 % and 0.005 %.
+    //
+    // WHAT IT COMPUTES. Thermal wind for the ZONAL wind, which in this model's (r,theta,phi)
+    // convention is w (East+), NOT u (u is radial):
+    //
+    //     dw/dz = -(g/(f*T)) * dT/dy,     y = northward distance
+    //
+    // the.z[j] is COLATITUDE (MinMax_Atm.cpp:235: "cos(latitude) = sin(colatitude)"), so
+    // j increases southward, dy = -a*dtheta and f = 2*omega*cos(theta). Hence
+    //
+    //     dw/dz = +(g/(a*f*T)) * dT/dtheta
+    //
+    // Checked against the model's own field before it was written: at 31S on the 87E section
+    // dT/dy = 0.683 K/deg over 1-10 km, which this relation turns into +28.1 m/s of westerly
+    // shear where the model carries +4.56. The shear is present in the temperature and absent
+    // from the wind, and that difference is exactly what this function installs.
+    //
+    // THE SURFACE VALUE IS THE ANCHOR AND IS NOT TOUCHED. Integration starts at
+    // i_topography[j][k] from the prescribed w, so the surface wind BANDS survive intact --
+    // they are what the atm->ocean transfer hands to the hydrosphere, and the trade/westerly
+    // curl between them is what drives the gyres (project_hydro_ekman_sh_gyre). This function
+    // adds the SHEAR its own temperature implies; it does not rewrite the wind.
+    //
+    // THE TROPICS ARE TAPERED OUT, because f -> 0 there and thermal wind is not the balance
+    // that holds. weight = sin^2(lat)/(sin^2(lat) + sin^2(lat_min)) is smooth, 0 at the equator
+    // and 0.5 at lat_min (ATM_TW_LATMIN, default 15 deg), so the prescribed Hadley/trade
+    // profile is retained where it is the right structure and the geostrophic shear takes over
+    // polewards. There is no 1/f blow-up anywhere: the weight vanishes faster than f does.
+    //
+    // A LEVEL WHOSE MERIDIONAL NEIGHBOURS ARE NOT BOTH FLUID CONTRIBUTES ZERO SHEAR. A centred
+    // dT/dtheta straddling a terrain step is the defect that gave brunt_N2 its +-0.03 s^-2
+    // "boundary-layer" extrema, which turned out to be the Andes and the Himalaya. Not repeated
+    // here.
+    //
+    // ORDERING: this runs BEFORE balance_column_mass_flux(), so if the v-component is enabled
+    // the mass constraint is applied to the final v rather than to a profile this then shifts.
+    // ==================================================================
+    void balance_thermal_wind()
+    {
+        const double s = twStrength();
+        if (s == 0.0) return;
+
+        const double a        = m.r_Earth * 1000.0;              // [m] (r_Earth is in km)
+        const double lat_min  = twLatMin() * M_PI / 180.0;
+        const double s2_min   = sin(lat_min) * sin(lat_min);
+        const double w_max    = twWmax();                        // [m/s] sanity cap
+        const double inv_u_0  = 1.0 / m.u_0;
+        const bool   do_v     = twDoV();
+
+        long n_cols = 0, n_capped = 0;
+        double worst_dw = 0.0;                                   // largest shear added [m/s]
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:n_cols,n_capped) reduction(max:worst_dw)
+        for (int j = 1; j < m.jm - 1; j++) {
+            for (int k = 0; k < m.km; k++) {
+                const double theta = m.the.z[j];
+                const double slat  = cos(theta);                 // sin(latitude)
+                const double f     = 2.0 * m.omega * slat;
+                if (f == 0.0) continue;
+                const double wgt = (slat*slat) / (slat*slat + s2_min);
+                if (wgt <= 0.0) continue;
+
+                const int i0 = m.i_topography[j][k];
+                if (i0 >= m.im - 1) continue;
+
+                const int kp = (k + 1) % m.km;
+                const int km1 = (k + m.km - 1) % m.km;
+                const double sth = sin(theta);
+
+                // shear at a level, [ (m/s) / m ], zero where the stencil is not all fluid
+                auto shear_w = [&](int i)->double {
+                    if (is_land(m.h, i, j+1, k) || is_land(m.h, i, j-1, k)) return 0.0;
+                    const double T = m.t.x[i][j][k] * m.t_0;
+                    if (!(T > 0.0) || !AtomUtils::is_finite_safe(T)) return 0.0;
+                    const double dTdthe = (m.t.x[i][j+1][k] - m.t.x[i][j-1][k])
+                                        * m.t_0 / (2.0 * m.dthe);
+                    if (!AtomUtils::is_finite_safe(dTdthe)) return 0.0;
+                    return m.g * dTdthe / (a * f * T);
+                };
+                auto shear_v = [&](int i)->double {
+                    if (!do_v) return 0.0;
+                    if (is_land(m.h, i, j, kp) || is_land(m.h, i, j, km1)) return 0.0;
+                    if (!(sth > 1.0e-3)) return 0.0;
+                    const double T = m.t.x[i][j][k] * m.t_0;
+                    if (!(T > 0.0) || !AtomUtils::is_finite_safe(T)) return 0.0;
+                    const double dTdphi = (m.t.x[i][j][kp] - m.t.x[i][j][km1])
+                                        * m.t_0 / (2.0 * m.dphi);
+                    if (!AtomUtils::is_finite_safe(dTdphi)) return 0.0;
+                    // v is meridional SOUTH-positive here, so it is minus the northward
+                    // geostrophic component dv_n/dz = +(g/(f*T)) * (1/(a sin(theta))) dT/dphi
+                    return -m.g * dTdphi / (a * sth * f * T);
+                };
+
+                const double w0 = m.w.x[i0][j][k];               // anchor: prescribed surface
+                const double v0 = m.v.x[i0][j][k];
+                double acc_w = 0.0, acc_v = 0.0;                 // accumulated shear [m/s]
+                double prev_w = shear_w(i0), prev_v = shear_v(i0);
+
+                for (int i = i0 + 1; i < m.im; i++) {
+                    const double dz = m.get_layer_height(i) - m.get_layer_height(i-1);
+                    if (!(dz > 0.0)) continue;
+                    const double cur_w = shear_w(i), cur_v = shear_v(i);
+                    acc_w += 0.5 * (cur_w + prev_w) * dz;
+                    acc_v += 0.5 * (cur_v + prev_v) * dz;
+                    prev_w = cur_w; prev_v = cur_v;
+
+                    double dw = s * wgt * acc_w;                 // [m/s]
+                    double dv = s * wgt * acc_v;
+                    if (!AtomUtils::is_finite_safe(dw)) dw = 0.0;
+                    if (!AtomUtils::is_finite_safe(dv)) dv = 0.0;
+
+                    double wnew = w0 + dw * inv_u_0;             // stored non-dimensional
+                    double vnew = v0 + dv * inv_u_0;
+                    const double w_lim = w_max * inv_u_0;
+                    if (fabs(wnew) > w_lim) { wnew = (wnew > 0.0 ? w_lim : -w_lim); n_capped++; }
+                    if (do_v && fabs(vnew) > w_lim) { vnew = (vnew > 0.0 ? w_lim : -w_lim); n_capped++; }
+
+                    if (fabs(dw) > worst_dw) worst_dw = fabs(dw);
+                    m.w.x[i][j][k] = wnew;  m.wn.x[i][j][k] = wnew;
+                    if (do_v) { m.v.x[i][j][k] = vnew;  m.vn.x[i][j][k] = vnew; }
+                }
+                n_cols++;
+            }
+        }
+
+        double wmax = 0.0;
+        for (int i = 0; i < m.im; i++)
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    if (!is_land(m.h, i, j, k) && fabs(m.w.x[i][j][k]) > wmax)
+                        wmax = fabs(m.w.x[i][j][k]);
+
+        std::cout << "      ATOM: thermal-wind balance strength " << std::fixed
+                  << std::setprecision(3) << s
+                  << "  lat_min " << std::setprecision(1) << twLatMin() << " deg"
+                  << "  v-component " << (do_v ? "ON" : "off")
+                  << "  applied to " << n_cols << " columns"
+                  << "  largest shear added " << std::fixed << std::setprecision(2)
+                  << worst_dw << " m/s"
+                  << "  max|w| now " << (wmax * m.u_0) << " m/s"
+                  << "  capped cells " << n_capped << std::endl;
+    }
+
+    // Strength on the thermal-wind shear. 0.0 = off (default, byte-identical); 1.0 = the full
+    // shear the model's own temperature implies. A strength rather than a flag, for the same
+    // reason ATM_HYDRO_PGF is one: it makes a partial arm possible if the full one is unstable.
+    static double twStrength(){
+        static const double v = [](){
+            const char* e = getenv("ATM_TW_BALANCE"); return e ? atof(e) : 0.0; }();
+        return v;
+    }
+    static double twLatMin(){
+        static const double v = [](){
+            const char* e = getenv("ATM_TW_LATMIN"); return e ? atof(e) : 15.0; }();
+        return v;
+    }
+    static double twWmax(){
+        static const double v = [](){
+            const char* e = getenv("ATM_TW_WMAX"); return e ? atof(e) : 80.0; }();
+        return v;
+    }
+    // The MERIDIONAL component, from the ZONAL temperature gradient. Default OFF even when
+    // ATM_TW_BALANCE is on: v is the component balance_column_mass_flux() constrains and the
+    // one Psi(ground) is built from, so enabling it changes two tracked quantities at once.
+    // The jet -- and the 35-65 deg storm track that needs it -- is entirely in w.
+    static bool twDoV(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_TW_BALANCE_V"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
 private:
     cAtmosphereModel& m;
 

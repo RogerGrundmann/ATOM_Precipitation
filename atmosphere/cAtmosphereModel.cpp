@@ -568,6 +568,14 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // DEFAULT ON since 2026-08-28: it removes 94.8 % of Psi(ground) at initialisation and
     // 71.2 % at iteration 100, and no other lever in this tree touches that mode.
     // ATM_V_MASSBAL=0 restores the unbalanced profile exactly.
+    // THERMAL-WIND BALANCED INITIAL STATE (ATM_TW_BALANCE=<strength>, default 0.0 = off and
+    // byte-identical unset). See balance_thermal_wind() in VelocityInitializer.h. Runs BEFORE
+    // the mass-flux balance so that constraint is applied to the final v, and after
+    // densities()/ThermoAtm so `t` is the field it reads. Nothing in the momentum equations
+    // carries the temperature, so this model cannot GENERATE thermal wind; 1/f is 66 500
+    // iterations and the longest run here is 1600, so it cannot be waited for either. This
+    // supplies it as an initial condition instead.
+    VelocityInitializer(*this).balance_thermal_wind();
     VelocityInitializer(*this).balance_column_mass_flux();
 
     {
@@ -1238,6 +1246,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
+          << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
+          << "  TW_BALANCE_V="  << ev("ATM_TW_BALANCE_V",  "0*")
+          << "  TW_LATMIN="     << ev("ATM_TW_LATMIN",     "15*")
           << "  PDYN_CEILING="  << ev("ATM_PDYN_CEILING",  "3.0*")
           << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
           << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "1*")
