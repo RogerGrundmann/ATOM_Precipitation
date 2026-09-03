@@ -1238,6 +1238,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
+          << "  PDYN_CEILING="  << ev("ATM_PDYN_CEILING",  "3.0*")
+          << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
           << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "1*")
           << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
           << "   (* = compiled-in default, not set in the environment)\n";

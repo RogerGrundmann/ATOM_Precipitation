@@ -103,7 +103,14 @@ public:
         // (46°S/170°E, iter 288). 2.0 leaves the projection intact while still catching the
         // gross Andes injection; the orographic Shapiro filter (post-solve, on u/v/w) is now
         // the primary stabiliser for the steep-orography CFL mode, not this clamp.
-        constexpr double p_dyn_cap = 2.0;
+        // ⚠️ ATM_PDYN_CAP (2026-09-03, default 0 = the shipped 2.0, bit-identical unset). The
+        // companion of ATM_PDYN_CEILING below; read that note for why 2.0 is 87 Pa and not
+        // 2000 hPa, and why both are a latent barrier rather than a present cause.
+        const double p_dyn_cap = [](){
+            const char* e = getenv("ATM_PDYN_CAP");
+            const double v = e ? atof(e) : 0.0;
+            return (v > 0.0) ? v : 2.0;
+        }();
 
         // ⚠️ A/B KNOB 2026-07-21 (ATM_POISSON_METRIC_FIX, default 0 = bit-identical). The θ/φ
         // Poisson Laplacian coefficients (num2/num3/denom) use SINGLE-power inv_rm /
@@ -602,22 +609,55 @@ public:
         // (near-surface) to i=26/42°N/68°E (Pamir, ~4 km, the documented secular-growth
         // band). Symptom-only / whack-a-mole; the crash time is p_dyn-clip-independent.
         // Reverted to the hard clamp. See [[project_upper_velocity_secular_growth]].
-        const double p_dyn_ceiling = (m.total_iter_count > 300) ? 3.0 : 10.0;
-        #pragma omp parallel for collapse(3)
+        // ⚠️ ATM_PDYN_CEILING (2026-09-03, default 0 = the shipped phase-dependent value, so an
+        // unset environment is BIT-IDENTICAL). Both clamps are LATENT BARRIERS to any repair that
+        // gives this model a real thermal pressure field, and the size of the barrier is not the
+        // size the comments above claim. p_dyn is non-dimensionalised by rho*u_0^2 ~ 43.7 Pa and
+        // NOT by p_0 = 1013.25 hPa -- there is no Euler number in the pressure-gradient term of
+        // rhs_v, so the momentum equation is only dimensionally consistent under rho*u_0^2 (see
+        // CLAUDE.md, "p_dyn is not in the units this tree has always said it is", verified three
+        // independent ways). So this ceiling is 131 Pa, not 3000 hPa, and p_dyn_cap is 87 Pa.
+        // A geostrophically balanced mid-latitude pressure field in these units is p_dyn ~ 70 --
+        // 23x ABOVE the ceiling. Nothing binds today (max|p_dyn| ~ 0.017, 176x below it), which
+        // is exactly why this needs a COUNTER and not an argument: the first repair that works
+        // will hit the clamp before it shows a circulation, and would otherwise look like a null.
+        const double p_dyn_ceiling = [&](){
+            const char* e = getenv("ATM_PDYN_CEILING");
+            const double v = e ? atof(e) : 0.0;
+            return (v > 0.0) ? v : ((m.total_iter_count > 300) ? 3.0 : 10.0);
+        }();
+        long   n_clip   = 0;     // cells the ceiling actually truncated
+        long   n_nan    = 0;     // cells zeroed as non-finite
+        double pmax_pre = 0.0;   // max |p_dyn| BEFORE the ceiling -- the number the ceiling hides
+        #pragma omp parallel for collapse(3) reduction(+:n_clip,n_nan) reduction(max:pmax_pre)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
                 for (int k = 0; k < m.km; k++) {
                     double p = m.p_dyn.x[i][j][k];
-                    if (!is_finite_safe(p))      m.p_dyn.x[i][j][k] = 0.0;
-                    else if (p >  p_dyn_ceiling) m.p_dyn.x[i][j][k] =  p_dyn_ceiling;
-                    else if (p < -p_dyn_ceiling) m.p_dyn.x[i][j][k] = -p_dyn_ceiling;
+                    if (!is_finite_safe(p))    { m.p_dyn.x[i][j][k] = 0.0; n_nan++; continue; }
+                    const double a = fabs(p);
+                    if (a > pmax_pre) pmax_pre = a;
+                    if (p >  p_dyn_ceiling)      { m.p_dyn.x[i][j][k] =  p_dyn_ceiling; n_clip++; }
+                    else if (p < -p_dyn_ceiling) { m.p_dyn.x[i][j][k] = -p_dyn_ceiling; n_clip++; }
                 }
             }
         }
-
         auto end = std::chrono::high_resolution_clock::now();
         if (verbose) {
             reportDivergence("at pressure solve");
+            // Print-only. No new class member -- deliberately, because adding one changes
+            // sizeof() and this tree's build hazard is an ODR size mismatch that AddressSanitizer
+            // does not see (see CLAUDE.md, "The build hazard").
+            {
+                const long ncell = (long)m.im * m.jm * m.km;
+                cout << "      ATOM: p_dyn clamp   ceiling = " << fixed << setprecision(3)
+                     << p_dyn_ceiling
+                     << "   max|p_dyn| pre-clip = " << scientific << setprecision(3) << pmax_pre
+                     << "   clipped = " << n_clip << " cells (" << fixed << setprecision(4)
+                     << (ncell > 0 ? 100.0 * n_clip / ncell : 0.0) << " %)"
+                     << "   non-finite zeroed = " << n_nan
+                     << (n_clip > 0 ? "   *** CEILING BINDING ***" : "") << endl;
+            }
             auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
             printf(" time measured: %.3f seconds for PressureSolverAtm\n", elapsed.count() * 1e-9);
             cout << "      ATOM: PressureSolverAtm ended" << endl;
