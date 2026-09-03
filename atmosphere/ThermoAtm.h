@@ -107,7 +107,60 @@ public:
         else if (m.evap_model == "Rohwer") active = EvapModel::Rohwer;
         else                               active = EvapModel::Dalton;
 
-        #pragma omp parallel for collapse(2) schedule(static)
+        // ==================================================================
+        // ATM_EVAP_SPREAD -- how the surface humidity increment reaches levels 1..n_spread.
+        // 0 = SHIPPED (default, bit-identical), 1 = deficit form, 2 = per-level relaxation.
+        //
+        // THE SHIPPED UPDATE IS NOT THE ONE ITS OWN COMMENT DESCRIBES. The comment above the
+        // weights says "distribute c_eq across surface + n_spread levels above, conserving total
+        // moisture (weights sum to 1)". The weights do sum to 1 -- 0.6439 / 0.2369 / 0.0871 /
+        // 0.0321 for n_spread = 3 -- but the two branches of the update are different in KIND:
+        //
+        //     i = 0    c  =  c_fix + (c_eq - c_fix) * w_norm      <- a DIFFERENCE (relaxation)
+        //     i >= 1   c  =  min(c + c_eq * weight, c_sat_i)      <- an ABSOLUTE addition
+        //
+        // Level 0 relaxes toward the equilibrium humidity, which is what the routine is for.
+        // Levels 1..n_spread ADD c_eq*weight to whatever is already there, with no dependence on
+        // how moist those levels already are, EVERY iteration (the call at
+        // cAtmosphereModel.cpp:1544 is ungated). The excess added per call is c_fix*weight_i,
+        // i.e. 35.6 % of the current surface humidity redeposited into the three levels above,
+        // and the only thing that stops it is the c_sat_i cap on the same line. So levels 1..3
+        // over ocean ratchet to saturation within a few iterations and stay pinned there.
+        //
+        // That is a moisture SOURCE that no flux produced, bounded by a clamp -- structurally
+        // the same defect as the microphysics floor injection, which was worth 8129 mm/a and
+        // which this file records as the sixth cancelling pair. It is stated here as a mechanism
+        // read off the source; whether it dominates the near-surface humidity is what the arm
+        // measures, because initWaterWapour ALSO starts the ocean column at RH = 0.75*1.25 =
+        // 0.9375 at every level, and at nm = 100 (20 s of physical time) the two are not
+        // separable from the field alone.
+        //
+        // MODE 1 -- DEFICIT (the documented intent). Distribute the SAME increment the surface
+        // gets, so the i = 0 and i >= 1 branches are consistent and the sum over the weights is
+        // one increment rather than one increment plus c_fix:
+        //     c[i] += (c_eq - c_fix) * weight_i
+        // It can be NEGATIVE, which the shipped form cannot be: when the near-surface air is
+        // moister than equilibrium -- after rain -- the correct flux is downward, and the
+        // shipped branch can only ever add.
+        //
+        // MODE 2 -- PER-LEVEL RELAXATION.  c[i] += (c_eq - c[i]) * weight_i.  Each level is
+        // relaxed toward the SURFACE equilibrium value, which is the wrong target for a level
+        // 100 m up and colder -- kept only as the bracketing alternative, not as a candidate.
+        //
+        // Default 0. This tree flips defaults on measurements, not on arguments, and nothing has
+        // been run yet.
+        // ==================================================================
+        static const int evap_spread = [](){
+            const char* e = getenv("ATM_EVAP_SPREAD"); return e ? atoi(e) : 0; }();
+
+        // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how
+        // many of those cells are sitting ON the c_sat_i cap -- the direct test of "it ratchets
+        // to saturation" rather than "it reaches an equilibrium".
+        double inj_pw = 0.0, wsum = 0.0;      // cos-lat weighted precipitable water added [mm]
+        long   n_cap = 0, n_cell = 0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:inj_pw,wsum,n_cap,n_cell)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
@@ -210,6 +263,7 @@ public:
                 m.c.x[0][j][k] = m.c_fix.y[j][k] + (c_eq - m.c_fix.y[j][k]) * w_norm;  // i=0: weight = exp(0)*w_norm
 
                 if (c_eq > 0.0) {
+                    const double cw = sin(m.the.z[j]);            // cos(latitude)
                     for (int i = 1; i <= n_spread; i++) {
                         double weight  = std::pow(r, i) * w_norm;
                         double t_i     = m.t.x[i][j][k] * m.t_0;
@@ -219,7 +273,27 @@ public:
                             : m.hp * AtomUtils::exp_func(t_i, 21.8746,  7.66);
                         double denom_i = p_i - (1.0 - m.ep) * E_i;
                         double c_sat_i = (denom_i > 0.0) ? m.ep * E_i / denom_i : m.ep * E_i / p_i;
-                        m.c.x[i][j][k] = std::min(m.c.x[i][j][k] + c_eq * weight, c_sat_i);
+
+                        const double c_before = m.c.x[i][j][k];
+                        double incr;
+                        switch (evap_spread) {
+                            case 1:  incr = (c_eq - m.c_fix.y[j][k]) * weight; break;  // deficit
+                            case 2:  incr = (c_eq - c_before)        * weight; break;  // relaxation
+                            default: incr =  c_eq                    * weight; break;  // shipped
+                        }
+                        double c_new = c_before + incr;
+                        if (c_new > c_sat_i) { c_new = c_sat_i; }
+                        if (c_new < 0.0)     { c_new = 0.0; }
+                        m.c.x[i][j][k] = c_new;
+
+                        // print-only accounting of what this branch actually moved
+                        const double dz = 0.5 * (m.get_layer_height(i+1) - m.get_layer_height(i-1));
+                        double rho = m.r_humid.x[i][j][k];
+                        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                        inj_pw += cw * (c_new - c_before) * rho * dz;   // [mm] of precipitable water
+                        wsum   += cw;
+                        n_cell++;
+                        if (c_new >= c_sat_i * (1.0 - 1.0e-12)) n_cap++;
                     }
                 }
 
@@ -251,6 +325,19 @@ public:
 */
             }  // k
         }  // j
+
+        // Unconditional, one line: what the i >= 1 spread branch injected this call, and how much
+        // of it is sitting on the saturation cap. On the shipped branch the injection is an
+        // ABSOLUTE c_eq*weight rather than an increment, so a large positive number here with a
+        // high capped fraction is the ratchet described above, measured rather than argued.
+        cout << "      ATOM: evap spread mode " << evap_spread
+             << (evap_spread == 0 ? " (shipped)" : evap_spread == 1 ? " (deficit)" : " (relax)")
+             << "   injected into levels 1.." << n_spread << " = "
+             << scientific << setprecision(3) << (wsum > 0.0 ? inj_pw / wsum * (double)n_spread : 0.0)
+             << " mm precipitable water (cos-lat mean per call)"
+             << fixed << setprecision(2)
+             << "   at the c_sat cap: " << (n_cell > 0 ? 100.0 * n_cap / n_cell : 0.0)
+             << " % of " << n_cell << " ocean cells" << endl;
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
