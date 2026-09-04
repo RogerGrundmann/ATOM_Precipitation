@@ -728,6 +728,13 @@ the wrong instrument — see below — but the eddy statement stands on `wbud_ad
 `wbud_cor` = -3.2e-06, 80x smaller.)
 Easing the filter preserves the shear; it does not create the baroclinic growth that turns shear
 into rain. **Do not expect a filter setting to fix the 35-65 degree band.**
+**AND THE 156.6 IN BOTH COLUMNS IS NOT EVIDENCE ABOUT THE EDDIES AT ALL — corrected 2026-09-03.**
+`ATM_TW_BALANCE` has since produced a jet **71 % stronger and relocated INTO this band**, and the
+35-65 deg precipitation moved **0.013 %**. 600 iterations is 120 s, over which a 0.33 m/s meridional
+flow carries a parcel **36 metres**, so no dynamical arm of this length can move a precipitation
+band whatever it does to the circulation. The eddy statement stands where it was measured, in the
+momentum budget; the precipitation columns of this table measure the advective displacement. See
+*The balanced initial state DOES give this model a mid-latitude jet* below.
 
 *Useful by-product*: the control is `Precip` 998.4 at `r` = 0.457 after 600 iterations against
 975.8 at `r` = 0.456 at `nm` = 100 — so under the 2026-09-01 defaults the precipitation field is
@@ -1026,6 +1033,85 @@ stand are the ones taken at the shipped `dt` in the subsection above — connect
 stable, byte-identical off, and the first geostrophically balanced cells this model has had. The
 circulation response remains unmeasured, and the obstacle is no longer "run it longer": it is that
 this model has no pressure that answers to the flow.
+### The balanced initial state DOES give this model a mid-latitude jet — and the precipitation cannot feel it, for a reason that retires the whole class of experiment
+
+**`ATM_TW_BALANCE=1.0` AGAINST A CLEAN CONTROL, 600 ITERATIONS FROM SCRATCH EACH, `config_accept.xml`
+DEFAULTS, MOIST PHYSICS FROM ITERATION 0, 24 THREADS, ONE BINARY, ~61 MIN PER ARM** (2026-09-03,
+`output_twctl` / `output_tw10`; both exit 0 with **zero NaN**; the two `[RUN CONFIG]` banners differ
+in `TW_BALANCE` and nothing else — `HYDRO_PGF=0` in BOTH, so this is the initial state alone).
+
+From scratch is mandatory rather than preferred: `load_state()` overwrites everything the init path
+produces, so a restart arm cannot exercise this knob at all — and the byte-identical check that
+cleared it was a restart, i.e. it could only ever have verified the OFF branch.
+
+**THE CONTROL IS ALSO THE FROM-SCRATCH OFF-BRANCH CHECK, AND IT REPRODUCES `output_rsfull100` TO
+EVERY RECORDED DIGIT** — zonal-mean jet above 3 km **26.4877 / 22.5733 / 20.4221 / 18.3027** at
+iterations 20 / 160 / 320 / 600 against the recorded 26.488 / 22.573 / 20.422 / 18.303, core at
+5513 m. That binary has since gained `ATM_TW_BALANCE`, `ATM_EVAP_SPREAD`, the pressure-clamp
+instrument and the re-sized clamps; none of them touches the default branch.
+
+**THE KNOB DOES EXACTLY WHAT IT WAS WRITTEN TO DO.** At initialisation: 64 619 columns, **largest
+shear added 242.45 m/s**, capped at the 80 m/s ceiling in 6798 cells. Zonal-mean jet above 3 km:
+
+| iteration | 20 | 200 | 400 | **600** | core at 600 | latitude |
+|---|---|---|---|---|---|---|
+| **control** | 26.488 | 21.919 | 19.651 | **18.303** | 5513 m | **31S** |
+| **`TW_BALANCE=1.0`** | 45.261 | 37.130 | 33.428 | **31.232** | 5513 m | **65S** |
+
+**A 71 % STRONGER JET, AND IT IS IN THE MID-LATITUDES WHERE THE CONTROL HAS NOTHING.** The control's
+zonal-mean maximum sits at 30-31S for the whole run; this one sits at 64-65S from iteration 20
+onward. That is a storm-track jet, in the band the model is 6x too dry in.
+
+**AND THE DECAY IS THE SAME FRACTION, WHICH IS THE THIRD CONFIRMATION THAT THE FILTER IS LINEAR.**
+-30.9 % for the control against **-31.0 %** for the balanced arm over the same 600 iterations, and
+`dw_radial` in the 20-70 deg band above 3 km is 2.09e-03 against **4.38e-03**, 2.1x — tracking the
+amplitude, as a linear damping must. The balanced state is not held by anything: with `HYDRO_PGF=0`
+there is no pressure gradient to balance it, so it is a larger initial condition being eroded at the
+same rate, exactly as the strength sweep predicted.
+
+**THE EDDIES DO RESPOND. THE PRECIPITATION DOES NOT.** Band-median eddy momentum flux convergence
+`wbud_advh` goes 6.5e-08 -> **2.15e-07, 3.3x** — still 20x below Coriolis, but plainly alive. Then,
+from the two runs' own written fields at full precision (not the 1-decimal print):
+
+| cos-lat mean, mm/a | control | `TW_BALANCE=1.0` | change | NASA |
+|---|---|---|---|---|
+| 0-15 | 3436.381 | 3440.865 | +0.131 % | 1487.0 |
+| 15-35 | 273.961 | 273.142 | -0.299 % | 761.4 |
+| **35-65** | **156.628** | **156.649** | **+0.013 %** | **981.1** |
+| 65-90 | 7.481 | 7.474 | -0.088 % | 364.2 |
+| precipitable water | — | — | **+0.000 % in every band** | |
+| surface temperature | — | — | **within 0.015 %** | |
+
+**156.6 FOR THE FOURTH TIME, AND IT IS NOT A PRINT-PRECISION ARTEFACT** — 0.013 % is measured off the
+fields. The Shapiro sweep got 156.6 at two filter strengths; this gets 156.6 with the jet 71 %
+stronger AND relocated 34 degrees poleward into the band itself.
+
+**THE REASON IS ARITHMETIC, IT WAS AVAILABLE WITHOUT RUNNING ANYTHING, AND IT APPLIES TO EVERY
+DYNAMICAL ARM IN THIS FILE.** 600 iterations is **120.2 s** of physical time. The 35-65 deg band's
+median \|`vbar`\| above 500 m is **0.33 m/s**, so a parcel moves **36 metres — 0.03 % of a 1-degree
+cell.** One cell meridionally is **1.85 MILLION iterations**; even the 31 m/s jet needs **18 500**
+to move air one cell zonally. **Precipitation here is a local column response to a thermodynamic
+state that transport cannot have touched** — which the table above measures directly: precipitable
+water identical to six figures in every band, temperature to 0.015 %, and the precipitation moving
+by about as much as the local moisture did and no more.
+
+**SO THE FOUR "THE JET BUYS NOTHING" ARMS ARE ONE MEASUREMENT, AND IT IS OF THE ADVECTIVE
+DISPLACEMENT, NOT OF THE EDDIES.** *"The eddies are STARVED, not damped"* stands where it was
+measured — on `wbud_advh` against `wbud_cor` in the momentum budget — and **must not be read off the
+precipitation bands, which cannot respond to either.** Likewise *"do not expect a filter setting to
+fix the 35-65 degree band"* generalises: **do not expect ANY dynamical change to move ANY
+precipitation band in a run this tree can afford.** A circulation experiment scored on precipitation
+is scoring nothing, whatever the size of the circulation change.
+
+**WHAT IS AND IS NOT SETTLED.** Settled: the balanced initial state is written, stable at full
+strength, byte-identical off, from-scratch verified, and it is the only thing in this tree that has
+ever put a jet in the mid-latitudes. Not settled: whether that jet does anything to the climate,
+because no run of this length can show it. The lever is the same one the `dt` subsection above
+failed to reach — physical integration length — and the honest next instrument is a
+circulation-side score (eddy heat/momentum flux, `Psi`, the jet itself) rather than another
+precipitation table. `Psi(ground)` is -0.4 % between the arms, as it must be: `ATM_TW_BALANCE_V` is
+off, so only the ZONAL wind was touched and `Psi` is meridional.
+
 ### What this does and does not say
 
 It IS: the meridional pressure gradient measured against Coriolis on a spun-up default-
@@ -1033,9 +1119,15 @@ configuration field; the mechanism read off the source; the leading candidate re
 retired; the pressure's normalisation corrected; and the first of the three repairs written and
 measured (the subsection above). **It is NOT yet a repair of the CLIMATE**: `ATM_HYDRO_PGF` is
 verified connected, correctly sized, stable at full strength and byte-identical off, and it moves
-no velocity on any run this tree can afford. The other two routes remain unwritten or unmeasured —
-`ATM_BUOY_CONSISTENT` (which this file expects to be unstable, and says so), and a balanced initial
-state in the manner of ATHAD's `initBalancedState`.
+no velocity on any run this tree can afford. **ALL THREE ROUTES HAVE NOW BEEN WRITTEN AND
+MEASURED, AND NOT ONE MOVES A PRECIPITATION BAND.** `ATM_HYDRO_PGF` (force side, jet-core
+ageostrophic residual 0.9999 -> 0.2498); `ATM_BUOY_CONSISTENT` (the buoyancy's missing factor of
+5.0e5, reaching momentum through the model's own elliptic pressure, band p05 residual 0.996 ->
+0.437 at 100 iterations and 0.336 at 600 — and it did NOT turn out to be unstable, as this file
+expected); and `ATM_TW_BALANCE`, the balanced initial state in the manner of ATHAD's
+`initBalancedState`, which is the only one that moves a VELOCITY — a 71 % stronger jet, relocated
+into the storm-track band — and moves the 35-65 deg precipitation by **0.013 %**. The subsection
+above says why, and the reason is not a property of any of the three.
 And one more caveat with teeth: **one iteration is 0.2 s, so 1/f at 31 deg is 13 315 s = 66 500
 iterations.** The longest run in this tree is 1000. Nothing here has been integrated for 2 % of an
 inertial time unit — which does NOT excuse the missing balance (a projection pressure is
