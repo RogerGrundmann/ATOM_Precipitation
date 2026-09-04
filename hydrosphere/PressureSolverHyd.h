@@ -4,6 +4,7 @@
 #include "Utils.h"
 
 #include <vector>
+#include <cstdlib>
 #include <cstdint>
 #include <cmath>
 #include <chrono>
@@ -34,6 +35,8 @@ public:
 
     void run(int n_sweeps = 1, bool verbose = true)
     {
+        static const bool run_neumann = [](){
+            const char* e = getenv("HYD_RUN_NEUMANN"); return e && atoi(e) != 0; }();
         using namespace std;
         if (verbose) cout << endl << endl << endl
             << "      OGCM: PressureSolverHyd (" << n_sweeps << " Jacobi sweeps)" << endl;
@@ -327,12 +330,27 @@ public:
         #pragma omp parallel for collapse(2)
         for (int k = 0; k < m.km; k++) {
             for (int j = 0; j < m.jm; j++) {
+                // HYD_RUN_NEUMANN (default 0 = shipped). The shipped radial BC here is a
+                // CUBIC EXTRAPOLATION -- a zero-third-derivative smoothness condition, not a
+                // boundary condition. A PROJECTION pressure requires dp/dn = 0 at a rigid
+                // boundary: that is precisely what makes the corrected normal velocity vanish
+                // there. Cubic extrapolation permits a non-zero normal gradient at the seafloor
+                // and the lid, i.e. it permits flow through them, and the gradient correction
+                // then drives a radial velocity into the wall. The in-loop solver
+                // (project_velocity) uses zero-gradient; these two have disagreed about the
+                // radial pressure BC all along, and this is the one whose own header records
+                // that it "left div(u)~2, radial u~0.5".
+                if (run_neumann) {
+                    m.p_dyn.x[0][j][k]      = m.p_dyn.x[1][j][k];
+                    m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-2][j][k];
+                } else {
                 m.p_dyn.x[0][j][k]      = m.p_dyn.x[3][j][k]
                     - 3.0 * m.p_dyn.x[2][j][k]
                     + 3.0 * m.p_dyn.x[1][j][k];
                 m.p_dyn.x[m.im-1][j][k] = m.p_dyn.x[m.im-4][j][k]
                     - 3.0 * m.p_dyn.x[m.im-3][j][k]
                     + 3.0 * m.p_dyn.x[m.im-2][j][k];
+                }
             }
         }
 
@@ -384,6 +402,68 @@ public:
     // RHS pressure-gradient term, then clear p_dyn/aux so the time loop starts
     // fresh. See project_hydro_polar_blowup.
     // ====================================================================
+
+    // ==================================================================================
+    // HYD_LINE_SOLVE -- RADIAL LINE RELAXATION FOR THE PROJECTION POISSON SOLVE.
+    // Default 0 = off and bit-identical; 1 replaces the pointwise sweep with a direct
+    // tridiagonal (Thomas) solve down each radial column.
+    //
+    // WHY. Measured 2026-09-04: this ocean's horizontal metric is ~2e4 too small
+    // (HYD_METRIC_RADIUS), and correcting it makes the model NaN in the radial velocity
+    // within one to three iterations. The ordering variable is the Poisson operator's
+    // anisotropy c_the/c_r: 8.55 shipped and 0.0257 at a 100 km metric radius both run,
+    // 0.0128 NaNs at iteration 3, and 0.00040 -- the Earth -- NaNs at iteration 1. It is
+    // not CFL (both horizontal CFL numbers IMPROVE as the radius grows) and not a bug (a
+    // bug would fail identically at every radius). As the horizontal coupling collapses the
+    // problem tends toward DECOUPLED 1-D RADIAL COLUMNS WITH NEUMANN ENDS, which is
+    // singular, and a fixed 60-sweep pointwise Jacobi cannot solve it. The pressure comes
+    // out wrong and the gradient correction u -= dpdr*exp_rm -- the one term the metric
+    // does NOT shrink -- injects a spurious radial velocity.
+    //
+    // WHY A LINE SOLVE IS THE RIGHT CURE AND NOT JUST MORE SWEEPS. Line relaxation in the
+    // STRONG direction converges FASTER the more anisotropic the operator gets: with the
+    // radial direction solved exactly, the iteration only has to propagate the horizontal
+    // coupling, and its error contracts like horizontal/(horizontal + radial) per sweep --
+    // which is exactly the small number that defeats the pointwise scheme. The regime that
+    // breaks Jacobi is the regime this converges best in.
+    //
+    // THE NEUMANN ENDS ARE FOLDED IN RATHER THAN LAGGED. The BC is p[0] = p[1] and
+    // p[im-1] = p[im-2], so at the ends the off-diagonal moves onto the diagonal
+    // (diag -= aRm / aRp) instead of being carried as a known from the previous sweep. That
+    // makes the column solve exact including its boundaries. The row sums are then the
+    // HORIZONTAL coefficients alone, so the matrix is still strictly diagonally dominant
+    // wherever any horizontal neighbour is water, and Thomas is stable on it without
+    // pivoting -- but it also means a column with no horizontal water neighbour at all is
+    // singular, and such a column is skipped exactly as the pointwise code skips diag <= 0.
+    //
+    // Columns are solved in maximal contiguous runs of water cells, so a seafloor part-way
+    // up a column splits it into independent systems rather than differencing through rock.
+    // ==================================================================================
+    static bool lineSolveEnabled() {
+        static const bool on = [](){
+            const char* e = getenv("HYD_LINE_SOLVE"); return e && atoi(e) != 0; }();
+        return on;
+    }
+
+    // Thomas algorithm on [lo,hi]. A = sub-diagonal, B = diagonal, C = super-diagonal,
+    // D = rhs (overwritten with the solution). `cp` is scratch of the same length.
+    // Returns false if the pivot collapses, in which case the caller leaves p unchanged.
+    static bool thomas(double* A, double* B, double* C, double* D, double* cp,
+                       int lo, int hi) {
+        if (B[lo] == 0.0) return false;
+        cp[lo] = C[lo] / B[lo];
+        D[lo]  = D[lo] / B[lo];
+        for (int i = lo + 1; i <= hi; i++) {
+            const double den = B[i] - A[i] * cp[i-1];
+            if (den == 0.0 || !AtomUtils::is_finite_safe(den)) return false;
+            cp[i] = C[i] / den;
+            D[i]  = (D[i] - A[i] * D[i-1]) / den;
+        }
+        for (int i = hi - 1; i >= lo; i--) D[i] -= cp[i] * D[i+1];
+        for (int i = lo; i <= hi; i++) if (!AtomUtils::is_finite_safe(D[i])) return false;
+        return true;
+    }
+
     void project_initial_velocity(int n_sweeps = 200)
     {
         using namespace std;
@@ -536,8 +616,122 @@ public:
             }
         }
 
-        // ---- Step 2: masked-Neumann Jacobi solve  L(p) = source.
+        // ---- Step 2: masked-Neumann solve  L(p) = source.
+        // Two paths over the SAME operator: the shipped pointwise sweep, and (HYD_LINE_SOLVE)
+        // a direct tridiagonal solve down each radial column. See the note on lineSolveEnabled().
+        const bool line_solve = lineSolveEnabled();
+        static const bool fold_ends = [](){
+            const char* e = getenv("HYD_LINE_FOLD"); return !e || atoi(e) != 0; }();
+
+        // ---- COMPATIBILITY PROJECTION (line path only, HYD_LINE_GAUGE, default ON with it).
+        // This operator is pure Neumann EVERYWHERE: zero-gradient on the six domain faces and
+        // a zeroed coefficient at every land face. A pure-Neumann Poisson problem is SINGULAR --
+        // p is determined only up to a constant per connected basin -- and it is SOLVABLE only
+        // if the source integrates to zero over that basin. Nothing upstream enforces that.
+        // A pointwise Jacobi stopped at 60 sweeps never converges far enough to notice; solving
+        // the radial direction exactly every sweep does, and the inconsistent part then grows
+        // without bound. Measured 2026-09-04: the line solve alone, at the SHIPPED metric,
+        // NaNs at iteration 5 where the pointwise scheme runs clean.
+        // Remove the water-cell mean of the source so the system is consistent, and remove the
+        // mean of p after each sweep to pin the gauge. Global rather than per-basin, which is
+        // exact for a single connected ocean and an approximation otherwise.
+        static const bool gauge = [](){
+            const char* e = getenv("HYD_LINE_GAUGE"); return !e || atoi(e) != 0; }();
+        if (line_solve && gauge) {
+            double ssum = 0.0; long scnt = 0;
+            #pragma omp parallel for collapse(2) reduction(+:ssum,scnt) schedule(static)
+            for (int i = 1; i < m.im-1; i++)
+                for (int j = 1; j < m.jm-1; j++)
+                    for (int k = 1; k < m.km-1; k++)
+                        if (water(i,j,k)) { ssum += m.aux_u.x[i][j][k]; scnt++; }
+            if (scnt > 0) {
+                const double sbar = ssum / (double)scnt;
+                #pragma omp parallel for collapse(2) schedule(static)
+                for (int i = 1; i < m.im-1; i++)
+                    for (int j = 1; j < m.jm-1; j++)
+                        for (int k = 1; k < m.km-1; k++)
+                            if (water(i,j,k)) m.aux_u.x[i][j][k] -= sbar;
+            }
+        }
+
         for (int sweep = 0; sweep < n_sweeps; sweep++) {
+          if (line_solve) {
+            #pragma omp parallel
+            {
+                std::vector<double> A(m.im), B(m.im), C(m.im), D(m.im), cp(m.im);
+                #pragma omp for collapse(2) schedule(static)
+                for (int j = 1; j < m.jm-1; j++) {
+                    for (int k = 1; k < m.km-1; k++) {
+                        int i = 1;
+                        while (i <= m.im-2) {
+                            if (!water(i, j, k)) { i++; continue; }
+                            const int lo = i;
+                            while (i <= m.im-2 && water(i, j, k)) i++;
+                            const int hi = i - 1;          // maximal water run [lo,hi]
+
+                            bool ok = true;
+                            for (int q = lo; q <= hi; q++) {
+                                const double rm       = m.rad.z[q];
+                                const double rh       = m.metricRadius(rm);
+                                const double exp_2_rm = 1.0 / ((rm + 1.0) * (rm + 1.0));
+                                const double inv_rm2  = 1.0 / (rh * rh);
+                                const double cT = inv_rm2 * inv_dthe2;
+                                const double cP = inv_rm2 / (sinthe_tab[j] * sinthe_tab[j])
+                                                * inv_dphi2;
+                                const double aRm = water(q-1,j,k) ? exp_2_rm * m.rc2m[q] : 0.0;
+                                const double aRp = water(q+1,j,k) ? exp_2_rm * m.rc2p[q] : 0.0;
+                                const double aTm = water(q,j-1,k) ? cT : 0.0;
+                                const double aTp = water(q,j+1,k) ? cT : 0.0;
+                                const double aPm = water(q,j,k-1) ? cP : 0.0;
+                                const double aPp = water(q,j,k+1) ? cP : 0.0;
+                                double diag = aRm + aRp + aTm + aTp + aPm + aPp;
+                                if (diag <= 0.0) { ok = false; break; }
+
+                                // Fold the Neumann end conditions onto the diagonal: at the
+                                // bottom of a run p[lo-1] == p[lo] (and aRm is already 0 if the
+                                // neighbour is rock, so this is a no-op there); likewise at the top.
+                                // HYD_LINE_FOLD (default 1) -- fold the Neumann end onto the
+                                // diagonal, which is algebraically exact: substituting p[0]=p[1]
+                                // into the i=1 row reduces it to aRp*(p[2]-p[1]) + aT*(..) +
+                                // aP*(..) = src, which is what this assembles.
+                                // BUT at a CORNER, where the radial Neumann meets the theta or
+                                // phi one, the row loses aRm AND aTm from its diagonal while its
+                                // remaining off-diagonals are unchanged, so that mode's iteration
+                                // matrix has spectral radius exactly 1. The pointwise scheme
+                                // leaves it marginal and slow; an exact radial solve removes the
+                                // damping that was hiding it, and p_dyn runs to its clamp at the
+                                // pole-bottom corner (measured 2026-09-04: +-10132.5 hPa = 10*p_0
+                                // at 90N/90S, -200 m, NaN by iteration 5).
+                                // HYD_LINE_FOLD=0 lags the end instead, exactly as the pointwise
+                                // scheme does, keeping that damping at the cost of an inexact
+                                // boundary row.
+                                double sub = aRm, sup = aRp;
+                                double rhs_end = 0.0;
+                                if (q == lo) {
+                                    if (fold_ends) diag -= aRm;
+                                    else           rhs_end += aRm * m.p_dyn.x[q-1][j][k];
+                                    sub = 0.0;
+                                }
+                                if (q == hi) {
+                                    if (fold_ends) diag -= aRp;
+                                    else           rhs_end += aRp * m.p_dyn.x[q+1][j][k];
+                                    sup = 0.0;
+                                }
+                                if (diag <= 0.0) { ok = false; break; }
+
+                                A[q] = -sub;  B[q] = diag;  C[q] = -sup;
+                                D[q] = aTm*m.p_dyn.x[q][j-1][k] + aTp*m.p_dyn.x[q][j+1][k]
+                                     + aPm*m.p_dyn.x[q][j][k-1] + aPp*m.p_dyn.x[q][j][k+1]
+                                     + rhs_end - m.aux_u.x[q][j][k];
+                            }
+                            if (ok && thomas(A.data(), B.data(), C.data(), D.data(),
+                                             cp.data(), lo, hi))
+                                for (int q = lo; q <= hi; q++) m.p_dyn.x[q][j][k] = D[q];
+                        }
+                    }
+                }
+            }
+          } else {
             #pragma omp parallel for collapse(2) schedule(static)
             for (int i = 1; i < m.im-1; i++) {
                 for (int j = 1; j < m.jm-1; j++) {
@@ -564,6 +758,25 @@ public:
                             + aPm*m.p_dyn.x[i][j][k-1] + aPp*m.p_dyn.x[i][j][k+1]
                             - m.aux_u.x[i][j][k] ) / diag;
                     }
+                }
+            }
+          }
+            // Gauge fix: a pure-Neumann solution is defined only up to a constant, and with the
+            // radial direction solved exactly that constant is free to drift. Pin it.
+            if (line_solve && gauge) {
+                double psum = 0.0; long pcnt = 0;
+                #pragma omp parallel for collapse(2) reduction(+:psum,pcnt) schedule(static)
+                for (int i = 1; i < m.im-1; i++)
+                    for (int j = 1; j < m.jm-1; j++)
+                        for (int k = 1; k < m.km-1; k++)
+                            if (water(i,j,k)) { psum += m.p_dyn.x[i][j][k]; pcnt++; }
+                if (pcnt > 0) {
+                    const double pbar = psum / (double)pcnt;
+                    #pragma omp parallel for collapse(2) schedule(static)
+                    for (int i = 1; i < m.im-1; i++)
+                        for (int j = 1; j < m.jm-1; j++)
+                            for (int k = 1; k < m.km-1; k++)
+                                if (water(i,j,k)) m.p_dyn.x[i][j][k] -= pbar;
                 }
             }
             // zero-gradient (Neumann) pressure BCs on the domain faces

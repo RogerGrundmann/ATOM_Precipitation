@@ -1467,6 +1467,102 @@ ocean's horizontal dynamics are currently held up by the error.
 — the control's in-loop `writeFile` had overwritten `PlotData_Hyd.xyz` while the failed arm's copy
 was still the setup state. Nothing about the initialisation is implicated by anything measured.
 
+### The metric fix was blocked by ONE BOUNDARY CONDITION, and with both in the radial velocity falls 180x
+
+**`HYD_RUN_NEUMANN=1`, default 0 = shipped.** `PressureSolverHyd::run()`'s radial pressure BC is a
+CUBIC EXTRAPOLATION:
+
+    p_dyn[0] = p_dyn[3] - 3*p_dyn[2] + 3*p_dyn[1]
+
+That is a zero-third-derivative SMOOTHNESS condition, not a boundary condition. **A projection
+pressure requires `dp/dn` = 0 at a rigid boundary** — that is precisely what makes the corrected
+normal velocity vanish there. Cubic extrapolation permits a non-zero normal gradient at the
+seafloor and the lid, i.e. it permits flow THROUGH them, and the gradient correction then drives a
+radial velocity into the wall. **`project_velocity` uses zero-gradient, so the two solvers have
+disagreed about the radial pressure BC all along** — and the extrapolating one is the one whose own
+header records that it "left `div(u)~2`, radial `u~0.5`".
+
+**AND IT IS WHAT BLOCKED `HYD_METRIC_RADIUS`.** Every metric arm before this NaN'd at iteration 1.
+With the BC corrected, `nm` = 20 at 1 thread, all exit 0 with **zero NaN**:
+
+| arm | metric | run() BC | line solve | result |
+|---|---|---|---|---|
+| control | off | cubic | — | 20/20 |
+| **`w0`** | off | **Neumann** | — | **20/20, and a NULL** |
+| **`w1`** | **6370 km** | **Neumann** | — | **20/20** |
+| `w2` | 6370 km | Neumann | lagged | 20/20 |
+
+**`w0` IS A NULL AND THAT IS THE ATTRIBUTION.** Corrected BC at the SHIPPED metric gives
+`max|u|` 0.016243 against the control's 0.016243 and `max|w|` 0.163028 against 0.163030. The BC only
+matters once the metric is right — which is exactly why it was never found: at a 200 m metric radius
+the horizontal terms swamp the radial BC error by 2e4.
+
+**THE REPAIRED OCEAN, `w1` AGAINST THE SHIPPED CONTROL** (iteration 20, 1 thread, from the restart
+binaries):
+
+| | shipped | repaired | ratio |
+|---|---|---|---|
+| rms `u` (RADIAL) | 1.052e-03 | **5.856e-06** | **0.0056** |
+| rms `p_dyn` | 2.304e-04 | **3.008e-06** | **0.013** |
+| rms `w` (zonal) | 5.257e-02 | 5.990e-02 | 1.14 |
+| rms `v` | 1.341e-02 | 1.048e-02 | 0.78 |
+| **max\|u\|** | **0.016243 m/s** | **0.000101 m/s** | **1/161** |
+| **\|u\|/\|w\| rms** | **0.0200** | **0.00010** | |
+
+**THE SPURIOUS RADIAL VELOCITY COLLAPSES BY ~180x AND THE HORIZONTAL CURRENT STRENGTHENS.** That is
+the defect `project_hydro_radial_velocity_runaway` is about — the one previously treated by pinning
+`u` = 0 at both radial walls. A 200 m deep, 111 km wide cell has an aspect ratio of 1.8e-3, so
+continuity puts `|u|/|w|` at that order: the shipped 0.0200 is an order of magnitude ABOVE it and
+the repaired 0.00010 is at or below it.
+
+### The radial tridiagonal solve: written, works, and was NOT the cure
+
+**`HYD_LINE_SOLVE=1`** replaces the pointwise sweep in `project_velocity` with a direct Thomas solve
+down each radial column, in maximal contiguous runs of water cells. **`HYD_LINE_FOLD` (default 1)
+must be set to 0.** The series, `nm` = 20, 1 thread:
+
+| arm | ends | gauge | metric | result |
+|---|---|---|---|---|
+| `t1` | fold | — | shipped | **NaN @5** |
+| `u1` | fold | + compat/gauge | shipped | **NaN @3** |
+| **`v0`** | **lag** | — | shipped | **20/20 clean** |
+| `v1` | lag | — | 6370 km | NaN @1 |
+| `w2` | lag | — | 6370 km + Neumann BC | 20/20 |
+
+**THE FOLD IS ALGEBRAICALLY EXACT AND DESTABILISES ANYWAY.** Substituting `p[0]=p[1]` into the
+`i=1` row reduces it to `aRp*(p[2]-p[1]) + aT*(..) + aP*(..) = src`, which is what the folded
+tridiagonal assembles — checked, not assumed. But at a CORNER, where the radial Neumann meets the
+theta one, the row loses `aRm` AND `aTm` from its diagonal while its off-diagonals are unchanged, so
+that mode's iteration matrix has spectral radius exactly 1. The pointwise scheme leaves it marginal
+and slow; an exact radial solve removes the damping that was hiding it. Measured: `p_dyn` runs to
+its clamp, **+-10132.5 hPa = 10*p_0, at 90N/90S and -200 m** — the pole-bottom corner — and those
+cells are never written by the line solve, they are BC copies of `j=1` and `i=1`. Lagging the ends
+keeps the damping at the cost of an inexact boundary row, and runs clean.
+
+**AND IT IS NOT NEEDED.** `w2` (with it) gives `max|u|` 0.000276 against `w1`'s 0.000101 — slightly
+WORSE. The line solve is a convergence-quality option, not a stability requirement, and should be
+judged on `div(u)` and `Psi(ground)` rather than on survival. Default stays 0.
+
+### Three of this session's own claims, retracted
+
+1. **"The metric failure is solver conditioning"** — that the Poisson problem tends toward singular
+   decoupled radial columns a 60-sweep Jacobi cannot solve. **Wrong.** The graded `c_the/c_r`
+   threshold (0.0257 runs, 0.0128 NaNs at 3, 0.00040 at 1) is real data and is now explained by the
+   BC: as the metric radius grows the RADIAL term dominates more, so a wrong RADIAL BC becomes
+   progressively more damaging. Same ordering variable, wrong mechanism. `5100766`'s commit message
+   carries the wrong version.
+2. **"The line solve exposes a pure-Neumann singularity"** — tested by removing the source's
+   water-cell mean and pinning the gauge. **Refuted**: `u1` died at iteration 3 where `t1` died at
+   5, i.e. slightly worse. The growth is a localised CORNER mode, not a global constant, which is
+   why a global mean could not touch it.
+3. **"The damage is present at initialisation"**, from a 20 K temperature difference at iteration 0
+   — that compared iteration 20 against iteration 0, because the control's in-loop `writeFile` had
+   overwritten `PlotData_Hyd.xyz` while the failed arm's copy was still the setup state.
+
+**STILL OPEN IN `run()`**: its THETA and PHI boundary conditions are also extrapolations
+(`c43*p[1] - c13*p[2]`), not zero-gradient. The same argument applies at the poles and at the
+Greenwich seam, and neither has been touched or measured.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
