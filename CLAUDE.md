@@ -1515,6 +1515,56 @@ the defect `project_hydro_radial_velocity_runaway` is about — the one previous
 continuity puts `|u|/|w|` at that order: the shipped 0.0200 is an order of magnitude ABOVE it and
 the repaired 0.00010 is at or below it.
 
+### The 1000-iteration pair: the repair holds, and the control is still spreading
+
+**1000 ITERATIONS = 83 s OF PHYSICAL TIME, 24 THREADS, BOTH EXIT 0 WITH ZERO NaN.** Run as a
+RESTART from each arm's own iteration-300 checkpoint, which is the exact continuation and saves
+re-running the first 300 iterations of both (`nm` counts NEW iterations; `total_iter_count`
+accumulates). Binary pinned to `cli/hyd_kr` so a rebuild could not swap it between the two
+sequential arms.
+
+| iter | control max\|u\| | control rms `u` | repaired max\|u\| | repaired rms `u` | ratio |
+|---|---|---|---|---|---|
+| 300 | 0.125180 | 1.343e-02 | 0.000162 | 8.995e-06 | 1492x |
+| 500 | 0.126306 | 1.516e-02 | 0.000160 | 9.029e-06 | 1679x |
+| 700 | 0.127016 | 1.747e-02 | 0.000159 | 9.095e-06 | 1921x |
+| **1000** | **0.127636** | **1.887e-02** | **0.000158** | **9.135e-06** | **2065x** |
+
+**THE REPAIRED OCEAN IS FLAT AND SLIGHTLY DECAYING** — `max|u|` 1.62e-4 -> 1.58e-4, rms drifting
++1.5 % over 700 iterations and levelling. **THE CONTROL IS NOT, AND THE TRAJECTORY SHOWS SOMETHING
+THE ENDPOINT WOULD HAVE HIDDEN**: its `max|u|` SATURATES near 0.128 m/s while its **rms `u` keeps
+climbing, 1.34e-02 -> 1.89e-02, +41 %**. The runaway did not stop after iteration 300; it stopped
+growing at the PEAK and went on spreading through the volume. Hence the widening ratio.
+
+At iteration 1000, `|u|/|w|` is **0.389 control against 0.00016 repaired**, on a geometric bound of
+1.8e-3 — the control is **216x above what a 200 m deep, 111 km wide cell can support**, the repaired
+an order below.
+
+| rms at iteration 1000 | control | repaired | ratio |
+|---|---|---|---|
+| `u` | 1.887e-02 | **9.135e-06** | **0.0005** |
+| `p_dyn` | 1.003e-03 | **5.476e-06** | **0.0055** |
+| `w` (zonal) | 4.855e-02 | 5.632e-02 | **1.16** |
+| `v` | 3.307e-02 | 3.480e-02 | **1.05** |
+| `t` | 1.03263 | 1.03261 | 1.0000 |
+| `c` | 0.71367 | 0.72477 | 1.016 |
+
+**The horizontal circulation is not merely preserved, it is STRONGER** — `w` +16 %, `v` +5 %, with
+temperature identical to five figures. That is the signature of energy that was going into a
+spurious vertical mode staying in the horizontal flow instead.
+
+**AND THE CAVEAT, FROM THE MODEL'S OWN CONVERGENCE MONITOR, WHICH CUTS THE OTHER WAY.**
+`convergence_hyd.csv` at iteration 1000: mean KE **1.225e-04 control against 1.487e-04 repaired**
+(+21 %, consistent with the stronger horizontal flow) — but the KE DRIFT is **1.29 % control
+against 2.08 % repaired**, and `converged` is **0 for both**. So the repaired ocean carries more
+energy and is drifting FASTER in it, not settling sooner. Temperature drift is marginally better
+(0.0090 % against 0.0103 %). **Neither arm is converged and the repair does not make the ocean
+converge**; it removes a spurious vertical mode, which is a different claim.
+
+**READ THIS AS A NUMERICAL RESULT, NOT A CLIMATE ONE.** 1000 iterations is 83 seconds. The KE-drift
+work in this tree's own record runs to 1600+ iterations and judges on exactly the column that says
+`converged = 0` here.
+
 ### The radial tridiagonal solve: written, works, and was NOT the cure
 
 **`HYD_LINE_SOLVE=1`** replaces the pointwise sweep in `project_velocity` with a direct Thomas solve

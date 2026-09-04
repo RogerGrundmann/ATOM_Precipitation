@@ -88,7 +88,40 @@ public:
     double dt = 0.0;
     static const double the0, phi0, r0, residuum_ref_atm;
 
-    const int c43 = 4.0/3.0, c13 = 1.0/3.0;
+    // ==================================================================================
+    // ATM_BC_SECOND_ORDER -- default 0 = the SHIPPED (truncated) behaviour, bit-identical.
+    //
+    // DECLARED `const int`, SO THESE TRUNCATE: c43 = 4.0/3.0 -> 1 and c13 = 1.0/3.0 -> 0, and
+    // every `c43*A[1] - c13*A[2]` in this model executes as plain `A[1]`. The intent -- and the
+    // comment at every call site -- is the SECOND-ORDER one-sided Neumann condition,
+    // dA/dn = 0 discretised as (-3A[0] + 4A[1] - A[2])/(2h) = 0, i.e. A[0] = (4A[1] - A[2])/3.
+    // What runs is the FIRST-ORDER form A[0] = A[1]. IceSchemeCommon.h:114 goes further and
+    // calls it a "quadratic edge extrapolation"; a plain copy is what it gets.
+    //
+    // Found in the OCEAN first (cHydrosphereModel.h, HYD_BC_SECOND_ORDER, 2026-09-04) and the
+    // identical declaration was sitting here. 29 call sites: BC_Atm.h (13),
+    // PressureSolverAtm.h (9), IceSchemeCommon.h (6, the precipitation-flux edges). All of them
+    // are boundary conditions -- none is a physical coefficient -- so this is an accuracy
+    // defect, not a wrong-physics one: both forms are valid Neumann, and the model is one order
+    // less accurate than it says, everywhere, by accident rather than by choice.
+    //
+    // Default 0 is byte-identical BY ARITHMETIC rather than by a guard: it sets c43 = 1.0 and
+    // c13 = 0.0, the exact values the truncated ints already held, and every call site is
+    // `c43*A - c13*B` evaluated in double, where int 1 and 0 promote to the same 1.0 and 0.0.
+    // Verified that no call site uses either constant in an integer context.
+    //
+    // UNMEASURED HERE. In the ocean the equivalent flip was a NULL at 300 iterations (5-6
+    // figures identical on every field). Do not assume that carries over: this model has 41
+    // levels over a 16 km shell, a moist boundary layer and a precipitation flux with its own
+    // edge treatment, and IceSchemeCommon's use is on a field with sharp gradients.
+    // ==================================================================================
+    static bool bcSecondOrder() {
+        static const bool on = [](){
+            const char* e = getenv("ATM_BC_SECOND_ORDER"); return e && atoi(e) != 0; }();
+        return on;
+    }
+    const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
+    const double c13 = bcSecondOrder() ? 1.0/3.0 : 0.0;
 
     static const int im = 41, jm = 181, km = 361;
 
