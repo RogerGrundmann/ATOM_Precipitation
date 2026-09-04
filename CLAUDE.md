@@ -1515,6 +1515,33 @@ the defect `project_hydro_radial_velocity_runaway` is about — the one previous
 continuity puts `|u|/|w|` at that order: the shipped 0.0200 is an order of magnitude ABOVE it and
 the repaired 0.00010 is at or below it.
 
+### AND THE VELOCITY DISTRIBUTION SAYS THE CONTROL IS THE BETTER FIELD — the metric fix buys noise
+
+**CORRECTED 2026-09-04, at the user's observation, and it retracts a claim two paragraphs down.**
+`max` is one cell. The DISTRIBUTION over ocean surface cells at iteration 1000, speed in cm/s:
+
+| | p50 | p90 | p99 | max | grid-scale noise |
+|---|---|---|---|---|---|
+| control | 0.94 | 4.35 | 14.20 | **49.6** | **0.72** |
+| metric+Neumann | 0.92 | 4.12 | 14.67 | **112.3** | **1.69** |
+
+**THE BULK OF THE DISTRIBUTION IS IDENTICAL** — p50, p90 and p99 agree to a few per cent — and what
+the repair adds is a 112 cm/s OUTLIER and **2.3x the grid-scale noise** (rms of the 5-point
+Laplacian of surface `w`, normalised by rms `w`). **"The ACC jet appears, 1.12 m/s at 40S 175E" was
+a single noisy cell read as a physical feature and is RETRACTED**: in the ZONAL MEAN the 45-60S band
+is WEAKER in the repaired arm, 3.43 against 3.93 cm/s.
+
+**THE MECHANISM WAS FLAGGED BEFORE THE FIRST RUN AND THEN DROPPED WHEN IT DID NOT NaN.** Correcting
+the metric cuts horizontal diffusion by `inv_rm^2` ~ **4e8**, so nothing is left to damp grid-scale
+structure. **This ocean has no horizontal eddy viscosity of its own — it was getting one by accident
+from the metric error**, and that is also why the repaired arm's KE drift is worse (2.08 % against
+1.29 %).
+
+**SO `HYD_METRIC_RADIUS` TRADES A SPURIOUS VERTICAL MODE FOR HORIZONTAL NOISE, AND IS NOT USABLE
+UNTIL A REAL HORIZONTAL VISCOSITY EXISTS.** The radial-velocity collapse (2065x) is real and so is
+the noise; both are consequences of removing a 2e4 error that two different defects were leaning on.
+Default stays 0. **Read the 1000-iteration section below with this in front of it.**
+
 ### The 1000-iteration pair: the repair holds, and the control is still spreading
 
 **1000 ITERATIONS = 83 s OF PHYSICAL TIME, 24 THREADS, BOTH EXIT 0 WITH ZERO NaN.** Run as a

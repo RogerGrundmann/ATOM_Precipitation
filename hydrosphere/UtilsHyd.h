@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdlib>
+
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 
@@ -183,6 +185,30 @@ public:
         const double t_min = (m.t_0 -  4.0) / m.t_0;   //  -4 C
         const double t_max = (m.t_0 + 40.0) / m.t_0;   //  40 C
 
+        // ==================================================================================
+        // HYD_T_FREEZE -- floor the temperature at the FREEZING POINT OF SEAWATER instead of
+        // a flat -4 C. Default 0 = shipped and bit-identical.
+        //
+        // THE -4 C FLOOR IS 2 C BELOW WHERE SEAWATER FREEZES, so the model permits supercooled
+        // ocean and then stops it at an arbitrary constant. Measured 2026-09-04 at iteration
+        // 1000: min T is -2.90 C (control) and -3.68 C (metric+Neumann arm) at 76-90 N, i.e.
+        // BOTH arms sit in the 2 C window between the true freezing point and the clamp, and
+        // the clamp is what is holding them. That is the polar cold bias: not a transport
+        // error, a missing phase boundary.
+        //
+        // There is no sea-ice scheme here, so nothing forms ice or releases the latent heat
+        // that in the real ocean pins a freezing surface at T_f. Flooring at T_f is the
+        // correct zero-order stand-in for that: it says "this water would have frozen", holds
+        // it at the phase boundary, and does not pretend to carry the ice.
+        //
+        // T_f is SALINITY-DEPENDENT (UNESCO/Millero, surface pressure), which the flat floor
+        // could not represent: 0.000 C at 0 psu, -1.638 at 30, -1.922 at 35, -2.095 at 38. The
+        // pressure term (-7.53e-4 C/dbar, i.e. -0.015 C over this 200 m column) is omitted as
+        // negligible here and is where to look first on a deep grid.
+        // ==================================================================================
+        static const bool t_freeze = [](){
+            const char* e = getenv("HYD_T_FREEZE"); return e && atoi(e) != 0; }();
+
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
@@ -207,7 +233,22 @@ public:
                     if (m.c.x[i][j][k] <  0.0)    m.c.x[i][j][k] = 0.0;
 
                     if (m.t.x[i][j][k] > t_max)  m.t.x[i][j][k] = t_max;
-                    if (m.t.x[i][j][k] < t_min)  m.t.x[i][j][k] = t_min;
+
+                    double t_lo = t_min;
+                    if (t_freeze) {
+                        const double S  = m.c.x[i][j][k] * m.c_35;          // psu
+                        const double Sc = (S > 0.0) ? S : 0.0;
+                        const double Tf = -0.0575 * Sc
+                                        + 1.710523e-3 * pow(Sc, 1.5)
+                                        - 2.154996e-4 * Sc * Sc;            // [C]
+                        const double cand = (m.t_0 + Tf) / m.t_0;
+                        // Never RAISE the floor above the shipped one: this is a freezing
+                        // limiter, not a warming source. A fresh cell (the recorded salinity-IC
+                        // defect, ~12 % of this ocean) would otherwise be floored at 0 C.
+                        t_lo = (cand < t_min) ? t_min : cand;
+                        if (Sc < 5.0) t_lo = t_min;      // fresh cells: fall back, do not warm
+                    }
+                    if (m.t.x[i][j][k] < t_lo)  m.t.x[i][j][k] = t_lo;
  
                     if (is_land(m.h, i, j, k)) {
                         m.c.x[i][j][k]     = 0.0;
