@@ -71,7 +71,39 @@ public:
     static const double the0, phi0, r0, residuum_ref_hyd;
     static const double dr_stretch;                                         // sinh stretching parameter for radial coordinate (cosh(dr_stretch) = step ratio surface/bottom)
 
-    const int c43 = 4.0/3.0, c13 = 1.0/3.0;
+    // ==================================================================================
+    // HYD_BC_SECOND_ORDER -- default 0 = the SHIPPED (truncated) behaviour, bit-identical.
+    //
+    // THESE WERE DECLARED `const int` AND SILENTLY TRUNCATED: c43 = 4.0/3.0 -> 1 and
+    // c13 = 1.0/3.0 -> 0. Every `c43*A[1] - c13*A[2]` in this model has therefore been
+    // executing as plain `A[1]`. The intent -- and the comment at every call site -- is the
+    // SECOND-ORDER one-sided Neumann condition: dA/dn = 0 discretised as
+    // (-3A[0] + 4A[1] - A[2])/(2h) = 0, i.e. A[0] = (4A[1] - A[2])/3. What runs is the
+    // FIRST-ORDER form A[0] = A[1].
+    //
+    // So the boundary conditions are not wrong in KIND -- both are valid Neumann -- they are
+    // one order less accurate than the code says, everywhere, and by accident rather than by
+    // choice. ~60 call sites in the hydrosphere: BC_Hyd, InitValues_Hyd's v and w boundary
+    // values, PressureSolverHyd's p_dyn and aux_* boundaries, and ThermoHyd's force and
+    // Ekman diagnostics. ThermoHyd.h:401 declares its own LOCAL `const double c43 = 4.0/3.0`
+    // and is therefore the one place the intended value is actually used.
+    //
+    // THE SAME DECLARATION IS IN atmosphere/cAtmosphereModel.h:91 AND IS NOT TOUCHED HERE.
+    // Flipping it would move every atmosphere boundary at once, in the middle of the
+    // atmosphere work; it needs its own arm and its own measurement.
+    //
+    // Setting the knob switches all ~60 sites together, which is the honest granularity: a
+    // model with second-order Neumann on some boundaries and first-order on others is a third
+    // thing that has never been tested. Default 0 reproduces the shipped branch exactly by
+    // construction, not by a guard.
+    // ==================================================================================
+    static bool bcSecondOrder() {
+        static const bool on = [](){
+            const char* e = getenv("HYD_BC_SECOND_ORDER"); return e && atoi(e) != 0; }();
+        return on;
+    }
+    const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
+    const double c13 = bcSecondOrder() ? 1.0/3.0 : 0.0;
 
     static const int im = 41, jm = 181, km = 361;
 

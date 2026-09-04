@@ -1559,9 +1559,41 @@ judged on `div(u)` and `Psi(ground)` rather than on survival. Default stays 0.
    — that compared iteration 20 against iteration 0, because the control's in-loop `writeFile` had
    overwritten `PlotData_Hyd.xyz` while the failed arm's copy was still the setup state.
 
-**STILL OPEN IN `run()`**: its THETA and PHI boundary conditions are also extrapolations
-(`c43*p[1] - c13*p[2]`), not zero-gradient. The same argument applies at the poles and at the
-Greenwich seam, and neither has been touched or measured.
+### The theta and phi BCs are not extrapolations — `c43` and `c13` are declared `int`
+
+**THE PARAGRAPH THIS REPLACES WAS WRONG TWICE OVER.** It said `run()`'s theta and phi boundary
+conditions "are also extrapolations (`c43*p[1] - c13*p[2]`), not zero-gradient". They are not
+extrapolations, they ARE zero-gradient — and only by accident:
+
+    cHydrosphereModel.h:74   const int c43 = 4.0/3.0, c13 = 1.0/3.0;
+
+**Declared `int`.** `c43` truncates to **1** and `c13` to **0**, so every `c43*A[1] - c13*A[2]` in
+this model executes as plain `A[1]`. The intent, and the comment at every call site, is the
+SECOND-ORDER one-sided Neumann condition — `dA/dn = 0` discretised as
+`(-3A[0] + 4A[1] - A[2])/(2h) = 0`, i.e. `A[0] = (4A[1] - A[2])/3`. What runs is the FIRST-ORDER
+form `A[0] = A[1]`.
+
+**Not wrong in KIND — both are valid Neumann — but one order less accurate than the code says,
+everywhere, by accident rather than by choice.** ~60 call sites in the hydrosphere: `BC_Hyd`,
+`InitValues_Hyd`'s v and w boundary values, `PressureSolverHyd`'s `p_dyn` and `aux_*` boundaries,
+and `ThermoHyd`'s force and Ekman diagnostics. `ThermoHyd.h:401` declares its own LOCAL
+`const double c43 = 4.0/3.0`, so the tree contains both the correct value and the truncated one.
+
+**`HYD_BC_SECOND_ORDER=1` restores the intended form at all ~60 sites together**, which is the
+honest granularity: a model with second-order Neumann on some boundaries and first-order on others
+is a third thing nobody has tested. **Default 0 is byte-identical BY ARITHMETIC, not by a guard** —
+it sets `c43 = 1.0` and `c13 = 0.0`, the exact values the truncated `int`s already had, and every
+call site is `c43*A - c13*B` evaluated in double, where `int` 1 and 0 promote to the same 1.0 and
+0.0. Verified that no call site uses either constant in an integer context.
+
+**THE SAME DECLARATION IS AT `atmosphere/cAtmosphereModel.h:91` AND IS DELIBERATELY NOT TOUCHED.**
+Flipping it would move every atmosphere boundary condition at once, in the middle of the atmosphere
+work. It needs its own arm and its own measurement.
+
+**AND THE RADIAL BC IS NOW FIRST-ORDER ON PURPOSE.** `HYD_RUN_NEUMANN` uses `p[0] = p[1]`, matching
+`project_velocity`, rather than the `(4p[1] - p[2])/3` form — because the radial grid is STRETCHED
+and the uniform-spacing coefficients 4/3 and -1/3 are not the second-order one-sided formula there.
+A stretched-grid second-order radial Neumann is a further refinement and is not written.
 
 ## Open risks
 
