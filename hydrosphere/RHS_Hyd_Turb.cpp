@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <cmath>
+#include <cstdlib>
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 
@@ -668,6 +669,119 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double dpdthe_invrm = dpdthe * inv_rm;
     double dpdphi_invrs = dpdphi * inv_rmsinthe;
 
+    // ==================================================================================
+    // HYD_BAROCLINIC_PGF -- THE HORIZONTAL HYDROSTATIC PRESSURE GRADIENT IN rhs_v/rhs_w.
+    // A STRENGTH, not a flag. Default 0.0 = OFF and bit-identical.
+    //
+    // WHY. The comment at the buoyancy term below has been asking for this term by name:
+    // "a real baroclinic ocean needs the horizontal grad(p_hydro) in rhs_v/rhs_w, not just
+    // this term." The two `dpd*` lines above read `p_dyn`, a PROJECTION pressure whose Poisson
+    // source is the divergence of the tendency -- it removes the divergent part of forces
+    // already present and cannot manufacture the pressure a mass field implies. `p_hydro`,
+    // which ThermoHyd rebuilds every iteration and which carries the whole density structure,
+    // appears in NO momentum equation. The only other route from t or c into momentum is
+    // `buoy_nd` below, which is RADIAL and which its own comment records as carrying a
+    // spurious dt, "~1e-7 too small, so buoyancy is effectively OFF and the ocean is
+    // dynamically barotropic (wind + Coriolis only)". This is the atmosphere's missing
+    // thermal wind, one model over; see CLAUDE.md.
+    //
+    // HORIZONTAL ONLY, for the same reason the atmosphere's ATM_HYDRO_PGF is. The radial
+    // hydrostatic gradient IS gravity to within a per cent, and this model handles the radial
+    // direction the Boussinesq way -- `buoy_nd` is the residual and `rhs_u` carries no -g.
+    // Adding dp_hydro/dr without the matching -g would be a ~1e5 spurious sinking. Do not
+    // "complete" this with a third line.
+    //
+    // ---- THE METRIC, AND WHY THIS TERM DELIBERATELY DOES NOT MATCH ITS NEIGHBOURS ----
+    //
+    // MEASURED 2026-09-04, AND IT IS A DEFECT IN THE OCEAN THAT THE ATMOSPHERE DOES NOT HAVE.
+    // The horizontal derivatives above are scaled by `inv_rm` with rm = rad.z[i], and the
+    // ocean's rad.z runs 1.000 .. 2.000 (StretchedCoordinates from r0 = 1.0 over a length
+    // (im-1)*dr = 1.0). The implied metric radius is therefore rm*L_hyd = 200 .. 400 m. In the
+    // atmosphere the same expression carries rmet ~ 397.5, and 397.5 * L_atm = 397.5 * 16024 m
+    // = 6.370e6 m -- the Earth's radius, exactly. THE OCEAN IS MISSING THAT NORMALISATION.
+    // Consequence, measured from the iteration-300 field of `output_ps0` rather than argued:
+    // the code's median |horizontal advection| / |Coriolis| is 18 972x the same ratio formed
+    // physically, and R_Earth/(rm*L_hyd) over rm in [1,2] is 31 850 .. 15 925 -- the measured
+    // number sits inside that band. So the ocean's horizontal advection, diffusion and p_dyn
+    // gradient are all ~2e4 too large relative to Coriolis, which is the one horizontal term
+    // that needs no metric (it is 2*omega*L_hyd/u_0 * cos(theta) * w, a proper inverse Rossby
+    // number) and is therefore the one that is right.
+    //
+    // THIS TERM USES THE EARTH'S RADIUS, NOT `inv_rm`, AND THAT IS A JUDGEMENT WORTH STATING.
+    // Matching the neighbours would be the usual rule and it is wrong here for a specific
+    // reason: the entire purpose of this force is to balance CORIOLIS -- that balance is what
+    // geostrophy and thermal wind ARE -- and Coriolis is the metric-free term. Written with
+    // `inv_rm` this force would be ~2e4 times the Coriolis force it is meant to oppose, and the
+    // balance it exists to create would be impossible by construction. Written with R_Earth it
+    // is correctly sized against Coriolis and wrongly sized against advection and diffusion,
+    // which are themselves wrong. That is the better of two bad options and it is not a repair
+    // of the metric: fixing rad.z would move advection, diffusion, the Poisson operator and the
+    // projection together, and is a far larger change than this one.
+    //
+    // THE EULER NUMBER. The two `dpd*` lines above carry none, which fixes `p_dyn`'s
+    // normalisation at rho*u_0^2 (the same argument that corrected the atmosphere's p_dyn label
+    // from p_0). `p_hydro` is a REAL pressure in BAR, and a physical acceleration enters this
+    // RHS multiplied by L_hyd/u_0^2 -- read off the Coriolis term, which is
+    // (2*omega*L_hyd/u_0)*cos(theta)*w_nd = [2*omega*cos(theta)*w_phys] * L_hyd/u_0^2. Hence
+    //     dv*/dt* = -(1e5 * L_hyd / (rho_0_water * u_0^2 * R_Earth)) * d(p_hydro)/dthe
+    // = 0.0547 per bar per radian at the shipped constants.
+    //
+    // NO NORMALISATION VARIANT IS NEEDED, WHICH THE ATMOSPHERE COULD NOT SAY. There,
+    // differencing p_stat raw put a spurious barotropic gradient at the ground because
+    // densities() sets p_sl proportional to the surface temperature, and the default had to
+    // renormalise every column at a common height. Here the surface value is
+    // p_hydro[im-1] = p_0/1000, the SAME CONSTANT in every column, so the raw field already has
+    // zero horizontal gradient at the surface and carries only the baroclinic part beneath it.
+    // And the ocean grid is a z-coordinate -- level i is the same geometric depth in every
+    // column -- so differencing at constant i is differencing at constant depth and the
+    // sigma-coordinate pressure-gradient error cannot arise at all.
+    //
+    // LAND IS THE ONE HAZARD, AND IT IS REAL: ThermoHyd sets p_hydro = 0 in rock, so a centred
+    // difference across a coast or over the seafloor would see 0 against ~12 bar and
+    // manufacture an enormous gradient. Fall back to a one-sided difference at a land face,
+    // exactly as ThermoHyd::Forces() already does for its PresGradForce diagnostic.
+    //
+    // IT SURVIVES THE PROJECTION, WHICH THE BAROTROPIC MODE DID NOT. The note further down
+    // records that f x u_bt was not injected as a force because it is curl-free and the
+    // divergence projection deletes it. A BAROCLINIC gradient is not curl-free -- its curl is
+    // the thermal wind, which is the whole point -- so the solenoidal part survives. It is
+    // therefore left inside aux_v/aux_w (only the p_dyn gradient is added back below), so the
+    // projection removes its divergent part and keeps the rest.
+    //
+    // WHAT TO EXPECT ON THE FIRST RUN. The v/w budgets change immediately; the VELOCITY will
+    // not, on any run this tree can afford. Geostrophic adjustment takes 1/f, which at 30 deg
+    // is ~2.7e4 s = 2.7e8 iterations at dt = 1e-4 with L_hyd/u_0 = 833 s. That is the same
+    // ceiling ATM_HYDRO_PGF met and the reason its default is also 0.0.
+    // ==================================================================================
+    static const double bcl_pgf = [](){
+        const char* e = getenv("HYD_BAROCLINIC_PGF"); return e ? atof(e) : 0.0; }();
+
+    double bcl_the = 0.0, bcl_phi = 0.0;
+    if(bcl_pgf != 0.0 && is_water(h, i, j, k)
+       && j > 0 && j < jm-1 && k > 0 && k < km-1){
+        const double pC = p_hydro.x[i][j][k];
+        // One-sided at a land face: substitute the centre value, which zeroes that half of the
+        // difference rather than differencing against rock.
+        const double pTp = is_land(h,i,j+1,k) ? pC : p_hydro.x[i][j+1][k];
+        const double pTm = is_land(h,i,j-1,k) ? pC : p_hydro.x[i][j-1][k];
+        const double pPp = is_land(h,i,j,k+1) ? pC : p_hydro.x[i][j][k+1];
+        const double pPm = is_land(h,i,j,k-1) ? pC : p_hydro.x[i][j][k-1];
+
+        // 1e5 Pa/bar, / (rho u_0^2), x L_hyd/u_0^2 folded into one constant, and the metric
+        // radius is the EARTH'S, for the reason argued at length above.
+        const double eu = bcl_pgf * 1.0e5 * L_hyd
+                        / (r_0_water * u_0 * u_0 * r_Earth * 1.0e3);
+
+        // sinthe here is the CLAMPED metric sine (>= 0.4, RungeKutta_Hyd_Turb.cpp) -- this is a
+        // metric division, not a body force's angular structure, so it takes the same floor
+        // every other 1/sin in this file takes.
+        bcl_the = eu * (pTp - pTm) * inv_2dthe;
+        bcl_phi = eu * (pPp - pPm) * inv_2dphi / sinthe;
+
+        if(!AtomUtils::is_finite_safe(bcl_the)) bcl_the = 0.0;
+        if(!AtomUtils::is_finite_safe(bcl_phi)) bcl_phi = 0.0;
+    }
+
     // ----- Shear (velocity-gradient) dissipation heating -----
     // Dissipation function Φ = ν|S|² built DIRECTLY from the RESOLVED strain-rate tensor
     // (the velocity gradients), not the parameterized ε. This is the KE→internal-energy
@@ -741,7 +855,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
                               + centrifugal * centrifugal_rad;
     }
 
-    rhs_v.x[i][j][k] = -dpdthe_invrm - transport_v + diffusion_v
+    rhs_v.x[i][j][k] = -dpdthe_invrm - bcl_the - transport_v + diffusion_v
         + Coriolis * Coriolis_the + centrifugal * centrifugal_the;
 
     // v-momentum-budget capture (meridional). Attributes why the subtropical
@@ -749,7 +863,10 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // western-boundary current. vbud_wind is added in the wind-stress block
     // below (i=im-2 only). Sum of the five vbud_* equals rhs_v.
     if (wbudget_capture) {
-        vbud_pgf.x[i][j][k]  = -dpdthe_invrm;
+        // With HYD_BAROCLINIC_PGF on, this bucket is the TOTAL pressure gradient --
+        // projection plus hydrostatic -- so dyn_sum stays equal to the tendency and the
+        // budget remains an identity. Separate the two with a HYD_BAROCLINIC_PGF=0 arm.
+        vbud_pgf.x[i][j][k]  = -dpdthe_invrm - bcl_the;
         vbud_cor.x[i][j][k]  =  Coriolis * Coriolis_the
                               + centrifugal * centrifugal_the;
         vbud_adv.x[i][j][k]  = -transport_v;
@@ -757,7 +874,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         vbud_wind.x[i][j][k] =  0.0;   // set below at i=im-2
     }
 
-    rhs_w.x[i][j][k] = -dpdphi_invrs - transport_w + diffusion_w
+    rhs_w.x[i][j][k] = -dpdphi_invrs - bcl_phi - transport_w + diffusion_w
         + Coriolis * Coriolis_phi;
 
     // w-momentum-budget capture (turbulent path = active path; mirror of
@@ -765,7 +882,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // write_w_momentum_budget can attribute the zonal-mean zonal-velocity
     // tendency by latitude/depth. diffusion_w here carries the eddy viscosity.
     if (wbudget_capture) {
-        wbud_pgf.x[i][j][k]  = -dpdphi_invrs;
+        wbud_pgf.x[i][j][k]  = -dpdphi_invrs - bcl_phi;   // total: projection + hydrostatic
         wbud_cor.x[i][j][k]  =  Coriolis * Coriolis_phi;
         wbud_adv.x[i][j][k]  = -transport_w;
         wbud_diff.x[i][j][k] =  diffusion_w;

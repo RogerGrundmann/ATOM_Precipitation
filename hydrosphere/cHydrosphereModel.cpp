@@ -9,6 +9,9 @@
  * code developed by Roger Grundmann, Zum Marktsteig 1, D-01728 Bannewitz(roger.grundmann@web.de)
 */
 
+#include <cstdlib>
+#include <string>
+
 #include "cHydrosphereModel.h"
 #include "BC_Hyd.h"
 #include "PressureSolverHyd.h"
@@ -387,6 +390,23 @@ void cHydrosphereModel::Run(){
 void cHydrosphereModel::run_3D_loop(int Ma){
 
 cout << endl << endl << endl << "      OGCM: run_3D_loop ..........................." << endl;
+
+    // [RUN CONFIG] for the hydrosphere's environment knobs, unconditional, so no run has to be
+    // reconstructed from a shell history. The atmosphere gained this banner on 2026-09-02 after
+    // two "flipped on" claims in CLAUDE.md turned out to be wrong about a default; the ocean had
+    // no knobs to print until now. `*` marks a compiled-in default not set in the environment.
+    {
+        auto ev = [](const char* k, const char* dflt){
+            const char* e = getenv(k);
+            return e ? std::string(e) : (std::string(dflt) + "*");
+        };
+        cout << "      OGCM: [RUN CONFIG] knobs:  PHYDRO_SALT=" << ev("HYD_PHYDRO_SALT", "0")
+             << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
+             << "   (* = compiled-in default, not set in the environment)" << endl;
+        cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
+             << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "
+             << dt * L_hyd / u_0 << " s" << endl;
+    }
 
     // Set turbulence model flags once, before the iteration loop
     if (!turb_model.empty() && turb_model != "laminar") {

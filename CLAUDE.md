@@ -1245,6 +1245,99 @@ restart and the VTK. **The force itself is still unwritten.** Default stays 0 fo
 `ATM_HYDRO_PGF`'s does: nothing about it has been shown on a circulation, and this tree flips
 defaults on measurements.
 
+### The force is now written: `HYD_BAROCLINIC_PGF`, default 0.0, and unlike the atmosphere's it MOVES THE VELOCITY
+
+**`HYD_BAROCLINIC_PGF=<strength>`** adds `-(1e5*L_hyd/(rho_0_water*u_0^2*R_Earth)) * d(p_hydro)/dthe`
+to `rhs_v` and the matching `1/sin(theta)` term to `rhs_w` (`RHS_Hyd_Turb.cpp`). Horizontal only,
+for the reason `ATM_HYDRO_PGF` is: radially the hydrostatic gradient IS gravity, and `rhs_u` carries
+no `-g`. **Off-branch verified BYTE-IDENTICAL through two binary generations** — `output_r0`'s
+restart has the same md5 as `output_qn0`'s, which has the same md5 as `hyd_base`'s.
+
+**AND THE OCEAN IS MISSING THE HORIZONTAL METRIC NORMALISATION THE ATMOSPHERE HAS.** This was found
+while sizing the term and it is larger than the term. The horizontal derivatives are scaled by
+`inv_rm` with `rm = rad.z[i]`, and the ocean's `rad.z` runs **1.000 to 2.000** (`StretchedCoordinates`
+from `r0` = 1.0 over a length `(im-1)*dr` = 1.0), so the implied metric radius is
+`rm*L_hyd` = **200 to 400 m**. In the atmosphere the same expression carries `rmet` ~ 397.5, and
+397.5 * `L_atm` = 397.5 * 16 024 m = **6.370e6 m — the Earth's radius, exactly.**
+
+Measured rather than argued, from `output_ps0`'s iteration-300 field: the code's median
+\|horizontal advection\|/\|Coriolis\| is **18 972x** the same ratio formed physically, against a
+predicted `R_Earth/(rm*L_hyd)` of 31 850..15 925 over `rm` in [1,2] — the measurement sits inside
+the band. **So the ocean's horizontal advection, diffusion and `p_dyn` gradient are all ~2e4 too
+large relative to Coriolis**, which is the one horizontal term that needs no metric (it is
+`2*omega*L_hyd/u_0*cos(theta)*w`, a proper inverse Rossby number) and is therefore the one that is
+right.
+
+**THIS TERM THEREFORE USES `R_Earth`, NOT `inv_rm`, AND DELIBERATELY DOES NOT MATCH ITS NEIGHBOURS.**
+The rule in this tree is to match the existing term's structure and supply only the Euler number,
+and it is set aside here for a specific reason: the entire purpose of this force is to balance
+CORIOLIS — that balance is what geostrophy and thermal wind ARE — and written with `inv_rm` it
+would be ~2e4 times the force it exists to oppose, so the balance could never form. Correctly
+sized against Coriolis and wrongly sized against terms that are themselves wrong is the better of
+two bad options. **`rad.z` was NOT touched**: fixing it moves advection, diffusion, the Poisson
+operator and the projection together, and is a far larger change than this one.
+
+**NO NORMALISATION VARIANT IS NEEDED, WHICH THE ATMOSPHERE COULD NOT SAY.** `ATM_HYDRO_PGF` needed
+`_RAW` versus a common-height renormalisation because `densities()` makes `p_sl` proportional to
+surface temperature. Here `p_hydro[im-1] = p_0/1000`, the SAME CONSTANT in every column, so the raw
+field has zero horizontal gradient at the surface and carries only the baroclinic part beneath it.
+And the ocean grid is a z-coordinate — level `i` is the same depth in every column — so differencing
+at constant `i` is differencing at constant depth and the sigma-coordinate error cannot arise. The
+one hazard is LAND, where `ThermoHyd` sets `p_hydro` = 0; one-sided differences at a land face,
+exactly as `Forces()` already does for `PresGradForce`.
+
+**THE TERM IS CORRECTLY SIZED AGAINST CORIOLIS ON THE SHIPPED FIELD AND FIVE TIMES TOO LARGE ON THE
+SALT-AWARE ONE**, median over the fluid interior at iteration 300:
+
+| meridional term, nondim `dv*/dt*` | median | p90 | vs Coriolis |
+|---|---|---|---|
+| `Coriolis_the` | 3.63e-04 | 5.03e-03 | 1.00 |
+| **`centrifugal_the`** | **2.19e-09** | 2.91e-09 | **6.0e-06** |
+| `bcl_the`, shipped `p_hydro` | 1.91e-04 | 1.58e-03 | **0.53** |
+| `bcl_the`, salt-aware `p_hydro` | 2.89e-03 | 9.61e-02 | **7.96** (5.13 on salty columns) |
+
+**`centrifugal_the` CANNOT COLLIDE WITH ANYTHING**: it is six orders below Coriolis, because it
+carries `(dt/u_0)^2` = 1.7e-07 — a THIRD non-dimensionalisation, neither `L_hyd/u_0^2` nor anything
+else, which its own comment flags as the open model-wide body-force unit question. And the
+temptation to think the new PGF now absorbs it — its comment says the centrifugal force is
+"absorbed into the geopotential" on the real planet, i.e. balanced by a meridional pressure
+gradient — is wrong: `p_hydro` is a hydrostatic integral under a UNIFORM surface pressure and
+carries no oblateness or sea-surface tilt, so the artefact stays exactly as unopposed as before.
+
+**AND IT SURVIVES THE PROJECTION, WHICH IS THE RESULT THAT SEPARATES THIS FROM THE ATMOSPHERE.**
+The term is left inside `aux_v`/`aux_w` so the pressure solve removes only its DIVERGENT part. The
+note further down records that `f x u_bt` was not injected as a force because it is curl-free and
+the projection deletes it; a baroclinic gradient's curl is the thermal wind, so its solenoidal part
+should survive. Measured, three arms at 1 thread, `nm` = 20, all exit 0 with **zero NaN**, over
+1 029 132 clean cells (both meridional neighbours fluid, no fresh cell anywhere in the column,
+10-70 deg):
+
+| arm | median \|dv\| predicted unopposed | median \|dv\| measured | **surviving** | Spearman |
+|---|---|---|---|---|
+| **`r1` shipped `p_hydro`** | 1.87e-07 | 7.74e-09 | **4.2 %** | 0.18 |
+| **`r2` salt-aware `p_hydro`** | 4.43e-06 | 2.69e-06 | **60.7 %** | 0.35 |
+
+**THE SALT-AWARE FIELD IS WHAT MAKES IT SURVIVE — 61 % against 4 %** — which is the code comment's
+own prediction with a number on it: the salt-blind `p_hydro` is nearly curl-free and the projection
+eats it, the baroclinic one is not and it does not. **`HYD_PHYDRO_SALT` and `HYD_BAROCLINIC_PGF` are
+a PAIR**, and the first is close to useless without the second and measurably weaker alone.
+
+**THE VELOCITY MOVES IN TWENTY ITERATIONS**, which `ATM_HYDRO_PGF` never managed on any run: rms
+relative change against the off arm, `u` **4.3e-03**, `v` 8.6e-04, `w` 1.3e-04 for `r2`, and
+1.6e-05 / 1.7e-06 / 6.5e-07 for `r1`. The radial component moves most, as a horizontal force
+driving convergence through continuity should. **The reason the ocean can show this and the
+atmosphere cannot is structural**: the atmosphere's time loop never applies `v <- v - grad(p)` at
+all, while `PressureSolverHyd::project_velocity` does, so the ocean actually has a working
+velocity-pressure coupling to deliver the force through.
+
+**WHAT IS NOT SHOWN, AND THE TIMESCALE IS NOW PRINTED BY EVERY RUN.** The new `[SCALES]` banner
+reports `L_hyd/u_0` = 833.3 s and **one iteration = 0.0833 s**, so `nm` = 20 is **1.67 seconds** and
+the 300-iteration pair is 25 seconds. Geostrophic adjustment takes `1/f` ~ 2.7e4 s at 30 deg =
+**324 000 iterations**. So this is first light — connected, correctly sized against Coriolis,
+stable, byte-identical off, and surviving the projection — and it is **not** a circulation result.
+**Default stays 0.0**, and the strength should be swept below 1.0 before it is run at full: at 1.0
+on the salt-aware field it is ~5x the Coriolis force it is meant to balance.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
