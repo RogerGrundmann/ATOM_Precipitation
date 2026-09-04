@@ -1245,6 +1245,45 @@ restart and the VTK. **The force itself is still unwritten.** Default stays 0 fo
 `ATM_HYDRO_PGF`'s does: nothing about it has been shown on a circulation, and this tree flips
 defaults on measurements.
 
+### The strength sweep says run it at 1.0, and the reason is that the model is exactly linear in it
+
+**SWEPT AT THE USER'S INSTRUCTION BECAUSE THE TERM RUNS ~5x CORIOLIS AT STRENGTH 1.0**
+(2026-09-04). Five arms, `HYD_PHYDRO_SALT=1` throughout, **1 thread** so the off-branch noise is
+exactly zero and a strength of 0.1 is still measurable, `nm` = 20 = **1.67 s** of physical time.
+All five exit 0 with **zero NaN**. 932 602 clean cells (salty, coast-free, 15-70 deg).
+
+| strength | surviving (median) | rms dv / rms v | max\|u\| nd | max\|w\| nd |
+|---|---|---|---|---|
+| 0.0 | — | 0 | 6.7679e-02 | 6.7929e-01 |
+| 0.1 | **64.8 %** | 6.408e-05 | 6.7678e-02 | 6.7929e-01 |
+| 0.2 | **64.8 %** | 1.282e-04 | 6.7678e-02 | 6.7929e-01 |
+| 0.5 | **64.8 %** | 3.204e-04 | 6.7677e-02 | 6.7929e-01 |
+| 1.0 | **64.8 %** | 6.408e-04 | 6.7676e-02 | 6.7929e-01 |
+
+**THE RESPONSE IS EXACTLY LINEAR AND THE STABILITY IS IDENTICAL AT EVERY STRENGTH.** `rms dv` goes
+1x, 2x, 5x, 10x with the strength to four figures; the surviving fraction is the same 64.8 % at all
+four; the Pearson, Spearman and least-squares slope against the applied force are **identical** at
+0.1 and at 1.0; and `max|u|` and `max|w|` agree with the strength-0 control to four and five
+figures. **There is no threshold, no nonlinearity and no instability anywhere below 1.0, so
+reducing the strength buys nothing except a proportionally smaller effect.** Run it at 1.0.
+
+**AND THE "5x CORIOLIS" IS NOT A NUMERICAL HAZARD, IT IS A STATEMENT ABOUT THE CURRENTS.** The
+geostrophic zonal current implied by the model's OWN `p_hydro` is **0.0069 m/s** against an actual
+**0.0041 m/s** (medians, same cells) -- the density field asks for currents **2.4x** stronger than
+the model has. That is the atmosphere's "+28 m/s implied against +4.6 m/s actual" in the ocean, and
+scaling a DERIVED force down to make `|pgf|/|cor|` = 1 would be fitting the force to a flow that is
+wrong. The excess is the flow's, not the term's.
+
+**THE BALANCE ITSELF IS NOT REACHABLE, AND THE ARITHMETIC IS THE SAME WALL AS EVERYWHERE ELSE IN
+THIS FILE.** At strength 1.0 the zonal current closes **0.00175 %** of its 1.25e-02 m/s geostrophic
+gap in 1.67 s; extrapolated linearly that is **26.5 hours = 1.14e+06 iterations**, against `1/f` at
+30 deg of 1.37e+04 s = **1.65e+05 iterations** -- the same order, within a factor of 7, which is
+what says the term is adjusting at the rate a geostrophic adjustment should. **A "does the current
+move toward `w_g`" test returns -0.025 at every strength, and that is the WRONG TEST at
+t << 1/f**: the immediate response to a suddenly-applied MERIDIONAL force is meridional, and the
+zonal response only appears after Coriolis has turned it, i.e. after `1/f`. Do not read that -0.025
+as the term failing.
+
 ### The force is now written: `HYD_BAROCLINIC_PGF`, default 0.0, and unlike the atmosphere's it MOVES THE VELOCITY
 
 **`HYD_BAROCLINIC_PGF=<strength>`** adds `-(1e5*L_hyd/(rho_0_water*u_0^2*R_Earth)) * d(p_hydro)/dthe`
@@ -1317,7 +1356,16 @@ should survive. Measured, three arms at 1 thread, `nm` = 20, all exit 0 with **z
 | **`r1` shipped `p_hydro`** | 1.87e-07 | 7.74e-09 | **4.2 %** | 0.18 |
 | **`r2` salt-aware `p_hydro`** | 4.43e-06 | 2.69e-06 | **60.7 %** | 0.35 |
 
-**THE SALT-AWARE FIELD IS WHAT MAKES IT SURVIVE — 61 % against 4 %** — which is the code comment's
+**THE SURVIVAL FIGURE DEPENDS ON THE STATISTIC AND THE MEDIAN ONE OVERSTATES IT** (corrected
+2026-09-04, same arms). By medians the salt-aware field keeps **60.7 %** of the unopposed velocity
+change; by least squares over the same cells the slope is **0.043**, and the rank correlation
+between the applied force and the velocity response is **+0.33**. Both are right and they say
+different things: the TYPICAL cell keeps most of the force, while the cells carrying the LARGEST
+gradients keep almost none — which is what a projection does, since the strongest gradients are the
+most divergent. **Quote the pair, not the 61 %.** `f293f4d`'s message says 60.7 % without the
+least-squares number beside it.
+
+**THE SALT-AWARE FIELD IS STILL WHAT MAKES IT SURVIVE — 61 % against 4 % by the same median measure** — which is the code comment's
 own prediction with a number on it: the salt-blind `p_hydro` is nearly curl-free and the projection
 eats it, the baroclinic one is not and it does not. **`HYD_PHYDRO_SALT` and `HYD_BAROCLINIC_PGF` are
 a PAIR**, and the first is close to useless without the second and measurably weaker alone.
