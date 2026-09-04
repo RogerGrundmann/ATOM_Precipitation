@@ -195,6 +195,7 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     total_iter_count = 0;                                               // reset per time slice so the inviscid spin-up fires at the start of every Ma slice
 
     rad.StretchedCoordinates(im, r0, dr, dr_stretch);
+    initMetricRadius();                      // HYD_METRIC_RADIUS; must follow the coordinates
     the.Coordinates(jm, the0, dthe);
     phi.Coordinates(km, phi0, dphi);
 
@@ -383,6 +384,29 @@ void cHydrosphereModel::Run(){
         << std::endl;
 
     return;
+}
+/*
+*
+*/
+void cHydrosphereModel::initMetricRadius(){
+    // One rad.z unit in metres. The ocean grid maps a radial step to a depth as
+    // (rad.z[i+1]-rad.z[i])*L_hyd (see the dz lines in this file), and rad.z spans exactly 1.0
+    // from r0 = 1.0, so one unit is L_hyd metres EXACTLY and uniformly -- simpler than the
+    // atmosphere, whose exponential stretch makes its metricShellLength() an average.
+    static const double r_km = [this](){
+        const char* e = getenv("HYD_METRIC_RADIUS");
+        return e ? atof(e) : 0.0; }();          // DEFAULT 0 = off, unlike the atmosphere's
+
+    if(r_km <= 0.0){
+        m_metric_r0 = 0.0;
+        cout << "      OGCM: HYD_METRIC_RADIUS off - horizontal metric left on the grid"
+             << " coordinate (rad.z ~ 1..2, i.e. a " << L_hyd << " m planet)" << endl;
+        return;
+    }
+    m_metric_r0 = r_km * 1.0e3 / L_hyd;
+    cout << "      OGCM: HYD_METRIC_RADIUS = " << r_km << " km, one rad.z unit = " << L_hyd
+         << " m  ->  metric r0 = " << m_metric_r0
+         << " (grid r0 stays " << rad.z[0] << ")" << endl;
 }
 /*
 *

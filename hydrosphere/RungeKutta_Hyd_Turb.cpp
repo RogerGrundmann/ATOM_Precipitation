@@ -69,9 +69,14 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
             geo.sinthe2 = geo.sinthe * geo.sinthe;
             geo.costhe  = costhe_tbl[j];
 
-            geo.inv_rm              = 1.0 / geo.rm;
-            geo.inv_rm2             = 1.0 / geo.rm2;
-            geo.inv_rmsinthe        = 1.0 / (geo.rm * geo.sinthe);
+            // HORIZONTAL metric radius (HYD_METRIC_RADIUS). Identity when off.
+            // rm / rm2 / exp_rm stay on the GRID coordinate: they are the radial
+            // stretch, the layer thickness and the wall distance, not a planet radius.
+            const double rh  = metricRadius(geo.rm);
+            const double rh2 = rh * rh;
+            geo.inv_rm              = 1.0 / rh;
+            geo.inv_rm2             = 1.0 / rh2;
+            geo.inv_rmsinthe        = 1.0 / (rh * geo.sinthe);
             geo.inv_rm2sinthe       = geo.inv_rm2 / geo.sinthe;
             geo.inv_rm2sinthe2      = geo.inv_rm2 / geo.sinthe2;
             geo.costhe_inv_rm2sinthe = geo.costhe * geo.inv_rm2sinthe;

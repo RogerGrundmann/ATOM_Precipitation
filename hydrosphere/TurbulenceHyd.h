@@ -302,13 +302,16 @@ private:
 
                     // ---- geometry ----
                     const double rm       = m.rad.z[i];
+                    // HORIZONTAL metric radius (HYD_METRIC_RADIUS). rm itself stays the GRID
+                    // coordinate -- it is also the wall distance further down this file.
+                    const double rh       = m.metricRadius(rm);
                     const double exp_rm   = 1.0 / (rm + 1.0);
                     double sinthe         = sin(m.the.z[j]);
                     if (sinthe == 0.0) sinthe = 1.0e-5;
-                    const double rmsinthe = rm * sinthe;
+                    const double rmsinthe = rh * sinthe;
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
-                    const double inv_rm2dthe  = inv_2dthe / rm;
+                    const double inv_rm2dthe  = inv_2dthe / rh;
                     const double inv_rmsinthe2dphi = inv_2dphi / rmsinthe;
 
                     m.tke.x[i][j][k] = std::max(0.0,     m.tke.x[i][j][k]);
@@ -468,11 +471,12 @@ private:
         const double bet_0    = 0.0708;
 
         const double rm       = m.rad.z[i];
+        const double rh       = m.metricRadius(rm);   // HYD_METRIC_RADIUS, horizontal only
         double sinthe         = sin(m.the.z[j]);
         if (sinthe == 0.0) sinthe = 1.0e-5;
-        const double rmsinthe = rm * sinthe;
+        const double rmsinthe = rh * sinthe;
         const double exp_rm   = 1.0 / (rm + 1.0);
-        const double inv_rm   = 1.0 / rm;
+        const double inv_rm   = 1.0 / rh;
 
         const bool neumann_bot = (i > 0      && is_land(m.h, i-1, j, k));
         const bool neumann_jm1 = (j > 0      && is_land(m.h, i, j-1, k));
@@ -503,7 +507,7 @@ private:
         const double ddisdphi_neu = (dis_kp1 - dis_km1) / (rmsinthe * 2.0 * m.dphi);
 
         const double dudr   = (m.rc1m[i]*m.u.x[i-1][j][k] + m.rc10[i]*m.u.x[i][j][k] + m.rc1p[i]*m.u.x[i+1][j][k]) * exp_rm;
-        const double dvdthe = (m.v.x[i][j+1][k] - m.v.x[i][j-1][k]) / (rm * 2.0 * m.dthe);
+        const double dvdthe = (m.v.x[i][j+1][k] - m.v.x[i][j-1][k]) / (rh * 2.0 * m.dthe);
         const double dwdphi = (m.w.x[i][j][k+1] - m.w.x[i][j][k-1]) / (rmsinthe * 2.0 * m.dphi);
 
         const double dudthe_u = (m.u.x[i][j+1][k] - m.u.x[i][j-1][k]) / (rm       * 2.0 * m.dthe);
@@ -567,10 +571,10 @@ private:
 
         const double nue_water_nd = nue_water / (m.u_0 * m.L_hyd);
 
-        const double y_phys = std::max(rm * m.L_hyd - z_floor, 1.0e-6);
+        const double y_phys = std::max(rm * m.L_hyd - z_floor, 1.0e-6);   // RADIAL: grid coord
         const double y_star = y_phys / m.L_hyd;
 
-        const double rmsinthe = rm * sinthe;
+        const double rmsinthe = m.metricRadius(rm) * sinthe;   // HORIZONTAL: HYD_METRIC_RADIUS
         const double exp_rm   = 1.0 / (rm + 1.0);
 
         const bool neumann_bot = (i > 0      && is_land(m.h, i-1, j, k));

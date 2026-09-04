@@ -268,7 +268,10 @@ public:
                            && is_water(m.h, i, j, k-1) && is_water(m.h, i, j, k+1)))
                             continue;
 
-                        double rm       = m.rad.z[i];
+                        // HORIZONTAL metric (HYD_METRIC_RADIUS). This is the residuum monitor,
+                        // a diagnostic -- but it is also the convergence test, so it moves with
+                        // the dynamics rather than being left on the old metric.
+                        double rm       = m.metricRadius(m.rad.z[i]);
                         double rmsinthe = rm * sinthe;
 
                         double dudr   = (m.u.x[i+1][j][k] - m.u.x[i-1][j][k]) / m.dr;

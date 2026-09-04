@@ -261,6 +261,44 @@ public:
     double su[5] = {0}, sv[5] = {0}, sw[5] = {0};   // velocity [nondim] after stages 0..4
 
     Array_1D rad;                                                       // radial coordinate direction
+
+    // ==================================================================================
+    // HYD_METRIC_RADIUS -- the HORIZONTAL metric's planetary radius. Ported from the
+    // atmosphere's ATM_METRIC_RADIUS (2026-07-28), which fixed the identical defect there.
+    //
+    // THE DEFECT, MEASURED 2026-09-04. RungeKutta_Hyd_Turb sets geo.rm = rad.z[i] and
+    // inv_rm = 1/rm, and RHS_Hyd_Turb uses that as the PLANETARY radius in v/r d/dthe,
+    // 1/(r sinthe) d/dphi and in every Laplacian. rad.z runs 1.000 .. 2.000
+    // (StretchedCoordinates from r0 = 1.0 over a length (im-1)*dr = 1.0), and one rad.z unit
+    // is L_hyd = 200 m, so the implied metric radius is 200 .. 400 m against the Earth's
+    // 6.370e6 m. Measured from output_ps0's iteration-300 field: the code's median
+    // |horizontal advection| / |Coriolis| is 18 972x the same ratio formed physically, against
+    // a predicted R_Earth/(rm*L_hyd) of 31 850 .. 15 925 over rm in [1,2] -- inside the band.
+    // So the ocean's horizontal advection, diffusion and pressure gradient are all ~2e4 too
+    // large relative to Coriolis, which needs no metric and is therefore the term that is right.
+    //
+    // WHAT THIS DOES NOT DO, AND THE RESTRAINT IS THE WHOLE DESIGN (the atmosphere's words,
+    // and they apply here unchanged): it does NOT move rad.z. rad.z is not only a radius, it is
+    // also the stretched RADIAL coordinate that exp_rm = 1/(rm+1) is built on, that
+    // (rad.z[i+1]-rad.z[i])*L_hyd turns into a layer thickness, and that TurbulenceHyd turns
+    // into a wall distance (y_phys = rm*L_hyd - z_floor). Shifting rad.z to 31 850 would divide
+    // every radial derivative by ~2e4 and put the wall distance 6370 km from the seafloor.
+    // ONLY the 1/r factors move; exp_rm stays a function of the grid coordinate.
+    //
+    // The value is a radius in km, so HYD_METRIC_RADIUS=6370 is the Earth. DEFAULT 0 = OFF,
+    // i.e. the shipped rad.z ~ 1.5 metric, and metricRadius() is then the identity so every
+    // call site is bit-identical unset. The atmosphere defaults ITS version on; this one waits
+    // for a measurement, which is this tree's rule.
+    // ==================================================================================
+    void initMetricRadius();
+
+    // The radius the HORIZONTAL metric should use, in rad.z units, given a grid coordinate rm.
+    double metricRadius(double rm) const {
+        return (m_metric_r0 > 0.0) ? (m_metric_r0 + (rm - rad.z[0])) : rm;
+    }
+
+    // Planetary radius in rad.z units when HYD_METRIC_RADIUS is on; 0.0 means off.
+    double m_metric_r0 = 0.0;
     Array_1D the;                                                       // lateral coordinate direction
     Array_1D phi;                                                       // longitudinal coordinate direction
 

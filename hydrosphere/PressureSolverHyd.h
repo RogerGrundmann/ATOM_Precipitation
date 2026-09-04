@@ -148,9 +148,13 @@ public:
                 geo.sinthe       = sinthe_table[j];
                 geo.sinthe2      = geo.sinthe * geo.sinthe;
                 geo.costhe       = cos(m.the.z[j]);
-                geo.inv_rm       = 1.0 / geo.rm;
-                geo.inv_rm2      = 1.0 / geo.rm2;
-                geo.inv_rmsinthe         = 1.0 / (geo.rm * geo.sinthe);
+                // HORIZONTAL metric radius (HYD_METRIC_RADIUS). MUST match RungeKutta_Hyd_Turb
+                // exactly: the Poisson operator and the RHS have to see the same metric, or the
+                // projection stops being the adjoint of the divergence it is solving for.
+                const double rh  = m.metricRadius(geo.rm);
+                geo.inv_rm       = 1.0 / rh;
+                geo.inv_rm2      = 1.0 / (rh * rh);
+                geo.inv_rmsinthe         = 1.0 / (rh * geo.sinthe);
                 geo.inv_rm2sinthe        = geo.inv_rm2 / geo.sinthe;
                 geo.inv_rm2sinthe2       = geo.inv_rm2 / geo.sinthe2;
                 geo.costhe_inv_rm2sinthe = geo.costhe * geo.inv_rm2sinthe;
@@ -418,8 +422,9 @@ public:
             for (int j = 1; j < m.jm-1; j++) {
                 const double rm           = m.rad.z[i];
                 const double exp_rm       = 1.0 / (rm + 1.0);
-                const double inv_rm       = 1.0 / rm;
-                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                const double rh           = m.metricRadius(rm);   // HYD_METRIC_RADIUS
+                const double inv_rm       = 1.0 / rh;
+                const double inv_rmsinthe = 1.0 / (rh * sinthe_tab[j]);
 
                 for (int k = 1; k < m.km-1; k++) {
                     if (is_land(m.h, i, j, k)) continue;
@@ -510,8 +515,9 @@ public:
             for (int j = 1; j < m.jm-1; j++) {
                 const double rm           = m.rad.z[i];
                 const double exp_rm       = 1.0 / (rm + 1.0);
-                const double inv_rm       = 1.0 / rm;
-                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                const double rh           = m.metricRadius(rm);   // HYD_METRIC_RADIUS
+                const double inv_rm       = 1.0 / rh;
+                const double inv_rmsinthe = 1.0 / (rh * sinthe_tab[j]);
                 const double hs_r         = m.rad.z[i+1] - m.rad.z[i-1];
                 const double two_over_hs  = 2.0 / hs_r;
                 for (int k = 1; k < m.km-1; k++) {
@@ -536,8 +542,9 @@ public:
             for (int i = 1; i < m.im-1; i++) {
                 for (int j = 1; j < m.jm-1; j++) {
                     const double rm      = m.rad.z[i];
-                    const double exp_2_rm = 1.0 / ((rm + 1.0) * (rm + 1.0));
-                    const double inv_rm2  = 1.0 / (rm * rm);
+                    const double rh      = m.metricRadius(rm);   // HYD_METRIC_RADIUS
+                    const double exp_2_rm = 1.0 / ((rm + 1.0) * (rm + 1.0));   // RADIAL: grid coord
+                    const double inv_rm2  = 1.0 / (rh * rh);
                     const double inv_rm2sinthe2 = inv_rm2 / (sinthe_tab[j] * sinthe_tab[j]);
                     const double cT = inv_rm2 * inv_dthe2;
                     const double cP = inv_rm2sinthe2 * inv_dphi2;
@@ -587,8 +594,9 @@ public:
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
                 const double rm           = m.rad.z[i];
-                const double inv_rm       = 1.0 / rm;
-                const double inv_rmsinthe = 1.0 / (rm * sinthe_tab[j]);
+                const double rh           = m.metricRadius(rm);   // HYD_METRIC_RADIUS
+                const double inv_rm       = 1.0 / rh;
+                const double inv_rmsinthe = 1.0 / (rh * sinthe_tab[j]);
                 for (int k = 0; k < m.km; k++) {
                     if (i < m.im-1 && water(i,j,k) && water(i+1,j,k)) {
                         const double rmf = 0.5*(m.rad.z[i]+m.rad.z[i+1]);

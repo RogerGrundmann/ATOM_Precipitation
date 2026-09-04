@@ -1386,6 +1386,87 @@ stable, byte-identical off, and surviving the projection — and it is **not** a
 **Default stays 0.0**, and the strength should be swept below 1.0 before it is run at full: at 1.0
 on the salt-aware field it is ~5x the Coriolis force it is meant to balance.
 
+### The ocean's horizontal metric is a 2e4 error, the fix is written, AND THE MODEL CANNOT TAKE IT — the obstacle is the pressure solver, not the metric
+
+**`HYD_METRIC_RADIUS=<km>`, default 0 = OFF**, ported from the atmosphere's `ATM_METRIC_RADIUS`
+(2026-07-28), which fixed the identical defect there. **Off-branch verified BYTE-IDENTICAL across
+ten call sites** — `output_m0`'s restart has the same md5 as `output_r0`, `output_qn0` and
+`hyd_base`'s, i.e. through three binary generations.
+
+**THE DEFECT.** `RungeKutta_Hyd_Turb` sets `geo.rm = rad.z[i]` and `inv_rm = 1/rm`, and the RHS uses
+that as the PLANETARY radius in `v/r d/dthe`, `1/(r sinthe) d/dphi` and every Laplacian. `rad.z`
+runs **1.000 to 2.000** and one `rad.z` unit is `L_hyd` = 200 m, so the implied metric radius is
+**200 to 400 m**. Measured from `output_ps0`'s iteration-300 field: the code's median
+\|horizontal advection\|/\|Coriolis\| is **18 972x** the same ratio formed physically, against a
+predicted `R_Earth/(rm*L_hyd)` of 31 850..15 925 -- inside the band. **So the ocean's horizontal
+advection, diffusion and `p_dyn` gradient are all ~2e4 too large relative to Coriolis**, the one
+horizontal term that needs no metric and is therefore right.
+
+**THE ATMOSPHERE'S `rad.z` RUNS 1.0 TO 2.0 TOO — an earlier version of this file said it "carries
+`rmet` ~ 397.5" and that was wrong about the MECHANISM.** What the atmosphere has is a SEPARATE
+`m_metric_r0` that gives only the 1/r factors the planetary radius while leaving `rad.z` alone. The
+substance held (its horizontal metric radius IS the Earth's); the ocean was missing a mechanism,
+not a coordinate value. **The restraint is the whole design and it is not optional**: `rad.z` is
+also the stretched RADIAL coordinate `exp_rm = 1/(rm+1)` is built on, the thing
+`(rad.z[i+1]-rad.z[i])*L_hyd` turns into a layer thickness, and the thing `TurbulenceHyd` turns
+into a WALL DISTANCE. Moving `rad.z` to 31 850 would divide every radial derivative by 2e4 and put
+the wall 6370 km from the seafloor.
+
+**TEN SITES, AND FINDING THEM ALL MATTERED MORE THAN ANY ONE EDIT**: the RHS `geo`, **four** in
+`PressureSolverHyd` (the `geo` build, the operator sweep, the source, the gradient correction — the
+first attempt patched one of the four), three in `TurbulenceHyd`, and the residuum monitor. A
+partial fix is worse than none: **the Poisson operator and the RHS must see the same metric, or the
+projection stops being the adjoint of the divergence it solves for.** Left alone deliberately:
+`ThermoHyd`'s `Forces()` and `EkmanPumping`, output-only diagnostics already on a different
+metres-based convention.
+
+**AND SWITCHING IT ON KILLS THE MODEL IN ONE ITERATION.** `HYD_METRIC_RADIUS=6370`, 1 thread:
+`*** NaN/Inf DETECTED *** stage=post-RK4 iter=1 field=u`. `project_barotropic` is bit-identical
+between the arms (`max|Psi|=44948654.487430`), so the divergence starts after it.
+
+**IT IS NOT A CFL FAILURE AND IT IS NOT A BUG, AND THE SWEEP IS WHAT SAYS SO.** Both horizontal CFL
+numbers IMPROVE as the radius grows — advection and diffusion each fall like 1/r — and a bug would
+fail identically at every radius. Instead the failure is GRADED, `nm` = 5, 1 thread:
+
+| radius km | metric r0 | `c_the/c_r` | reached |
+|---|---|---|---|
+| shipped (~0.3) | 1.5 | **8.55** | 20/20 |
+| 1 | 5 | 2.56 | 5/5 |
+| 10 | 50 | 0.256 | 5/5 |
+| **100** | 500 | **0.0257** | **5/5** |
+| **200** | 1 000 | **0.0128** | **NaN at 3** |
+| 300 | 1 500 | 0.00855 | NaN at 2 |
+| 500 | 2 500 | 0.00513 | NaN at 2 |
+| 700 | 3 500 | 0.00366 | NaN at 1 |
+| 1 000 | 5 000 | 0.00256 | NaN at 1 |
+| **6 370 (Earth)** | 31 850 | **0.00040** | **NaN at 1** |
+
+**THE ONSET IS AT `c_the/c_r` ~ 0.02 AND THE TIME TO FAILURE SHORTENS MONOTONICALLY WITH THE
+ANISOTROPY.** That is a conditioning failure, in one specific place: as the horizontal coupling
+collapses the Poisson problem tends toward a set of DECOUPLED 1-D RADIAL COLUMNS WITH NEUMANN ENDS,
+which is singular, and a fixed 60-sweep Jacobi cannot solve it. The pressure comes out wrong and
+the correction `u -= dpdr*exp_rm` — **the one term the metric does not shrink** — injects a
+spurious radial velocity. Which is exactly the field the detector names.
+
+**AND THE ATMOSPHERE SITS JUST ABOVE THE OCEAN'S THRESHOLD, WHICH IS THE STRONGEST EVIDENCE FOR THE
+DIAGNOSIS.** CLAUDE.md records `c_phi/c_r` = **0.0322** for this tree's atmosphere with its metric
+fix ON, against an ocean onset near 0.02. The reason is geometry, not tuning: the ocean's shell is
+**200 m over a 6370 km radius (aspect 3e-5)** against the atmosphere's 16 km (2.5e-3), so at the
+CORRECT metric the ocean's Poisson operator is **~80x more radially dominated**. The atmosphere
+could carry this repair; the ocean, with this solver, cannot.
+
+**SO THE REPAIR THE METRIC IMPLIES IS A PRESSURE SOLVER, NOT A METRIC.** A direct tridiagonal solve
+in the radial direction, or a preconditioner that handles the anisotropy, in place of the fixed
+Jacobi sweep count. **Until that exists `HYD_METRIC_RADIUS` must stay 0** — and that is not a
+judgement about the metric, which is wrong by 2e4 and known to be wrong. It is a statement that the
+ocean's horizontal dynamics are currently held up by the error.
+
+*Two mistakes made getting here, both recorded because this file's rule is to record them.* The
+`rmet` mechanism error above. And an "the damage is present at initialisation" claim, quoting a
+20 K temperature difference at iteration 0, that was **comparing iteration 20 against iteration 0**
+— the control's in-loop `writeFile` had overwritten `PlotData_Hyd.xyz` while the failed arm's copy
+was still the setup state. Nothing about the initialisation is implicated by anything measured.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
