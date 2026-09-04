@@ -1134,6 +1134,117 @@ inertial time unit — which does NOT excuse the missing balance (a projection p
 diagnostic and re-solved every step, so it does not need an inertial period to appear), but does
 mean no arm in this file can be read as an adjusted state.
 
+## The ocean has the atmosphere's defect one model over, and `HYD_PHYDRO_SALT` repairs the field the missing force would need
+
+**`RHS_Hyd_Turb.cpp:722` HAS BEEN SAYING THIS IN A COMMENT ALL ALONG**: *"a real baroclinic ocean
+needs the horizontal grad(p_hydro) in rhs_v/rhs_w, not just this term."* The ocean's only route
+from temperature or salinity into momentum is `buoy_nd` in `rhs_u` — RADIAL only, and the same
+comment records it as carrying "the spurious dt of the pre-`5f71571` convention (~1e-7 too small),
+so buoyancy is effectively OFF and the ocean is dynamically barotropic (wind + Coriolis only)".
+**That is `ATM_HYDRO_PGF`'s finding in the other model**: no horizontal pressure gradient in the
+horizontal momentum equations, and the one vertical surrogate inert.
+
+**AND THE FIELD THAT FORCE WOULD BE BUILT FROM DOES NOT KNOW ABOUT SALT.** `p_hydro` integrates
+`r_water` — thermal expansion and compressibility — while `r_salt_water`, computed three lines
+below in the same loop, is the full Gill approximation in temperature, SALINITY and depth.
+`HYD_PHYDRO_SALT=<0|1>` (**default 0 = shipped**, first environment knob in the hydrosphere)
+integrates the latter instead, with a plausibility floor and an unconditional one-line print.
+
+**FOUR ARMS. THE TWO THAT MATTER ARE AT ONE THREAD, BECAUSE THIS MODEL IS NOT BIT-REPRODUCIBLE
+UNDER OpenMP** (`project_hydro_nondeterminism`: a race survives in the momentum path). A
+multi-threaded pair cannot tell "the knob changed nothing" from "the threads did".
+
+| arm | binary | threads | nm |
+|---|---|---|---|
+| `qb0` | `hyd_base`, HEAD, knob absent | 1 | 20 |
+| `qn0` | new binary, knob unset | 1 | 20 |
+| `qn1` | new binary, `HYD_PHYDRO_SALT=1` | 1 | 20 |
+| `ps0` / `ps1` | new binary, off / on | 24 | 300 |
+
+All four exit 0 with **zero NaN**, on the current default atmosphere's own surface forcing
+(`output_twctl/0Ma_smooth_Transfer_Atm_600.vwtp`, yesterday's from-scratch control).
+
+**OFF-BRANCH: BYTE-IDENTICAL OVER ALL 19 WRITTEN FILES**, `qb0` against `qn0` — every VTK slice,
+the panorama `.vts`, both SST transfer files, `PlotData_Hyd.xyz`, all four budget CSVs, and the
+**364 MB restart binary** (`md5 f8de6005...` both). Not one byte.
+
+**AND THE KNOB IS DYNAMICALLY INERT, MEASURED RATHER THAN READ OFF THE SOURCE.** `qn1` against
+`qn0` at one thread: **16 of the 17 restart arrays are BIT-IDENTICAL — `t`, `u`, `v`, `w`, `c`,
+their `n` copies, `p_dyn`, `tke`, `dis`, `nue` all differ by exactly 0.0** — and only `p_hydro`
+moves, by 2.30 % rms. That is the dependency graph confirmed: `p_hydro` and `r_water` reach only
+`PresGradForce` and `CentrifugalForce`, which are diagnostics **nothing in `rhs_u`/`rhs_v`/`rhs_w`
+reads**, plus the restart and the VTK writers. `r_salt_water` is not touched at all — its depth
+term is `p_km = d_i*step_km`, GEOMETRIC depth, not `p_hydro`.
+
+**So this knob cannot change the ocean today, and that is the point of it rather than a
+disappointment**: it repairs the field, and the force that would consume it does not exist yet.
+
+**THE MAGNITUDE, ON THE 300-ITERATION 24-THREAD PAIR** (grid 41x181x361, and note the ocean is in
+SHALLOW mode: `p_hydro` maxes at 20.6 bar, a ~200 m column). Cos-lat mean `p_hydro`
+**10.9125 -> 11.1651 bar**; over fluid cells the rms difference is **2.29 %**, max 0.60 bar. Every
+other field in the restart moves 1e-4 to 1e-9 relative — the documented non-determinism, worst in
+the velocity path exactly where that memory says the surviving race is.
+
+**BUT THE MEAN IS NOT THE QUANTITY. A CONSTANT OFFSET IS INVISIBLE TO A GRADIENT, AND THE GRADIENT
+IS THE FORCE.** Median \|(1/rho) dp/dy\| over the extratropical fluid interior:
+
+| | median \|(1/rho)dp/dy\| | \|pgf\|/\|f w\| median | rms change |
+|---|---|---|---|
+| **all fluid cells** shipped | 5.33e-08 | 0.126 | — |
+| all fluid cells, salt-aware | **8.42e-07** | **2.105** | 2.0 % of the shipped rms |
+| **salty columns only** shipped | 5.71e-08 | 0.157 | — |
+| salty columns, salt-aware | **6.27e-07** | **1.619** | 3.3 % of the shipped rms |
+
+**AN ORDER OF MAGNITUDE, NOT A CORRECTION — AND IT IS NOT THE SALINITY BUG.** Restricting to
+columns carrying no fresh cell at any level above (63.8 % of the scored ocean) it is still
+**11.0x**. The rms change is only 2-3 % because the rms is set by a few coastal cells where both
+branches are large; the TYPICAL cell is where the shipped field has essentially no horizontal
+structure at all.
+
+**AND THE CHANGE'S OWN RATIONALE IS HALF WRONG: IT IS NOT MAINLY THE SALT.** The knob's comment
+argues from `beta_p` ~ 0.8 kg/m3 per psu against `alfa_t_p` ~ 0.2 per degC. Rebuilding the column
+integral from the Gill equation with one variable frozen at its global fluid mean at a time
+(post-processing of `ps0`'s own restart, no re-run), median \|dp/dy\| in salty columns:
+
+| | thermal only (S = S_bar) | haline only (T = T_bar) | both | neither |
+|---|---|---|---|---|
+| median \|dp/dy\| | **6.83e-07** | 3.71e-07 | 6.20e-07 | **0.0** |
+| lateral sigma(rho) | 2.22 | 9.92 | 8.68 kg/m3 | 0.00 |
+
+**The THERMAL half is the larger one**, the two partly oppose (both < thermal alone), and the
+`neither` row returning exactly 0.0 is the pipeline's own control. **The reason is that shipped
+`r_water` has no absolute temperature in it either**: it is anchored at
+`r_water[im-1] = r_0_water`, a GLOBAL CONSTANT, and propagated downward by *increments* —
+`beta_water*(T_i - T_{i+1})` between adjacent LEVELS, plus compressibility. A density built from
+vertical differences of a constant carries no lateral structure whatever the temperature does. So
+the shipped `p_hydro` is **barotropic by construction**, and what the knob restores is the whole
+equation of state, of which salinity is the smaller half.
+
+**AND THE PLAUSIBILITY FLOOR IS CATCHING 12.35 % OF THE OCEAN, NOT THE ~3 % ITS COMMENT CLAIMS.**
+Measured on `ps0`'s own field: **11.62 % of fluid cells are below 5 psu and 28.75 % below 30 psu**,
+the floor rejects **12.35 %** (the model's own print says 214 661 per call, against 222 850
+reconstructed — 3.7 % apart, which is the reconstruction's flat-depth approximation), and the
+rejected cells have median salinity **0.028 psu** and span **every level, i = 0 to 40** — not the
+coast-surface artefact the recorded bug describes. `project_hydro_salinity_ic`'s "coast-adjacent
+water cells still 0" is a much larger defect than that phrase suggests, and it is now the largest
+single obstacle to using this field.
+
+**TWO LIMITS OF THE FLOOR, BOTH MEASURED RATHER THAN ARGUED.** It is a fixed 1005 kg/m3 threshold,
+and `C_p` alone reaches 1019 at 4 km, so on a deep grid it would stop catching fresh cells
+entirely; it works here only because the column is 200 m. And falling back to `r_water` at a
+rejected cell puts a density DISCONTINUITY next to its salty neighbour, which manufactures exactly
+the horizontal gradient this field is being repaired to provide — which is why the all-cells 15.8x
+must be read as the salty-column **11.0x** plus contamination, and why the salinity IC is a
+prerequisite rather than a follow-up.
+
+**WHAT THIS IS AND IS NOT.** It IS: the field a horizontal baroclinic PGF would be built from,
+repaired, verified inert, and measured at an order of magnitude on the quantity that force would
+use. It is **NOT a change to the ocean's circulation and cannot be one** — `p_hydro` and `r_water`
+reach only `PresGradForce` and `CentrifugalForce`, which are diagnostics nothing reads, plus the
+restart and the VTK. **The force itself is still unwritten.** Default stays 0 for the same reason
+`ATM_HYDRO_PGF`'s does: nothing about it has been shown on a circulation, and this tree flips
+defaults on measurements.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT

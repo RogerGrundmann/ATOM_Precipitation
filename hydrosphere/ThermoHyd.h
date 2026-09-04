@@ -7,6 +7,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <iomanip>
 
@@ -63,9 +64,49 @@ public:
             }
         }
 
+        // ==================================================================
+        // HYD_PHYDRO_SALT -- integrate the hydrostatic pressure with the SEAWATER density.
+        // Default 0 = shipped and bit-identical. First environment knob in the hydrosphere.
+        //
+        // THE HYDROSTATIC PRESSURE IS BUILT FROM A DENSITY THAT DOES NOT KNOW ABOUT SALT.
+        // r_water carries thermal expansion (beta_water) and compressibility (E_water) and
+        // nothing else; r_salt_water, computed three lines below in the same loop, is the full
+        // Gill approximation in temperature, SALINITY and depth. p_hydro integrates the former.
+        //
+        // Salinity is a first-order term in seawater density -- beta_p ~ 0.8 kg/m3 per psu
+        // against alfa_t_p ~ 0.2 kg/m3 per degC -- so the shipped p_hydro is missing the whole
+        // haline contribution and with it every thermohaline pressure signal. That matters
+        // now rather than as a tidy-up, because p_hydro is the field a baroclinic
+        // pressure-gradient force would be built from: RHS_Hyd_Turb.cpp:722 records that
+        // "a real baroclinic ocean needs the horizontal grad(p_hydro) in rhs_v/rhs_w", and
+        // grad of a pressure that ignores salt is not that force.
+        //
+        // r_salt_water is the IN-SITU density -- its C_p/beta_p/alfa_t_p/gamma_t_p coefficients
+        // already carry the depth dependence through p_km -- so integrating it is the correct
+        // hydrostatic pressure, not an approximation to one.
+        //
+        // TWO CONSEQUENCES TO READ FOR, BOTH DELIBERATE.
+        // (1) r_water itself moves, because its compressibility factor divides by
+        //     (p_hydro[i] - p_hydro[i+1])/E_water. That is the right direction -- compression
+        //     should respond to the actual pressure -- but it means this knob changes the
+        //     r_water diagnostic as well as p_hydro, and the two must not be read as
+        //     independent confirmations of each other.
+        // (2) The QUADRATURE is deliberately left alone. The shipped integral is one-sided,
+        //     rho[i+1]*g*dz, and this keeps that stencil and changes only WHICH rho. A
+        //     trapezoid would be more accurate but needs r_salt_water[i], which is computed
+        //     later in the same sweep, so it is a reordering rather than a substitution --
+        //     a separate question, and mixing the two would confound this arm.
+        // ==================================================================
+        static const bool phydro_salt = [](){
+            const char* e = getenv("HYD_PHYDRO_SALT"); return e && atoi(e) != 0; }();
+
+        double p_sum = 0.0, w_sum = 0.0, p_max = 0.0;   // print-only, over fluid cells
+        long   n_fresh = 0;                             // cells rejected by the plausibility floor
+
         // --- hydrostatic pressure, water and salt water density in the flow field ---
         // outer (j,k) parallel; inner i-loop is sequential (downward dependency chain)
-        #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+        #pragma omp parallel for collapse(2) schedule(dynamic, 4) \
+                reduction(+:p_sum,w_sum,n_fresh) reduction(max:p_max)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
                 for (int i = m.im-2; i >= 0; i--) {
@@ -80,10 +121,32 @@ public:
                     // with the wrong surface pressure — yielded negative ΔP at
                     // i=im-2, inverting the compressibility term and producing
                     // r_water values ~1 kg/m³ too low throughout the column.)
+                    // Which density carries the column weight.
+                    // The plausibility floor is NOT defensive boilerplate -- it is a measured
+                    // hazard. ~3 % of ocean cells still carry Salinity == 0 (the recorded
+                    // coast-adjacent land-ocean-interface bug; see project_hydro_salinity_ic).
+                    // A fresh cell returns r_salt_water ~ 996 kg/m3 against a seawater 1025 --
+                    // 29 kg/m3, 2.8 % -- and that value is FINITE AND POSITIVE, so a
+                    // finite/positive test does not catch it. p_hydro is a DOWNWARD INTEGRAL,
+                    // so one such cell biases every level beneath it. Fall back to the shipped
+                    // density rather than integrate a freshwater column in an ocean.
+                    double rho_col = m.r_water.x[i+1][j][k];
+                    if (phydro_salt) {
+                        const double rs = m.r_salt_water.x[i+1][j][k];
+                        if (AtomUtils::is_finite_safe(rs) && rs > 1005.0) rho_col = rs;
+                        else n_fresh++;
+                    }
+
                     m.p_hydro.x[i][j][k] =                              // hydrostatic pressure in [bar]
                         m.p_hydro.x[i+1][j][k]
-                        + m.r_water.x[i+1][j][k] * m.g * step_m / 100000.0;
+                        + rho_col * m.g * step_m / 100000.0;
                     if(is_land(m.h, i, j, k)) m.p_hydro.x[i][j][k] = 0.0;
+                    else {
+                        const double cw = sin(m.the.z[j]);              // cos(latitude)
+                        p_sum += cw * m.p_hydro.x[i][j][k];
+                        w_sum += cw;
+                        if (m.p_hydro.x[i][j][k] > p_max) p_max = m.p_hydro.x[i][j][k];
+                    }
 
                     m.r_water.x[i][j][k] =                              // [kg/m³]
                         m.r_water.x[i+1][j][k]
@@ -109,6 +172,17 @@ public:
                 }  // i
             }  // k
         }  // j
+
+        // Print-only, unconditional: the field a baroclinic PGF would be built from, as one
+        // scalar per run so the two branches can be compared without extracting VTK.
+        cout << "      HYD: p_hydro from " << (phydro_salt ? "r_salt_water (T,S,depth)"
+                                                           : "r_water (T,p only)  [shipped]")
+             << "   cos-lat mean over fluid cells below the surface = " << fixed << setprecision(4)
+             << (w_sum > 0.0 ? p_sum / w_sum : 0.0) << " bar"
+             << "   max = " << p_max << " bar"
+             << (phydro_salt ? "   fresh cells rejected: " : "") ;
+        if (phydro_salt) cout << n_fresh;
+        cout << endl;
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
