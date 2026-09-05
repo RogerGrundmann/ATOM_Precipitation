@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include "cHydrosphereModel.h"
+#include "HydHorizViscosity.h"
 #include "Utils.h"
 
 using namespace std;
@@ -650,6 +651,181 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         - v_metric * w_ijk + d2wdphi2 * inv_rm2sinthe2
         + 2.0 * dudphi * inv_rm2sinthe
         + dvdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re;
+
+    // ==================================================================================
+    // HYD_A_H -- AN EXPLICIT HORIZONTAL EDDY VISCOSITY, in m^2/s. Default 0 = OFF and
+    // bit-identical.
+    //
+    // WHY THIS EXISTS. This ocean has no horizontal eddy viscosity of its own. It has ONE
+    // isotropic coefficient, `diffusion_vel_re` = 1/re_turb + nue, applied to the whole
+    // spherical Laplacian, whose horizontal part carries `inv_rm2` -- and `rm` is the GRID
+    // coordinate, running 1.000..2.000 with one unit = L_hyd = 200 m. So the horizontal
+    // diffusion has been acting over a metric radius of 200-400 m instead of 6370 km, i.e.
+    // it is (r_Earth/(rm*L_hyd))^2 ~ 4e8 too strong. Correcting the metric
+    // (HYD_METRIC_RADIUS) removes that factor and leaves NOTHING to damp grid-scale
+    // structure: measured 2026-09-04 at iteration 1000, the repaired arm carries 2.3x the
+    // control's grid-scale noise (rms 5-point Laplacian of surface w over rms w, 0.72 ->
+    // 1.69) and a 112 cm/s outlier where the control's max is 49.6. That is why
+    // HYD_METRIC_RADIUS is not usable, and this term is the missing piece.
+    //
+    // WHAT THE MODEL HAS BEEN GETTING BY ACCIDENT, MEASURED RATHER THAN ARGUED. From
+    // output_za's iteration-300 field the k-epsilon `nue` has a median of 9.54e-05 nd =
+    // **0.0046 m^2/s** -- a molecular-scale number, as an ocean turbulence closure tuned on
+    // the VERTICAL should give. Put that through the broken horizontal metric and the
+    // IMPLIED horizontal viscosity is **1.2e6 m^2/s at the surface and 4.6e6 at the
+    // seafloor**, against the 1e2..1e4 m^2/s a 1-degree ocean model actually uses. The
+    // metric error is not a small correction to the horizontal mixing; it IS the horizontal
+    // mixing, at ~100x the largest defensible value.
+    //
+    // AND THE PHYSICAL VALUE CANNOT ACT HERE, WHICH IS THE FINDING AND IT NEEDED NO RUN.
+    // A Laplacian viscosity damps a 2*dx mode with e-folding 1/(A_h*k^2), k = pi/dx and
+    // dx = 111.2 km at the equator, so k^2 = 7.99e-10:
+    //
+    //     A_h = 1e2 m^2/s  ->  145 days   = 1.5e8 iterations
+    //     A_h = 1e4 m^2/s  ->  1.45 days  = 1.5e6 iterations
+    //     A_h = 1e6 m^2/s  ->  21 min     = 1.5e4 iterations
+    //     A_h = 1.5e7      ->  83 s       = 1.0e3 iterations   <- one run of this model
+    //
+    // One iteration is 0.0833 s and the longest run in this tree is 1000. **So a
+    // physically-sized horizontal eddy viscosity is three orders of magnitude too slow to
+    // damp anything on any run this tree can afford**, and the accidental 1e6 the metric
+    // error supplies is the smallest value that comes close. This is the same wall as
+    // ATM_HYDRO_PGF's 1/f and HYD_BAROCLINIC_PGF's: the model's iteration budget, not the
+    // physics. Read A_h at the values that ACT as a NUMERICAL knob in the sense
+    // sst_relax_alpha and the atmosphere's omega_teq are numerical, and do not call a value
+    // chosen to control noise an eddy viscosity.
+    //
+    // STABILITY IS NEVER THE BINDING CONSTRAINT, which is worth recording because it is the
+    // usual reason such a term is kept small. Explicit stability wants
+    // A_h/(u_0*L_hyd)*(L_hyd/r_E)^2 <= 0.5*dthe^2/dt = 1.52, i.e. A_h <= 7e10 m^2/s. Every
+    // value above is 3 to 9 orders under it.
+    //
+    // THE OPERATOR is the HORIZONTAL part of the existing `diffusion_v`/`diffusion_w`
+    // expressions, term for term including the curvature and the u/v/w cross-couplings, so
+    // this is the same vector Laplacian with a different coefficient rather than a second
+    // and differently-shaped operator. Horizontal momentum only: `u` is the RADIAL
+    // component, and the point of the metric repair is that its spurious value collapses --
+    // giving it horizontal diffusion would re-couple exactly what was separated.
+    //
+    // THE METRIC HERE IS THE EARTH'S, DELIBERATELY, and does NOT follow `inv_rm`. Written
+    // with `inv_rm` the coefficient would mean 4e8 different things depending on whether
+    // HYD_METRIC_RADIUS is set, and A_h would stop being a viscosity in m^2/s. Same
+    // reasoning, and the same exception to "match the neighbouring term's structure", as
+    // HYD_BAROCLINIC_PGF above.
+    //
+    // Carries `diffusion_ramp` like every other diffusion coefficient, so an inviscid
+    // spin-up stays inviscid.
+    //
+    // NEXT, AND NOT WRITTEN: a BIHARMONIC form. At a strength that damps 2*dx in one run
+    // length, a Laplacian also damps the domain-scale flow by (k_2dx/k_L)^2 ~ 8.3e3, while
+    // a biharmonic damps it by (k_2dx/k_L)^4 ~ 6.9e7 -- four orders more scale-selective,
+    // which is exactly why ocean models at this resolution use one. That is the instrument
+    // that could remove the noise without removing the circulation with it.
+    // ==================================================================================
+    static const double a_h_phys = [](){
+        const char* e = getenv("HYD_A_H"); return e ? atof(e) : 0.0; }();
+
+    if(a_h_phys != 0.0){
+        const double inv_r_true = L_hyd / (r_Earth * 1.0e3);          // L_hyd / R_Earth [m/m]
+        const double a_h_nd     = a_h_phys / (u_0 * L_hyd)
+                                * inv_r_true * inv_r_true * diffusion_ramp;
+
+        const double cot_the = costhe / sinthe;
+        const double inv_s2  = 1.0 / sinthe2;
+
+        diffusion_v += a_h_nd * (d2vdthe2 + dvdthe * cot_the
+                               - (1.0 + cot_the * cot_the) * v_ijk
+                               + d2vdphi2 * inv_s2
+                               + 2.0 * dudthe
+                               - 2.0 * dwdphi * costhe * inv_s2);
+
+        diffusion_w += a_h_nd * (d2wdthe2 + dwdthe * cot_the
+                               - (1.0 + cot_the * cot_the) * w_ijk
+                               + d2wdphi2 * inv_s2
+                               + 2.0 * dudphi / sinthe
+                               + 2.0 * dvdphi * costhe * inv_s2);
+    }
+
+    // ==================================================================================
+    // HYD_A_H_BIHARM=<B in m^4/s> -- OUTER PASS of the horizontal biharmonic viscosity.
+    // Default 0.0 = OFF and bit-identical.
+    //
+    // WHY A BIHARMONIC AT ALL, AND THE NUMBER THAT DECIDES IT. HYD_A_H above can damp
+    // grid-scale noise only at ~1.5e7 m^2/s, three orders above any physical value, and a
+    // Laplacian that strong reaches every scale: at the strength that gives a 2*dx
+    // e-folding of 83 s (one 1000-iteration run) its DOMAIN-scale e-folding is 7.8 days.
+    // The biharmonic at the equivalent strength, B = 1.89e16 m^4/s, gives a domain-scale
+    // e-folding of **62 878 days** -- the same grid-scale control, and **8 090x** less
+    // damping of the circulation, because selectivity goes as (k_2dx/k_L)^4 = 6.5e7
+    // against the Laplacian's (k_2dx/k_L)^2 = 8.1e3. That ratio is the whole argument for
+    // the term, and it is why ocean models at this resolution use one.
+    //
+    //     B = 1e11 m^4/s (a physical 1-degree value) -> 2*dx e-folding 181 days
+    //     B = 1e12                                   -> 18.2 days
+    //     B = 1.89e16                                -> 83 s = 1000 iterations
+    //
+    // So the physical value is as unreachable here as the Laplacian's, for the same reason
+    // -- one iteration is 0.0833 s -- and B is a NUMERICAL knob at the values that act.
+    // What changes is the COST of using a numerical value, and that is what the biharmonic
+    // buys: at equal grid-scale control it leaves the circulation alone by 8 000x.
+    //
+    // STABILITY, again not the binding constraint: explicit nabla^4 wants
+    // dt*B_nd/dthe^4 <= 1/8, i.e. B <= **2.3e20 m^4/s**, four orders above the strongest
+    // value in the table.
+    //
+    // NON-DIMENSIONALISATION. Physical dv/dt = -B*nabla^4_h v, and nabla^4_h = H^2/r^4 with
+    // H the angular operator the inner pass stored, so the coefficient is
+    // B*L_hyd/(u_0*r_Earth^4) -- the same shape as HYD_A_H's A_h*L_hyd/(u_0*r_Earth^2), one
+    // more power of the radius. As there, the radius is the EARTH'S and not inv_rm, so B
+    // means m^4/s whether or not HYD_METRIC_RADIUS is set.
+    //
+    // The MINUS sign is the physics: nabla^4 with a plus sign is anti-diffusive.
+    // ==================================================================================
+    if(HydHorizVisc::biharm_strength() != 0.0 && !HydHorizVisc::ok.empty()
+       && j > 0 && j < jm-1 && k > 0 && k < km-1){
+
+        const std::size_t p  = HydHorizVisc::idx(i, j,   k);
+        const std::size_t pT = HydHorizVisc::idx(i, j+1, k);
+        const std::size_t pB = HydHorizVisc::idx(i, j-1, k);
+        const std::size_t pP = HydHorizVisc::idx(i, j,   k+1);
+        const std::size_t pM = HydHorizVisc::idx(i, j,   k-1);
+
+        // every stencil point of the OUTER application must have had its INNER application
+        // computed, or the difference is taken against a zero that means "not evaluated".
+        if(HydHorizVisc::ok[p] && HydHorizVisc::ok[pT] && HydHorizVisc::ok[pB]
+                               && HydHorizVisc::ok[pP] && HydHorizVisc::ok[pM]){
+
+            // B * L_hyd / (u_0 * r_Earth^4), dimensionless; 5.06e-25 per (m^4/s) here.
+            const double r_m    = r_Earth * 1.0e3;
+            const double r_m2   = r_m * r_m;
+            const double b_h_nd = HydHorizVisc::biharm_strength() * L_hyd
+                                / (u_0 * r_m2 * r_m2) * diffusion_ramp;
+
+            const double cot_the = costhe / sinthe;
+            const double inv_s2  = 1.0 / sinthe2;
+
+            const double LvC = HydHorizVisc::lap_v[p],  LwC = HydHorizVisc::lap_w[p];
+            const double LvT = HydHorizVisc::lap_v[pT], LvB = HydHorizVisc::lap_v[pB];
+            const double LwT = HydHorizVisc::lap_w[pT], LwB = HydHorizVisc::lap_w[pB];
+            const double LvP = HydHorizVisc::lap_v[pP], LvM = HydHorizVisc::lap_v[pM];
+            const double LwP = HydHorizVisc::lap_w[pP], LwM = HydHorizVisc::lap_w[pM];
+
+            const double H2v = (LvT - 2.0*LvC + LvB) * inv_dthe2
+                             + cot_the * (LvT - LvB) * inv_2dthe
+                             - (1.0 + cot_the*cot_the) * LvC
+                             + (LvP - 2.0*LvC + LvM) * inv_dphi2 * inv_s2
+                             - 2.0 * costhe * inv_s2 * (LwP - LwM) * inv_2dphi;
+
+            const double H2w = (LwT - 2.0*LwC + LwB) * inv_dthe2
+                             + cot_the * (LwT - LwB) * inv_2dthe
+                             - (1.0 + cot_the*cot_the) * LwC
+                             + (LwP - 2.0*LwC + LwM) * inv_dphi2 * inv_s2
+                             + 2.0 * costhe * inv_s2 * (LvP - LvM) * inv_2dphi;
+
+            diffusion_v -= b_h_nd * H2v;
+            diffusion_w -= b_h_nd * H2w;
+        }
+    }
 
     double diffusion_c = (d2cdr2 * exp_2_rm + dcdr * two_over_rm_exp
         + d2cdthe2 * inv_rm2 + dcdthe * cos_rm2sin

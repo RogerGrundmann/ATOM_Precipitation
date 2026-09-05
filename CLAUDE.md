@@ -1672,6 +1672,99 @@ work. It needs its own arm and its own measurement.
 and the uniform-spacing coefficients 4/3 and -1/3 are not the second-order one-sided formula there.
 A stretched-grid second-order radial Neumann is a further refinement and is not written.
 
+### The horizontal eddy viscosity the metric error was supplying is 1e6 m^2/s, a PHYSICAL one cannot act here, and both `HYD_A_H` and `HYD_A_H_BIHARM` are now written
+
+**`HYD_A_H=<m^2/s>`, an explicit horizontal eddy viscosity on `rhs_v`/`rhs_w`, default 0 = OFF.**
+Written 2026-09-05 as the named prerequisite for `HYD_METRIC_RADIUS`: correcting the metric cuts
+horizontal diffusion by ~4e8 and leaves nothing to damp grid-scale structure, which is why the
+repaired arm carries 2.3x the control's grid-scale noise. The operator is the HORIZONTAL part of
+the existing `diffusion_v`/`diffusion_w`, term for term including the curvature and the cross
+couplings, so it is the same vector Laplacian with a different coefficient; the metric in it is
+the EARTH'S, deliberately not `inv_rm`, so that `A_h` means m^2/s whether or not
+`HYD_METRIC_RADIUS` is set — the same exception, for the same reason, as `HYD_BAROCLINIC_PGF`.
+
+**WHAT THE MODEL HAS BEEN GETTING BY ACCIDENT, MEASURED FROM ITS OWN FIELD** (`output_za`,
+iteration 300, no re-run). The k-epsilon `nue` has median **9.54e-05 nd = 0.0046 m^2/s** — a
+molecular-scale number, which is what a closure tuned on the VERTICAL should give. Put through
+the broken horizontal metric it becomes an implied horizontal viscosity of:
+
+| | implied `A_h` |
+|---|---|
+| at the surface (`rm` = 2) | **1.16e+06 m^2/s** |
+| at the seafloor (`rm` = 1) | **4.64e+06 m^2/s** |
+| *what a 1-degree ocean model uses* | *1e2 .. 1e4* |
+
+**So the metric error is not a correction to the horizontal mixing, it IS the horizontal mixing,
+at ~100x the largest defensible value.**
+
+**AND THE PHYSICAL VALUE CANNOT ACT ON ANY RUN THIS TREE CAN AFFORD — WHICH NEEDED NO RUN TO
+ESTABLISH.** A Laplacian damps a 2*dx mode with e-folding `1/(A_h k^2)`, `k = pi/dx`,
+`dx` = 111.2 km at the equator so `k^2` = 7.99e-10. One iteration is **0.0833 s** and the longest
+run in this tree is 1000:
+
+| `A_h` m^2/s | 2*dx e-folding | iterations |
+|---|---|---|
+| 1e2 | 145 days | 1.5e8 |
+| **1e4** (the large end of physical) | **1.45 days** | **1.5e6** |
+| 1e6 (what the metric error supplies) | 21 min | 1.5e4 |
+| **1.5e7** | **83 s** | **1.0e3 — one run** |
+
+**A physically-sized horizontal eddy viscosity is three orders of magnitude too slow to damp
+anything here.** So *"a real horizontal eddy viscosity is the prerequisite for the metric fix"* —
+this file's own next step, written 2026-09-04 — **is not achievable as stated.** What is
+achievable is an EXPLICIT viscosity at a value you choose, in place of one the geometry hands
+you: same wall as `ATM_HYDRO_PGF`'s `1/f` and `HYD_BAROCLINIC_PGF`'s, and the same resolution the
+atmosphere's `omega_teq` and this model's `sst_relax_alpha` already carry — **read `A_h` at the
+values that ACT as a NUMERICAL knob, and do not call a value chosen to control noise an eddy
+viscosity.**
+
+**STABILITY IS NEVER THE BINDING CONSTRAINT**, which is worth recording because it is the usual
+reason such a term is kept small: explicit stability wants `A_h` <= **7e10 m^2/s** at `dt` = 1e-4,
+and every value in the table is 3 to 9 orders under it.
+
+**AND THE BIHARMONIC IS NOW WRITTEN TOO — `HYD_A_H_BIHARM=<B in m^4/s>`, default 0.0 = OFF.**
+The argument for it is one ratio. At the strength that gives a 2*dx e-folding of 83 s — one
+1000-iteration run — the two operators cost the CIRCULATION completely different amounts:
+
+| at equal grid-scale control (2*dx e-folding 83 s) | strength | domain-scale e-folding |
+|---|---|---|
+| Laplacian `HYD_A_H` | 1.51e+07 m^2/s | **7.8 days** |
+| **biharmonic `HYD_A_H_BIHARM`** | **1.89e+16 m^4/s** | **62 878 days** |
+
+**8 090x less damping of the large scale for the same control of the small one**, because
+selectivity goes as `(k_2dx/k_L)^4` = 6.5e7 against `(k_2dx/k_L)^2` = 8.1e3. The physical value is
+as unreachable as the Laplacian's — B = 1e11 m^4/s, a 1-degree value, gives a 2*dx e-folding of
+**181 days** and 1e12 gives 18.2 — so B is a numerical knob at the strengths that act. **What the
+biharmonic changes is not the reachability, it is the COST of using a numerical value.** Explicit
+stability again does not bind: `B` <= **2.3e20 m^4/s**.
+
+**THREE IMPLEMENTATION FACTS THAT ARE NOT DETAILS.**
+1. **`nabla^4` is not computable from one cell**, so the inner Laplacian is a separate pass over
+   the grid and its result lives in `HydHorizViscosity.h` as inline variables — NOT as `Array`
+   members, because adding members moves `sizeof(cHydrosphereModel)` and that is this tree's
+   stack-canary hazard. ~43 MB, allocated only when the knob is on.
+2. **The inner pass runs on `vn`/`wn`, not on the running `v`/`w`.** This RK4 is POINTWISE — all
+   four stages are taken at one cell before the sweep moves on — so a neighbour's `v` is at a
+   stage that depends on the sweep order, and an operator built from it would be thread-order
+   dependent in a model already documented as not bit-reproducible. `vn`/`wn` are constant through
+   the sweep, so the operator is deterministic; the price is a one-iteration lag.
+3. **The two knobs differ in operator SHAPE, deliberately.** `HYD_A_H` is the horizontal part of
+   the shipped `diffusion_v`/`diffusion_w` term for term, including the `u`-coupling
+   (`2*dudthe`, `2*dudphi/sin`), because the rule here is to match the existing term and supply
+   only the coefficient. The biharmonic has to be the SAME operator twice and the outer
+   application has no `lap_u` to couple to, so it is the 2-D horizontal vector Laplacian with the
+   `u`-coupling dropped — which is what an ocean model's biharmonic is. It also switches itself
+   off within two cells of any coast (the inner pass marks where it ran and the outer pass
+   requires all five of its stencil points marked), rather than differencing against a zero that
+   means "not evaluated".
+
+**BOTH KNOBS ARE UNMEASURED**: written, sized, building clean, off-branch byte check not yet run.
+
+*The `[RUN CONFIG]` banner was printing two of the eight hydrosphere knobs. It now prints all
+eight, and `[SCALES]` prints `dx`, the horizontal metric radius actually in force, and `A_h`'s
+2*dx e-folding in iterations — because every argument about the metric has had to re-derive
+these.*
+
 ### The polar cold bias is a missing phase boundary, and `HYD_T_FREEZE` is SUBSURFACE-ONLY because the surface already has one
 
 **`HYD_T_FREEZE=1`, default 0 = shipped and bit-identical off.** The temperature floor in

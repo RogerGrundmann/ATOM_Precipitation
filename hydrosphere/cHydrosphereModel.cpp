@@ -484,10 +484,47 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         };
         cout << "      OGCM: [RUN CONFIG] knobs:  PHYDRO_SALT=" << ev("HYD_PHYDRO_SALT", "0")
              << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
+             << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "0")
+             << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
+             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "0")
+             << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
+             << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "0")
+             << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "0")
+             << "  A_H="                                       << ev("HYD_A_H", "0")
+             << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
              << "   (* = compiled-in default, not set in the environment)" << endl;
         cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
              << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "
              << dt * L_hyd / u_0 << " s" << endl;
+
+        // Horizontal-mixing scales, printed unconditionally because every argument about
+        // HYD_METRIC_RADIUS and HYD_A_H has had to re-derive them. dx is the equatorial
+        // 1-degree cell; the 2*dx e-folding is 1/(A_h*k^2) with k = pi/dx.
+        {
+            const double dx    = 2.0 * M_PI * r_Earth * 1.0e3 / 360.0;
+            const double k2    = (M_PI / dx) * (M_PI / dx);
+            const double s_per = dt * L_hyd / u_0;
+            // what the GRID metric implies today: rm runs 1..2, so the horizontal metric
+            // radius is rm*L_hyd unless HYD_METRIC_RADIUS moved it.
+            const double rh_sfc = metricRadius(2.0) * L_hyd;                  // [m]
+            cout << "      OGCM: [SCALES] dx(eq) = " << dx / 1.0e3
+                 << " km   horizontal metric radius at the surface = " << rh_sfc
+                 << " m (Earth: " << r_Earth * 1.0e3 << ")" << endl;
+            // domain-scale wavenumber, for the selectivity line below
+            const double kL  = 2.0 * M_PI / 2.0e7;
+            const double a_h = [](){ const char* e = getenv("HYD_A_H"); return e ? atof(e) : 0.0; }();
+            if(a_h != 0.0)
+                cout << "      OGCM: [SCALES] A_H = " << a_h << " m2/s -> 2dx e-folding "
+                     << 1.0 / (a_h * k2) << " s = " << 1.0 / (a_h * k2) / s_per
+                     << " iterations,  domain-scale e-folding "
+                     << 1.0 / (a_h * kL * kL) / 86400.0 << " d" << endl;
+            const double b_h = [](){ const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 0.0; }();
+            if(b_h != 0.0)
+                cout << "      OGCM: [SCALES] A_H_BIHARM = " << b_h << " m4/s -> 2dx e-folding "
+                     << 1.0 / (b_h * k2 * k2) << " s = " << 1.0 / (b_h * k2 * k2) / s_per
+                     << " iterations,  domain-scale e-folding "
+                     << 1.0 / (b_h * kL * kL * kL * kL) / 86400.0 << " d" << endl;
+        }
     }
 
     // Set turbulence model flags once, before the iteration loop

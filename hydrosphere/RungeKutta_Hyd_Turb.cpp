@@ -4,6 +4,7 @@
 */
 
 #include "cHydrosphereModel.h"
+#include "HydHorizViscosity.h"
 
 #include <cstdint>
 #include <cstring>
@@ -53,6 +54,80 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
         sinthe_tbl[j] = sin(the.z[j]);
         if (sinthe_tbl[j] < 0.4) sinthe_tbl[j] = 0.4;
         costhe_tbl[j] = cos(the.z[j]);
+    }
+
+    // ==================================================================================
+    // HYD_A_H_BIHARM -- INNER PASS of the horizontal biharmonic viscosity.
+    //
+    // Fills H(vn,wn), the angular part of the horizontal vector Laplacian, so the RHS can
+    // apply the SAME operator a second time. See HydHorizViscosity.h for why the buffer is
+    // there and why it is built on the time-level-n fields.
+    //
+    // The operator is the 2-D HORIZONTAL vector Laplacian:
+    //   H_v = d2v/dthe2 + cot*dv/dthe - (1+cot^2)*v + d2v/dphi2/sin^2 - 2*cos/sin^2*dw/dphi
+    //   H_w = d2w/dthe2 + cot*dw/dthe - (1+cot^2)*w + d2w/dphi2/sin^2 + 2*cos/sin^2*dv/dphi
+    // It deliberately OMITS the u-coupling terms (2*dudthe, 2*dudphi/sin) that the shipped
+    // diffusion_v/diffusion_w carry, because a biharmonic has to be the same operator twice
+    // and the outer application has no lap_u to couple to. So this is the horizontal
+    // vector Laplacian an ocean model's biharmonic uses, not the full 3-D one -- the one
+    // place in this pair of knobs where HYD_A_H (which matches the shipped term exactly)
+    // and HYD_A_H_BIHARM differ in shape.
+    //
+    // Computed only where the full 5-point horizontal stencil is water, and `ok` records
+    // that, so the OUTER pass can require its own five stencil points to be marked. The
+    // biharmonic therefore switches itself off within two cells of any coast rather than
+    // differencing against a buffer that is zero because it was never computed -- which
+    // would manufacture exactly the coastal gradient the term exists to remove.
+    // ==================================================================================
+    if (HydHorizVisc::biharm_strength() != 0.0) {
+        HydHorizVisc::s_jm = jm;
+        HydHorizVisc::s_km = km;
+        const std::size_t n_cells = static_cast<std::size_t>(im) * jm * km;
+        HydHorizVisc::lap_v.assign(n_cells, 0.0);
+        HydHorizVisc::lap_w.assign(n_cells, 0.0);
+        HydHorizVisc::ok.assign(n_cells, 0);
+
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 1; i < im-1; i++) {
+            for (int j = 1; j < jm-1; j++) {
+                const double sthe   = sinthe_tbl[j];
+                const double cthe   = costhe_tbl[j];
+                const double cot    = cthe / sthe;
+                const double inv_s2 = 1.0 / (sthe * sthe);
+
+                for (int k = 1; k < km-1; k++) {
+                    if (AtomUtils::is_land(h, i, j,   k) || AtomUtils::is_land(h, i, j+1, k)
+                     || AtomUtils::is_land(h, i, j-1, k) || AtomUtils::is_land(h, i, j,   k+1)
+                     || AtomUtils::is_land(h, i, j,   k-1))  continue;
+
+                    const double vC = vn.x[i][j][k],   wC = wn.x[i][j][k];
+                    const double vT = vn.x[i][j+1][k], vB = vn.x[i][j-1][k];
+                    const double wT = wn.x[i][j+1][k], wB = wn.x[i][j-1][k];
+                    const double vP = vn.x[i][j][k+1], vM = vn.x[i][j][k-1];
+                    const double wP = wn.x[i][j][k+1], wM = wn.x[i][j][k-1];
+
+                    const double d2v_the = (vT - 2.0*vC + vB) * inv_dthe2;
+                    const double d2w_the = (wT - 2.0*wC + wB) * inv_dthe2;
+                    const double d2v_phi = (vP - 2.0*vC + vM) * inv_dphi2;
+                    const double d2w_phi = (wP - 2.0*wC + wM) * inv_dphi2;
+                    const double dv_the  = (vT - vB) * inv_2dthe;
+                    const double dw_the  = (wT - wB) * inv_2dthe;
+                    const double dv_phi  = (vP - vM) * inv_2dphi;
+                    const double dw_phi  = (wP - wM) * inv_2dphi;
+
+                    const std::size_t p = HydHorizVisc::idx(i, j, k);
+                    HydHorizVisc::lap_v[p] = d2v_the + cot * dv_the
+                                           - (1.0 + cot*cot) * vC
+                                           + d2v_phi * inv_s2
+                                           - 2.0 * cthe * inv_s2 * dw_phi;
+                    HydHorizVisc::lap_w[p] = d2w_the + cot * dw_the
+                                           - (1.0 + cot*cot) * wC
+                                           + d2w_phi * inv_s2
+                                           + 2.0 * cthe * inv_s2 * dv_phi;
+                    HydHorizVisc::ok[p] = 1;
+                }
+            }
+        }
     }
 
     #pragma omp parallel for collapse(2) schedule(static)
