@@ -1672,6 +1672,81 @@ work. It needs its own arm and its own measurement.
 and the uniform-spacing coefficients 4/3 and -1/3 are not the second-order one-sided formula there.
 A stretched-grid second-order radial Neumann is a further refinement and is not written.
 
+### The polar cold bias is a missing phase boundary, and `HYD_T_FREEZE` is SUBSURFACE-ONLY because the surface already has one
+
+**`HYD_T_FREEZE=1`, default 0 = shipped and bit-identical off.** The temperature floor in
+`ValueLimitationHyd` was a flat **-4 C**, about 2 C below where seawater freezes, so the model
+permits supercooled ocean and stops it at an arbitrary constant. The knob replaces it with
+`max(T_f(S), -4 C)`, `T_f` the UNESCO/Millero freezing point (0.000 C at 0 psu, -1.638 at 30,
+-1.922 at 35). Cells below 5 psu fall back to -4 C, because ~12 % of this ocean is spuriously
+fresh and a naive `T_f` would floor those at 0 C and warm the Arctic by four degrees.
+
+**THE PREMISE THE KNOB WAS WRITTEN ON WAS WRONG, AND THE DEFECT IS BIGGER THAN THE PREMISE**
+(2026-09-05). `28857b2` argued that both 1000-iteration arms sit in the 2 C window between `T_f`
+and the clamp, "and the clamp is what is holding them". Measured on those two restarts: **EXACTLY
+ZERO cells sit at -4 C in either arm.** The clamp was never binding. What is real is the
+supercooling itself — of the cells the knob acts on (S >= 5 psu):
+
+| | iter 300 (shared start) | kr0 control @1000 | kr1 metric+Neumann @1000 |
+|---|---|---|---|
+| min T | -3.387 C | -2.899 C | -3.655 C |
+| **cells at the -4 C floor** | **0** | **0** | **0** |
+| **supercooled, T < T_f(S)** | **101 136 = 6.34 %** | **79 474 = 4.88 %** | **50 929 = 3.36 %** |
+| worst T - T_f | -3.10 C | -2.62 C | -2.96 C |
+
+**THE PAIRED ARMS, 300 -> 500 FROM THE CONTROL'S OWN CHECKPOINT** (`output_f0` / `output_f1`,
+24 threads, one pinned binary, both exit 0 with **zero NaN**):
+
+| iteration 500, S >= 5 psu | `HYD_T_FREEZE=0` | `HYD_T_FREEZE=1` |
+|---|---|---|
+| min T | **-3.224 C** | **-1.912 C** |
+| supercooled cells | 85 634 (5.32 %) | **15 282 (0.95 %)** |
+| worst T - T_f | -2.944 C | -1.195 C |
+| min T 76-90N / mean | -3.224 / -1.767 C | **-1.912 / -0.309 C** |
+| mean T | 14.542 C | 14.647 C |
+| rms `u` / `v` / `w` | — | **1.3e-05 / 1.6e-05 / 9.4e-06 relative** |
+| mean KE | 1.10587e-04 | 1.10586e-04 |
+
+**IT REMOVES 82 % OF THE SUPERCOOLING AND DOES NOT TOUCH THE CIRCULATION.** The velocity components
+agree to five figures and the mean KE to six, at 200 iterations — this is a thermodynamic local
+repair, not a dynamical change. Max warming in any cell is **+2.93 C**; the largest cooling anywhere
+is -0.0002 C, i.e. advective response and nothing else.
+
+**AND THE HEAT IT INJECTS IS FRONT-LOADED, NOT A RUNAWAY.** Flooring is a heat source with no
+reservoir — nothing tracks the ice that would have formed — so the obvious worry is unbounded
+warming. Measured, arm minus control, mean ocean T: **+0.032 K at iteration 325, then +0.037,
++0.038, +0.041, +0.042, +0.044, +0.044, +0.045 at 500.** Most of it lands in the first 25
+iterations (removing the standing supercooled reservoir) and the maintenance flux after that is
+~0.5 mK per 25 iterations and shrinking. Both arms still cool overall on the recorded deep-
+ventilation trend, the treated one marginally less (-0.083 K against -0.096 K over the 200).
+
+**THE SURFACE IS UNTOUCHED, AND THE REASON RETIRES HALF THE KNOB'S PURPOSE: `t_pole_salt` IS
+ALREADY A FREEZING FLOOR, AND IT WINS.** Per level, mean dT over salty cells (i = 40 is the
+SURFACE, i = 0 the seafloor):
+
+| level | 40 | 39 | 35 | 30 | 20 | 10 | 0 |
+|---|---|---|---|---|---|---|---|
+| mean dT | **+0.00000** | +0.058 | +0.093 | +0.097 | +0.096 | +0.103 | **+0.274** |
+| cells changed | **101** | 40 380 | 43 019 | 43 413 | 42 241 | 41 537 | 38 521 |
+
+`InitValues_Hyd.cpp:851` clamps the prescribed SST at `t_pole_salt` = **0.993 nd = -1.912 C**, and
+`cHydrosphereModel.cpp:219` snapshots that field into `t_surf_fix` and **re-pins `t.x[im-1]` to it
+every iteration**. So the ocean surface has carried a freezing floor all along — a CONSTANT one, at
+`T_f` for ~34.8 psu — and it overrides the limiter. 2 859 of the 2 961 cells sitting at -1.912 C in
+the control are at i = 40; they are that pin, not a coincidence.
+
+**WHICH IS WHERE THE RESIDUAL 0.95 % LIVES.** 2 731 of the 15 282 still-supercooled cells are AT
+the surface, and they are supercooled for exactly the reason the knob exists: a cell at 31.6 psu
+freezes at **-1.731 C** and the constant pin holds it at **-1.912 C**. **The salinity-dependent
+floor cannot reach the one place sea ice actually forms.** Making `t_surf_fix` carry `T_f(S)`
+instead of `t_pole_salt` is the follow-up, and it is a change to the surface FORCING rather than to
+the limiter.
+
+**DEFAULT STAYS 0**, on this tree's rule: 200 iterations is **16.7 seconds** of physical time, the
+arms restart from a ThreeCat-era ocean checkpoint, and nothing here has been shown on a spun-up
+field. What is settled is that the knob is connected, stable, dynamically inert at 200 iterations,
+and removes 82 % of a defect that is real and was mis-attributed to a clamp that never fired.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT

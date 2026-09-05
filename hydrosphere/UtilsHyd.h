@@ -191,10 +191,17 @@ public:
         //
         // THE -4 C FLOOR IS 2 C BELOW WHERE SEAWATER FREEZES, so the model permits supercooled
         // ocean and then stops it at an arbitrary constant. Measured 2026-09-04 at iteration
-        // 1000: min T is -2.90 C (control) and -3.68 C (metric+Neumann arm) at 76-90 N, i.e.
-        // BOTH arms sit in the 2 C window between the true freezing point and the clamp, and
-        // the clamp is what is holding them. That is the polar cold bias: not a transport
-        // error, a missing phase boundary.
+        // 1000: min T is -2.90 C (control) and -3.66 C (metric+Neumann arm) at 76-90 N, i.e.
+        // BOTH arms sit in the 2 C window between the true freezing point and the clamp.
+        //
+        // AND THE CLAMP IS NOT WHAT HOLDS THEM -- an earlier version of this comment said it
+        // was, inferring that from min T lying inside the window, which is a different
+        // statement. Measured 2026-09-05 over the same two restarts: EXACTLY ZERO cells sit
+        // at -4 C in either arm. What is real, and larger, is the supercooling itself: of the
+        // cells this knob acts on (S >= 5 psu) 4.88 % in the control and 3.36 % in the
+        // repaired arm are BELOW their own T_f, by up to 2.6 and 3.0 C -- ~80 000 and ~51 000
+        // cells. So the polar cold bias is a missing phase boundary rather than a transport
+        // error, and the arbitrary constant it replaces was never binding at all.
         //
         // There is no sea-ice scheme here, so nothing forms ice or releases the latent heat
         // that in the real ocean pins a freezing surface at T_f. Flooring at T_f is the
@@ -242,11 +249,22 @@ public:
                                         + 1.710523e-3 * pow(Sc, 1.5)
                                         - 2.154996e-4 * Sc * Sc;            // [C]
                         const double cand = (m.t_0 + Tf) / m.t_0;
-                        // Never RAISE the floor above the shipped one: this is a freezing
-                        // limiter, not a warming source. A fresh cell (the recorded salinity-IC
-                        // defect, ~12 % of this ocean) would otherwise be floored at 0 C.
+                        // max(T_f, -4 C): the floor is RAISED from the shipped -4 C to the
+                        // freezing point, which is the whole point of the knob -- a cell held
+                        // below T_f is supercooled, and flooring it AT T_f is the zero-order
+                        // stand-in for the latent heat an ice scheme would release. Measured
+                        // 2026-09-05: 4.9 % of salty cells (S >= 5 psu) are supercooled at
+                        // iteration 1000, by up to 2.6 C, while EXACTLY ZERO cells sit at the
+                        // -4 C clamp -- so this acts on ~80 000 cells, and the clamp it
+                        // replaces was never binding at all.
+                        // The max() guard is the other direction: never LOWER the floor below
+                        // the shipped -4 C, so a pathological salinity cannot license colder
+                        // water than the model already allowed.
                         t_lo = (cand < t_min) ? t_min : cand;
-                        if (Sc < 5.0) t_lo = t_min;      // fresh cells: fall back, do not warm
+                        // Fresh cells fall back to -4 C rather than to T_f(0) = 0 C: ~12 % of
+                        // this ocean is spuriously fresh (the salinity-IC defect), and flooring
+                        // those at 0 C would warm the Arctic by four degrees.
+                        if (Sc < 5.0) t_lo = t_min;
                     }
                     if (m.t.x[i][j][k] < t_lo)  m.t.x[i][j][k] = t_lo;
  
