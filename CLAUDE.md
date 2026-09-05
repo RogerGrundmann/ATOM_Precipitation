@@ -1765,6 +1765,52 @@ eight, and `[SCALES]` prints `dx`, the horizontal metric radius actually in forc
 2*dx e-folding in iterations — because every argument about the metric has had to re-derive
 these.*
 
+### The ocean has no air-sea heat flux at all, and `HYD_SFC_FLUX` writes one — into `im-2`, not the skin
+
+**`rhs_t` CARRIES NO SURFACE HEAT SOURCE OF ANY KIND.** The ocean's entire surface thermal
+boundary condition is `t.x[im-1] = t_surf_fix`, a hard Dirichlet re-pin at `sst_relax_alpha` =
+1.0, and `t_surf_fix` is a SNAPSHOT taken once at initialisation from the atmosphere transfer
+file. So the surface temperature is a static prescribed field wearing a coupling's name: the ocean
+cannot warm or cool through its surface, and any SST anomaly its own circulation builds is erased
+in the iteration it is built. The re-pin's own comment says as much — it exists to stop a cold
+collapse, not to represent a flux — and records that a physically calibrated Haney restoring maps
+to `alpha` ~1.6e-8 here, indistinguishable from unforced. **The two available settings are
+"erase the ocean's own SST" and "no forcing at all".**
+
+**`HYD_SFC_FLUX=<c_H in W/(m^2 K)>`, default 0 = OFF**, adds `c_H*(T_skin - T)` as a temperature
+tendency — and it goes into **`im-2`, the top PROGNOSTIC level, not into the skin.** `im-1` is not
+integrated (`RungeKutta_Hyd_Turb` runs `i` from 1 to `im-2`), so a flux applied there would be
+overwritten by the pin before anything read it. **This is the atmosphere's own conclusion
+transplanted**: this file records that if level 0 there is a prescribed SST skin then the repair
+is to apply the bulk flux to level 1, not to the skin. Same structure, same repair, other model.
+
+**AND IT AVOIDS `ATM_SFC_FLUX`'s FAILURE MODE RATHER THAN REPEATING IT.** That knob measured a
+null because `apply_teq_relaxation` absorbed **93 %** of everything it added, in the same
+iteration, at the same level. Here nothing competes: the pin is one level above `im-2`. This term
+is SLOW, not ABSORBED, and those are different defects.
+
+**THE TIMESCALE, WHICH SAYS WHAT TO EXPECT BEFORE ANYONE RUNS IT.** `tau = rho*cp*dz/c_H`, and the
+top layer is **2.758 m** (sinh stretch, `beta` = 2, over a 200 m column):
+
+| `c_H` W/(m^2 K) | `tau` | iterations |
+|---|---|---|
+| 10 | 13.3 days | 1.38e+07 |
+| **40** (the standard Haney value) | **3.33 days** | **3.45e+06** |
+| 100 | 1.33 days | 1.38e+06 |
+
+One iteration is **0.0833 s** and the longest run in this tree is 1000. **So it is connected,
+correctly sized, and cannot move an ocean on any run this tree can afford** — the same wall as
+`HYD_BAROCLINIC_PGF` and `ATM_HYDRO_PGF`. It is written because the surface exchange being ABSENT
+and the surface exchange being SLOW are different states of the model, and only the second can be
+quoted. The 2.758 m layer is also why the number looks as good as it does: the same `c_H` over a
+realistic 50 m mixed layer is **60 days**. A real implementation would distribute the flux over a
+mixed-layer depth rather than dumping it in the top cell; this does the simple thing and says so.
+
+It does NOT replace the resolved exchange — `diffusion_t` still moves whatever the closure's `nue`
+moves across that interface, which is additive and small (`nue` median **0.0046 m^2/s**,
+molecular-scale). `[SCALES]` prints the top prognostic layer thickness unconditionally and the
+flux timescale in ITERATIONS when the knob is set. **UNMEASURED.**
+
 ### The polar cold bias is a missing phase boundary, and `HYD_T_FREEZE` is SUBSURFACE-ONLY because the surface already has one
 
 **`HYD_T_FREEZE=1`, default 0 = shipped and bit-identical off.** The temperature floor in

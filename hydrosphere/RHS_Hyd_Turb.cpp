@@ -996,6 +996,75 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
     rhs_t.x[i][j][k] = pressure_t - transport_t + diffusion_t + dissip_heat_t;
 
+    // ==================================================================================
+    // HYD_SFC_FLUX=<c_H in W/(m^2 K)> -- THE AIR-SEA HEAT FLUX. Default 0 = OFF and
+    // bit-identical.
+    //
+    // WHAT IS MISSING. `rhs_t` carries no surface heat source of any kind. The ocean's
+    // entire surface thermal boundary condition is `t.x[im-1] = t_surf_fix`, a hard
+    // Dirichlet re-pin at `sst_relax_alpha` = 1.0, and `t_surf_fix` is a SNAPSHOT taken
+    // once at initialisation from the atmosphere transfer file. So the surface temperature
+    // is a static prescribed field wearing a coupling's name: the ocean cannot warm or cool
+    // through its surface, and any SST anomaly its own circulation builds is erased in the
+    // same iteration it is built. The re-pin's own comment says as much -- it exists to
+    // stop a cold collapse, not to represent a flux.
+    //
+    // WHERE IT GOES, AND THIS IS THE POINT. Level `im-1` is NOT prognostic --
+    // RungeKutta_Hyd_Turb runs `i` from 1 to `im-2` -- so a flux applied there would be
+    // overwritten by the pin before anything read it. It goes into `im-2`, the top level
+    // the model actually integrates, driven by the difference against the skin above it.
+    // **This is the atmosphere's own conclusion transplanted**: CLAUDE.md records that if
+    // level 0 there is a prescribed SST skin then the repair is to apply the bulk flux to
+    // level 1, not to the skin. Same structure, same repair, other model.
+    //
+    // AND IT AVOIDS THE ATMOSPHERE'S FAILURE MODE RATHER THAN REPEATING IT. `ATM_SFC_FLUX`
+    // measured a null because `apply_teq_relaxation` absorbed 93 % of everything it added,
+    // in the same iteration, at the same level. Here there is no relaxation at `im-2` at
+    // all -- the pin lives one level above -- so nothing competes with this term. It is
+    // slow, not absorbed, and those are different defects.
+    //
+    // THE TIMESCALE, WHICH SAYS WHAT TO EXPECT BEFORE ANYONE RUNS IT. tau = rho*cp*dz/c_H
+    // and the top layer here is **2.758 m** (sinh stretch, beta = 2, over a 200 m column):
+    //
+    //     c_H =  10 W/m^2/K -> tau = 13.3 days = 1.38e+07 iterations
+    //     c_H =  40 (the standard Haney value) -> 3.33 days = 3.45e+06 iterations
+    //     c_H = 100 -> 1.33 days = 1.38e+06 iterations
+    //
+    // One iteration is 0.0833 s and the longest run in this tree is 1000. **So this term is
+    // connected and correctly sized and cannot move an ocean on any run this tree can
+    // afford**, exactly like HYD_BAROCLINIC_PGF and ATM_HYDRO_PGF before it. It is written
+    // because the surface exchange being ABSENT and the surface exchange being SLOW are
+    // different states of the model, and only the second one can be quoted.
+    //
+    // The 2.758 m layer is itself why the number is as favourable as it is: the same c_H
+    // over a realistic 50 m mixed layer is 60 days. A real implementation would distribute
+    // the flux over a mixed-layer depth rather than dumping it in the top cell; this does
+    // the simple thing and says so.
+    //
+    // NOT A REPLACEMENT FOR THE RESOLVED EXCHANGE, which stays: `diffusion_t` still carries
+    // whatever the closure's `nue` moves across that interface. That is additive and it is
+    // small -- `nue` has a median of 0.0046 m^2/s, a molecular-scale number.
+    //
+    // NON-DIMENSIONALISATION: c_H*L_hyd/(u_0*rho_0_water*cp_w*dz), multiplying the
+    // non-dimensional temperature difference, so t_0 cancels and no extra factor appears.
+    // ==================================================================================
+    static const double sfc_flux_cH = [](){
+        const char* e = getenv("HYD_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+
+    if(sfc_flux_cH != 0.0 && i == im-2
+       && is_water(h, i, j, k) && is_water(h, im-1, j, k)){
+        const double dz_top = (rad.z[im-1] - rad.z[im-2]) * L_hyd;          // [m]
+        if(dz_top > 0.0){
+            const double coeff = sfc_flux_cH * L_hyd
+                               / (u_0 * r_0_water * cp_w * dz_top);
+            // the skin above, whatever the surface BC has made of it: with
+            // sst_relax_alpha = 1 this IS the prescribed atmospheric SST, and with a Haney
+            // alpha < 1 it is the surface the ocean and the forcing have settled on.
+            const double dT_nd = t.x[im-1][j][k] - t.x[i][j][k];
+            rhs_t.x[i][j][k] += coeff * dT_nd;
+        }
+    }
+
     // Boussinesq buoyancy with thermal + haline anomaly.  Only the anomaly
     // relative to the reference state (t = 1, c = 1) drives radial motion;
     // the hydrostatic reference is absorbed into the pressure split.

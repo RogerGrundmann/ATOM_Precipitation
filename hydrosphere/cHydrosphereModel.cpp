@@ -510,6 +510,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "0")
              << "  A_H="                                       << ev("HYD_A_H", "0")
              << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
+             << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")
              << "   (* = compiled-in default, not set in the environment)" << endl;
         cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
              << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "
@@ -536,6 +537,18 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
                      << 1.0 / (a_h * k2) << " s = " << 1.0 / (a_h * k2) / s_per
                      << " iterations,  domain-scale e-folding "
                      << 1.0 / (a_h * kL * kL) / 86400.0 << " d" << endl;
+            // air-sea flux timescale: tau = rho*cp*dz/c_H over the TOP PROGNOSTIC layer,
+            // which is where HYD_SFC_FLUX puts it (im-1 is the prescribed skin).
+            const double dz_top = (rad.z[im-1] - rad.z[im-2]) * L_hyd;
+            const double c_H = [](){ const char* e = getenv("HYD_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+            cout << "      OGCM: [SCALES] top prognostic layer (i = im-2) = " << dz_top
+                 << " m" << endl;
+            if(c_H != 0.0){
+                const double tau = r_0_water * cp_w * dz_top / c_H;
+                cout << "      OGCM: [SCALES] SFC_FLUX c_H = " << c_H
+                     << " W/m2/K -> tau = " << tau << " s = " << tau / 86400.0
+                     << " d = " << tau / s_per << " iterations" << endl;
+            }
             const double b_h = [](){ const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 0.0; }();
             if(b_h != 0.0)
                 cout << "      OGCM: [SCALES] A_H_BIHARM = " << b_h << " m4/s -> 2dx e-folding "
