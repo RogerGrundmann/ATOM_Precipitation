@@ -269,8 +269,10 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     // warm the Arctic surface by four degrees.
     // ==================================================================================
     {
+        // DEFAULT ON since 2026-09-05, at the user's instruction. HYD_T_FREEZE_SFC=0
+        // restores the constant t_pole_salt floor.
         const char* e_sfc = getenv("HYD_T_FREEZE_SFC");
-        if (e_sfc && atoi(e_sfc) != 0){
+        if (!e_sfc || atoi(e_sfc) != 0){
             int    n_seen = 0, n_fresh = 0, n_raised = 0;
             double raise_max = 0.0;
             double t_sfc_min = 1.0e30;            // coldest prescribed SST, [C]
@@ -506,8 +508,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
              << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "0")
              << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
-             << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "0")
-             << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "0")
+             << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
+             << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")
              << "  A_H="                                       << ev("HYD_A_H", "0")
              << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
              << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")

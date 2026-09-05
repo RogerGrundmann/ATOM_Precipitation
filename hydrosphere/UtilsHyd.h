@@ -231,8 +231,10 @@ public:
         // pressure term (-7.53e-4 C/dbar, i.e. -0.015 C over this 200 m column) is omitted as
         // negligible here and is where to look first on a deep grid.
         // ==================================================================================
+        // DEFAULT ON since 2026-09-05, at the user's instruction, on the four-arm
+        // measurement below. HYD_T_FREEZE=0 restores the shipped flat -4 C floor.
         static const bool t_freeze = [](){
-            const char* e = getenv("HYD_T_FREEZE"); return e && atoi(e) != 0; }();
+            const char* e = getenv("HYD_T_FREEZE"); return e ? atoi(e) != 0 : true; }();
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {

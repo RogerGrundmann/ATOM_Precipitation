@@ -1949,10 +1949,22 @@ floor cannot reach the one place sea ice actually forms.** Making `t_surf_fix` c
 instead of `t_pole_salt` is the follow-up, and it is a change to the surface FORCING rather than to
 the limiter.
 
-**DEFAULT STAYS 0**, on this tree's rule: 200 iterations is **16.7 seconds** of physical time, the
-arms restart from a ThreeCat-era ocean checkpoint, and nothing here has been shown on a spun-up
-field. What is settled is that the knob is connected, stable, dynamically inert at 200 iterations,
-and removes 82 % of a defect that is real and was mis-attributed to a clamp that never fired.
+**FLIPPED ON BY DEFAULT 2026-09-05, AT THE USER'S INSTRUCTION, AS A PAIR** — `HYD_T_FREEZE` and
+`HYD_T_FREEZE_SFC` both 0 -> 1, on the four-arm measurement below: together they take supercooling
+from **5.32 % to 0.78 %** of the salty ocean with the circulation untouched (rms `u`/`v`/`w` to five
+figures, mean KE to six). They are a pair because each alone leaves the other's level set exactly
+unchanged. **Setting either variable back to 0 restores the old branch.**
+**⚠ THE BOTH-DIRECTIONS VERIFICATION IS OWED**: this tree's rule is that a default flip is verified
+by reproducing the measured arm from a clean environment AND reproducing the shipped branch from an
+explicit `=0`, and neither run has been made — the runs were postponed. Do that before quoting
+anything from the new default.
+**What is settled is the physics**: 200 iterations is 16.7 s from a ThreeCat-era checkpoint, so this
+is not a spun-up result, but the knobs are connected, stable, dynamically inert, and remove a defect
+that is real and was mis-attributed to a clamp that never fired.
+**AND THE VELOCITY PROFILE IS THE OTHER HALF OF THAT INSTRUCTION**: `HYD_METRIC_RADIUS` STAYS 0.
+The shipped metric is the only branch whose horizontal velocity decays with depth; every
+metric-fixed arm is flat below 11 m and bottom-intensified in rms. See the viscosity-arm subsection
+above.
 
 ### And the surface half is now measured too: `HYD_T_FREEZE_SFC` removes 98 % of what the interior floor cannot touch
 
