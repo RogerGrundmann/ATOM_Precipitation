@@ -1886,6 +1886,44 @@ arms restart from a ThreeCat-era ocean checkpoint, and nothing here has been sho
 field. What is settled is that the knob is connected, stable, dynamically inert at 200 iterations,
 and removes 82 % of a defect that is real and was mis-attributed to a clamp that never fired.
 
+### And the surface half is now measured too: `HYD_T_FREEZE_SFC` removes 98 % of what the interior floor cannot touch
+
+**FOUR ARMS FROM ONE CHECKPOINT, 300 -> 500, 24 threads, all exit 0 with zero NaN.** `f0` neither,
+`f1` interior only, `s1` surface only, `s2` both. Supercooled cells are those with `T < T_f(S)` at
+`S >= 5 psu`; the SURFACE row is level `im-1`, the prescribed skin:
+
+| arm | **surface** | interior | total | mean T | rms `u`/`v`/`w` |
+|---|---|---|---|---|---|
+| `f0` neither | 2731 | 82 903 | 85 634 (5.32 %) | 14.54199 | — |
+| `f1` interior | **2731** | 12 551 | 15 282 (0.95 %) | 14.64680 | identical to 5 figures |
+| `s1` surface | **50** | 82 545 | 82 595 (5.13 %) | 14.54368 | identical |
+| **`s2` both** | **50** | 12 539 | **12 589 (0.78 %)** | 14.64706 | identical |
+
+**EACH KNOB ACTS ON EXACTLY ITS OWN LEVEL SET AND NEITHER TOUCHES THE OTHER'S.** The interior floor
+leaves the surface count at 2731 — unchanged to the CELL — which turns this morning's structural
+argument into a measurement. The surface floor takes it **2731 -> 50, 98.2 %**, and moves the
+interior by 0.4 %, which is advection. No arm moves the circulation.
+
+**AT INITIALISATION THE FLOOR RAISES 2742 OF 34 641 SALTY OCEAN SURFACE CELLS (7.9 %), BY UP TO
+0.624 C**, and the coldest prescribed SST is exactly `t_pole_salt` = -1.912 C.
+
+**THE 50 SURVIVORS ARE THE LIMIT OF A ONE-TIME FLOOR, AND THEY NAME THE NEXT STEP.** Their median
+deficit is **0.0017 C** — the freezing point to rounding — because the floor is built on `c_fix`,
+the PRESCRIBED salinity, while the running salinity has drifted. Exactly ONE cell carries a real
+deficit: it began at `>= 34.8 psu`, so `T_f(S_fix) <= -1.912` and the floor declined to raise it,
+and it has since freshened to **17.17 psu** where the freezing point is **-0.93 C**. Flooring at
+the re-pin with the RUNNING salinity would close it. One cell is an argument, not an urgency.
+
+**AND THE FIRST ARM OF THIS KNOB WAS A NULL FOR A REASON THAT WAS NOT THE KNOB** (2026-09-05). It
+reported "0 cells raised" because its output directory had been seeded with the restart `.bin`
+alone: the atmosphere transfer file was absent, the run fell back to the NASA surface temperature
+whose minimum is **-0.01 C**, and nothing was within 1.9 C of a freezing point. The log said
+`WARNING: transfer file not found` forty lines above the census line that was being read.
+**EIGHTH occurrence of "the answer was in output nobody opened", and the first where the missing
+output was a WARNING in the same log.** The census print now reports cells scored, cells skipped as
+fresh, the coldest prescribed SST and `max(T_f - SST)` even when negative — so "the floor found
+nothing to do" and "the floor had nothing to read" no longer print the same line.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
