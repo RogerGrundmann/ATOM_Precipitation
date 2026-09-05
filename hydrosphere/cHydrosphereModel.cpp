@@ -271,23 +271,41 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     {
         const char* e_sfc = getenv("HYD_T_FREEZE_SFC");
         if (e_sfc && atoi(e_sfc) != 0){
-            int n_raised = 0;
+            int    n_seen = 0, n_fresh = 0, n_raised = 0;
             double raise_max = 0.0;
+            double t_sfc_min = 1.0e30;            // coldest prescribed SST, [C]
+            double margin_max = -1.0e30;          // largest T_f - t_surf_fix, [C], even if <= 0
             for (int j = 0; j < jm; j++)
                 for (int k = 0; k < km; k++){
                     if (!is_water(h, im-1, j, k))  continue;
+                    const double t_c = (t_surf_fix.y[j][k] - 1.0) * t_0;
+                    if (t_c < t_sfc_min)  t_sfc_min = t_c;
                     const double S = c_fix.y[j][k] * c_35;               // psu
-                    if (S < 5.0)  continue;                              // fresh: leave alone
-                    const double cand = (t_0 + seawater_freezing_point_C(S)) / t_0;
+                    if (S < 5.0){ n_fresh++; continue; }                 // fresh: leave alone
+                    n_seen++;
+                    const double Tf   = seawater_freezing_point_C(S);
+                    const double cand = (t_0 + Tf) / t_0;
+                    const double d    = (cand - t_surf_fix.y[j][k]) * t_0;
+                    if (d > margin_max)  margin_max = d;
                     if (cand > t_surf_fix.y[j][k]){
-                        const double d = (cand - t_surf_fix.y[j][k]) * t_0;
                         if (d > raise_max)  raise_max = d;
                         t_surf_fix.y[j][k] = cand;
                         n_raised++;
                     }
                 }
+            // Report the whole census, not just the count. A null here is ambiguous
+            // otherwise -- "the floor found nothing to do" and "the floor is not connected"
+            // print the same line -- and the FIRST arm of this knob was a null for a third
+            // reason again: the atmosphere transfer file was absent, so the prescribed SST
+            // came from the NASA field whose minimum is -0.01 C, 1.9 C above any freezing
+            // point. margin_max says which: it is the largest T_f - t_surf_fix over the
+            // scored cells, so a value near 0 means the floor is only just inactive and a
+            // large negative one means the prescribed SST is nowhere near freezing.
             cout << "      OGCM: HYD_T_FREEZE_SFC=1  surface SST forcing floored at T_f(S): "
-                 << n_raised << " cells raised, largest raise " << raise_max << " C" << endl;
+                 << n_raised << " of " << n_seen << " salty ocean cells raised (" << n_fresh
+                 << " skipped as < 5 psu), largest raise " << raise_max
+                 << " C, coldest prescribed SST " << t_sfc_min
+                 << " C, max (T_f - SST) " << margin_max << " C" << endl;
         }
     }
 
