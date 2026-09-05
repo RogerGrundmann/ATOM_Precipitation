@@ -233,6 +233,64 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
         for (int k = 0; k < km; k++)
             c_fix.y[j][k] = c.x[im-1][j][k];
 
+    // ==================================================================================
+    // HYD_T_FREEZE_SFC -- give the PRESCRIBED SURFACE FORCING a salinity-dependent
+    // freezing floor, in place of the constant t_pole_salt. Default 0 = shipped and
+    // bit-identical.
+    //
+    // THE SURFACE ALREADY HAS A FREEZING FLOOR AND IT IS A CONSTANT. InitValues_Hyd's
+    // initTemperature clamps the prescribed SST at t_pole_salt = 0.993 nd = -1.912 C,
+    // which is T_f for about 34.8 psu, and t_surf_fix then re-pins the surface row to
+    // that field every iteration -- AFTER valueLimitationHyd has run. So the interior
+    // floor (HYD_T_FREEZE) cannot reach the surface at all: measured 2026-09-05 over
+    // iterations 300-500, mean dT at i = im-1 is +0.00000 C with 101 cells changed,
+    // against +0.274 C at the seafloor, and 2 859 of the 2 961 cells sitting at exactly
+    // -1.912 C are the surface pin.
+    //
+    // AND A CONSTANT FLOOR IS WRONG WHEREVER THE WATER IS NOT 34.8 psu. Fresher water
+    // freezes WARMER: at 31.6 psu T_f is -1.731 C, so the pin holds such a cell 0.18 C
+    // BELOW its own freezing point and manufactures supercooled surface water. That is
+    // where the residual supercooling of the HYD_T_FREEZE arm lives -- 2 731 of its
+    // 15 282 remaining supercooled cells are AT the surface. This raises the pin to
+    // max(t_surf_fix, T_f(S)), so it can only ever warm, never cool.
+    //
+    // Applied to the PRESCRIBED fields and once, here rather than in the loop, because
+    // t_surf_fix is a fixed forcing snapshot by design: it is floored against c_fix, the
+    // prescribed surface salinity captured on the line above, not against the running
+    // c.x[im-1] that SalinityEvaporation moves. (The floor is idempotent, so re-reading
+    // the running field would not accumulate the way c_fix's offset would -- it would
+    // simply make the forcing time-dependent, which is the one property this field has
+    // to keep.) Note the capture of t_surf_fix itself is 20 lines above and runs BEFORE
+    // initSalinity, so this could not have been folded into it: there is no surface
+    // salinity to floor against at that point.
+    //
+    // Cells below 5 psu are left alone, the same guard the interior floor carries: ~12 %
+    // of this ocean is spuriously fresh (the salinity-IC defect) and T_f(0) = 0 C would
+    // warm the Arctic surface by four degrees.
+    // ==================================================================================
+    {
+        const char* e_sfc = getenv("HYD_T_FREEZE_SFC");
+        if (e_sfc && atoi(e_sfc) != 0){
+            int n_raised = 0;
+            double raise_max = 0.0;
+            for (int j = 0; j < jm; j++)
+                for (int k = 0; k < km; k++){
+                    if (!is_water(h, im-1, j, k))  continue;
+                    const double S = c_fix.y[j][k] * c_35;               // psu
+                    if (S < 5.0)  continue;                              // fresh: leave alone
+                    const double cand = (t_0 + seawater_freezing_point_C(S)) / t_0;
+                    if (cand > t_surf_fix.y[j][k]){
+                        const double d = (cand - t_surf_fix.y[j][k]) * t_0;
+                        if (d > raise_max)  raise_max = d;
+                        t_surf_fix.y[j][k] = cand;
+                        n_raised++;
+                    }
+                }
+            cout << "      OGCM: HYD_T_FREEZE_SFC=1  surface SST forcing floored at T_f(S): "
+                 << n_raised << " cells raised, largest raise " << raise_max << " C" << endl;
+        }
+    }
+
     AtomUtils::damp_wiggles(c, &i_bathymetry, true, true, true);
 
     ThermoHyd(*this).SaltWaterDens();

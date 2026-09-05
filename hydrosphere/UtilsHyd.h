@@ -17,6 +17,24 @@
 
 using namespace AtomUtils;
 
+// ----------------------------------------------------------------------------------
+// Freezing point of seawater at surface pressure (UNESCO/Millero), in degrees Celsius:
+// 0.000 C at 0 psu, -1.638 at 30, -1.922 at 35, -2.095 at 38. The pressure term
+// (-7.53e-4 C/dbar, i.e. -0.015 C over this 200 m column) is omitted as negligible here
+// and is where to look first on a deep grid.
+//
+// ONE definition, because there are two places that need it and they must agree: the
+// interior floor in valueLimitationHyd (HYD_T_FREEZE) and the PRESCRIBED SURFACE forcing
+// t_surf_fix (HYD_T_FREEZE_SFC). The surface is the half that matters -- it is where sea
+// ice forms -- and it is the half the limiter cannot reach, because the surface row is
+// re-pinned to t_surf_fix after the limiter runs.
+// ----------------------------------------------------------------------------------
+inline double seawater_freezing_point_C(double S_psu)
+{
+    const double S = (S_psu > 0.0) ? S_psu : 0.0;
+    return -0.0575 * S + 1.710523e-3 * pow(S, 1.5) - 2.154996e-4 * S * S;
+}
+
 class UtilsHyd {
 public:
     explicit UtilsHyd(cHydrosphereModel& model)
@@ -245,9 +263,7 @@ public:
                     if (t_freeze) {
                         const double S  = m.c.x[i][j][k] * m.c_35;          // psu
                         const double Sc = (S > 0.0) ? S : 0.0;
-                        const double Tf = -0.0575 * Sc
-                                        + 1.710523e-3 * pow(Sc, 1.5)
-                                        - 2.154996e-4 * Sc * Sc;            // [C]
+                        const double Tf = seawater_freezing_point_C(Sc);    // [C]
                         const double cand = (m.t_0 + Tf) / m.t_0;
                         // max(T_f, -4 C): the floor is RAISED from the shipped -4 C to the
                         // freezing point, which is the whole point of the knob -- a cell held
