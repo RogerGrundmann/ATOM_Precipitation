@@ -1542,6 +1542,74 @@ UNTIL A REAL HORIZONTAL VISCOSITY EXISTS.** The radial-velocity collapse (2065x)
 the noise; both are consequences of removing a 2e4 error that two different defects were leaning on.
 Default stays 0. **Read the 1000-iteration section below with this in front of it.**
 
+### The viscosity arms: both knobs work, the Laplacian is 3.2x the biharmonic at equal nominal strength — and the VELOCITY PROFILE is wrong in every metric-fixed arm
+
+**THREE ARMS, 1000 -> 1200 FROM `output_kr1`'s OWN CHECKPOINT** (2026-09-05, 24 threads, one pinned
+binary, all exit 0 with **zero NaN**). All three carry `HYD_METRIC_RADIUS=6370 HYD_RUN_NEUMANN=1`,
+because that is the configuration that HAS the noise — testing a viscosity on the shipped branch
+would be testing it against the 1e6 m^2/s the metric error already supplies. Both strengths set for
+the SAME 2*dx e-folding of 100 iterations, so the arms differ only in selectivity; the model prints
+both, and the domain-scale figures are the argument for the biharmonic:
+
+    A_H       = 1.503e+08 m^2/s -> 2dx 99.99 iterations, domain scale    0.78 d
+    A_H_BIHARM= 1.882e+17 m^4/s -> 2dx 100.01 iterations, domain scale 6313.46 d
+
+| arm | noise i=39 | noise i=40 | p50 | p90 | p99 | **max** | 45-60N | 45-60S | mean T |
+|---|---|---|---|---|---|---|---|---|---|
+| *kr0 shipped metric* | *0.642* | *0.576* | *0.64* | *3.42* | *12.80* | *45.61* | *1.80* | *3.36* | *14.46* |
+| start (kr1 @1000) | 1.179 | 1.605 | 0.58 | 3.19 | 13.22 | 46.15 | 2.12 | 2.86 | 15.15 |
+| **va0 control** | **1.397** | **1.864** | 0.69 | 3.56 | 13.51 | **57.57** | 2.18 | 3.23 | 15.163 |
+| **va1 `A_H`** | **0.996** | **1.339** | 0.69 | 3.52 | 13.10 | **42.75** | 2.15 | 3.23 | 15.163 |
+| **va2 `BIHARM`** | **1.272** | **1.703** | 0.69 | 3.54 | 13.32 | **54.07** | 2.17 | 3.23 | 15.163 |
+
+**THE NOISE IS STILL GROWING IN THE CONTROL** — 1.179 -> 1.397 over 200 more iterations — so
+yesterday's 2.3x was not a settled state. The Laplacian cuts it **-28.7 % against the control** and
+takes `max` from 57.57 to **42.75 cm/s, below even the shipped arm's 45.61**. The biharmonic cuts it
+**-9.0 %**.
+
+**THE LAPLACIAN IS 3.2x MORE EFFECTIVE AT EQUAL NOMINAL STRENGTH, WHICH IS NOT A CONTRADICTION OF
+THE SELECTIVITY ARGUMENT BUT ITS OTHER HALF.** The two were matched at 2*dx, and the noise this
+index measures is NOT a pure 2*dx mode: a Laplacian at this strength also e-folds 3*dx and 4*dx
+within the run, where `k^4` has already fallen off by 5x and 16x. **Selectivity cuts both ways —
+the biharmonic leaves the circulation alone because it leaves everything but the very shortest
+scales alone.** To match the noise removal it needs a stronger coefficient, and it can afford one:
+its domain-scale e-folding is 6313 days against the Laplacian's 0.78.
+
+**AND NEITHER COSTS ANYTHING MEASURABLE.** `p50` is 0.69 in all three, `p90` within 1 %, the
+zonal-mean bands within 1.4 %, mean T identical to five decimals. That was the prediction made
+before the runs and it holds — but it is a WEAK result, because at 200 iterations the Laplacian has
+used 0.02 % of one domain-scale e-folding. **This arm shows the knobs are connected, stable and
+effective on the noise. It does NOT yet price the Laplacian's collateral damage**, which needs a
+run this tree cannot afford.
+
+**AND THE ARM FOUND SOMETHING LARGER THAN IT WAS ASKED: THE VELOCITY PROFILE IS WRONG IN EVERY
+METRIC-FIXED ARM, AND THE VISCOSITY IS NOT THE CAUSE** (found by the user, looking at the field).
+Scored on a FIXED population of **33 111 full-depth columns**, so every level scores the same cells
+and this is not the land mask:
+
+| depth | kr0 median | va0 median | kr0 rms | **va0 rms** |
+|---|---|---|---|---|
+| 0 m | 1.090 | 1.249 | 3.066 | 4.256 |
+| 11 m | 0.454 | 0.308 | 2.156 | 2.130 |
+| 105 m | 0.289 | 0.242 | 0.995 | 1.177 |
+| **200 m** | 0.283 | 0.253 | **0.962** | **2.155** |
+
+Below 11 m the repaired profile is FLATTER than the shipped one (0.31 -> 0.25 against 0.45 -> 0.28)
+and its rms **RISES toward the seafloor**, 1.18 at 105 m to **2.16** at the bottom, where kr0 falls
+1.00 -> 0.96. **A bottom-intensified horizontal current in a wind-driven ocean is backwards.**
+`va0` carries no viscosity and has it, and so does `kr1` at iteration 1000, so it predates these
+arms entirely — it arrived with the metric fix and yesterday's write-up recorded only that the
+horizontal flow was "not merely preserved, it is STRONGER" without looking at WHERE.
+
+**THE LIKELY MECHANISM, NOT YET MEASURED**: the shipped ocean's vertical structure was partly
+manufactured by the spurious radial velocity the metric fix removes (rms `u` **2.4e-02 -> 1.0e-05**,
+a factor of 2400), which was advecting momentum down the column. Take that away and nothing is left
+to shear the column: the buoyancy carries the ~1e-7 spurious `dt`, `HYD_BAROCLINIC_PGF` is default
+0, and `project_barotropic` pins a depth-mean mode every iteration (`max|u_bt|` = 38 cm/s). **So the
+repaired ocean has no mechanism to build vertical shear at all.** That is a THIRD count against
+`HYD_METRIC_RADIUS` alongside the grid-scale noise, and it points at the same missing physics
+`HYD_PHYDRO_SALT` + `HYD_BAROCLINIC_PGF` were written for. Default stays 0.
+
 ### The 1000-iteration pair: the repair holds, and the control is still spreading
 
 **1000 ITERATIONS = 83 s OF PHYSICAL TIME, 24 THREADS, BOTH EXIT 0 WITH ZERO NaN.** Run as a
