@@ -940,6 +940,50 @@ public:
             }  // k
         }  // j
 
+        // ==================================================================================
+        // THE PLANETARY SHORTWAVE BUDGET, printed unconditionally once the albedo is final.
+        //
+        // CLAUDE.md's open risk reads "no atmospheric SW absorption and no Rayleigh scattering,
+        // so albedo_equator = 0.1 is a SURFACE albedo doing a PLANETARY albedo's job (absorbs
+        // 387.7 W/m2 at the equator against Earth's ~316)". HALF OF THAT IS STALE: the fixed
+        // pole->equator albedo parabola was replaced by a surface-type value with a live
+        // ice/snow feedback (0.08 ocean / 0.20 land / 0.60 ice) and then composited with a cloud
+        // reflectivity bump toward 0.50, so `albedo` IS a planetary-ish albedo wherever there is
+        // cloud. What is NOT stale is the transmission: nothing attenuates the shortwave on its
+        // way down, so every watt that is not reflected arrives at the GROUND.
+        //
+        // Earth, for the three numbers below: planetary albedo ~0.29, atmosphere absorbs ~23 %
+        // of the incoming (water vapour, ozone, cloud), surface absorbs ~47 %. This model
+        // absorbs 0 % in the atmosphere BY CONSTRUCTION, so its surface takes the whole of the
+        // non-reflected beam and its troposphere is heated only from below and by longwave.
+        // ==================================================================================
+        {
+            Array_2D S_in(m.jm, m.km, 0.0), S_refl(m.jm, m.km, 0.0), S_sfc(m.jm, m.km, 0.0);
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++) {
+                    const double S = m.short_wave_radiation[j];
+                    const double a = m.albedo.y[j][k];
+                    S_in.y[j][k]   = S;
+                    S_refl.y[j][k] = a * S;
+                    S_sfc.y[j][k]  = (1.0 - a) * S;      // reaches the GROUND: no atmospheric term
+                }
+            const double in   = AtomUtils::GetMean_2D(m.jm, m.km, S_in);
+            const double refl = AtomUtils::GetMean_2D(m.jm, m.km, S_refl);
+            const double sfc  = AtomUtils::GetMean_2D(m.jm, m.km, S_sfc);
+            const std::ios::fmtflags f = std::cout.flags();
+            const std::streamsize    pr = std::cout.precision();
+            std::cout << "      ATOM: [SW BUDGET] TOA in = " << std::fixed << std::setprecision(1)
+                      << in << " W/m2   reflected = " << refl
+                      << "   planetary albedo = " << std::setprecision(3)
+                      << (in > 0.0 ? refl / in : 0.0) << " (Earth ~0.29)" << std::endl;
+            std::cout << "      ATOM: [SW BUDGET] absorbed by the ATMOSPHERE = "
+                      << std::setprecision(1) << 0.0 << " W/m2 = 0.0 % (Earth ~23 %)"
+                      << "   by the SURFACE = " << sfc << " W/m2 = "
+                      << (in > 0.0 ? 100.0 * sfc / in : 0.0) << " % (Earth ~47 %)"
+                      << "   -- NOTHING ATTENUATES THE BEAM ON THE WAY DOWN" << std::endl;
+            std::cout.flags(f); std::cout.precision(pr);
+        }
+
         if (radColDiag() && eps_max.eps >= 0.0) {
             const double lat = 90.0 - eps_max.j;
             const double lon = (eps_max.k <= 180) ? eps_max.k : eps_max.k - 360;

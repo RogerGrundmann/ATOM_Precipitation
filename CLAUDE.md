@@ -2283,6 +2283,77 @@ replacements. Not settled: whether crediting the fluxes to the air changes anyth
 against the timescale wall that made `ATM_SFC_FLUX` a null — `omega_teq` is 3290x faster than a
 surface flux BY CONSTRUCTION), and where the precipitated water actually comes from.
 
+## The planetary albedo is RIGHT and the SHORTWAVE PARTITION is wrong: the surface takes 69 % where Earth's takes 47
+
+**HALF OF THIS TREE'S SHORTWAVE OPEN RISK IS STALE, AND THE OTHER HALF IS NOW SIZED**
+(2026-09-06, `[SW BUDGET]`, unconditional print at the end of `MultiLayerRadiation::run()` once
+the albedo is final; physics-neutral, 13 of 13 written files byte-identical at 1 thread).
+
+The recorded risk reads: *"no atmospheric SW absorption and no Rayleigh scattering, so
+`albedo_equator` = 0.1 is a SURFACE albedo doing a PLANETARY albedo's job (absorbs 387.7 W/m2 at
+the equator against Earth's ~316)"*. **The albedo half no longer holds.** The fixed pole-to-equator
+albedo parabola was replaced by a surface-type value with a live ice/snow feedback — 0.08 ocean /
+0.20 land / 0.60 ice over a ramp about freezing — and then composited with a cloud reflectivity
+bump toward 0.50 on the column condensate path. Measured:
+
+| | shipped | `ATM_SW_INSOL=1361` | Earth |
+|---|---|---|---|
+| TOA incoming | 151.3 W/m2 | **340.3 W/m2** | 340.3 |
+| reflected | 46.5 | 105.6 | ~99 |
+| **planetary albedo** | **0.307** | **0.310** | **~0.29** |
+| absorbed by the ATMOSPHERE | **0.0 W/m2 = 0.0 %** | **0.0 W/m2 = 0.0 %** | ~23 % |
+| absorbed by the SURFACE | 104.8 = **69.3 %** | 234.7 = **69.0 %** | ~47 % |
+
+**THE PLANETARY ALBEDO IS 0.31 AGAINST EARTH'S 0.29 — within 7 %, and on BOTH branches.** That is
+the ice feedback and the cloud bump doing exactly the job the open risk says is not being done, and
+the 0.1 in that sentence is a constant that no longer sets the answer. *(`ATM_SW_INSOL` moves the
+albedo by 0.003, which is the check that it is a genuine field property and not a coincidence of
+the insolation profile — and with it on, TOA incoming is 340.3 W/m2 against Earth's 340.3, because
+the corrected form has no free constants.)*
+
+**WHAT IS REAL, AND IT IS THE TRANSMISSION, NOT THE REFLECTION.** Nothing attenuates the beam on
+its way down: every watt not reflected arrives at the GROUND. So the surface absorbs **69 %** of
+the incoming where Earth's absorbs ~47 %, and the atmosphere absorbs **0.0 %** where Earth's
+absorbs ~23 % in water vapour, ozone and cloud. At the corrected insolation that is **~78 W/m2
+delivered to the surface that should have been deposited in the air** — comparable to the entire
+latent heat flux, and in the wrong place.
+
+**AND IT COMPOUNDS TWO DEFECTS THIS FILE ALREADY HAS.** The troposphere is heated only from below
+and by longwave, which is exactly the direction that makes a radiative equilibrium too STABLE — the
+`ATM_RAD_EQUIL` chain's finding — and the surface is over-heated in a model whose surface already
+cannot pass energy up (the sensible flux is debited and credited to nothing, and is 3.2-4.7 W/m2
+against ~20). **The missing shortwave absorption is a third term pushing the same way.**
+
+**THE REPAIR IS BOUNDED BUT IT IS NOT A COEFFICIENT.** Attenuating the beam requires depositing the
+absorbed part as a layer heating, and the two radiation branches would take it differently: the
+`ATM_RAD_EQUIL` sweep uses a single column flux `F` as its constant, which an absorbing atmosphere
+no longer is, and the shipped tridiagonal branch admits shortwave only through the surface balance.
+**Not written.** What must not be done is to attenuate the surface term alone — that removes energy
+from the model instead of moving it, and would cool the whole column. *Same shape as the
+`ATM_RAD_EQUIL` / `ATM_SW_INSOL` pair, where fixing either alone is worse than fixing neither.*
+
+## The water budget does not close, and now every run says so
+
+**`water budget closure` IS PRINTED BESIDE THE PRECIPITATION COMPONENTS** (2026-09-06,
+unconditional). P and E must have equal long-run global means: the atmosphere holds ~25 mm of
+precipitable water against ~1000 mm/a of rainfall, so it turns its entire reservoir over in ~9 days
+and cannot run a persistent imbalance. The two have never been printed together, in one unit, in
+this tree. First readings, `nm` = 20 (4 seconds of physical time), 8 threads:
+
+    water budget closure:  P = 467.7 mm/a   E = 189.7 mm/a   P - E = 277.9 mm/a   P/E = 2.46
+    water budget closure:  P = 567.3 mm/a   E = 209.2 mm/a   P - E = 358.1 mm/a   P/E = 2.71
+
+**AND P IS STILL CLIMBING WHILE E IS NOT**, so the ratio grows with the run: the accepted
+configuration rains **975.8 mm/a at `nm` = 100** against an evaporation of the order measured here,
+i.e. **P/E of 4-5 and rising**. Read the RATIO on a spun-up run and not this one — E is a diagnostic
+of the surface state and responds in one call, P is a flux that has to grow out of the initial
+condition — but the direction is not in doubt and the gap is not small.
+
+**The candidate source is named in `ATM_EVAP_SPREAD`'s own comment**: an absolute moisture addition
+to levels 1..`n_spread` every iteration that no flux produced, bounded only by the `c_sat_i` clamp.
+That is the same shape as the microphysics floor which manufactured 8129 mm/a before 2026-09-01,
+and it is now measurable in one line of every run log rather than by instrumenting a scheme.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT

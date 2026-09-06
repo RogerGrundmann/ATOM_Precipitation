@@ -791,6 +791,36 @@ public:
             component("P_graupel", m.P_graupel);
             component("P_conv",    m.P_conv);
 
+            // ==========================================================================
+            // P - E CLOSURE. In ANY closed atmospheric water budget the long-run global
+            // means of precipitation and surface evaporation are equal: the atmosphere
+            // holds ~25 mm of precipitable water and rains ~1000 mm/a, so it turns its
+            // entire reservoir over every ~9 days and cannot run a persistent imbalance.
+            // Printed together, in one unit, because they never have been -- and measured
+            // 2026-09-06 this model rains 976-1000 mm/a while evaporating 80-260, i.e.
+            // P/E of 4-12. Water that precipitates without being evaporated came from
+            // somewhere, and the candidate is named in ATM_EVAP_SPREAD's own comment: an
+            // absolute moisture addition to levels 1..n_spread every iteration that no
+            // flux produced, bounded only by the c_sat_i clamp. Same shape as the
+            // microphysics floor that manufactured 8129 mm/a before 2026-09-01.
+            //
+            // READ IT ON A SPUN-UP RUN. Both terms need the field settled: at nm = 20
+            // (4 seconds of physical time) precipitation is still climbing out of its
+            // initial condition and the ratio is not a closure statement.
+            // E is a DIAGNOSTIC of the surface state, recomputed every call, so it
+            // responds much faster than P does.
+            // ==========================================================================
+            {
+                const double E_mm_a =
+                    AtomUtils::GetMean_2D(m.jm, m.km, m.Evaporation) * 365.0;   // [mm/d]->[mm/a]
+                const double PmE = mean_precip_mm_a - E_mm_a;
+                cout << " water budget closure:  P = " << fixed << setprecision(1)
+                     << mean_precip_mm_a << " mm/a   E = " << E_mm_a
+                     << " mm/a   P - E = " << PmE << " mm/a   P/E = "
+                     << setprecision(2) << (E_mm_a > 0.0 ? mean_precip_mm_a / E_mm_a : 0.0)
+                     << "   (a closed budget needs P - E = 0; Earth ~1000 / ~1000)" << endl;
+            }
+
             // WHAT THE FLOOR MANUFACTURED, printed beside the total it belongs to.
             //
             // `P_x[i] = max(0, P_x[i+1] + dP)` is not a guard, it is a SOURCE: wherever the
