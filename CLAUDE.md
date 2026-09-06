@@ -2193,20 +2193,35 @@ off. Three arms, `nm` = 10, 8 threads, implied evaporation in mm/a per call:
 | 1 (deficit form) | 649.7 | 309.3 | **235.6** | **225.8** | 236.4 | 257.9 |
 | 2 (per-level relaxation) | 649.7 | 308.2 | **234.2** | **224.3** | 234.9 | 256.4 |
 
-**THE SHIPPED MOISTENING SUPPRESSES THE MODEL'S OWN EVAPORATION BY 2.7x**, and the two repaired
-modes agree with each other to 0.6 % — which is what says the effect is the absolute-addition
-form and not a detail of either replacement. **The mechanism is confirmed and it is not the whole
-story**: even repaired, E settles near **250 mm/a against ~1000**, so the surface flux is a further
-~4x too weak.
+**⚠ THAT 2.7x IS RETRACTED — IT IS A SPIN-UP ARTEFACT, AND THE SAME THREE ARMS ARE A NULL ON A
+SPUN-UP FIELD** (2026-09-06, re-run from `output_twctl/atm_restart_0Ma_600.bin`, 600 -> 700,
+24 threads, one pinned binary, all three exit 0):
+
+| `ATM_EVAP_SPREAD` | P mm/a (hi / lo) | **E mm/a (hi / lo)** | P/E |
+|---|---|---|---|
+| **0 (shipped)** | 1014.6 / 921.4 | **512.5 / 526.6** | 1.98 / 1.75 |
+| 1 (deficit form) | 1014.6 / 918.4 | **510.9 / 526.5** | 1.99 / 1.74 |
+| 2 (per-level relaxation) | 1014.9 / 918.8 | **511.3 / 526.7** | 1.99 / 1.74 |
+
+**Evaporation differs by 0.2 % across the three**, against the 2.7x measured in the transient. The
+ratcheting is real there and does not survive it: on a settled field the near-surface humidity
+reaches the same equilibrium whichever way the increment is applied, so the same Dalton deficit and
+the same E come out. **The absolute-addition form remains a genuine code defect read off the
+source — a moisture source no flux produced, bounded only by `c_sat_i` — but it does NOT control
+the settled evaporation.**
+
+*What these arms do NOT test: all three still ADD the moisture, differing only in how it is spread
+over levels 1..`n_spread`. A null between them says the FORM does not matter; it does not exonerate
+the addition itself. That needs an arm with the addition removed, which no mode provides.*
 
 **AND THE WATER BUDGET DOES NOT CLOSE, BY A FACTOR OF FOUR TO TWELVE.** In any closed atmospheric
 water budget the long-run global means of P and E are equal. This tree's accepted configuration
-rains **975.8 mm/a at `nm` = 100 and ~1000 at `nm` = 600**, and evaporates **80-260**. So the water
-this model precipitates is not coming from its surface. *That is the same shape as the microphysics
-floor that manufactured 8129 mm/a* — and the candidate source is named in `ATM_EVAP_SPREAD`'s own
-comment: an absolute moisture addition every iteration that no flux produced, bounded only by the
-`c_sat_i` clamp. **A P - E closure print on a spun-up run is the next instrument**, and it is one
-line beside `Precip mean`.
+rains **975.8 mm/a at `nm` = 100 and ~1000 at `nm` = 600**, and evaporates **510-527 on a spun-up
+field** (the 80-260 first written here was the spin-up transient). So about HALF the water this
+model precipitates is not coming from its surface. *Same shape as the microphysics floor that
+manufactured 8129 mm/a.* **The candidate source first named here — `ATM_EVAP_SPREAD`'s absolute
+moisture addition — is REFUTED as the lever**: changing its form moves the settled evaporation by
+0.2 %. **Where the ~500 mm/a comes from is OPEN.**
 
 **READ THE ABSOLUTE NUMBERS AS SPIN-UP, THE RATIOS AS REAL.** `nm` = 10 is **2 seconds** of
 physical time, so no arm here is a climate. The three evaporation trajectories start from an
@@ -2358,15 +2373,19 @@ is **~1.9**, not 4-5. (2) Evaporation on a spun-up field is **510-527 mm/a**, ab
 ~1000 — not the 80-260 the `nm` = 20 arms showed, and not "5-12x too low". **The evaporation
 collapse measured at `nm` = 10-20 is a SPIN-UP ARTEFACT of the analytic initial condition, not the
 model's settled state**, and the `ATM_EVAP_SPREAD` comparison (2.7x between the shipped and
-repaired forms) was measured entirely inside that transient. It should be re-run from this
-checkpoint before it is quoted as a property of the model.
+repaired forms) was measured entirely inside that transient. **Re-run from this checkpoint it is a
+NULL — 0.2 % on E across all three modes — so the 2.7x is RETRACTED; the table is in the
+surface-flux section above.**
 
 **WHAT SURVIVES, AND IT IS STILL LARGE.** `P - E` = **390-500 mm/a** on a settled field: about
 **40-50 % of everything this model precipitates has no surface source.** P = 1014.6 at iteration
 700 also reproduces the recorded ~1000 for this configuration, so the P side is the model's own
 headline number and it is the E side that is short. The gap is real, it is measured on a spun-up
-field for the first time, and the candidate source is unchanged — `ATM_EVAP_SPREAD`'s absolute
-moisture addition to levels 1..`n_spread` every iteration, bounded only by the `c_sat_i` clamp.
+field for the first time. **And the candidate source is now REFUTED**: re-running the three
+`ATM_EVAP_SPREAD` modes from this same checkpoint moves the settled evaporation by 0.2 %, so the
+form of the moistening is not what supplies the missing ~500 mm/a. **The source is unidentified**,
+and the instrument that would narrow it is a COLUMN WATER BUDGET — the vapour tendency against
+evaporation, condensation and transport, summed to close — not another knob.
 
 **⚠ `nm` MEANS DIFFERENT THINGS IN THE TWO MODELS, AND THE FIRST ATTEMPT AT THIS RUN WAS A
 SILENT NO-OP.** `cAtmosphereModel.cpp:1319` is `for(iter_n = iter_start; iter_n <= nm; iter_n++)`,
