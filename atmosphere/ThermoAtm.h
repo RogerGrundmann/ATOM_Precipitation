@@ -342,7 +342,73 @@ public:
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
         printf(" time measured: %.3f seconds for WaterVapourEvaporation\n", elapsed.count() * 1e-9);
+        reportSurfaceEnergyLeak();
+
         cout << "      WaterVapourEvaporation ended" << endl;
+    }
+
+    // ==================================================================================
+    // THE SURFACE TURBULENT FLUX, BOTH HALVES, IN W/m2 -- THE ENERGY THAT LEAVES THE SURFACE
+    // AND ENTERS NOTHING. Unconditional, print-only, called at the end of the evaporation pass
+    // so `Evaporation` is final.
+    //
+    // CLAUDE.md records both halves as open and neither as sized:
+    //   SENSIBLE -- MultiLayerRadiation's surface balance solves
+    //   (1-albedo)*SW + L_down = sigma*T_s^4 + c_H*(T_s - T_air1), so the surface is DEBITED
+    //   c_H*(T_s - T_air1), and no term in rhs_t credits it to the air.
+    //   LATENT   -- waterVapourEvaporation moistens levels 0..n_spread and NEVER WRITES `t`, so
+    //   the phase change removes no enthalpy from the surface either.
+    // Both are energy sinks with no matching source: the surface balance is closed BY
+    // CONSTRUCTION (it is solved for T_s), so the non-conservation is invisible there and shows
+    // up only as a number the atmosphere never receives. That number is what this prints.
+    //
+    // Signs: positive = upward, surface -> air, which is the direction Earth's mean fluxes run.
+    // Earth's global means are ~20 W/m2 sensible and ~80 W/m2 latent, ~100 W/m2 together,
+    // against ~240 W/m2 of absorbed shortwave -- so this is not a small term anywhere.
+    // c_H = 15.0 W/(m2 K) is MultiLayerRadiation.h's own value, repeated here rather than
+    // shared, because sharing it would mean a header dependency in the wrong direction; if it
+    // changes there it must change here, and the print says which value it used.
+    // ==================================================================================
+    void reportSurfaceEnergyLeak()
+    {
+        using namespace std;
+        constexpr double c_H = 15.0;                       // MultiLayerRadiation.h's value
+        const double conv    = 1.0 / 8.64e4;               // [mm/d] -> [kg/(m2 s)]
+
+        Array_2D H_sens(m.jm, m.km, 0.0), H_lat(m.jm, m.km, 0.0), dT(m.jm, m.km, 0.0);
+        for (int j = 0; j < m.jm; j++) {
+            for (int k = 0; k < m.km; k++) {
+                const int i_m = m.i_topography[j][k];
+                if (i_m + 1 > m.im - 1) continue;
+                const double T_s    = m.t.x[i_m][j][k]     * m.t_0;
+                const double T_air1 = m.t.x[i_m + 1][j][k] * m.t_0;
+                dT.y[j][k]     = T_s - T_air1;
+                H_sens.y[j][k] = c_H * (T_s - T_air1);                 // W/m2, + upward
+                H_lat.y[j][k]  = m.lv * m.Evaporation.y[j][k] * conv;  // W/m2, + upward
+            }
+        }
+        const double sens = AtomUtils::GetMean_2D(m.jm, m.km, H_sens);
+        const double lat  = AtomUtils::GetMean_2D(m.jm, m.km, H_lat);
+        const double dTm  = AtomUtils::GetMean_2D(m.jm, m.km, dT);
+
+        const ios::fmtflags f = cout.flags();
+        const streamsize    pr = cout.precision();
+        cout << fixed << setprecision(2)
+             << "      ATOM: [SFC ENERGY LEAK] sensible c_H*(T_s-T_air1) = " << sens
+             << " W/m2   latent lv*E = " << lat
+             << " W/m2   total = " << (sens + lat)
+             << " W/m2  (Earth ~20 / ~80 / ~100)" << endl;
+        // E in mm/a as well, because that is the unit `Precip mean` is printed in six lines
+        // away and the two must balance in any closed atmospheric water budget.
+        cout << "      ATOM: [SFC ENERGY LEAK] implied evaporation = "
+             << (lat * 8.64e4 / m.lv) << " mm/d = "
+             << setprecision(1) << (lat * 8.64e4 / m.lv * 365.0) << " mm/a"
+             << setprecision(2) << "   (Earth ~2.7 mm/d = ~1000 mm/a)"
+             << "   -- compare `Precip mean` above" << endl;
+        cout << "      ATOM: [SFC ENERGY LEAK] mean T_s - T_air1 = " << dTm
+             << " K   c_H = " << c_H << " W/(m2 K)"
+             << "   -- ALL OF IT IS DEBITED FROM THE SURFACE AND CREDITED TO NOTHING" << endl;
+        cout.flags(f); cout.precision(pr);
     }
 
     // ------------------------------------------------------------------

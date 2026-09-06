@@ -2151,6 +2151,78 @@ and it is measured only at the INITIAL projection, where `aux` holds a velocity.
 `aux` holds a TENDENCY, so the same probe there would be measuring a different thing and has not
 been run.
 
+## The surface turbulent flux is 10-56 W/m2, it COLLAPSES, and the model rains four times what it evaporates
+
+**THE SURFACE ENERGY LEAK IS NOW A NUMBER** (2026-09-06, unconditional print at the end of
+`waterVapourEvaporation`). This file recorded both halves of the surface exchange as open and
+neither as sized: the balance in `MultiLayerRadiation` DEBITS the surface `c_H*(T_s - T_air1)` and
+nothing credits it to the air, and `waterVapourEvaporation` moistens levels 0..3 and **never writes
+`t`**, so the phase change removes no enthalpy either. The surface balance is closed BY
+CONSTRUCTION — it is solved for `T_s` — so the non-conservation is invisible there and shows up
+only as energy the atmosphere never receives.
+
+| | model | Earth |
+|---|---|---|
+| sensible `c_H*(T_s - T_air1)` | **3.2 - 4.0 W/m2** | ~20 |
+| latent `lv*E` | **6.4 - 51.9 W/m2** | ~80 |
+| **total leaked** | **10 - 56 W/m2** | ~100 |
+| mean `T_s - T_air1` | **0.21 - 0.26 K** | ~1.3 K at this `c_H` |
+
+**THE LEAK IS SMALL, AND NOT BECAUSE THE COUPLING IS NEARLY CLOSED — BECAUSE BOTH FLUXES ARE FAR
+TOO SMALL.** Crediting them to the air is a ~15 W/m2 repair, not a ~100 W/m2 one, and the larger
+defect is upstream of the coupling. `c_H` = 15 W/(m2 K) is a defensible bulk coefficient; what is
+wrong is that the model's surface-to-air temperature difference is **0.21 K where Earth's needs
+~1.3**. *That is D.3's defect measured from the other side*: level 0 is relaxed onto `t_eq` at
+`omega_teq` = 0.20/iteration and level 1 is dragged with it, so the surface layer is nearly
+isothermal and a bulk flux proportional to `T_s - T_air1` has almost nothing to act on.
+
+**AND THE LATENT HALF DOES NOT SETTLE, IT COLLAPSES — 8x IN FOUR ITERATIONS.** Per call, the
+implied evaporation: **649.7 -> 184.6 -> 79.8 mm/a**, against Earth's ~1000.
+
+**THE CAUSE IS THE MOISTENING, AND ITS OWN COMMENT PREDICTED THIS BEFORE THE PROBE EXISTED.**
+`ATM_EVAP_SPREAD`'s note records that the shipped update is not the one its comment describes:
+level 0 RELAXES toward equilibrium while levels 1..`n_spread` take an **absolute addition** of
+`c_eq*weight` every iteration, ungated and independent of how moist they already are, so "levels
+1..3 over ocean ratchet to saturation within a few iterations and stay pinned there". A Dalton
+evaporation is driven by the vapour-pressure DEFICIT, so saturating the air it moistens switches it
+off. Three arms, `nm` = 10, 8 threads, implied evaporation in mm/a per call:
+
+| `ATM_EVAP_SPREAD` | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| **0 (shipped)** | 649.7 | 184.6 | **79.8** | **62.1** | 71.5 | 93.8 |
+| 1 (deficit form) | 649.7 | 309.3 | **235.6** | **225.8** | 236.4 | 257.9 |
+| 2 (per-level relaxation) | 649.7 | 308.2 | **234.2** | **224.3** | 234.9 | 256.4 |
+
+**THE SHIPPED MOISTENING SUPPRESSES THE MODEL'S OWN EVAPORATION BY 2.7x**, and the two repaired
+modes agree with each other to 0.6 % — which is what says the effect is the absolute-addition
+form and not a detail of either replacement. **The mechanism is confirmed and it is not the whole
+story**: even repaired, E settles near **250 mm/a against ~1000**, so the surface flux is a further
+~4x too weak.
+
+**AND THE WATER BUDGET DOES NOT CLOSE, BY A FACTOR OF FOUR TO TWELVE.** In any closed atmospheric
+water budget the long-run global means of P and E are equal. This tree's accepted configuration
+rains **975.8 mm/a at `nm` = 100 and ~1000 at `nm` = 600**, and evaporates **80-260**. So the water
+this model precipitates is not coming from its surface. *That is the same shape as the microphysics
+floor that manufactured 8129 mm/a* — and the candidate source is named in `ATM_EVAP_SPREAD`'s own
+comment: an absolute moisture addition every iteration that no flux produced, bounded only by the
+`c_sat_i` clamp. **A P - E closure print on a spun-up run is the next instrument**, and it is one
+line beside `Precip mean`.
+
+**READ THE ABSOLUTE NUMBERS AS SPIN-UP, THE RATIOS AS REAL.** `nm` = 10 is **2 seconds** of
+physical time, so no arm here is a climate. The three evaporation trajectories start from an
+identical 649.7 and are run from one binary and one initial state, so the 2.7x between them is a
+comparison; the 80-260 against 1000 is a diagnostic of the surface state at those iterations, not
+a converged flux. **NOTHING IS FLIPPED** — `ATM_EVAP_SPREAD` stays 0 — because two seconds is not
+evidence for a default, and because the repaired branch changes the humidity field that every
+cloud and radiation constant was calibrated against.
+
+**WHAT IS AND IS NOT SETTLED.** Settled: both halves of the surface exchange are sized for the
+first time; the sensible half is starved by a 0.21 K surface-air difference; the latent half is
+suppressed 2.7x by the moistening's absolute-addition form, measured on two independent
+replacements. Not settled: whether crediting the fluxes to the air changes anything (~15 W/m2
+against the timescale wall that made `ATM_SFC_FLUX` a null — `omega_teq` is 3290x faster than a
+surface flux BY CONSTRUCTION), and where the precipitated water actually comes from.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
