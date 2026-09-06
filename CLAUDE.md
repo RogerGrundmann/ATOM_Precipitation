@@ -1826,7 +1826,15 @@ stability again does not bind: `B` <= **2.3e20 m^4/s**.
    requires all five of its stencil points marked), rather than differencing against a zero that
    means "not evaluated".
 
-**BOTH KNOBS ARE UNMEASURED**: written, sized, building clean, off-branch byte check not yet run.
+**BOTH KNOBS ARE NOW MEASURED, AND THE OFF-BRANCH BYTE CHECK PASSED ACROSS BINARY
+GENERATIONS**: `cli/hyd_tf`, built before `HYD_A_H`, `HYD_A_H_BIHARM` and `HYD_SFC_FLUX`
+existed, against `cli/hyd` carrying all three at their default off — **19 of 19 written files
+byte-identical**, the VTK slices, the panorama `.vts`, both SST transfer files,
+`PlotData_Hyd.xyz`, the budget CSVs and the 364 MB restart binary. 1 THREAD, `nm` = 20 from
+the iteration-300 checkpoint, atm transfer present (`output_byte_b1` / `output_byte_b2`);
+one thread because the momentum-path race means a 24-thread pair could not tell a null knob
+from the threads. The arms themselves are in *The viscosity arms* above: the Laplacian cuts
+the grid-scale noise 28.7 % and the biharmonic 9.0 % at equal nominal 2*dx strength.
 
 *The `[RUN CONFIG]` banner was printing two of the eight hydrosphere knobs. It now prints all
 eight, and `[SCALES]` prints `dx`, the horizontal metric radius actually in force, and `A_h`'s
@@ -1954,10 +1962,45 @@ the limiter.
 from **5.32 % to 0.78 %** of the salty ocean with the circulation untouched (rms `u`/`v`/`w` to five
 figures, mean KE to six). They are a pair because each alone leaves the other's level set exactly
 unchanged. **Setting either variable back to 0 restores the old branch.**
-**⚠ THE BOTH-DIRECTIONS VERIFICATION IS OWED**: this tree's rule is that a default flip is verified
-by reproducing the measured arm from a clean environment AND reproducing the shipped branch from an
-explicit `=0`, and neither run has been made — the runs were postponed. Do that before quoting
-anything from the new default.
+**THE BOTH-DIRECTIONS VERIFICATION IS NOW DONE, AND BOTH DIRECTIONS REPRODUCE THEIR ARM
+EXACTLY** (2026-09-06, `output_von` / `output_voff`, same iteration-300 seed as every arm above —
+`hyd_restart_0Ma_300.bin` md5 `3736f3f8` plus the atm transfer file — 300 -> 500, 24 threads, one
+pinned binary `cli/hyd_ver`; both exit 0 with **zero NaN**):
+
+| | supercooled (sfc / interior / total) | min T | mean T | mean KE |
+|---|---|---|---|---|
+| `s2`, the measured arm | 50 / 12 539 / **12 589** | -1.9121 | 14.64706 | 1.10586e-04 |
+| **`von`, CLEAN ENVIRONMENT** | **50 / 12 539 / 12 589** | **-1.9121** | **14.64706** | **1.10586e-04** |
+| `f0`, the shipped branch | 2 731 / 82 903 / **85 634** | -3.2243 | 14.54199 | 1.10587e-04 |
+| **`voff`, explicit `=0` on both** | **2 731 / 82 903 / 85 634** | **-3.2243** | **14.54199** | **1.10586e-04** |
+
+**EVERY CELL COUNT IS IDENTITY, NOT AGREEMENT** — to the cell, in both directions — and `min T`,
+`mean T` and the convergence monitor's whole row match to every printed digit. `von`'s banner reads
+`T_FREEZE=1* T_FREEZE_SFC=1*`, starred as compiled-in and not set in the environment, and its
+surface census raises the same 2 742 of 34 641 cells by the same 0.624 C; `voff`'s reads
+`T_FREEZE=0 T_FREEZE_SFC=0` unstarred and prints no census line at all.
+
+**AND THE RESIDUAL IS PLACED AGAINST THE SIGNAL RATHER THAN CALLED SMALL**, rms relative difference
+over the restart arrays:
+
+| | `t` | `p_dyn` | `u` |
+|---|---|---|---|
+| reproduction, `von` vs `s2` | **3.1e-09** | 9.0e-04 | 7.3e-04 |
+| reproduction, `voff` vs `f0` | **7.3e-10** | 1.5e-04 | 7.6e-05 |
+| **knob effect**, `s2` vs `f0` | **1.547e-03** | 8.1e-04 | 6.3e-04 |
+| **knob effect**, `von` vs `voff` | **1.547e-03** | 5.6e-04 | 5.5e-04 |
+
+In the TEMPERATURE the reproduction residual is **six orders below the knob effect**, and that knob
+effect is `1.547e-03` on the old pair and `1.547e-03` on the new one, to four figures. In `p_dyn`
+and `u` the reproduction residual is the SAME SIZE as the "knob effect" — which is the dynamical
+inertness measured a second way: neither number is a signal, both are the documented
+fixed-thread-count non-determinism, worst in the velocity path exactly where the surviving race is.
+
+*The census used here is validated against the recorded four-arm table before being pointed at the
+new arms, and reproduces all four exactly. One correction it needed is worth keeping: a strict
+`T < T_f` OVER-counts by 700 cells in `f1` and 683 in `s2`, because a cell the interior floor WROTE
+sits at a deficit of ~1e-12 C — round-off through the non-dimensionalisation. A cell held AT the
+floor is not supercooled; the tolerance is 1e-9 C.*
 **What is settled is the physics**: 200 iterations is 16.7 s from a ThreeCat-era checkpoint, so this
 is not a spun-up result, but the knobs are connected, stable, dynamically inert, and remove a defect
 that is real and was mis-attributed to a clamp that never fired.
