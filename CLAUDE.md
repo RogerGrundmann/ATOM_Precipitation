@@ -3576,6 +3576,45 @@ line is.
   associative; a tropical precipitation probe differs 4e-6 between 2 and 4 threads. State the
   thread count with any number quoted from here.
 
+- **`OneCatIceScheme`'s `S_nuc` IS COMPUTED AND NEVER READ, AND `tau_s` IS TUNED AGAINST IT**
+  (2026-09-06, found by the first `-Wall -Wextra` sweep this tree has had). `:191` assigns
+  `S_nuc = eps_t/tau_s * cloud`, and the snow source at `:273` is
+  `thr.S_i_au + thr.S_d_au + S_rim + S_frz - S_melt` — **`S_nuc` is absent**. It was superseded
+  when snow was moved onto the shared cloud-ice reservoir, which `:262-264` says in as many
+  words, and the assignment was left behind.
+
+  **What makes it more than dead code is the comments and the constant.** `:31` still reads
+  *"S_nuc is now the sole snow seed"* and justifies **`tau_s` = 4.0e4** on exactly that basis —
+  *"slowed 8x from 1e3; 1e3 over-produced snow (63 % frac)"* — so a tuned constant governs a term
+  that does not run, and `:32`, `:180` and `:308` all reason about `S_nuc` as live, `:308`
+  explaining a band-widening fix by where "snow nucleation `S_nuc` is STRONGEST". `S_dep` at
+  `:124` is likewise declared and never used, consistent with its own removal note.
+
+  **This is the fourth instance of a comment describing code that does not run** — after
+  `initTemperatureData`'s asymptote overwritten on the next line, `Q_Sensible`, and the
+  `panorama_cnt` print. It is in a SELECTABLE scheme (`CategoryIceScheme` = 1) and not the
+  default, so it is a correctness-of-record defect and not a live physics error — but anyone who
+  selects OneCat and tunes `tau_s` is tuning nothing. **The repair is a CHOICE and should be made
+  deliberately**: delete `S_nuc`, `S_dep` and `tau_s` together, or wire `S_nuc` back into `S_s`.
+  Those are different physics.
+
+- **`dt_rain_dim` IS SET AND NEVER USED IN THE DEFAULT SCHEME, AND WHAT IT POINTS AT IS A
+  QUESTION RATHER THAN A FINDING.** `TwoCatIceScheme.h:317`. Harmless alone — `S_ev` uses
+  `pow(R_ev, exp_4_9)` on the AREA-WEIGHTED rate, which is also why `Rain_pow_4_9` at `:289` went
+  dead when `ATM_RAIN_AREA` landed. What it points at is that **`dt_snow_dim` = `step[i]/0.96`, a
+  SNOW fall-transit time, is the timescale for CLOUD-WATER processes**: `S_c_frz = cloud/dt_snow_dim`
+  (`:346`) and both availability limiters, `max_cloud_loss` (`:546`) and `max_ice_loss` (`:559`).
+  That may be the COSMO convention rather than an error, and a discarded rain-side timescale
+  sitting beside it suggests the pairing was intended and never wired up. **One look at the COSMO
+  source settles it. Do not "fix" it before that look.**
+
+- **THE `-Wall -Wextra` SWEEP IS CHEAP AND HAD NEVER BEEN RUN, AND ITS MAIN RESULT IS
+  REASSURING.** `g++ -fsyntax-only -Wall -Wextra` over every `atmosphere/*.cpp` and
+  `hydrosphere/*.cpp` takes about a minute and returns **46 warnings, ALL unused-variable or
+  unused-but-set** — not one uninitialised read, sign-compare, dangling reference or format
+  mismatch. The two entries above are the only ones with content. Re-run it after any large port;
+  a build's own `-Wall` output scrolls past and nobody reads it.
+
 ## The build hazard, because it produced a crash that looked like a success
 
 `-MMD` tracks headers only for objects ALREADY compiled with it. `cli/atm.o` was four weeks
