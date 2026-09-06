@@ -2469,6 +2469,56 @@ mode 5 on the same checkpoint, or removing the relaxation from the free troposph
 levels are the scaffold that makes the CO2 signal persist). **Nothing was flipped here.** The three
 arms are recorded because "the repair has never been run in the model" was true and is no longer.
 
+### And the model CAN be run with radiation in the loop: `radiation_mode` 2 is stable
+
+**`radiation_mode` WAS A HARD-CODED `constexpr int = 5` AND THEREFORE UNTESTABLE.**
+`ATM_RADIATION_MODE=<0..5>` (2026-09-06, default 5 = shipped, **byte-identical unset over 13 files
+at 1 thread**) makes it settable; every use is a runtime comparison in one translation unit.
+Three arms, 600 -> 700 from `output_twctl/atm_restart_0Ma_600.bin`, 24 threads, one pinned binary,
+**all exit 0 with zero NaN** — including mode 2, which was the one expected to fail.
+
+| | **5 (shipped)** | **1** | **2** |
+|---|---|---|---|
+| how MLR reaches `t` | **it does not — discarded** | `t_eq` := MLR's RE, carried by the in-RHS Held-Suarez term | **`t` blended toward MLR at `omega_rad` = 0.05/iter** |
+| `apply_teq_relaxation` (Scotese pin) | **every iteration** | not called | not called |
+| mean T, surface (i=0) | 15.603 C | 15.011 | **13.548** |
+| mean T, i=1 | 12.875 | 12.544 | 11.858 |
+| mean T, i=10 / i=20 / i=30 | 12.781 / 5.590 / -16.873 | 12.503 / 5.386 / -17.087 | **12.557 / 5.568 / -16.751** |
+| max surface T | 34.674 | 33.682 | 33.549 |
+| min T, and where | -56.500, **the lid** | -56.501, 14.6 km | **-57.424, 80S at the GROUND** |
+| P / E / (P/E) | 1014.6 / 512.5 / 1.98 | 1151.1 / 524.2 / 2.20 | 1045.3 / **427.4** / 2.45 |
+
+**MODE 2 IS STABLE, WHICH IS THE ANSWER TO THE QUESTION UNDER THE WHOLE RADIATION CHAIN.** Both
+modes take a ONE-TIME step at the first checkpoint and are then flat: over the following eighty
+iterations the max surface T drifts **-0.004 K in mode 1 and -0.002 K in mode 2**. The offline
+harness reaches NaN in five passes and the `RAD_EQUIL`-alone arm gives a 219 K snowball; blended at
+5 % per iteration alongside the dynamics, the same scheme does not run away. **This model can be
+run with its radiation driving the temperature.**
+
+**READ MODE 1 AS THE CONTROL FOR MODE 2, NOT MODE 5.** Modes 1 and 2 differ from 5 in TWO ways:
+both stop calling `apply_teq_relaxation`, so the Scotese prescription is gone, and only mode 2 adds
+the radiative heating. Mode 1 is therefore the no-prescription control, and the RADIATION's own
+effect is `2` minus `1`: **-1.46 K at the surface, -0.69 K at i=1, and +0.05 to +0.34 K through the
+whole free troposphere** (i=10, 20, 30). So the radiation acts almost entirely at the SURFACE and
+leaves the column within a few tenths — which is the shape the offline work predicted from the
+other side, where the tridiagonal was found to fail below 3.7 km and to track grey RE above it.
+
+**AND THE COLDEST POINT MOVES OFF THE LID.** In mode 5 the minimum is -56.500000 at 16 km, which is
+`t_top_init` — a pin, not a temperature. In mode 2 it is **-57.424 at 80S on the GROUND**: for the
+first time the coldest place in this model is the winter pole rather than the model lid.
+
+**WHAT IT COSTS, AND IT IS NOT SMALL.** Evaporation falls **512 -> 427 mm/a (-17 %)** while
+precipitation rises, so `P/E` goes 1.98 -> 2.45 and the non-closure widens from 502 to 618 mm/a.
+Mode 1 widens it too (627). Removing the Scotese pin makes the water budget worse, and nothing here
+says which of the two changes is responsible.
+
+**WHAT THIS IS NOT.** 100 iterations is 20 seconds of physical time and the arms are flat because
+the fast adjustment is over, not because a climate has equilibrated. Mode 5 remains the default and
+nothing is flipped: mode 2 abandons the Scotese baseline the whole tree is calibrated against, and
+its `omega_rad` = 0.05 per iteration is a numerical rate with no `dt`, exactly like `omega_teq`.
+**What is settled is narrower and firmer than a default: the radiation is not structurally locked
+out of this model — mode 5 locks it out, and mode 2 runs.**
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT

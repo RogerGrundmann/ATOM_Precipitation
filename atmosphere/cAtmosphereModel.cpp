@@ -710,7 +710,19 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     //       otherwise differences to ~0 since both start t from the same Scotese snapshot); seeding
     //       t makes the two runs evolve to distinct, CO2-separated equilibria that the shifted t_eq
     //       then anchors. This is the working single-run CO2 sensitivity path.
-    constexpr int    radiation_mode     = 5;               // mode 5: strong relaxation to Scotese+CO2 perturbation
+    // ATM_RADIATION_MODE -- was a hard-coded constexpr 5 and therefore untestable. Default 5 =
+    // shipped and bit-identical unset. Made settable 2026-09-06 to answer one question: mode 5
+    // DISCARDS every temperature MultiLayerRadiation computes (cloud_radiation_diag saves t, runs
+    // MLR, and restores t), so the radiation is a diagnostic and no radiation change can move the
+    // climate. Modes 1 and 2 are the two routes that do feed MLR into the temperature --
+    // 1 sets t_eq := MLR's radiative equilibrium and lets the in-RHS Held-Suarez term carry it
+    // (which enters at ~1e-8 per iteration, so expect near-inertness), 2 blends t directly toward
+    // MLR at omega_rad = 0.05 per iteration. Every use below is a runtime comparison in this one
+    // translation unit; nothing needs it in a constant expression.
+    static const int radiation_mode = [](){
+        const char* e = getenv("ATM_RADIATION_MODE");
+        const int v = e ? atoi(e) : 5;
+        return (v >= 0 && v <= 5) ? v : 5; }();
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
     constexpr double omega_teq          = 0.20;            // mode 5: relaxation rate toward t_eq (frac/iter)
