@@ -3610,27 +3610,42 @@ line is.
   associative; a tropical precipitation probe differs 4e-6 between 2 and 4 threads. State the
   thread count with any number quoted from here.
 
-- **`OneCatIceScheme`'s `S_nuc` IS COMPUTED AND NEVER READ, AND `tau_s` IS TUNED AGAINST IT**
-  (2026-09-06, found by the first `-Wall -Wextra` sweep this tree has had). `:191` assigns
-  `S_nuc = eps_t/tau_s * cloud`, and the snow source at `:273` is
-  `thr.S_i_au + thr.S_d_au + S_rim + S_frz - S_melt` — **`S_nuc` is absent**. It was superseded
-  when snow was moved onto the shared cloud-ice reservoir, which `:262-264` says in as many
-  words, and the assignment was left behind.
+- **`OneCatIceScheme`'s `S_nuc` WAS COMPUTED AND NEVER READ, AND `tau_s` WAS TUNED AGAINST IT —
+  FIXED BY DELETION 2026-09-06, AND THE HISTORY IS WHY.** `:191` assigned
+  `S_nuc = eps_t/tau_s * cloud` and the snow source at `:273` was
+  `thr.S_i_au + thr.S_d_au + S_rim + S_frz - S_melt`, with `S_nuc` absent. `:31` still called it
+  *"the sole snow seed"* and sized **`tau_s` = 4.0e4** on that basis, and three further comments
+  reasoned about it as live.
 
-  **What makes it more than dead code is the comments and the constant.** `:31` still reads
-  *"S_nuc is now the sole snow seed"* and justifies **`tau_s` = 4.0e4** on exactly that basis —
-  *"slowed 8x from 1e3; 1e3 over-produced snow (63 % frac)"* — so a tuned constant governs a term
-  that does not run, and `:32`, `:180` and `:308` all reason about `S_nuc` as live, `:308`
-  explaining a band-widening fix by where "snow nucleation `S_nuc` is STRONGEST". `S_dep` at
-  `:124` is likewise declared and never used, consistent with its own removal note.
+  **THE FIRST WRITE-UP CALLED THE REPAIR A CHOICE — delete it, or wire it back into `S_s` — AND
+  THE HISTORY SETTLES IT AS DELETION.** Until `633e9c6` the budget read
+  `S_c = S_c_c - S_au - S_ac - S_nuc - S_rim - S_shed` against `S_s = S_nuc + S_rim + S_dep`: a
+  properly conserving pair. That commit routed snow through the bounded ice reservoir instead and
+  **removed BOTH sides together**, which is why the code conserves mass today. Two consequences
+  follow, and each on its own rules the term out:
 
-  **This is the fourth instance of a comment describing code that does not run** — after
-  `initTemperatureData`'s asymptote overwritten on the next line, `Q_Sensible`, and the
-  `panorama_cnt` print. It is in a SELECTABLE scheme (`CategoryIceScheme` = 1) and not the
-  default, so it is a correctness-of-record defect and not a live physics error — but anyone who
-  selects OneCat and tunes `tau_s` is tuning nothing. **The repair is a CHOICE and should be made
-  deliberately**: delete `S_nuc`, `S_dep` and `tau_s` together, or wire `S_nuc` back into `S_s`.
-  Those are different physics.
+  1. **The pathway it stood for is still here, in two steps.** `SaturationAdjustment.h:252`
+     partitions condensate into `ice` by the ice fraction and `:261` freezes cloud water outright
+     below the homogeneous-freezing floor; the throttle then turns that ice into snow through
+     `S_i_au` (aggregation) and `S_d_au` (depositional autoconversion), both bounded. Re-adding
+     `S_nuc` runs the SAME cloud-water-to-frozen-precipitation conversion a second time, in
+     parallel.
+  2. **Re-adding it to `S_s` alone — the naive reading of a compiler "set but not used" — would
+     create snow from nothing**, because the matching `- S_nuc` in `S_c` is gone.
+
+  So nucleation is not missing from this scheme; a redundant second path to snow is. Deleted:
+  `S_nuc`, the orphaned `S_dep`/`a_dep`/`b_dep` declarations, and `tau_s` — a constant fitted
+  when `S_nuc` was the seed AND the scheme still had the unbounded `S_dep`, so doubly obsolete.
+  The four stale comments are corrected and `:273` now carries a **do-not-restore note** giving
+  this reasoning, because the next reader meets the same compiler warning.
+
+  **VERIFIED**: the default branch is `CategoryIceScheme` = 2, so OneCat never executes, and a
+  1-thread `nm` = 4 run before and after is byte-identical over all 13 written files.
+  **STILL OPEN IN OneCat, AND LARGER THAN THIS WAS**: its `ice` is DIAGNOSTIC — set by
+  `SaturationAdjustment`, never debited by the scheme's own `S_i` — so `S_s` draws
+  `thr.S_i_au + thr.S_d_au` from a reservoir nothing depletes. Its own comment at `:274` says so.
+  That is a mass-conservation defect of the same family as the one repaired in TwoCat on
+  2026-09-01, and it is untouched.
 
 - **`dt_rain_dim` IS SET AND NEVER USED IN THE DEFAULT SCHEME, AND WHAT IT POINTS AT IS A
   QUESTION RATHER THAN A FINDING.** `TwoCatIceScheme.h:317`. Harmless alone — `S_ev` uses
@@ -3641,6 +3656,23 @@ line is.
   That may be the COSMO convention rather than an error, and a discarded rain-side timescale
   sitting beside it suggests the pairing was intended and never wired up. **One look at the COSMO
   source settles it. Do not "fix" it before that look.**
+
+- **AND THE `lib/` SWEEP FOUND ONE MORE, NOW FIXED: THE COASTAL SPONGE'S ALASKA PROBE THREW AWAY
+  THE ANSWER IT WENT LOOKING FOR** (2026-09-06). `lib/Utils.cpp:1083`. The comment above the scan
+  says the probe samples a 5x5 area *"and report the cell with max |v|"* — precisely because "the
+  print location varies with sign conventions" — and the loop duly tracked `alaska_jmax`,
+  `alaska_kmax`, `alaska_imax`, `alaska_topo` and `alaska_flagged`, **none of which was ever
+  read**. The `[coastal_sponge]` line printed the VALUE and never the cell, in every run log in
+  this tree. `coastal_velocity_sponge` is live — called on `u`, `v` and `w` at
+  `cAtmosphereModel.cpp:1794-1796` — so this is an instrument that half-answered its own question
+  rather than dead code.
+
+  Now printed. It pays immediately: `AK_max` **moves between successive calls** — `(j=31, k=207,
+  i=6)` then `(j=32, k=211, i=0)` — sits at `topo=0`, and only **13 of the 25** sampled columns
+  are flagged coastal, so the sampled maximum is not a fixed cell and is not necessarily inside
+  the sponge at all. **This changes the `[coastal_sponge]` line's format in every future log**,
+  which is the one cost; the written output is byte-identical over all 13 files at 1 thread.
+  *`lib/` had been outside the first sweep, and these four were the only warnings in it.*
 
 - **THE `-Wall -Wextra` SWEEP IS CHEAP AND HAD NEVER BEEN RUN, AND ITS MAIN RESULT IS
   REASSURING.** `g++ -fsyntax-only -Wall -Wextra` over every `atmosphere/*.cpp` and

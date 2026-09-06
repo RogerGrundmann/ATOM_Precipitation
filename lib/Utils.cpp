@@ -1133,10 +1133,18 @@ void AtomUtils::coastal_velocity_sponge(Array& field,
         }
     }
 
+    // The 5x5 Alaska scan tracked the winning cell and then threw it away: alaska_jmax,
+    // alaska_kmax, alaska_imax, alaska_topo and alaska_flagged were all set and never read,
+    // so the print reported the VALUE while the comment above promised "the cell with max |v|"
+    // -- the whole reason the scan samples an area instead of one point. Reported now
+    // (2026-09-06). AK_flag is how many of the 25 columns the coastal mask actually flagged,
+    // which is what says whether AK_max is even inside the sponge.
     std::cout << "[coastal_sponge] flagged=" << n_coastal
               << " clamped=" << n_clamped
               << " max_pre=" << max_pre
               << " AK_max=" << alaska_max_pre
+              << " @(j=" << alaska_jmax << ",k=" << alaska_kmax << ",i=" << alaska_imax
+              << ",topo=" << alaska_topo << ",AK_flag=" << alaska_flagged << "/25)"
               << " i5_max=" << i5_max
               << " @(j=" << i5_j << ",k=" << i5_k << ",topo=" << i5_topo << ",flag=" << i5_flag << ")"
               << std::endl;

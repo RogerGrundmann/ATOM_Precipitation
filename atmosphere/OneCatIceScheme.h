@@ -21,15 +21,13 @@ namespace OneCatIce {
     constexpr double b_ev = 5.98;                                       // m2*s/kg
     constexpr double a_melt = 3.90e-6;                                  // K/(kg/kg)
     constexpr double b_melt = 10.50;                                    // m2*s/kg
-    constexpr double b_dep = 10.50;                                     // m2*s/kg
     constexpr double a_if = 1.92e-6;
     constexpr double a_cf = 3.97e-5;
     constexpr double E_cf = 5.0e-3;
     constexpr double N_cf_0_surf = 2.0e5;                               // 1/m3
     constexpr double N_cf_0_top = 1.0e4;                                // 1/m3
     constexpr double tau_r = 3.3e3;                                     // s, adjusted for NASA avg 2.68 mm/d
-    constexpr double tau_s = 4.0e4;                                     // s — slowed 8x from 1e3: S_nuc is now the sole snow seed and accumulates over the full [-37,0)C band; 1e3 over-produced snow (63% frac). 8e3 gives a moderate snow fraction.
-    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg). Ported from TwoCat — without it the tau_r tuning above is defeated (ALL cloud autoconverts) -> ~25x over-precip. Applied to the rain autoconversion only; snow nucleation (S_nuc) is left unthresholded.
+    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg). Ported from TwoCat — without it the tau_r tuning above is defeated (ALL cloud autoconverts) -> ~25x over-precip. Applied to the rain autoconversion only, which is now the scheme's ONLY direct cloud-water conversion (see the S_s note below).
     constexpr double a_mc = 0.08;                                       // kg/m2
     constexpr double a_mv = 0.02;                                       // kg/m2
     constexpr int iter_prec_end = 2;                                    // COSMO iterations
@@ -115,13 +113,12 @@ private:
         double eps_t = 0.0;
         double a_m = 0.0;
         double a_ev_local = 0.0;
-        double a_dep = 0.0;
         double N_cf = 0.0;
 
         double q_sat = 0.0, E_sat = 0.0;
         double q_Ice = 0.0,  E_Ice = 0.0;
 
-        double S_nuc, S_frz, S_cf_frz, S_if_frz, S_dep, S_au, S_ac, S_rim, S_shed, S_ev, S_melt;
+        double S_frz, S_cf_frz, S_if_frz, S_au, S_ac, S_rim, S_shed, S_ev, S_melt;
 
         std::vector<double> step(m.im, 0.0);
 
@@ -177,8 +174,8 @@ private:
                         // ATM_CLOUD_FRAC: every q_c_crit test below is an IN-CLOUD one, so it
                         // is applied to cloud/f and the rate scaled by f. See TwoCatIceScheme for
                         // the argument and the measurement. f = 1 off-branch, so all three are
-                        // the shipped expressions exactly. S_nuc and S_ac are LINEAR in cloud
-                        // water and therefore invariant under the transform -- untouched.
+                        // the shipped expressions exactly. S_ac is LINEAR in cloud water and
+                        // therefore invariant under the transform -- untouched.
                         const double f_cld = CloudFraction::effectiveFraction(
                                 max(0.0, m.c.x[i][j][k]) + max(0.0, m.cloud.x[i][j][k])
                                     + max(0.0, m.ice.x[i][j][k]),
@@ -186,10 +183,8 @@ private:
                                 max(0.0, m.cloud.x[i][j][k]) + max(0.0, m.ice.x[i][j][k]));
                         const double cloud_in = m.cloud.x[i][j][k] / f_cld;   // in-cloud water
 
-                        if(m.cloud.x[i][j][k] > 0.0){
+                        if(m.cloud.x[i][j][k] > 0.0)
                             S_au  = f_cld * (1.0 - eps_t)/tau_r * max(0.0, cloud_in - q_c_crit); // Kessler threshold: only cloud excess rains
-                            S_nuc = eps_t/tau_s * max(0.0, m.cloud.x[i][j][k]);                    // snow nucleation left unthresholded (want snow)
-                        }
 
 
                         // collection mechanisms: accretion, riming, shedding
@@ -202,8 +197,8 @@ private:
                         // instability TwoCat cured / ThreeCat had). Two guards, matching TwoCat:
                         // (1) q_c_crit threshold — in the cold snow-forming layers cloud water is
                         //     ~0.09 g/kg < q_c_crit, so riming (the runaway term) switches OFF there
-                        //     while nucleation still makes snow; (2) c_rim reduced 5x. Snow now
-                        //     forms (from S_nuc) and stays bounded.
+                        //     while the ice->snow throttle still makes snow; (2) c_rim reduced 5x.
+                        //     Snow now forms (from thr.S_i_au + thr.S_d_au) and stays bounded.
                         // Fraction-aware for the same reason as S_au. Snow is left as the GRID
                         // MEAN, exactly as Rain is in TwoCat's accretion: scaling it too needs an
                         // assumption about precipitation fraction versus cloud fraction, which
@@ -271,6 +266,21 @@ private:
                                            - S_frz + S_melt;
                         m.S_s.x[i][j][k] =   thr.S_i_au + thr.S_d_au + S_rim
                                            + S_frz - S_melt;
+                        // THERE IS DELIBERATELY NO DIRECT cloud-water -> snow TERM HERE, AND IT
+                        // MUST NOT BE ADDED BACK. Until 633e9c6 this scheme carried
+                        // S_nuc = eps_t/tau_s*cloud as a conserving pair -- credited to S_s,
+                        // debited from S_c -- and that commit removed BOTH sides together when it
+                        // routed snow through the bounded ice reservoir instead. The physical
+                        // chain S_nuc stood for is still here, in two steps: SaturationAdjustment
+                        // freezes cloud water into `ice` (:252 partitions by the ice fraction,
+                        // :261 freezes it outright below the homogeneous-freezing floor), and the
+                        // throttle turns that ice into snow via S_i_au + S_d_au. Re-adding S_nuc
+                        // would run the SAME conversion a second time in parallel, and re-adding
+                        // it to S_s alone -- the naive reading of a compiler "set but not used" --
+                        // would create snow from nothing, because its matching -S_nuc in S_c is
+                        // gone. The leftover assignment and the tuned tau_s were deleted
+                        // 2026-09-06; the constant had been fitted when S_nuc WAS the seed and
+                        // governed a term that no longer ran.
                         // NOTE: cloud ice here is diagnostic (set by SaturationAdjustment; the
                         // scheme's S_i tendency is not integrated into it), so ice cannot be
                         // depleted and m_i stays saturated — the throttle bounds S_d_au but does
@@ -306,8 +316,9 @@ private:
                         // snow integration. Accumulate over the FULL sub-freezing column
                         // [t_00, t_0) = [-37,0)C, not just [t_000, t_0) = [-20,0)C: the old lower
                         // bound t_000 discarded the -37..-20C layers where the ice fraction eps_t
-                        // (and hence snow nucleation S_nuc) is STRONGEST, so the snow that formed
-                        // was zeroed before it could fall — OneCat produced zero snow everywhere.
+                        // (and hence the ice reservoir the snow grows from) is STRONGEST, so the
+                        // snow that formed was zeroed before it could fall — OneCat produced zero
+                        // snow everywhere.
                         if((t_u < m.t_0)&&(t_u >= m.t_00))
                               m.P_snow.x[i][j][k] = m.P_snow.x[i+1][j][k]
                                   + m.r_humid.x[i+1][j][k] * m.S_s.x[i+1][j][k]
