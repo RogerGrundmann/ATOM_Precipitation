@@ -2081,6 +2081,76 @@ output was a WARNING in the same log.** The census print now reports cells score
 fresh, the coldest prescribed SST and `max(T_f - SST)` even when negative — so "the floor found
 nothing to do" and "the floor had nothing to read" no longer print the same line.
 
+## The projection's shortfall is ADJOINTNESS, and converging the solver makes it WORSE
+
+**`ATM_PROJ_CONSISTENCY=1`, new 2026-09-06, print-only, default off.** This tree concluded, BY
+ELIMINATION, that "the solver converges to a fixed point that is not divergence-free, and more
+relaxation converges to it harder". The elimination was sound and the conclusion is now measured
+directly — and its second clause is exactly backwards.
+
+**THE SUSPECT, READ OFF THE SOURCE.** At convergence the Jacobi update (`PressureSolverAtm.h:492`)
+satisfies `Lc(p) = div_src`, with `Lc` the **COMPACT** 7-point Laplacian
+`(p[i+1] - 2p[i] + p[i-1])/dr^2`, because `denom = 2*(num1+num2+num3)`. But the velocity correction
+(`:1063` in the loop, `:1132` in `project_initial_velocity`) applies the **WIDE** gradient
+`(p[i+1] - p[i-1])/(2dr)`, so what the divergence operator sees subtracted is
+`Lw(p) = div(grad_wide p)` — on the same stencil `(p[i+2] - 2p[i] + p[i-2])/(4dr^2)`, **a different
+operator**, which decouples even from odd points and annihilates the Nyquist mode exactly. The
+probe rebuilds both from the model's own `p_dyn` and `aux`, with the solver's own metric
+coefficients, over cells whose entire 13-point stencil is fluid.
+
+**THREE ARMS, 200 OUTER SWEEPS x `ATM_PROJ_SWEEPS` RELAXATIONS, 8 threads, `rms div_src` =
+5.370e-03 in ALL THREE** (same initial field; the arms differ only in relaxation):
+
+| relaxations | solver residual \|Lc-div\| | **removed by the SOLVER** | correction leaves \|div-Lw\| | **removed by the CORRECTION** | `div(u)` after |
+|---|---|---|---|---|---|
+| **200 (shipped)** | 1.610e-03 | **70.01 %** | 2.505e-03 | **53.36 %** | 3.014e-03 |
+| 2 000 | 4.917e-04 | 90.84 % | 2.785e-03 | 48.14 % | 3.376e-03 |
+| **10 000** | **9.848e-05** | **98.17 %** | 2.940e-03 | **45.26 %** | **3.586e-03** |
+
+**THE SOLVER CONVERGES PERFECTLY WELL — 98.2 % — AND THE APPLIED CORRECTION GETS MONOTONICALLY
+WORSE AS IT DOES**: 53.4 -> 48.1 -> 45.3 %, with `div(u)` after the projection RISING
+3.014e-03 -> 3.586e-03. That is the adjointness defect isolated, and it is sharper than "the gap
+stays put". The mechanism follows: as the solver converges, `p_dyn` satisfies the COMPACT operator
+ever more exactly, including at the grid scale where compact and wide differ most, so the WIDE
+gradient applied to it removes less and less. **Relaxing harder does not converge toward a
+divergence-free velocity; it converges toward a pressure that is right for an operator the
+correction does not use.**
+
+**SO THE STANDING CONCLUSION IS CORRECTED.** The fixed point is not "not divergence-free" — it is
+the exact solution of the solver's OWN operator, and the velocity correction uses a DIFFERENT one.
+This also explains the sign of `ATM_PROJ_SWEEPS` being measured **negative** (-0.04 % at 10x,
+-0.07 % at 100x on `Psi(ground)`), which was read as inertness with a rounding-level sign: it is
+this effect, and it is real.
+
+**AND THE OBVIOUS REPAIR IS RULED OUT BY THE SOLVER'S OWN COLOURING, WHICH IS WHY THIS SECTION
+STOPS HERE.** The natural fix — build the Poisson operator as the exact composition of the
+discrete divergence and gradient actually used, i.e. make it WIDE — cannot be solved by this
+solver: a `+-2` stencil leaves `(i+j+k)` parity UNCHANGED, so every stencil neighbour shares the
+cell's own colour and red-black Jacobi decouples into eight independent sub-grids that never
+communicate. **The wide operator and red-black relaxation are incompatible by construction.** The
+viable repair is the other direction — make the CORRECTION consistent with the compact operator by
+applying it at FACES (a staggered / Rhie-Chow momentum-interpolation projection: face gradients,
+face velocity correction, reconstruct to centres) — and that is a change to how the projection is
+applied, not a coefficient. It is not written.
+
+*`ATM_RHIE_CHOW` is not that repair and does not become it.* It adds a `D4` term to the divergence
+which damps the checkerboard; it does not make `div.grad` equal the operator being inverted, which
+is why it measured null on `Psi(ground)` and why that null is structural.
+
+**ONE CONFOUND WAS CHECKED AND ELIMINATED BY MEASUREMENT RATHER THAN ARGUMENT.** The solver CLAMPS
+`div_src` at `denom*p_dyn_cap` (`:456`) before it ever sees it, so `Lc(p)` converges onto the
+CLAMPED value and differencing against the raw divergence would charge the clamp to the solver. The
+probe applies the same clamp and counts it: **0 cells clamped, 0.00 %**, so the clamp is not
+involved at all here and the numbers above are unaffected. *(The first version of the probe did
+difference against the raw value; it read the same 70.01 % / 53.36 %, because nothing clamps.)*
+
+**WHAT THIS IS AND IS NOT.** It IS: the projection's shortfall attributed, on the model's own
+field, to a named operator inconsistency, with a monotone three-point response and a mechanism that
+predicts its direction; and one standing conclusion in this file corrected. It is **NOT** a repair,
+and it is measured only at the INITIAL projection, where `aux` holds a velocity. In the time loop
+`aux` holds a TENDENCY, so the same probe there would be measuring a different thing and has not
+been run.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT

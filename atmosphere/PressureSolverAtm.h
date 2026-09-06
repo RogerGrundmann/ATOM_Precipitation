@@ -1071,6 +1071,156 @@ public:
         }
     }
 
+    // ==================================================================================
+    // ATM_PROJ_CONSISTENCY=1 (print-only, default off) -- IS THE PROJECTION'S GRADIENT THE
+    // ADJOINT OF THE DIVERGENCE THE SOLVER INVERTED?
+    //
+    // The recorded facts this exists to attribute: the in-loop projection removes only 9-14 %
+    // of div(u) per call; 200 sweeps and 40 000 relaxations converge to a PLATEAU that is not
+    // divergence-free; and the p_dyn checkerboard never decays. CLAUDE.md concludes "the solver
+    // converges to a fixed point that is not divergence-free" BY ELIMINATION -- convergence was
+    // ruled out, so something structural was left. This measures the structural thing directly.
+    //
+    // THE SUSPECT, READ OFF THE SOURCE. At convergence the Jacobi update (:492) satisfies
+    //     Lc(p) = div_src + rc,      Lc = COMPACT 7-point,  (p[i+1] - 2p[i] + p[i-1])/dr^2
+    // because denom = 2*(num1+num2+num3). But the velocity correction (:1063, :1132) applies the
+    // WIDE 2*dr gradient, (p[i+1] - p[i-1])/(2dr), so what the divergence operator actually sees
+    // subtracted is
+    //     Lw(p) = div( grad_wide p ),  which on the same stencil is (p[i+2] - 2p[i] + p[i-2])/(4dr^2)
+    // -- a DIFFERENT operator, and one that decouples even from odd points and annihilates the
+    // Nyquist mode exactly. If that is the cause then the solver is driving Lc(p) onto div_src
+    // while the correction subtracts Lw(p), and no number of sweeps can close the gap.
+    //
+    // WHAT IS PRINTED. Over cells whose whole 13-point (+-2 in each direction) stencil is fluid:
+    //   rms div_src                       -- the divergence the projection is asked to remove
+    //   rms (Lc - div_src)                -- the SOLVER's residual; small if it has converged
+    //   rms (div_src - Lw)                -- what the CORRECTION actually leaves behind
+    //   removed_solver / removed_actual   -- 1 - those residuals over rms div_src
+    // The prediction the knob was written to test: removed_solver ~ 1, removed_actual ~ 0.1.
+    // Both are computed from the model's OWN p_dyn and aux, with the solver's own metric
+    // coefficients, so neither is a rewritten quantity. Zero effect on the field.
+    // ==================================================================================
+    void report_projection_consistency(const char* tag)
+    {
+        static const bool on = [](){
+            const char* e = getenv("ATM_PROJ_CONSISTENCY"); return e && atoi(e) != 0; }();
+        if (!on) return;
+        using namespace std;
+
+        const double inv_dr2  = 1.0 / (m.dr * m.dr);
+        const double inv_2dr  = 1.0 / (2.0 * m.dr);
+        const double inv_dthe2= 1.0 / (m.dthe * m.dthe);
+        const double inv_2dthe= 1.0 / (2.0 * m.dthe);
+        const double inv_dphi2= 1.0 / (m.dphi * m.dphi);
+        const double inv_2dphi= 1.0 / (2.0 * m.dphi);
+        const bool   metric_fix = [](){
+            const char* e = getenv("ATM_POISSON_METRIC_FIX"); return e && atoi(e) != 0; }();
+
+        // metric factors at a level; sinthe carries the model's own 0.55 floor
+        auto sin_j = [&](int j){ double s = sin(m.the.z[j]); return (s < 0.55) ? 0.55 : s; };
+
+        static const double pdyn_cap = [](){
+            const char* e = getenv("ATM_PDYN_CAP");
+            const double v = e ? atof(e) : 0.0;
+            return (v > 0.0) ? v : 2.0; }();
+
+        double s_div = 0.0, s_rc = 0.0, s_rw = 0.0;  long n = 0, n_clamped = 0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:s_div,s_rc,s_rw,n,n_clamped)
+        for (int i = 2; i < m.im-2; i++) {
+            for (int j = 2; j < m.jm-2; j++) {
+                for (int k = 2; k < m.km-2; k++) {
+                    // whole 13-point stencil must be fluid: land cells carry zeroed aux and a
+                    // mirrored p_dyn, so a stencil touching one measures the wall, not the operator
+                    bool solid = false;
+                    for (int d = -2; d <= 2 && !solid; d++) {
+                        if (m.h.x[i+d][j][k] == 1.0) solid = true;
+                        if (m.h.x[i][j+d][k] == 1.0) solid = true;
+                        if (m.h.x[i][j][k+d] == 1.0) solid = true;
+                    }
+                    if (solid) continue;
+
+                    // ---- metric at i, i+-1 (radial) and j (horizontal) ----
+                    auto ex   = [&](int ii){ return m.metricExpRm(m.rad.z[ii]); };
+                    auto irm  = [&](int ii){ return 1.0 / m.metricRadius(m.rad.z[ii]); };
+                    const double exp_rm = ex(i), inv_rm = irm(i);
+                    const double sthe   = sin_j(j);
+                    const double inv_rs = inv_rm / sthe;
+                    const double exp2   = exp_rm * exp_rm;
+
+                    const double m_the_c = metric_fix ? (inv_rm * inv_rm) : inv_rm;
+                    const double m_phi_c = metric_fix ? (inv_rs * inv_rs) : inv_rs;
+
+                    // ---- div_src, exactly as the solver forms it in the interior ----
+                    const double du_dr   = (m.aux_u.x[i+1][j][k] - m.aux_u.x[i-1][j][k]) * inv_2dr;
+                    const double dv_dthe = (m.aux_v.x[i][j+1][k] - m.aux_v.x[i][j-1][k]) * inv_2dthe;
+                    const double dw_dphi = (m.aux_w.x[i][j][k+1] - m.aux_w.x[i][j][k-1]) * inv_2dphi;
+                    double div_src = du_dr * exp_rm + dv_dthe * inv_rm + dw_dphi * inv_rs;
+                    if (!AtomUtils::is_finite_safe(div_src)) continue;
+                    // THE SOLVER CLAMPS ITS SOURCE (:456) BEFORE IT EVER SEES IT, so Lc(p)
+                    // converges onto the CLAMPED value. Differencing against the raw divergence
+                    // charges the clamp to the solver and understates its convergence -- the
+                    // first version of this probe did exactly that and read 70 % where the
+                    // clamp-aware number is different. Apply the same clamp, and count it.
+                    const double denom_c = 2.0 * (exp2 * inv_dr2
+                                                + m_the_c * inv_dthe2
+                                                + m_phi_c * inv_dphi2);
+                    const double src_max = denom_c * pdyn_cap;
+                    if      (div_src >  src_max) { div_src =  src_max; n_clamped++; }
+                    else if (div_src < -src_max) { div_src = -src_max; n_clamped++; }
+
+                    // ---- Lc: the COMPACT operator the Jacobi sweep drives onto div_src ----
+                    const double m_the = m_the_c;
+                    const double m_phi = m_phi_c;
+                    const double num_a = exp2 * (-m.metricCurv(m.rad.z[i])) * inv_2dr;
+                    const double Lc =
+                          exp2  * inv_dr2   * (m.p_dyn.x[i+1][j][k] - 2.0*m.p_dyn.x[i][j][k] + m.p_dyn.x[i-1][j][k])
+                        + m_the * inv_dthe2 * (m.p_dyn.x[i][j+1][k] - 2.0*m.p_dyn.x[i][j][k] + m.p_dyn.x[i][j-1][k])
+                        + m_phi * inv_dphi2 * (m.p_dyn.x[i][j][k+1] - 2.0*m.p_dyn.x[i][j][k] + m.p_dyn.x[i][j][k-1])
+                        + num_a * (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]);
+
+                    // ---- Lw: the divergence of the correction the code actually applies ----
+                    // correction field c = (dpdr*exp_rm, dpdthe*inv_rm, dpdphi*inv_rmsinthe),
+                    // then the SAME central divergence applied to it.
+                    auto cu = [&](int ii){
+                        return (m.p_dyn.x[ii+1][j][k] - m.p_dyn.x[ii-1][j][k]) * inv_2dr * ex(ii); };
+                    auto cv = [&](int jj){
+                        return (m.p_dyn.x[i][jj+1][k] - m.p_dyn.x[i][jj-1][k]) * inv_2dthe * inv_rm; };
+                    auto cw = [&](int kk){
+                        return (m.p_dyn.x[i][j][kk+1] - m.p_dyn.x[i][j][kk-1]) * inv_2dphi * inv_rs; };
+                    const double Lw = (cu(i+1) - cu(i-1)) * inv_2dr   * exp_rm
+                                    + (cv(j+1) - cv(j-1)) * inv_2dthe * inv_rm
+                                    + (cw(k+1) - cw(k-1)) * inv_2dphi * inv_rs;
+                    if (!AtomUtils::is_finite_safe(Lc) || !AtomUtils::is_finite_safe(Lw)) continue;
+
+                    s_div += div_src * div_src;
+                    s_rc  += (Lc - div_src) * (Lc - div_src);
+                    s_rw  += (div_src - Lw) * (div_src - Lw);
+                    n++;
+                }
+            }
+        }
+
+        if (n == 0) { cout << "      ATOM: [PROJ CONSISTENCY] no clean cells" << endl; return; }
+        const double rms_div = sqrt(s_div / n);
+        const double rms_rc  = sqrt(s_rc  / n);
+        const double rms_rw  = sqrt(s_rw  / n);
+        const ios::fmtflags f = cout.flags();
+        const streamsize    pr = cout.precision();
+        cout << "      ATOM: [PROJ CONSISTENCY] " << tag
+             << "  rms div_src = "   << scientific << setprecision(3) << rms_div
+             << "   solver residual |Lc-div| = " << rms_rc
+             << "   correction leaves |div-Lw| = " << rms_rw << endl;
+        cout << "      ATOM: [PROJ CONSISTENCY] removed by the SOLVER's operator = "
+             << fixed << setprecision(2) << 100.0*(1.0 - (rms_div > 0 ? rms_rc/rms_div : 0.0))
+             << " %   removed by the APPLIED correction = "
+             << 100.0*(1.0 - (rms_div > 0 ? rms_rw/rms_div : 0.0))
+             << " %   (" << n << " clean cells, " << n_clamped
+             << " = " << (n > 0 ? 100.0*n_clamped/n : 0.0) << " % source-clamped)" << endl;
+        cout.flags(f); cout.precision(pr);
+    }
+
     void project_initial_velocity(int n_sweeps = 200)
     {
         static const int proj_sweeps = [](){
@@ -1101,6 +1251,10 @@ public:
         for (int s = 0; s < n_sweeps; s++) {
             run(false, proj_sweeps);
         }
+
+        // Between Steps 2 and 3 is the ONLY place this can be measured: p_dyn is converged
+        // and aux still holds the velocity Step 1 seeded, so div_src is reconstructible.
+        report_projection_consistency("after the solve, before the correction");
 
         // Step 3 — gradient correction v ← v − ∇p_dyn in the interior.
         // Metric factors match the rhs_u/v/w pressure-gradient term so the magnitudes
