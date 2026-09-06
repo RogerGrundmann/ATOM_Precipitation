@@ -2216,6 +2216,66 @@ a converged flux. **NOTHING IS FLIPPED** — `ATM_EVAP_SPREAD` stays 0 — becau
 evidence for a default, and because the repaired branch changes the humidity field that every
 cloud and radiation constant was calibrated against.
 
+### Level 0 is a PRESCRIBED SKIN, at the user's decision — and that settles what is missing
+
+**THE DECISION, 2026-09-06.** This file recorded that "the model has not decided whether ocean
+level 0 is the ocean or the air", and that the repair depends on which. **It is the prescribed SST
+skin**, and the turbulent flux belongs at the first AIR level. That matches the ocean's own choice
+one model over — `HYD_SFC_FLUX` puts its flux into `im-2`, the top PROGNOSTIC level, not the pinned
+skin — so both models now treat their interface the same way.
+
+**AND UNDER THAT READING THE SENSIBLE TERM IS ALREADY WRITTEN.** `ATM_SFC_FLUX` (default 0.0)
+applies `c_H*(T_s - T_1)` at `i_topography+1`, treats the surface as a fixed reservoir, and is
+correctly non-dimensionalised by `metricShellLength()` rather than `L_atm`. Its own comment says
+"crediting the surface back requires level 0 to be prognostic, which is the larger question this
+defect raises" — that is the question just answered, and the answer means it does not need to be.
+
+**THE LATENT TERM IS NOT MISSING, AND ADDING ONE WOULD DOUBLE-COUNT.** This file has said "both
+halves of the surface energy exchange are open" and that is half wrong. Evaporation puts energy
+into the air as VAPOUR, not as heat; the heat appears when that vapour condenses, and
+`SaturationAdjustment` already releases `lv/cp` per unit condensate. So there is no missing
+air-HEATING term, and crediting `lv*E` to `rhs_t` would count the same energy twice. What
+evaporation genuinely does not do is COOL THE SURFACE — and under the prescribed-skin convention
+the surface is a fixed reservoir by construction, so that is a stated consequence of the choice
+rather than a defect to repair. **Only the sensible half was ever missing.**
+
+**THE RELAXATION PRESCRIBES PART OF THE GRADIENT THE FLUX ACTS ON — MEASURED, AND IT IS NOT THE
+WHOLE STORY.** `apply_teq_relaxation` runs over EVERY level `0..im-1`, and `t_eq`'s own
+level0-to-level1 difference is **0.24 K** against a model `T_s - T_air1` of 0.21-0.26 K early on:
+the same number. `ATM_TEQ_SKIN_ONLY=1` (new, default 0, **byte-identical off over 13 files at 1
+thread**) restricts it to `i <= i_topography`, which under this convention is exactly the
+prescription, leaving the air free. Four arms, `nm` = 20, 8 threads:
+
+| arm | `T_s - T_air1` | sensible W/m2 | latent W/m2 |
+|---|---|---|---|
+| control | 0.31 K | 4.71 | 16.71 |
+| **`ATM_TEQ_SKIN_ONLY=1`** | **0.38 K** | **5.64** | 17.57 |
+| `+ ATM_SFC_FLUX=15` | 0.38 K | 5.63 | 17.57 |
+| `ATM_SFC_FLUX=15` alone | 0.31 K | 4.71 | 16.72 |
+
+**FREEING THE AIR RECOVERS 23 % OF THE SURFACE-AIR DIFFERENCE** (0.31 -> 0.38 K) and 20 % of the
+sensible flux. The control settles at 0.31 K against `t_eq`'s 0.24, so the model does generate
+0.07 K of its own; freed, it generates 0.14 K — **the relaxation was suppressing about half of the
+model's self-generated gradient.** That is real and it is the first time this layer has been moved
+by anything other than a convective adjustment.
+
+**AND MY OWN CLAIM THAT THIS WOULD MAKE `ATM_SFC_FLUX` ACT IS REFUTED BY THE SAME TABLE.** The flux
+is a null on BOTH branches — `fluxonly` reproduces the control to every digit and `skinflux`
+reproduces `skin` to 5.63 against 5.64. I had written that the relaxation "prescribes both
+endpoints of the difference the flux is proportional to, so even an infinite `c_H` would act on a
+gradient the model did not compute". Half right: it prescribes about half of it, and removing it
+does NOT make the flux reachable. **The timescale wall stands unchanged** — `nm` = 20 is 4 seconds
+against a 3293 s flux timescale, i.e. 0.12 % of the way — and it, not the relaxation, is why
+`ATM_SFC_FLUX` measures null. Two explanations that had been conflated are now separated, and both
+are true of different things.
+
+**WHAT IS LEFT ON THIS ITEM.** Even with the air freed, `T_s - T_air1` = 0.38 K against the ~1.3 K
+Earth needs at this `c_H`, so **3.4x of the gap is neither the relaxation nor the missing credit**.
+And `ATM_TEQ_SKIN_ONLY` MUST NOT BE FLIPPED on the strength of the table above: the levels it stops
+relaxing are the scaffold that makes the CO2 signal persist — the physical Held-Suarez term enters
+at ~1e-8/iteration — so every CO2-sensitivity result in this tree is on the other branch. It exists
+to make the surface layer measurable.
+
 **WHAT IS AND IS NOT SETTLED.** Settled: both halves of the surface exchange are sized for the
 first time; the sensible half is starved by a 0.21 K surface-air difference; the latent half is
 suppressed 2.7x by the moistening's absolute-addition form, measured on two independent

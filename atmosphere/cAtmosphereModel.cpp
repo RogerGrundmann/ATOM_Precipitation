@@ -764,11 +764,40 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // cold bias, unlike mode 2). The realistic equator-pole gradient in t_eq preserves the mean
     // circulation driving; only transient eddies are damped (canonical Held-Suarez at proper
     // strength). t_new = (1-omega_teq)*t_old + omega_teq*t_eq.
+    // ATM_TEQ_SKIN_ONLY -- restrict the relaxation to the PRESCRIBED SKIN (i <= i_topography)
+    // instead of every level 0..im-1. Default 0 = shipped and bit-identical.
+    //
+    // WHY, AND IT IS NOT THE TIMESCALE ARGUMENT ALREADY IN CLAUDE.md. That argument says
+    // omega_teq = 0.20 PER ITERATION carries no dt, giving a 1 s e-folding against a 3293 s
+    // surface flux, so ATM_SFC_FLUX measured a null because the relaxation absorbed 93 % of
+    // what it added. True, and not the whole reason. Measured 2026-09-06 by the [SFC ENERGY
+    // LEAK] print: t_eq's OWN level0-to-level1 difference is 0.24 K and the model's actual
+    // T_s - T_air1 is 0.21-0.26 K -- the same number. The relaxation does not merely outrun the
+    // flux; it PRESCRIBES BOTH ENDPOINTS OF THE DIFFERENCE THE FLUX IS PROPORTIONAL TO. A bulk
+    // flux c_H*(T_s - T_air1) with any c_H whatever is then acting on a gradient the model did
+    // not compute, which is why 3.2-4.0 W/m2 comes out against Earth's ~20.
+    //
+    // Under the convention chosen for this model -- level 0 IS a prescribed SST skin and the
+    // turbulent flux is applied to the first AIR level (which is what ATM_SFC_FLUX already
+    // does, at i_topography+1) -- relaxing level 0 IS the prescription and is correct.
+    // Relaxing levels 1..im-1 is a SEPARATE thing wearing the same name: it is the scaffold
+    // that makes the CO2 signal persist, because the physical Held-Suarez term enters at
+    // ~1e-8/iteration (cAtmosphereModel.cpp:733 records exactly this). Setting this knob keeps
+    // the prescription and drops the scaffold.
+    //
+    // ⚠️ IT IS NOT A FREE IMPROVEMENT AND MUST NOT BE FLIPPED ON THAT ARGUMENT. The scaffold is
+    // load-bearing: with it off, the CO2 perturbation no longer reaches the free troposphere by
+    // relaxation, so every CO2-sensitivity result in this tree is on the other branch. This
+    // exists to make the surface layer measurable, not to be switched on.
+    static const bool teq_skin_only = [](){
+        const char* e = getenv("ATM_TEQ_SKIN_ONLY"); return e && atoi(e) != 0; }();
     auto apply_teq_relaxation = [&]() {
         for (int i = 0; i < im; i++)
             for (int j = 0; j < jm; j++)
-                for (int k = 0; k < km; k++)
+                for (int k = 0; k < km; k++) {
+                    if (teq_skin_only && i > i_topography[j][k]) continue;
                     t.x[i][j][k] = (1.0 - omega_teq) * t.x[i][j][k] + omega_teq * t_eq.x[i][j][k];
+                }
     };
 
     // Option B helper: nudge the dynamical t toward the MLR radiative-equilibrium field by

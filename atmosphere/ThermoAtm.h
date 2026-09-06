@@ -375,7 +375,8 @@ public:
         constexpr double c_H = 15.0;                       // MultiLayerRadiation.h's value
         const double conv    = 1.0 / 8.64e4;               // [mm/d] -> [kg/(m2 s)]
 
-        Array_2D H_sens(m.jm, m.km, 0.0), H_lat(m.jm, m.km, 0.0), dT(m.jm, m.km, 0.0);
+        Array_2D H_sens(m.jm, m.km, 0.0), H_lat(m.jm, m.km, 0.0), dT(m.jm, m.km, 0.0),
+                 dTeq(m.jm, m.km, 0.0);
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
                 const int i_m = m.i_topography[j][k];
@@ -383,6 +384,11 @@ public:
                 const double T_s    = m.t.x[i_m][j][k]     * m.t_0;
                 const double T_air1 = m.t.x[i_m + 1][j][k] * m.t_0;
                 dT.y[j][k]     = T_s - T_air1;
+                // The RELAXATION's own surface-to-first-air-level difference. apply_teq_relaxation
+                // pulls EVERY level 0..im-1 toward t_eq at omega_teq = 0.20 per iteration with no
+                // dt, so if it dominates both levels then T_s - T_air1 must simply BE this, and
+                // the bulk flux has nothing to act on for a reason that is not the flux's.
+                dTeq.y[j][k]   = (m.t_eq.x[i_m][j][k] - m.t_eq.x[i_m + 1][j][k]) * m.t_0;
                 H_sens.y[j][k] = c_H * (T_s - T_air1);                 // W/m2, + upward
                 H_lat.y[j][k]  = m.lv * m.Evaporation.y[j][k] * conv;  // W/m2, + upward
             }
@@ -390,6 +396,7 @@ public:
         const double sens = AtomUtils::GetMean_2D(m.jm, m.km, H_sens);
         const double lat  = AtomUtils::GetMean_2D(m.jm, m.km, H_lat);
         const double dTm  = AtomUtils::GetMean_2D(m.jm, m.km, dT);
+        const double dTeqm= AtomUtils::GetMean_2D(m.jm, m.km, dTeq);
 
         const ios::fmtflags f = cout.flags();
         const streamsize    pr = cout.precision();
@@ -406,7 +413,8 @@ public:
              << setprecision(2) << "   (Earth ~2.7 mm/d = ~1000 mm/a)"
              << "   -- compare `Precip mean` above" << endl;
         cout << "      ATOM: [SFC ENERGY LEAK] mean T_s - T_air1 = " << dTm
-             << " K   c_H = " << c_H << " W/(m2 K)"
+             << " K   (t_eq's own level0-level1 difference = " << dTeqm << " K)"
+             << "   c_H = " << c_H << " W/(m2 K)"
              << "   -- ALL OF IT IS DEBITED FROM THE SURFACE AND CREDITED TO NOTHING" << endl;
         cout.flags(f); cout.precision(pr);
     }
