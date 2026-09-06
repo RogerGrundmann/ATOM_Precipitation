@@ -2401,6 +2401,74 @@ to levels 1..`n_spread` every iteration that no flux produced, bounded only by t
 That is the same shape as the microphysics floor which manufactured 8129 mm/a before 2026-09-01,
 and it is now measurable in one line of every run log rather than by instrumenting a scheme.
 
+## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
+
+**THE REPAIR FOR "THE SOLVER HAS NO FIXED POINT" HAS NOW BEEN RUN IN THE FULL MODEL, WHICH IT
+NEVER HAD, AND IT CANNOT MATTER — FOR A REASON THAT IS STRUCTURAL AND NOT A TIMESCALE**
+(2026-09-06). `ATM_RAD_EQUIL` + `ATM_SW_INSOL` are verified OFFLINE against a 200 000-sweep Jacobi
+at `max|dT|` = 0.000000 and have stayed default 0 "pending model arms". Three arms, 600 -> 700 from
+`output_twctl/atm_restart_0Ma_600.bin`, 24 threads, one pinned binary, all exit 0 with **zero NaN**:
+
+| | control | **`RAD_EQUIL` + `SW_INSOL`** | `RAD_EQUIL` alone |
+|---|---|---|---|
+| TOA incoming | 151.3 W/m2 | **340.3** | 151.3 |
+| planetary albedo | 0.309 | 0.311 | 0.309 |
+| **SW absorbed at the surface** | **104.6 W/m2** | **234.3** | 104.6 |
+| **max surface T** | **34.68 C** | **33.92 C** | **33.87 C** |
+| min T | -56.50 | -56.50 | -56.50 |
+| P / E / (P/E) | 1014.6 / 512.5 / 1.98 | 972.4 / 497.1 / 1.96 | 1000.7 / 502.9 / 1.99 |
+
+**THE PAIR MORE THAN DOUBLES THE ABSORBED SHORTWAVE — +130 W/m2 — AND THE SURFACE GETS 0.76 K
+COLDER.** And the half arm, which carries the CONTROL's shortwave, lands within 0.05 K of the pair.
+**So the 130 W/m2 contributed essentially nothing**, and what little moved tracks the solver change,
+not the energy.
+
+**THE CAUSE, READ OFF THE SOURCE AND NOT INFERRED.** In `radiation_mode` 5 the in-loop block
+(`cAtmosphereModel.cpp:1841`) does three things:
+1. `apply_co2_perturbation(false)` builds `t_eq` = **Scotese baseline + CO2 perturbation**
+   (`:887`, `t_eq = t_eq_base + dpert`). **MLR is not in it.**
+2. `cloud_radiation_diag()` saves `t`, runs `MultiLayerRadiation::run()` — which writes `t` — and
+   then **RESTORES the saved `t`**, twice, once after the clear-sky pass and once after the cloudy
+   one. The comment on the second is *"restore dynamical t (radiation.x kept cloudy)"*. Only the
+   diagnostic flux survives.
+3. `apply_teq_relaxation()` relaxes `t` onto that prescribed `t_eq` at `omega_teq` = 0.20 per
+   iteration.
+
+**SO THE MODEL'S TEMPERATURE IS PRESCRIBED AND THE RADIATION IS A DIAGNOSTIC. Every temperature
+`MultiLayerRadiation` computes is deleted on the same call.** No radiation change — the solver, the
+shortwave, the band constants, the cloud optics, the optical depths — can move this model's
+temperature by any route, at any run length.
+
+**AND THAT CORRECTS THIS FILE'S OWN ATTRIBUTION.** The paragraph *"THE TEMPERATURE IS ALSO NOT
+REACHABLE BY THE RADIATION KNOBS AT THIS `nm`"* explains the same null by the cadence and the run
+length — *"MLR reaches `t` only through `t_eq` on a `teq_refresh_stride` = 20 cadence, and 100
+iterations is 20 seconds"*. **MLR does not reach `t` through `t_eq` at all**: `t_eq` is Scotese plus
+a CO2 perturbation and never sees MLR's output. The run length is irrelevant, and *"the INITIAL
+profile is the only lever on this timescale"* is true for a reason that has nothing to do with the
+timescale. **Ninth instance in this tree of a null attributed to a timescale that is structural** —
+the same shape as `ATM_SFC_FLUX`, where the timescale argument was real but was not the only thing
+going on.
+
+**WHAT THAT MEANS FOR THE WHOLE RADIATION CHAIN.** `ATM_RAD_EQUIL`'s exact sweep, `ATM_SW_INSOL`'s
+correct insolation, the `eps_dry`/`co2_band` sweeps, `ATM_TAU_PBROAD`, the OLR work, the cirrus and
+`cwp_cap_col` findings — **all of it is diagnostic under `radiation_mode` 5**, and none of it can
+be judged by a temperature or a precipitation response. That is not a reason to distrust those
+measurements; the fluxes, optical depths and OLRs are real and were measured on the model's own
+field. It is a reason to stop expecting them to move a climate, and to say so when quoting them.
+
+**AND `warnIfHalfRepaired()` IS RIGHT ABOUT THE SCHEME AND IRRELEVANT TO THE MODEL.** Offline, one
+of the pair alone is the worst of the four arms — the shortwave alone diverges to 140.92 K with an
+inverted lapse. In the model the half arm is indistinguishable from the pair (33.87 vs 33.92 C),
+because the branch it damages is one whose output is discarded. Keep the warning; it protects the
+harness.
+
+**THE PREREQUISITE FOR ANY OF THIS MATTERING IS NOT A RADIATION FIX.** It is a prognostic
+temperature — either `radiation_mode` 1/2, which DO feed MLR into `t_eq`/`t`, measured against
+mode 5 on the same checkpoint, or removing the relaxation from the free troposphere
+(`ATM_TEQ_SKIN_ONLY`, written 2026-09-06 and **not** flippable for the reason recorded there: those
+levels are the scaffold that makes the CO2 signal persist). **Nothing was flipped here.** The three
+arms are recorded because "the repair has never been run in the model" was true and is no longer.
+
 ## Open risks
 
 - **`ATM_CLOUD_FRAC`: the sub-grid cloud scheme is WRITTEN AND STRUCTURALLY RIGHT, AND IT IS NOT
