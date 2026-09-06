@@ -2343,11 +2343,39 @@ this tree. First readings, `nm` = 20 (4 seconds of physical time), 8 threads:
     water budget closure:  P = 467.7 mm/a   E = 189.7 mm/a   P - E = 277.9 mm/a   P/E = 2.46
     water budget closure:  P = 567.3 mm/a   E = 209.2 mm/a   P - E = 358.1 mm/a   P/E = 2.71
 
-**AND P IS STILL CLIMBING WHILE E IS NOT**, so the ratio grows with the run: the accepted
-configuration rains **975.8 mm/a at `nm` = 100** against an evaporation of the order measured here,
-i.e. **P/E of 4-5 and rising**. Read the RATIO on a spun-up run and not this one — E is a diagnostic
-of the surface state and responds in one call, P is a flux that has to grow out of the initial
-condition — but the direction is not in doubt and the gap is not small.
+**READ ON A SPUN-UP FIELD IT IS 1.75-1.98, NOT THE 4-5 THIS PARAGRAPH FIRST PREDICTED.** Restarted
+from `output_twctl/atm_restart_0Ma_600.bin` — the from-scratch default-configuration control, every
+knob compiled-in — run 600 -> 700 at 24 threads, exit 0 with zero NaN. The ratio SETTLES by
+iteration ~609 and then holds for ninety iterations, on both parities of the 2dt sawtooth:
+
+| parity | P mm/a | E mm/a | **P - E** | **P/E** |
+|---|---|---|---|---|
+| **high** | 1010 - 1024 | 510 - 514 | **494 - 510** | **1.98** |
+| **low** | 913 - 921 | 521 - 527 | **388 - 395** | **1.75** |
+
+**TWO PREDICTIONS MADE FROM THE SHORT RUNS ARE REFUTED, AND BOTH IN THE MODEL'S FAVOUR.** (1) P/E
+is **~1.9**, not 4-5. (2) Evaporation on a spun-up field is **510-527 mm/a**, about HALF Earth's
+~1000 — not the 80-260 the `nm` = 20 arms showed, and not "5-12x too low". **The evaporation
+collapse measured at `nm` = 10-20 is a SPIN-UP ARTEFACT of the analytic initial condition, not the
+model's settled state**, and the `ATM_EVAP_SPREAD` comparison (2.7x between the shipped and
+repaired forms) was measured entirely inside that transient. It should be re-run from this
+checkpoint before it is quoted as a property of the model.
+
+**WHAT SURVIVES, AND IT IS STILL LARGE.** `P - E` = **390-500 mm/a** on a settled field: about
+**40-50 % of everything this model precipitates has no surface source.** P = 1014.6 at iteration
+700 also reproduces the recorded ~1000 for this configuration, so the P side is the model's own
+headline number and it is the E side that is short. The gap is real, it is measured on a spun-up
+field for the first time, and the candidate source is unchanged — `ATM_EVAP_SPREAD`'s absolute
+moisture addition to levels 1..`n_spread` every iteration, bounded only by the `c_sat_i` clamp.
+
+**⚠ `nm` MEANS DIFFERENT THINGS IN THE TWO MODELS, AND THE FIRST ATTEMPT AT THIS RUN WAS A
+SILENT NO-OP.** `cAtmosphereModel.cpp:1319` is `for(iter_n = iter_start; iter_n <= nm; iter_n++)`,
+so in the ATMOSPHERE `nm` is the TOTAL iteration count; restarting at 600 with `nm` = 100 runs
+**zero** iterations. The hydrosphere is the other way round — its `nm` counts NEW iterations and
+`total_iter_count` accumulates, which is how every ocean restart in this file was set up. The
+no-op exits 0, writes its files, prints a full set of diagnostics from the SETUP state, and says
+nothing about having skipped the loop. *Ninth occurrence of "the answer was in output nobody
+opened": the tell was `total_iter_count 600` in a run that was supposed to end at 700.*
 
 **The candidate source is named in `ATM_EVAP_SPREAD`'s own comment**: an absolute moisture addition
 to levels 1..`n_spread` every iteration that no flux produced, bounded only by the `c_sat_i` clamp.
