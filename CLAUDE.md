@@ -845,9 +845,8 @@ nothing.)
 
 **THERE IS NO EULER NUMBER IN THE PRESSURE-GRADIENT TERM.** `rhs_v` gets `-inv_rm * dp/dthe` with
 no `p_0/(rho u_0^2)` coefficient, so for the momentum equation to be dimensionally consistent
-`p_dyn` must be non-dimensionalised by **`rho*u_0^2` ~ 43.7 Pa**, not by `p_0` = 1013.25 hPa.
-`PressureSolverAtm.h:98` states the wrong one, and **every VTK writes `p_dyn * p_0`, i.e. 2320x
-too large.** Verified three independent ways:
+`p_dyn` must be non-dimensionalised by **`rho*u_0^2`**, not by `p_0` = 1013.25 hPa.
+`PressureSolverAtm.h:98` states the wrong one. Verified three independent ways:
 
 | check | predicted | measured |
 |---|---|---|
@@ -858,10 +857,45 @@ too large.** Verified three independent ways:
 Under the `p_0` normalisation the third line would read **0.240**, and the budget would have to be
 wrong. It is not; the label is.
 
+**AND WHICH `rho` IS THE REFERENCE ONE — 77.06 Pa, NOT THE 43.7 THIS SECTION USED TO SAY**
+(corrected 2026-09-06). All three checks above are RATIOS of non-dimensional quantities, so they
+pin the FORM `rho*u_0^2` and say nothing about the density; the 43.7 was a mid-tropospheric value
+(rho ~ 0.68 at the ~5.5 km jet core where it was measured). **The momentum equation settles it.**
+`RHS_Atm_Turb.cpp:933-935` assembles `dpdr*exp_rm`, `dpdthe*inv_rm` and `dpdphi*inv_rmsinthe`
+BARE — no `1/rho` — and the shipped Poisson source is `div(aux)` with no density in it either
+(`ATM_ANELASTIC` adds the `dln(rho)/dr` terms and is default off). So the system is Boussinesq and
+the density absorbed into `p_dyn` is a single REFERENCE constant, `r_air` = 1.2041, which is also
+the fallback `rho_c` uses at `RHS_Atm_Turb.cpp:1044`. **One non-dim unit is
+`r_air*u_0^2` = 1.2041 * 64 = 77.06 Pa.**
+
+**THE VTK FACTOR IS NOW FIXED** (2026-09-06). All four `PressureDynamic` writers
+(`Paraview_Atm.cpp`, panorama / radial / zonal / longal) used `p_0` and now use
+`r_air*u_0^2/100`, i.e. **hPa, the same unit `PressureStatic` is dumped in**. The written field
+was `p_0/(r_air*u_0^2)` = **1315x too large** — the previously recorded 2320x was that ratio taken
+against the 43.7. A/B at ONE thread, `nm` = 4, pre-fix against post-fix binary: of the 74 arrays
+in the zonal slice **73 are byte-identical and only `PressureDynamic` moves**, by a median
+7.605355e-04 against a predicted 7.605468e-04 (the scatter is the ASCII output's 3 significant
+digits); every budget CSV, both transfer files, `PlotData_Atm.xyz`, `convergence.csv` and the
+streamfunction are byte-identical, and the iteration-0 slices are too because `p_dyn` is zero
+there. The plotted values are now genuinely small — max \|`p_dyn`\| ~ 0.017 nd is **0.013 hPa =
+1.3 Pa** — and that smallness IS the finding of this section, so hPa was kept rather than
+switching to Pa to make the numbers look larger.
+
+**AND IT LEAVES ONE INCONSISTENCY IN THE CODE, UNFIXED AND RECORDED.** `ATM_HYDRO_PGF`'s Euler
+number uses the LOCAL density — `rho_c = r_humid.x[i][j][k]` at `RHS_Atm_Turb.cpp:1043` — where
+the bare projection term beside it in the same `rhs_v` implies the constant `r_air`. The two
+differ by `rho_local/r_air`: 1 at the surface, ~1.8 at 5 km, ~4 at 10 km. So on its own branch
+the hydrostatic term is up to 4x too WEAK aloft relative to the convention the rest of the
+equation uses. **Not touched here** — the knob is default 0 and every measurement recorded for it
+was taken with the local density, so changing it would silently invalidate those arms. It needs
+its own arm.
+
 **CONSEQUENCE: THE TWO PRESSURE CLAMPS ARE THREE ORDERS SMALLER THAN THEIR COMMENTS SAY.**
-`p_dyn_cap` = 2.0 is **87 Pa**, not 2000 hPa; `p_dyn_ceiling` = 3.0 is **131 Pa**. A
-geostrophically balanced mid-latitude pressure field in these units is `p_dyn` ~ **70** — **23x
-above the ceiling.** **Neither binds today** — max \|`p_dyn`\| is 0.017 at iteration 600, 176x
+`p_dyn_cap` = 2.0 is **154 Pa**, not 2000 hPa; `p_dyn_ceiling` = 3.0 is **231 Pa** (both
+re-derived 2026-09-06 under the reference density; they read 87 and 131 while this file used
+43.7). A geostrophically balanced mid-latitude pressure field in these units is `p_dyn` ~ **40** —
+**13x above the ceiling**, so the conclusion is unchanged and its margin is smaller.
+**Neither binds today** — max \|`p_dyn`\| is 0.017 at iteration 600, 176x
 below the ceiling — so they are a LATENT barrier and not the present cause. But any repair that
 gives this model a real thermal pressure field will hit them before it works, and re-sizing them
 is part of that repair rather than a follow-up. *Sixth instrument-shaped defect in this tree,

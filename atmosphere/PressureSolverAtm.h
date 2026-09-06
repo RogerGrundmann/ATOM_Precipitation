@@ -94,9 +94,12 @@ public:
         // huge Poisson source → runaway p_dyn → pressure-gradient force → velocity that
         // pegs the ±100 m/s clamp → larger divergence (a closed dry instability,
         // independent of moist physics). Bounding the per-cell source to denom·p_dyn_cap
-        // caps its contribution to p_dyn at p_dyn_cap (discrete max principle). p_dyn is
-        // non-dimensionalised by p_0=1013.25 hPa, so healthy dynamic pressure is ≪1
-        // non-dim (tens of hPa); the runaway reached 18–43 non-dim (≈18000–44000 hPa).
+        // caps its contribution to p_dyn at p_dyn_cap (discrete max principle).
+        // WARNING: THE TWO SENTENCES THAT STOOD HERE WERE WRONG ABOUT THE UNIT (corrected
+        // 2026-09-06). p_dyn is non-dimensionalised by rho*u_0^2 = 77.06 Pa and NOT by p_0, so
+        // 1 non-dim is 77 Pa: healthy dynamic pressure is <<1 non-dim (a few Pa, NOT tens of
+        // hPa) and the runaway that reached 18-43 non-dim reached 1400-3300 Pa, not
+        // 18000-44000 hPa. See the ATM_PDYN_CEILING note below for the derivation.
         // p_dyn_cap is a GENEROUS backstop only. A tight value (1.0) under-removed the
         // velocity divergence (the source IS the divergence the projection must cancel),
         // breaking incompressibility and triggering a worse dry CFL blow-up at the NZ Alps
@@ -612,13 +615,18 @@ public:
         // ⚠️ ATM_PDYN_CEILING (2026-09-03, default 0 = the shipped phase-dependent value, so an
         // unset environment is BIT-IDENTICAL). Both clamps are LATENT BARRIERS to any repair that
         // gives this model a real thermal pressure field, and the size of the barrier is not the
-        // size the comments above claim. p_dyn is non-dimensionalised by rho*u_0^2 ~ 43.7 Pa and
+        // size the comments above claim. p_dyn is non-dimensionalised by rho*u_0^2 and
         // NOT by p_0 = 1013.25 hPa -- there is no Euler number in the pressure-gradient term of
         // rhs_v, so the momentum equation is only dimensionally consistent under rho*u_0^2 (see
         // CLAUDE.md, "p_dyn is not in the units this tree has always said it is", verified three
-        // independent ways). So this ceiling is 131 Pa, not 3000 hPa, and p_dyn_cap is 87 Pa.
-        // A geostrophically balanced mid-latitude pressure field in these units is p_dyn ~ 70 --
-        // 23x ABOVE the ceiling. Nothing binds today (max|p_dyn| ~ 0.017, 176x below it), which
+        // independent ways). The rho is the REFERENCE one, r_air = 1.2041, because the momentum
+        // equation carries no 1/rho and the shipped Poisson source carries no density either --
+        // the system is Boussinesq (corrected 2026-09-06; this comment previously said 43.7 Pa,
+        // which is the LOCAL value at the ~5.5 km jet core where it was measured). One non-dim
+        // unit is r_air*u_0^2 = 77.06 Pa, so this ceiling is 231 Pa, not 3000 hPa, and
+        // p_dyn_cap is 154 Pa.
+        // A geostrophically balanced mid-latitude pressure field in these units is p_dyn ~ 40 --
+        // 13x ABOVE the ceiling. Nothing binds today (max|p_dyn| ~ 0.017, 176x below it), which
         // is exactly why this needs a COUNTER and not an argument: the first repair that works
         // will hit the clamp before it shows a circulation, and would otherwise look like a null.
         const double p_dyn_ceiling = [&](){

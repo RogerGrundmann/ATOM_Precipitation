@@ -35,6 +35,35 @@ namespace ParaViewAtm{
         return ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) ? 0.0 : v;
     }
 
+    // ==================================================================================
+    // p_dyn IS NOT NORMALISED BY p_0, AND EVERY VTK IN THIS TREE SAID IT WAS (fixed 2026-09-06).
+    //
+    // The four PressureDynamic writers below used `p_0` = 1013.25 hPa as the multiplier, which
+    // is what PressureStatic needs and what p_dyn does NOT. There is no Euler number in the
+    // pressure-gradient term of the momentum equations -- RHS_Atm_Turb.cpp:933-935 assembles
+    // `dpdr*exp_rm`, `dpdthe*inv_rm` and `dpdphi*inv_rmsinthe` BARE, with no 1/rho and no
+    // p_0/(rho u_0^2) coefficient -- so for `dv/dt = -grad p` to be dimensionally consistent
+    // p_dyn must be non-dimensionalised by rho*u_0^2. The written field was therefore
+    // p_0/(r_air*u_0^2) = 1315x too large.
+    //
+    // WHICH rho, AND WHY IT IS THE CONSTANT ONE. The shipped Poisson source is div(aux) with no
+    // density in it (ATM_ANELASTIC adds the dln(rho)/dr terms and is default off), and the
+    // momentum equation carries no 1/rho, so the system is Boussinesq: the density is absorbed
+    // into p_dyn as a single REFERENCE constant, and this model's reference air density is
+    // r_air. That is also the fallback `rho_c` uses in RHS_Atm_Turb.cpp:1044.
+    //
+    // ⚠️ CLAUDE.md QUOTES 43.7 Pa FOR THIS UNIT AND THAT IS THE LOCAL VALUE AT ~5.5 km, NOT THE
+    // REFERENCE. r_air*u_0^2 = 1.2041 * 64 = 77.06 Pa. The three verifications recorded there
+    // were ratio checks and are non-dimensional, so they pinned the FORM rho*u_0^2 and never the
+    // rho; see CLAUDE.md for the correction and for the one place that reads it the other way
+    // (ATM_HYDRO_PGF's Euler number uses the LOCAL r_humid, which is inconsistent with the bare
+    // term beside it by rho_local/r_air -- 1 at the surface, ~4 at 10 km. Default off, unfixed,
+    // recorded).
+    //
+    // Written in hPa so it sits beside PressureStatic, which is dumped at multiplier 1.0.
+    // ==================================================================================
+    inline double pdyn_to_hPa(double r_air, double u_0){ return r_air * u_0 * u_0 / 100.0; }
+
     void dump_array(const string &name, Array &a, double multiplier, ofstream &f){
         f <<  "    <DataArray type=\"Float32\" Name=\"" << name << "\" format=\"ascii\">\n";
         for(int k = 0; k < a.km; k++){
@@ -193,7 +222,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("PrecipitationGraupel", P_graupel, 8.64e4, Atmosphere_panorama_vts_File);
 
 //    dump_array("PressureStatic", p_stat, 1.0, Atmosphere_panorama_vts_File);
-//    dump_array("PressureDynamic", p_dyn, p_0, Atmosphere_panorama_vts_File);
+//    dump_array("PressureDynamic", p_dyn, pdyn_to_hPa(r_air, u_0), Atmosphere_panorama_vts_File);
 //    dump_array("r_humid", r_humid, 1.0, Atmosphere_panorama_vts_File);
 
     dump_array("CO2-Concentration", co2, co2_0, Atmosphere_panorama_vts_File);
@@ -357,7 +386,7 @@ void cAtmosphereModel::paraview_sphere_vts(string &Name_Bathymetry_File, int n){
     dump_array("tau_above", tau_above, 1.0, Atmosphere_panorama_vts_File);
     dump_array("tau_layer", tau_layer, 1.0, Atmosphere_panorama_vts_File);
     dump_array("BruntVaisala_N2", brunt_N2, 1.0, Atmosphere_panorama_vts_File);
-    dump_array("PressureDynamic", p_dyn, p_0, Atmosphere_panorama_vts_File);
+    dump_array("PressureDynamic", p_dyn, pdyn_to_hPa(r_air, u_0), Atmosphere_panorama_vts_File);
 
     dump_array("WaterVapour", c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("CloudWater", cloud, 1e3, Atmosphere_panorama_vts_File);
@@ -512,7 +541,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     dump_radial_2d("Precipitation_NASA", precipitation_NASA, 1.0, Atmosphere_vtk_radial_File);
 
     dump_radial("PressureStatic", p_stat, 1.0, i_radial, Atmosphere_vtk_radial_File);
-    dump_radial("PressureDynamic", p_dyn, p_0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("PressureDynamic", p_dyn, pdyn_to_hPa(r_air, u_0), i_radial, Atmosphere_vtk_radial_File);
 
 //    dump_radial("r_dry", r_dry, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("r_humid", r_humid, 1.0, i_radial, Atmosphere_vtk_radial_File);
@@ -776,7 +805,7 @@ void cAtmosphereModel::paraview_vtk_zonal(string &Name_Bathymetry_File,
 //    dump_zonal("TempStandard", TempStand, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 //    dump_zonal("TempDewPoint", TempDewPoint, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
-    dump_zonal("PressureDynamic", p_dyn, p_0, k_zonal, Atmosphere_vtk_zonal_File);
+    dump_zonal("PressureDynamic", p_dyn, pdyn_to_hPa(r_air, u_0), k_zonal, Atmosphere_vtk_zonal_File);
     dump_zonal("PressureStatic", p_stat, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
 
 //    dump_zonal("r_dry", r_dry, 1.0, k_zonal, Atmosphere_vtk_zonal_File);
@@ -986,7 +1015,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     dump_longal("PrecipitationGraupel", P_graupel, 8.64e4, j_longal, Atmosphere_vtk_longal_File);
 
     dump_longal("PressureStatic", p_stat, 1.0, j_longal, Atmosphere_vtk_longal_File);
-    dump_longal("PressureDynamic", p_dyn, p_0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("PressureDynamic", p_dyn, pdyn_to_hPa(r_air, u_0), j_longal, Atmosphere_vtk_longal_File);
 
 //    dump_longal("r_dry", r_dry, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("r_humid", r_humid, 1.0, j_longal, Atmosphere_vtk_longal_File);
