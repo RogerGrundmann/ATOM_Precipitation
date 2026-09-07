@@ -666,6 +666,71 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         }
         return (wsum > 0.0) ? (sum / wsum) * (u_0 * u_0) : 0.0;  // [m2/s2] (velocities are /u_0)
     };
+    // ---- HYD_KE_SPLIT: WHICH MODE IS THE KE RAMP IN? ----------------------------------------
+    //
+    // The recorded root cause of the ocean's non-convergence is "no velocity-proportional
+    // momentum sink: the only sink is viscous diffusion, which damps GRADIENTS and not the
+    // large-scale flow, so wind pumps momentum in with almost no sink and mean KE ramps".
+    // The recorded FIX is "put bottom friction INSIDE the Stommel solve, not the RHS", after an
+    // A/B in which a body-force drag -r*(v,w) bit 28 % by iteration 450 and then recovered.
+    //
+    // READING THE CODE MAKES BOTH HALVES DOUBTFUL, WHICH IS WHY THIS PRINT EXISTS.
+    //   (a) `project_barotropic` is called ONCE, before the loop (cHydrosphereModel.cpp:383),
+    //       so v_bt/w_bt are a FIXED prescribed field.
+    //   (b) `apply_barotropic_mode_split` adds (v_bt - column depth-mean) uniformly down each
+    //       column every iteration, i.e. it re-pins the depth-MEAN and leaves the DEVIATION
+    //       untouched.
+    // Together those say the barotropic KE is CONSTANT by construction after the 120-iteration
+    // ramp, so a ramp can only live in the baroclinic residual -- which the split does not
+    // touch and a body force therefore CAN reach. On that reading the old A/B's "recovery" was
+    // KE returning to the floor set by the pinned mode, not the drag being erased, and the
+    // monotonic dose-response it recorded (9.97 / 9.77 / 9.46) is the drag working on the only
+    // part it can. And friction inside the Stommel solve would change the PINNED value, i.e.
+    // the constant, not the ramp.
+    //
+    // The Stommel solve also already HAS a friction parameter -- `eps` = 3.0e-6, carried by
+    // cTp/cTm/cP in PressureSolverHyd.h:935 -- so "put friction inside the Stommel solve" is in
+    // part already done.
+    //
+    // None of that is worth acting on unmeasured, so: split the same cos-lat, dz-weighted mean
+    // KE this monitor already reports into the column depth-mean (barotropic) part and the
+    // deviation (baroclinic) part, and print both with the total. If the barotropic part is
+    // flat and the baroclinic one climbs, the target is a sink on the DEVIATION and the
+    // recorded fix is aimed at the wrong mode. Print-only, default off, changes no field.
+    static const bool ke_split = [](){ const char* e = getenv("HYD_KE_SPLIT");
+                                       return e && atoi(e) != 0; }();
+    auto ocean_KE_split = [&](double& ke_bt, double& ke_bc) {
+        double sbt = 0.0, sbc = 0.0, wsum = 0.0;
+        #pragma omp parallel for reduction(+:sbt,sbc,wsum) schedule(static)
+        for(int j = 0; j < jm; j++){
+            const double coslat = sin(the.z[j]);
+            for(int k = 0; k < km; k++){
+                // column depth-mean, on the same water cells and dz weights as the total
+                double mu = 0.0, mv = 0.0, mw = 0.0, cw = 0.0;
+                for(int i = 0; i < im; i++){
+                    if(!is_water(h, i, j, k)) continue;
+                    const double dz = (i < im-1) ? (rad.z[i+1] - rad.z[i]) * L_hyd : 0.0;
+                    mu += dz * u.x[i][j][k]; mv += dz * v.x[i][j][k]; mw += dz * w.x[i][j][k];
+                    cw += dz;
+                }
+                if(cw <= 0.0) continue;
+                mu /= cw; mv /= cw; mw /= cw;
+                for(int i = 0; i < im; i++){
+                    if(!is_water(h, i, j, k)) continue;
+                    const double dz = (i < im-1) ? (rad.z[i+1] - rad.z[i]) * L_hyd : 0.0;
+                    const double wt = coslat * dz;
+                    const double du = u.x[i][j][k] - mu, dv = v.x[i][j][k] - mv,
+                                 dw = w.x[i][j][k] - mw;
+                    sbt  += wt * 0.5 * (mu*mu + mv*mv + mw*mw);
+                    sbc  += wt * 0.5 * (du*du + dv*dv + dw*dw);
+                    wsum += wt;
+                }
+            }
+        }
+        const double f = (wsum > 0.0) ? (u_0 * u_0) / wsum : 0.0;
+        ke_bt = sbt * f; ke_bc = sbc * f;
+    };
+
     // Returns the trailing-window drift of `metric`, or -1 while still warming up
     // (fewer than 2 full windows). `abs_out` receives the drift in the metric's own units.
     auto conv_drift = [&](std::vector<double>& hist, double metric, double& abs_out) -> double {
@@ -763,6 +828,11 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // feeds back. See project_hydro_continuity_checkerboard.
             PressureSolverHyd(*this).project_velocity(60);
             PressureSolverHyd(*this).apply_barotropic_mode_split();   // impose wind-driven barotropic mode (both depth modes)
+            // HYD_BC_DRAG, default 0 = off. The velocity-proportional sink the ocean lacks,
+            // applied to the BAROCLINIC deviation -- the component the re-pin above leaves
+            // alone. Order relative to the split is immaterial: the two act on orthogonal
+            // parts of the column. See PressureSolverHyd::damp_baroclinic_deviation.
+            PressureSolverHyd(*this).damp_baroclinic_deviation();
             record_stage(2);   // stage 2: after the pressure projection + barotropic mode split
             AtomUtils::damp_wiggles(p_dyn, &i_bathymetry, true, true, true);
 
@@ -875,6 +945,18 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             double dT_K = 0.0, dKE_abs = 0.0;
             const double mT   = ocean_mean_T();
             const double mKE  = ocean_mean_KE();
+            if(ke_split){
+                double ke_bt = 0.0, ke_bc = 0.0;
+                ocean_KE_split(ke_bt, ke_bc);
+                std::cout << "      OGCM: [KE SPLIT] iter " << total_iter_count
+                          << "   barotropic (pinned depth-mean) " << std::scientific
+                          << std::setprecision(6) << ke_bt
+                          << "   baroclinic (free deviation) " << ke_bc
+                          << "   total " << (ke_bt + ke_bc)
+                          << "   baroclinic share " << std::fixed << std::setprecision(2)
+                          << (ke_bt + ke_bc > 0.0 ? 100.0*ke_bc/(ke_bt+ke_bc) : 0.0) << " %"
+                          << std::defaultfloat << std::endl;
+            }
             const double dT   = conv_drift(conv_histT,  mT,  dT_K);
             const double dKE  = conv_drift(conv_histKE, mKE, dKE_abs);
             const bool warming = (dT < 0.0) || (dKE < 0.0);      // < 2 windows of samples yet
