@@ -109,7 +109,22 @@ public:
 
     double residuum_old = 1.0e-5;
 
-    int Ma;
+    // NOTE: there is deliberately no `int Ma;` member here.
+    //
+    // The paleo time slice is threaded as a PARAMETER -- `RunTimeSlice(int Ma)` ->
+    // `run_3D_loop(int Ma)` -> `save_state/load_state(int iter, int Ma)` and the
+    // read_*_Surface_Data / initTemperature* calls -- and the model's own record of it is
+    // `m_current_time`, reached through `get_current_time()`, which is what the loop headings
+    // and the `use_earthbyte_reconstruction` branches read.
+    //
+    // A member of the same name existed until 2026-09-07 and was ASSIGNED NOWHERE. It was
+    // harmless only by accident: every function that uses `Ma` declares a parameter of that
+    // name, which shadows the member, so no read ever reached it -- verified by classifying
+    // all 41 occurrences in both models against their enclosing signature (the only unshadowed
+    // hits were the letters "Ma" inside string literals). Its one effect was that the FIRST use
+    // of `Ma` outside a shadowing function would have compiled silently and read an
+    // uninitialised int on a stack-local model object. Deleted so that such a use is a
+    // compile error instead. Do not re-add it; take the parameter, or call get_current_time().
 
 
 
