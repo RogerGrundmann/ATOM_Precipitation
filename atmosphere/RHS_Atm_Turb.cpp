@@ -522,6 +522,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double diffusion_vel_re = 0.0;
     double diffusion_tke_re = 0.0;
     double diffusion_dis_re = 0.0;
+    // d(coefficient)/d(nue) for each diffused quantity -- see the ATM_NUE_GRAD block below.
+    double nue_grad_t = 0.0, nue_grad_vel = 0.0, nue_grad_tke = 0.0, nue_grad_dis = 0.0;
     const double diff_prec_re_inv = 1.0 / (sc_WaterVapour * re_turb);
     const double diff_co2_re_inv  = 1.0 / (sc_CO2 * re_turb);
 
@@ -595,6 +597,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             diffusion_vel_re = 1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re = 1.0/re_turb + nue.x[i][j][k] / sig_k;
             diffusion_dis_re = 1.0/re_turb + nue.x[i][j][k] / sig_w;
+            nue_grad_t = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = 1.0/sig_k; nue_grad_dis = 1.0/sig_w;
         }
         // Source terms — computed fresh from current tke/dis so every RK4 sub-stage
         // is consistent (compute_k_epsilon runs only at even iterations).
@@ -626,6 +630,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             diffusion_vel_re = 1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re = 1.0/re_turb + sig_k * nue.x[i][j][k];
             diffusion_dis_re = 1.0/re_turb + sig_w * nue.x[i][j][k];
+            nue_grad_t = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = sig_k;     nue_grad_dis = sig_w;
         }
         // Source terms — fresh tke/dis, stored prod
         {
@@ -710,6 +716,10 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             diffusion_vel_re =  1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re =  1.0/re_turb + nue.x[i][j][k] / blend(sig_k1, sig_k2, F1);
             diffusion_dis_re =  1.0/re_turb + nue.x[i][j][k] / blend(sig_w1, sig_w2, F1);
+            // grad(blend) is neglected: F1 varies in space, so d/dnue is exact only at fixed F1.
+            nue_grad_t   = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = 1.0/blend(sig_k1, sig_k2, F1);
+            nue_grad_dis = 1.0/blend(sig_w1, sig_w2, F1);
         }
 
         // Source terms — computed fresh from current tke/dis at every RK4 sub-stage.
@@ -738,6 +748,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     }
 
     if(!use_turbulence_model){
+        // nue is zeroed below, so the coefficients are constants and nue_grad_* stay 0.0.
         diffusion_t_re        = 1.0 / (re_turb * pr_turb);
         diffusion_vel_re      = 1.0 / re_turb;
         diffusion_tke_re      = 0.0;
@@ -880,25 +891,87 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // missed here — it over-damped v,w in the NH and anti-diffused poleward of ~38°S.
     double v_metric         = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
+
+    // ==================================================================
+    // ATM_NUE_GRAD=<strength> / HYD_NUE_GRAD=<strength> -- the grad(nu).grad(phi) term.
+    // DEFAULT 0.0 = SHIPPED and bit-identical (the whole block is skipped and every
+    // diffusion_* below adds a literal 0.0).
+    //
+    // THE DEFECT. `dnuedr`, `dnuedthe` and `dnuedphi` are computed at every cell with full
+    // boundary stencils -- one-sided at both radial ends, one-sided at both poles, centred in
+    // the interior, ~20 lines of it -- and were READ BY NOTHING. Meanwhile the diffusion
+    // coefficients are LOCAL, per-cell functions of nue (diffusion_vel_re = 1/re_turb + nue,
+    // diffusion_t_re = that over pr_turb, and the tke/dis pair with their sigma scalings), so
+    // the models form nu(x)*grad^2(phi) and drop the grad(nu).grad(phi) half of
+    // div(nu grad(phi)). Found by the second -Wall -Wextra sweep, 2026-09-07, in BOTH models.
+    // It is not a dormant path: both default to turb_model = k_omega_SST, so nue is a live
+    // varying field.
+    //
+    // THE METRIC IS THE ONE ITS NEIGHBOURS USE, term for term. A physical gradient component
+    // here is exp_rm*d/d(rad.z), inv_rm*d/dthe and inv_rmsinthe*d/dphi, so the inner product of
+    // two gradients carries exp_2_rm, inv_rm2 and inv_rm2sinthe2 -- exactly the factors the
+    // second-derivative terms beside it already carry. In the OCEAN that metric is the broken
+    // 200-400 m one (HYD_METRIC_RADIUS default 0), and this term deliberately inherits it: it
+    // is a CORRECTION to the existing diffusion operator, so it must be scaled like the operator
+    // it corrects, not like the physics. That is the opposite of HYD_BAROCLINIC_PGF's choice,
+    // and for the opposite reason -- that term had to balance Coriolis, this one has to complete
+    // a Laplacian.
+    //
+    // THE SCALE FACTOR ON grad(nu) IS SET PER BRANCH, NOT ASSUMED, because the coefficients
+    // differ: d/dnue of diffusion_vel_re is 1, of diffusion_t_re is 1/pr_turb, and the tke/dis
+    // pair carry 1/sig, sig or 1/blend(...) depending on which closure is active. `nue_grad_*`
+    // below is that derivative, set next to each coefficient it belongs to.
+    //
+    // WHAT IT IS NOT, and this is the honest limit. For the SCALARS -- t, tke, dis -- adding
+    // grad(nu).grad(phi) completes div(kappa grad(phi)) EXACTLY. For the VELOCITY components it
+    // is the leading variable-viscosity correction and not the whole story: the full stress form
+    // div(nu*(grad(u) + grad(u)^T)) additionally carries grad(nu).grad(u)^T, and in spherical
+    // coordinates there are further curvature terms coupling grad(nu) to the components through
+    // the metric. What is added here is the Laplacian form div(nu grad(u)), which is what most
+    // ocean and atmosphere codes use. c/cloud/ice/gr/co2 and ocean salinity get NOTHING, and
+    // correctly so: their coefficients (diff_prec_re_inv, diff_co2_re_inv) are CONSTANTS with no
+    // nue in them at all -- which is itself worth knowing, since it means this tree diffuses
+    // moisture molecularly rather than turbulently.
+    //
+    // A STRENGTH rather than a flag, because the term's size against the Laplacian it joins has
+    // never been measured in either model, and this tree ramps a change to shipped dynamics
+    // before running it at full.
+    static const double nue_grad_s = [](){ const char* e = getenv("ATM_NUE_GRAD");
+                                           return e ? atof(e) : 0.0; }();
+    double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
+           cross_tke = 0.0, cross_dis = 0.0;
+    if(nue_grad_s != 0.0){
+        auto nue_dot = [&](double dfdr, double dfdthe, double dfdphi){
+            return dnuedr * dfdr * exp_2_rm + dnuedthe * dfdthe * inv_rm2
+                 + dnuedphi * dfdphi * inv_rm2sinthe2;
+        };
+        cross_t   = nue_grad_s * nue_grad_t   * nue_dot(dtdr,   dtdthe,   dtdphi);
+        cross_u   = nue_grad_s * nue_grad_vel * nue_dot(dudr,   dudthe,   dudphi);
+        cross_v   = nue_grad_s * nue_grad_vel * nue_dot(dvdr,   dvdthe,   dvdphi);
+        cross_w   = nue_grad_s * nue_grad_vel * nue_dot(dwdr,   dwdthe,   dwdphi);
+        cross_tke = nue_grad_s * nue_grad_tke * nue_dot(dtkedr, dtkedthe, dtkedphi);
+        cross_dis = nue_grad_s * nue_grad_dis * nue_dot(ddisdr, ddisdthe, ddisdphi);
+    }
+
     double diffusion_t = ((d2tdr2 - curv * dtdr) * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
-        + d2tdphi2 * inv_rm2sinthe2) * diffusion_t_re;
+        + d2tdphi2 * inv_rm2sinthe2) * diffusion_t_re + cross_t;
 
     double diffusion_u = ((d2udr2 - curv * dudr) * exp_2_rm + 2.0 * u_ijk * inv_rm2
         + d2udthe2 * inv_rm2 + 4.0 * dudr * inv_rm * exp_rm
-        + dudthe * cos_rm2sin + d2udphi2 * inv_rm2sinthe2) * diffusion_vel_re;
+        + dudthe * cos_rm2sin + d2udphi2 * inv_rm2sinthe2) * diffusion_vel_re + cross_u;
 
     double diffusion_v = ((d2vdr2 - curv * dvdr) * exp_2_rm + dvdr * two_over_rm_exp
         + d2vdthe2 * inv_rm2 + dvdthe * cos_rm2sin
         - v_metric * v_ijk + d2vdphi2 * inv_rm2sinthe2
         + 2.0 * dudthe * inv_rm2
-        - dwdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re;
+        - dwdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re + cross_v;
 
     double diffusion_w = ((d2wdr2 - curv * dwdr) * exp_2_rm + dwdr * two_over_rm_exp
         + d2wdthe2 * inv_rm2 + dwdthe * cos_rm2sin
         - v_metric * w_ijk + d2wdphi2 * inv_rm2sinthe2
         + 2.0 * dudphi * inv_rm2sinthe
-        + dvdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re;
+        + dvdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re + cross_w;
 
     double diffusion_c = ((d2cdr2 - curv * dcdr) * exp_2_rm + dcdr * two_over_rm_exp
         + d2cdthe2 * inv_rm2 + dcdthe * cos_rm2sin
@@ -922,11 +995,11 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
 
     double diffusion_tke = ((d2tkedr2 - curv * dtkedr) * exp_2_rm + dtkedr * two_over_rm_exp
         + d2tkedthe2 * inv_rm2 + dtkedthe * cos_rm2sin
-        + d2tkedphi2 * inv_rm2sinthe2) * diffusion_tke_re;
+        + d2tkedphi2 * inv_rm2sinthe2) * diffusion_tke_re + cross_tke;
 
     double diffusion_dis = ((d2disdr2 - curv * ddisdr) * exp_2_rm + ddisdr * two_over_rm_exp
         + d2disdthe2 * inv_rm2 + ddisdthe * cos_rm2sin
-        + d2disdphi2 * inv_rm2sinthe2) * diffusion_dis_re;
+        + d2disdphi2 * inv_rm2sinthe2) * diffusion_dis_re + cross_dis;
 
 
     // ===== RHS assembly =====

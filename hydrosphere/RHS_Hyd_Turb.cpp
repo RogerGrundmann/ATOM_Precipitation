@@ -352,6 +352,8 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     double diffusion_vel_re = 0.0;
     double diffusion_tke_re = 0.0;
     double diffusion_dis_re = 0.0;
+    // d(coefficient)/d(nue) for each diffused quantity -- see the HYD_NUE_GRAD block below.
+    double nue_grad_t = 0.0, nue_grad_vel = 0.0, nue_grad_tke = 0.0, nue_grad_dis = 0.0;
     const double diff_prec_re_inv = 1.0 / (sc * re_turb);
 
     // Wall-distance index for SST blending — use uniform grid index
@@ -405,6 +407,8 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             diffusion_vel_re = 1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re = 1.0/re_turb + nue.x[i][j][k] / sig_k;
             diffusion_dis_re = 1.0/re_turb + nue.x[i][j][k] / sig_w;
+            nue_grad_t = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = 1.0/sig_k; nue_grad_dis = 1.0/sig_w;
         }
         {
             const double tke_s = std::max(tke.x[i][j][k], 1.0e-10);
@@ -431,6 +435,8 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             diffusion_vel_re = 1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re = 1.0/re_turb + sig_k * nue.x[i][j][k];
             diffusion_dis_re = 1.0/re_turb + sig_w * nue.x[i][j][k];
+            nue_grad_t = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = sig_k;     nue_grad_dis = sig_w;
         }
         {
             const double tke_s  = std::max(tke.x[i][j][k], 1.0e-10);
@@ -518,6 +524,10 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             diffusion_vel_re =  1.0/re_turb + nue.x[i][j][k];
             diffusion_tke_re =  1.0/re_turb + nue.x[i][j][k] / blend(sig_k1, sig_k2, F1);
             diffusion_dis_re =  1.0/re_turb + nue.x[i][j][k] / blend(sig_w1, sig_w2, F1);
+            // grad(blend) is neglected: F1 varies in space, so d/dnue is exact only at fixed F1.
+            nue_grad_t   = 1.0/pr_turb; nue_grad_vel = 1.0;
+            nue_grad_tke = 1.0/blend(sig_k1, sig_k2, F1);
+            nue_grad_dis = 1.0/blend(sig_w1, sig_w2, F1);
         }
 
         {
@@ -543,6 +553,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     }
 
     if (!use_turbulence_model) {
+        // nue is zeroed below, so the coefficients are constants and nue_grad_* stay 0.0.
         diffusion_t_re   = 1.0 / (re_turb * pr_turb);
         diffusion_vel_re = 1.0 / re_turb;
         diffusion_tke_re = 0.0;
@@ -632,25 +643,49 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // Ma=100 iter-1000 restart (150 steps): stable, 0 NaN, KE differs ~0.01% (T bit-identical).
     double v_metric        = (1.0 + costhe * costhe / sinthe2) * inv_rm2;
 
+    // HYD_NUE_GRAD=<strength>, default 0.0 = shipped and bit-identical. The ocean half of the
+    // grad(nu).grad(phi) repair; the full rationale, the metric argument and the stated limits
+    // are in the matching block in atmosphere/RHS_Atm_Turb.cpp. Two notes specific to here:
+    // the metric is the ocean's own broken one (rad.z gives a 200-400 m radius,
+    // HYD_METRIC_RADIUS default 0) BY DESIGN, because this term corrects the existing diffusion
+    // operator and must be scaled like it rather than like the physics; and salinity `c` gets
+    // nothing, because diff_prec_re_inv = 1/(sc*re_turb) is a constant with no nue in it.
+    static const double nue_grad_s = [](){ const char* e = getenv("HYD_NUE_GRAD");
+                                           return e ? atof(e) : 0.0; }();
+    double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
+           cross_tke = 0.0, cross_dis = 0.0;
+    if(nue_grad_s != 0.0){
+        auto nue_dot = [&](double dfdr, double dfdthe, double dfdphi){
+            return dnuedr * dfdr * exp_2_rm + dnuedthe * dfdthe * inv_rm2
+                 + dnuedphi * dfdphi * inv_rm2sinthe2;
+        };
+        cross_t   = nue_grad_s * nue_grad_t   * nue_dot(dtdr,   dtdthe,   dtdphi);
+        cross_u   = nue_grad_s * nue_grad_vel * nue_dot(dudr,   dudthe,   dudphi);
+        cross_v   = nue_grad_s * nue_grad_vel * nue_dot(dvdr,   dvdthe,   dvdphi);
+        cross_w   = nue_grad_s * nue_grad_vel * nue_dot(dwdr,   dwdthe,   dwdphi);
+        cross_tke = nue_grad_s * nue_grad_tke * nue_dot(dtkedr, dtkedthe, dtkedphi);
+        cross_dis = nue_grad_s * nue_grad_dis * nue_dot(ddisdr, ddisdthe, ddisdphi);
+    }
+
     double diffusion_t = (d2tdr2 * exp_2_rm + dtdr * two_over_rm_exp
         + d2tdthe2 * inv_rm2 + dtdthe * cos_rm2sin
-        + d2tdphi2 * inv_rm2sinthe2) * diffusion_t_re;
+        + d2tdphi2 * inv_rm2sinthe2) * diffusion_t_re + cross_t;
 
     double diffusion_u = (d2udr2 * exp_2_rm + 2.0 * u_ijk * inv_rm2
         + d2udthe2 * inv_rm2 + 4.0 * dudr * inv_rm * exp_rm
-        + dudthe * cos_rm2sin + d2udphi2 * inv_rm2sinthe2) * diffusion_vel_re;
+        + dudthe * cos_rm2sin + d2udphi2 * inv_rm2sinthe2) * diffusion_vel_re + cross_u;
 
     double diffusion_v = (d2vdr2 * exp_2_rm + dvdr * two_over_rm_exp
         + d2vdthe2 * inv_rm2 + dvdthe * cos_rm2sin
         - v_metric * v_ijk + d2vdphi2 * inv_rm2sinthe2
         + 2.0 * dudthe * inv_rm2
-        - dwdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re;
+        - dwdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re + cross_v;
 
     double diffusion_w = (d2wdr2 * exp_2_rm + dwdr * two_over_rm_exp
         + d2wdthe2 * inv_rm2 + dwdthe * cos_rm2sin
         - v_metric * w_ijk + d2wdphi2 * inv_rm2sinthe2
         + 2.0 * dudphi * inv_rm2sinthe
-        + dvdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re;
+        + dvdphi * 2.0 * costhe * inv_rm2sinthe2) * diffusion_vel_re + cross_w;
 
     // ==================================================================================
     // HYD_A_H -- AN EXPLICIT HORIZONTAL EDDY VISCOSITY, in m^2/s. Default 0 = OFF and
@@ -833,11 +868,11 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
 
     double diffusion_tke = (d2tkedr2 * exp_2_rm + dtkedr * two_over_rm_exp
         + d2tkedthe2 * inv_rm2 + dtkedthe * cos_rm2sin
-        + d2tkedphi2 * inv_rm2sinthe2) * diffusion_tke_re;
+        + d2tkedphi2 * inv_rm2sinthe2) * diffusion_tke_re + cross_tke;
 
     double diffusion_dis = (d2disdr2 * exp_2_rm + ddisdr * two_over_rm_exp
         + d2disdthe2 * inv_rm2 + ddisdthe * cos_rm2sin
-        + d2disdphi2 * inv_rm2sinthe2) * diffusion_dis_re;
+        + d2disdphi2 * inv_rm2sinthe2) * diffusion_dis_re + cross_dis;
 
 
     // ===== RHS assembly =====
