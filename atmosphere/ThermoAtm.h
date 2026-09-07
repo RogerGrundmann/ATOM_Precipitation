@@ -920,9 +920,17 @@ public:
             " Evaporation_Dalton_average per year", Evaporation_Dalton_average, " mm/a",
             " Evaporation_Dalton_average per day", Evaporation_Dalton_average / 365.0, " mm/d");
 
+        // The ACTIVE model's average -- `m.Evaporation`, which is Meyer by default
+        // (cAtmosphereDefaults.cpp.inc:68), not Dalton. This row printed
+        // `Evaporation_Dalton_average`, a copy-paste from the row above, while the correctly
+        // computed `Evaporation_average` was discarded (it was the compiler's
+        // "set but not used" on this variable that surfaced it). Dalton, Meyer and Rohwer each
+        // still have their own labelled row below, so nothing is lost; this one now says what
+        // it claims. Fixed 2026-09-07 -- it changes the printed number in every future log
+        // wherever evap_model != Dalton, which is the shipped default.
         row(" co2_average", co2_average, " ppm",
-            " Evaporation_average per year", Evaporation_Dalton_average, " mm/a",
-            " Evaporation_average per day", Evaporation_Dalton_average / 365.0, " mm/d");
+            " Evaporation_average per year", Evaporation_average, " mm/a",
+            " Evaporation_average per day", Evaporation_average / 365.0, " mm/d");
 
         row(" co2_average", co2_average, " ppm",
             " Evaporation_Meyer_average per year", Evaporation_Meyer_average, " mm/a",

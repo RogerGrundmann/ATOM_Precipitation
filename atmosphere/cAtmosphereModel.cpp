@@ -506,7 +506,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 
 //    goto Printout;
 
-    MoistConvection(*this).run(iter_n);                                 // rainfall from convecting clouds
+    MoistConvection(*this).run();                                       // rainfall from convecting clouds
 
     AtomUtils::damp_wiggles(P_conv, &i_topography, true, true, true);
     AtomUtils::damp_wiggles(E_u,    &i_topography, true, true, true);
@@ -1486,7 +1486,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
 
                 t0_mark("IceScheme");
                 ColumnWaterBudget::mark(*this, "IceScheme");
-                MoistConvection(*this).run(iter_n);                     // rainfall from convecting clouds
+                MoistConvection(*this).run();                           // rainfall from convecting clouds
                 t0_mark("MoistConvection");
                 ColumnWaterBudget::mark(*this, "MoistConvection");
 

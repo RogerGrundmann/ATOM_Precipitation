@@ -142,8 +142,10 @@ void cAtmosphereModel::init_vapour_cloud() {                            // calcu
                 // ------------------------------------------------------------
                 // Dewpoint Temperature and Spread
                 // ------------------------------------------------------------
-                const double e_actual   = (p_u * q_sat_loc) / (ep + q_sat_loc);
-                const double log_val    = std::log(std::max(e_actual, MIN_PRESSURE) / E0_HPA);
+                // (Disabled with the dewpoint/stability block below, 2026-09-07: e_actual fed
+                // only log_val, which fed only commented-out code. Restore all four together.)
+//                const double e_actual   = (p_u * q_sat_loc) / (ep + q_sat_loc);
+//                const double log_val    = std::log(std::max(e_actual, MIN_PRESSURE) / E0_HPA);
 //                const double t_dewpoint = (MAG_B * log_val) / (MAG_A - log_val) + 273.15;
 //                const double spread     = t_u - t_dewpoint;
 
@@ -151,7 +153,7 @@ void cAtmosphereModel::init_vapour_cloud() {                            // calcu
                 // Atmospheric Stability Assessment
                 // ------------------------------------------------------------
                 // Bounds check: ensure i+1 is valid
-                const double dT = (i < im-2) ? (t.x[i+1][j][k] - t.x[i][j][k]) : 0.0;
+//                const double dT = (i < im-2) ? (t.x[i+1][j][k] - t.x[i][j][k]) : 0.0;
 //                const double diff = dT - LAPSE_RATE_REF;
 
                 // Stability weight: reduces moisture in stable conditions

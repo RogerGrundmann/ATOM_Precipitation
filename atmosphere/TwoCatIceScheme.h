@@ -236,7 +236,7 @@ private:
                 // Column-private variables
                 double q_sat = 0.0, E_sat = 0.0;
                 double q_Ice = 0.0, E_Ice = 0.0;
-                double dt_snow_dim = 0.0, dt_rain_dim = 0.0;
+                double dt_snow_dim = 0.0;
                 double t_u, p_u;
                 double m_i = m_i_max;
 
@@ -286,7 +286,7 @@ private:
                         double Snow = m.P_snow.x[i][j][k];
 
                         // Compute rain power terms only when raining
-                        double Rain_pow_4_9  = 0.0;
+                    
                         double Rain_pow_7_9  = 0.0;
                         double Rain_pow_13_9 = 0.0;
 
@@ -295,7 +295,8 @@ private:
                             double rain_pow_2 = rain_base * rain_base;  // ^2/9
                             double rain_pow_4 = rain_pow_2 * rain_pow_2;// ^4/9
 
-                            Rain_pow_4_9  = rain_pow_4;
+                            // (No Rain_pow_4_9: it went dead when ATM_RAIN_AREA landed and S_ev moved onto the
+    // area-weighted rate R_ev. Deleted 2026-09-07.)
                             Rain_pow_7_9  = Rain/rain_pow_2;            // 1 - 2/9 = 7/9
                             Rain_pow_13_9 = Rain * rain_pow_4;          // 1 + 4/9 = 13/9
                         }
@@ -314,7 +315,14 @@ private:
 
                         double mass_layer = m.r_humid.x[i][j][k] * step[i]; // density * shell thickness
 
-                        dt_rain_dim = step[i]/1.6;                      // adjusted rain fall time step by fixed velocities == 1.6 m/s
+                        // (No dt_rain_dim. It was computed here as step[i]/1.6 -- a RAIN fall-transit time -- and
+    // never read: S_ev uses pow(R_ev, exp_4_9) on the area-weighted rate instead. Deleted
+    // 2026-09-07. What it POINTS AT is left alone deliberately and is recorded in CLAUDE.md:
+    // dt_snow_dim = step[i]/0.96, a SNOW transit time, is the timescale used for CLOUD-WATER
+    // processes -- S_c_frz = cloud/dt_snow_dim and both availability limiters. That may be the
+    // COSMO convention rather than an error, and a discarded rain-side timescale sitting beside
+    // it suggests the pairing was intended and never wired up. One look at the COSMO source
+    // settles it; do not "fix" the pairing before that look.)== 1.6 m/s
                         dt_snow_dim = step[i]/0.96;                     // adjusted snow fall time step by fixed velocities == 0.96 m/s
 
 

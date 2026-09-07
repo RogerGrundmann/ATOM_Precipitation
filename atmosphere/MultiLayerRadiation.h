@@ -292,8 +292,11 @@ public:
         static const bool topo_rad = [](){
             const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
-        static const bool sfc_coupled = [](){
-            const char* e = getenv("ATM_SFC_COUPLED"); return e && atoi(e) != 0; }();
+        // (No `sfc_coupled` flag here: ATM_SFC_COUPLED was written, measured as a null and
+        // REMOVED -- it solved the surface balance with a neutral-lapse constraint and never
+        // fired, because at setup the column is stable and the guard correctly declined. This
+        // static was the last thing still reading its environment variable and did nothing with
+        // the answer. Deleted 2026-09-07; do not reintroduce the knob.)
 
         std::vector<double> cwp_census;                 // ATM_CWP_CENSUS: cwp_raw per column
         if (cwpCensus()) cwp_census.assign((size_t)m.jm * m.km, 0.0);

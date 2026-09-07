@@ -85,7 +85,12 @@ public:
 
     int iter;
 
-    void run(int iter) {
+    // No parameter: this took `int iter`, which shadowed the member of the same name and was
+    // then thrown away by `iter = m.iter_n;` on the third line. The call site passed `iter_n`,
+    // i.e. the same value, so it was harmless -- the same shape as the `int Ma` member deleted
+    // on 2026-09-07, and harmless for the same accidental reason. The member is still set from
+    // the model below.
+    void run() {
         using namespace std;
         using namespace AtomMoistConvection;
 
