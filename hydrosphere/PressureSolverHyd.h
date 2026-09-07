@@ -1024,6 +1024,70 @@ public:
     // barotropic current — is the pass/fail signal: it needs u_bt to fill the
     // column at 55-60 S (see project_hydro_eastern_boundary_current).
     // ------------------------------------------------------------------------
+    // ---- HYD_BC_DRAG: a velocity-proportional sink on the BAROCLINIC DEVIATION ----------------
+    //
+    // THE DEFECT. The ocean's horizontal momentum equation is
+    // rhs_{v,w} = -PGF - advection + diffusion (+ wind stress at i=im-2, + Coriolis), so its only
+    // momentum sink is viscous/turbulent diffusion, which damps GRADIENTS and not the large-scale
+    // wind-driven flow. Wind pumps momentum in with almost no sink and the mean KE ramps instead
+    // of plateauing. The atmosphere converges partly because it HAS a Rayleigh surface drag
+    // (rayleigh_kf = 1/86400); the ocean has no equivalent.
+    //
+    // WHY THE DEVIATION AND NOT THE FULL VELOCITY, which is the whole content of this function.
+    // `apply_barotropic_mode_split` re-pins each column's depth-MEAN to the prescribed v_bt every
+    // iteration and leaves the deviation alone. So a drag on the full velocity has its
+    // barotropic part erased by the very next re-pin -- which is what the 2026-07-18 A/B saw
+    // when -r*(v,w) bit 28 % by iteration 450 and then "recovered", and why that arm was recorded
+    // as a failure. On the reading measured with HYD_KE_SPLIT it was not a failure: the drag was
+    // working on the only component it can reach, and KE returned to the floor set by the pinned
+    // mode. Damping the deviation directly does the same physics without fighting the pin, and
+    // makes what is being damped explicit.
+    //
+    // The recorded alternative -- "put bottom friction INSIDE the Stommel solve" -- changes the
+    // PINNED CONSTANT (and that solve already has a friction parameter, eps = 3.0e-6 in
+    // cTp/cTm/cP above), so it cannot address a growth that lives in the deviation.
+    //
+    // READ THE STRENGTH AS A NUMERICAL KNOB, NOT AS BOTTOM FRICTION. One iteration is
+    // L_hyd/u_0 * dt = 0.0833 s, so an e-folding of tau seconds is tau/0.0833 iterations:
+    //
+    //     tau = 30 days   ->  3.1e+07 iterations      a defensible interior/bottom drag
+    //     tau =  1 day    ->  1.0e+06 iterations
+    //     tau =  1 hour   ->  4.3e+04 iterations
+    //     tau = 100 s     ->  1.2e+03 iterations      the first value that acts in a feasible run
+    //
+    // The longest ocean run in this tree is ~1000 iterations, so any value that visibly acts here
+    // is orders of magnitude stronger than a physical drag. Same wall, and the same honesty, as
+    // HYD_A_H: quote it as a numerical damping and do not call it bottom friction.
+    //
+    // Horizontal only (v, w). The radial component is a separate problem with its own history
+    // (project_hydro_radial_velocity_runaway) and is pinned to zero at both radial walls.
+    // Default 0.0 = OFF and bit-identical.
+    void damp_baroclinic_deviation()
+    {
+        static const double r_phys = [](){ const char* e = getenv("HYD_BC_DRAG");
+                                           return e ? atof(e) : 0.0; }();
+        if (r_phys <= 0.0) return;
+        // dt is non-dimensional; one step is dt*L_hyd/u_0 seconds, so the per-step damping
+        // fraction of a rate r [1/s] is r*dt*L_hyd/u_0. Clamped so a large r cannot overshoot.
+        const double sec_per_iter = m.dt * m.L_hyd / m.u_0;
+        const double alpha = std::min(1.0, r_phys * sec_per_iter);
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int j = 1; j < m.jm-1; j++) {
+            for (int k = 0; k < m.km; k++) {
+                int c = 0; double mv = 0.0, mw = 0.0;
+                for (int i = 0; i < m.im; i++)
+                    if (is_water(m.h, i, j, k)) { mv += m.v.x[i][j][k]; mw += m.w.x[i][j][k]; ++c; }
+                if (c == 0) continue;
+                mv /= c; mw /= c;
+                for (int i = 0; i < m.im; i++)
+                    if (is_water(m.h, i, j, k)) {
+                        m.v.x[i][j][k] -= alpha * (m.v.x[i][j][k] - mv);
+                        m.w.x[i][j][k] -= alpha * (m.w.x[i][j][k] - mw);
+                    }
+            }
+        }
+    }
+
     void apply_barotropic_mode_split()
     {
         // Two stabilisers, needed once the split runs from a COLD START (the deep-
@@ -1036,9 +1100,29 @@ public:
         //       boundary current is a thin jet the coarse grid cannot resolve at the
         //       coast. The open-ocean interior, incl. the circumpolar ACC band (the
         //       pass/fail signal), keeps the full barotropic mode.
+        // THE RAMP COUNTS total_iter_count, NOT iter_n, AND THAT IS A FIX (2026-09-07).
+        // The hydrosphere loops `for(iter_n = 1; iter_n <= nm; ...)` -- iter_n RESTARTS AT 1 on
+        // a resume -- so measuring the cold-start ramp with it re-fires the whole 120-iteration
+        // ramp on EVERY restart, holding the barotropic mode at partial strength for 120
+        // iterations of a run whose field already carries it at full strength. That is the same
+        // iter_n / total_iter_count asymmetry as the VTK-stamping bug recorded in UtilsHyd.h,
+        // and it matters more: the ramp is a COLD-START protection, and a restart is not a cold
+        // start. Measured with HYD_KE_SPLIT on a 300 -> 500 restart before the fix, the pinned
+        // barotropic KE climbed 3.75e-05 -> 8.06e-05 and then stopped dead at total iteration
+        // ~445, which is exactly where iter_n reached 120.
+        //
+        // CONSEQUENCE FOR EVERY OCEAN CONVERGENCE NUMBER TAKEN FROM A RESTART: the KE-drift
+        // figures this tree quotes were measured while the barotropic mode was being brought
+        // back up, so part of the "KE ramps and never plateaus" signal is this, not physics.
+        //
+        // On a FRESH run total_iter_count == iter_n, so the behaviour -- and the output -- is
+        // unchanged; the seed call before the loop stays a no-op on iter_n, which is what
+        // distinguishes it from the in-loop call (total_iter_count is already restored by then
+        // on a restart, so testing the ramp there would apply the mode outside the loop).
         const int    N_ramp = 120;
-        const double ramp   = std::min(1.0, (double)m.iter_n / (double)N_ramp);
-        if (ramp <= 0.0) return;                       // seed call (iter_n==0) is a no-op
+        if (m.iter_n == 0) return;                     // seed call, before the loop
+        const double ramp   = std::min(1.0, (double)m.total_iter_count / (double)N_ramp);
+        if (ramp <= 0.0) return;
         const int km = m.km, Kp = km - 1, isurf = m.im - 2;
         auto kper = [&](int k){ k %= Kp; if (k < 0) k += Kp; return k; };
         #pragma omp parallel for collapse(2) schedule(static)
