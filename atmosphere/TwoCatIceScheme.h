@@ -295,8 +295,8 @@ private:
                             double rain_pow_2 = rain_base * rain_base;  // ^2/9
                             double rain_pow_4 = rain_pow_2 * rain_pow_2;// ^4/9
 
-                            // (No Rain_pow_4_9: it went dead when ATM_RAIN_AREA landed and S_ev moved onto the
-    // area-weighted rate R_ev. Deleted 2026-09-07.)
+                            // (No Rain_pow_4_9: it went dead when ATM_RAIN_AREA landed and
+                            // S_ev moved onto the area-weighted rate R_ev. Deleted 2026-09-07.)
                             Rain_pow_7_9  = Rain/rain_pow_2;            // 1 - 2/9 = 7/9
                             Rain_pow_13_9 = Rain * rain_pow_4;          // 1 + 4/9 = 13/9
                         }

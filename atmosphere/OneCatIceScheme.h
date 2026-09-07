@@ -137,6 +137,34 @@ private:
 
                     for(int i = m.im-2; i >= 0; i--){
 
+                        // Sub-terrain guard, ported from TwoCatIceScheme.h:272 on 2026-09-07.
+                        // Cells with i < i_topography are INSIDE the mountain: their t, p,
+                        // r_humid, cloud and ice are sub-terrain copies, not air, and feeding
+                        // them to the rate laws produces an unphysical dP_rain that the
+                        // downward flux integration then carries up into the real column. In
+                        // TwoCat that is what drove the iteration-323 P_rain runaway at
+                        // (i=6, j=30, k=209), the Gulf of Alaska / Cook Inlet inside-mountain
+                        // cell. THIS SCHEME HAD NO SUCH GUARD AT ALL -- `i_topography` did not
+                        // appear in the file -- so it computed rates at every level including
+                        // rock, and its flux integration accumulated from the bottom of the
+                        // grid rather than from the ground.
+                        //
+                        // Zeroing S_i as well matters here specifically: until today S_i was
+                        // never assigned in this scheme, so a stale sub-terrain value could not
+                        // arise. It is assigned now (the ice->snow debit), so it needs clearing
+                        // inside the terrain like every other rate.
+                        if (i < m.i_topography[j][k]) {
+                            m.P_rain.x[i][j][k]        = 0.0;
+                            m.P_snow.x[i][j][k]        = 0.0;
+                            m.Precipitation.x[i][j][k] = 0.0;
+                            m.S_v.x[i][j][k] = 0.0;
+                            m.S_c.x[i][j][k] = 0.0;
+                            m.S_i.x[i][j][k] = 0.0;
+                            m.S_r.x[i][j][k] = 0.0;
+                            m.S_s.x[i][j][k] = 0.0;
+                            continue;
+                        }
+
                         double Rain = m.P_rain.x[i][j][k];
                         double Snow = m.P_snow.x[i][j][k];
 
