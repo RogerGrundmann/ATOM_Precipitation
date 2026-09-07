@@ -254,16 +254,60 @@ private:
                         else  S_frz = 0.0;
 
 
+                        // ICE CONSUMPTION LIMITER, ported from TwoCatIceScheme.h:558. It is part
+                        // of the S_i repair below rather than an extra: writing the ice sink
+                        // without it would turn "snow from nothing" into "negative ice", and the
+                        // RK4 stages clamp `ice` with std::max(0.0, ...), which is itself a water
+                        // SOURCE -- the shape ATM_CWB_DIAG charges to the RungeKutta bucket. The
+                        // two rates need it for different reasons: S_i_au = c_i_au*ice is
+                        // proportional and safe on its own, but S_d_au is sized by the DEPOSITION
+                        // rate (S_i_dep/1.5*((m_s_0/m_i)^(2/3)-1)), which is supersaturation-
+                        // limited and knows nothing about how much ice is present.
+                        {
+                            const double S_ice_total = thr.S_i_au + thr.S_d_au;
+                            const double max_ice_loss = m.ice.x[i][j][k] / dt_snow_dim;
+                            if(S_ice_total > max_ice_loss && S_ice_total > 0.0){
+                                const double factor = max_ice_loss / S_ice_total;
+                                thr.S_i_au *= factor;
+                                thr.S_d_au *= factor;
+                            }
+                        }
+
                         // sinks and sources. Snow now grows from the cloud-ICE reservoir
                         // (thr.S_i_au aggregation + thr.S_d_au depositional autoconversion),
                         // not directly from vapour/cloud — the shared, bounded throttle.
                         // Vapour->ice is owned by SaturationAdjustment upstream, so S_i_dep is
                         // used only to size S_d_au and is not re-applied to the vapour budget.
+                        //
+                        // S_i IS THE DEBIT FOR THE TWO ICE->SNOW TERMS, AND UNTIL 2026-09-07 IT
+                        // WAS NEVER ASSIGNED AT ALL -- so `S_s` drew `thr.S_i_au + thr.S_d_au`
+                        // from a reservoir nothing depleted and the scheme MANUFACTURED SNOW.
+                        // Every other term here is a conserving pair (S_c_c between S_v and S_c;
+                        // S_ev between S_v and S_r; S_au, S_ac, S_shed between S_c and S_r;
+                        // S_rim between S_c and S_s; S_frz and S_melt between S_r and S_s), so
+                        // these two were the whole of the non-closure. With the line below,
+                        // S_v + S_c + S_i + S_r + S_s = 0 identically, term by term.
+                        //
+                        // WHY THE DEBIT IS `ice` AND NOT VAPOUR, WHICH IS THE ONE JUDGEMENT IN
+                        // IT. S_d_au is sized by S_i_dep, a vapour->ice deposition rate, so it
+                        // looks like a vapour term. It is not: this scheme deliberately does NOT
+                        // apply S_i_dep to the budget, because SaturationAdjustment owns
+                        // vapour->ice and writes `ice` DIRECTLY (SaturationAdjustment.h:252/:261)
+                        // rather than through S_i. The deposited mass therefore does land in
+                        // `ice` first, and S_d_au moves it on to snow. Debiting `ice` is the
+                        // reading consistent with the comment above; debiting `c` would take the
+                        // same water twice, once here and once in the adjustment.
+                        //
+                        // NOTE the sub-terrain guard TwoCatIceScheme.h:273 has and this scheme
+                        // does not: OneCat computes its rates at every i including cells inside
+                        // mountains. That is pre-existing and applies equally to S_v/S_c/S_r/S_s,
+                        // so it is left alone here rather than half-fixed under an S_i change.
                         m.S_v.x[i][j][k] = - m.S_c_c.x[i][j][k] + S_ev;         // in kg/(kg*s)
                         m.S_c.x[i][j][k] =   m.S_c_c.x[i][j][k] - S_au - S_ac
                                            - S_rim - S_shed;
                         m.S_r.x[i][j][k] =   S_au + S_ac - S_ev + S_shed
                                            - S_frz + S_melt;
+                        m.S_i.x[i][j][k] = -(thr.S_i_au + thr.S_d_au);       // the debit for the two ice->snow terms
                         m.S_s.x[i][j][k] =   thr.S_i_au + thr.S_d_au + S_rim
                                            + S_frz - S_melt;
                         // THERE IS DELIBERATELY NO DIRECT cloud-water -> snow TERM HERE, AND IT
@@ -281,11 +325,13 @@ private:
                         // gone. The leftover assignment and the tuned tau_s were deleted
                         // 2026-09-06; the constant had been fitted when S_nuc WAS the seed and
                         // governed a term that no longer ran.
-                        // NOTE: cloud ice here is diagnostic (set by SaturationAdjustment; the
-                        // scheme's S_i tendency is not integrated into it), so ice cannot be
-                        // depleted and m_i stays saturated — the throttle bounds S_d_au but does
-                        // not reach a realistic snow fraction in OneCat's over-condensed climate.
-                        // Realistic snow needs TwoCat's full budget (project_ice_scheme_states).
+                        // (The note that used to stand here said cloud ice is DIAGNOSTIC --
+                        // "the scheme's S_i tendency is not integrated into it, so ice cannot be
+                        // depleted and m_i stays saturated". That was an accurate description of
+                        // the defect repaired above, not of a design choice: S_i now carries the
+                        // ice->snow debit and reaches `ice` through rhs_ice like every other
+                        // species. Whether OneCat then reaches a realistic snow fraction is a
+                        // separate question and is still open -- see project_ice_scheme_states.)
 
 
                         // rain integration
