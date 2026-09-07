@@ -2386,6 +2386,9 @@ field for the first time. **And the candidate source is now REFUTED**: re-runnin
 form of the moistening is not what supplies the missing ~500 mm/a. **The source is unidentified**,
 and the instrument that would narrow it is a COLUMN WATER BUDGET — the vapour tendency against
 evaporation, condensation and transport, summed to close — not another knob.
+**THAT INSTRUMENT IS NOW WRITTEN, AND THE QUESTION WAS MIS-POSED: SEE THE SECTION BELOW.** There
+is no 500 mm/a source. `P - E` is the residue of two terms of **5e+06 mm/a**, and the `E` in it is
+a diagnostic that reaches the water field nowhere.
 
 **⚠ `nm` MEANS DIFFERENT THINGS IN THE TWO MODELS, AND THE FIRST ATTEMPT AT THIS RUN WAS A
 SILENT NO-OP.** `cAtmosphereModel.cpp:1319` is `for(iter_n = iter_start; iter_n <= nm; iter_n++)`,
@@ -2400,6 +2403,123 @@ opened": the tell was `total_iter_count 600` in a run that was supposed to end a
 to levels 1..`n_spread` every iteration that no flux produced, bounded only by the `c_sat_i` clamp.
 That is the same shape as the microphysics floor which manufactured 8129 mm/a before 2026-09-01,
 and it is now measurable in one line of every run log rather than by instrumenting a scheme.
+
+## The column water budget: `P - E` is the residue of a cycle 5000x its size, and the microphysics pays 0.69 mm/a for 984 mm/a of rain
+
+**`ATM_CWB_DIAG=1`, new 2026-09-07, print-only, default off, and the off-branch is verified
+BYTE-IDENTICAL over all 20 written files at 1 thread** (the 21st, `RUN_CONFIG.txt`, differs only
+in the output path). It is the instrument the section above named as the next step: the column's
+TOTAL water — vapour + cloud + ice + graupel, from `i_topography` up — differenced after every
+stage of the time loop that can write it, charged to that stage, and reported as a rate in mm/a
+beside the model's own `P` and `E`. Same design as `ATM_T0_ATTRIB`, and for the same reason: this
+file has repeatedly recorded a mechanism read off the control flow that a measurement then
+contradicted.
+
+**THE LAYER MASS IS FROZEN FOR THE WINDOW, AND WITHOUT THAT THE INSTRUMENT IS NOISE.** The obvious
+formulation — difference `SUM(rho*q*dz)` between marks — fails, because `densities()` rewrites
+`r_humid` inside every moist iteration and W then moves when no water did. A window is ~2 s of
+physical time and the answer is quoted in mm/a, a factor of 1.6e+06, so a **1e-6** relative
+density drift on a 30 mm reservoir prints as **~470 mm/a** — the size of the thing being chased.
+Freezing `rho*dz` makes every bucket `SUM(M*dq)`, the sums telescope, and the identity closes on
+arithmetic. The true water path is printed beside it and the difference between the two IS the
+density drift, named and charged to no stage.
+
+Iterations 611-620 from `output_twctl/atm_restart_0Ma_600.bin`, `config_accept.xml` defaults,
+24 threads, exit 0 with zero NaN. Cos-lat means on the same weights `Precip mean` uses:
+
+| stage | total mm/a | surface band i0..i0+3 | aloft |
+|---|---|---|---|
+| **evaporation** | **+5.0008e+06** | **+5.0008e+06** | 0.0 |
+| **RungeKutta** | **-7.8455e+06** | -4.0167e+06 | -3.8288e+06 |
+| **damp_wiggles(q)** | **+2.5153e+06** | -9.5893e+05 | +3.4742e+06 |
+| **SaturationAdjust** | **+5.5107e+05** | +7.7e+02 | +5.5029e+05 |
+| BC_Atm | -5.8180e+04 | -4.0027e+04 | -1.8153e+04 |
+| orographic_shapiro | -7.6894e+03 | -5.6199e+03 | -2.0695e+03 |
+| IceScheme, MoistConvection, cap_S+clamp, ConvectiveAdjust, ThermoAtm, radiation/teq, pressure+project | **0.0000e+00** | | |
+| **`unattributed`** | **0.0000e+00** | | |
+| **NET** | **+1.5578e+05** | -1.9681e+04 | +1.7546e+05 |
+| *reference: P* | *983.6* | | |
+| *reference: E* | *522.3* | | |
+
+`unattributed` is **exactly zero**, so the fourteen hooks account for the whole field and the
+table is closed rather than sampled. The reservoir moves 30.7156 -> 30.7252 mm, the budget says
+9.894e-03 mm of that is water and **-3.143e-04 mm is the density** — 3 % of the change, which is
+what freezing the mass was for.
+
+**FINDING 1: `P - E` COMPARES A FLUX WITH A DIAGNOSTIC, AND THE TWO ARE THREE ORDERS APART.** The
+line printed unconditionally since 2026-09-06 reads `E = 522.3 mm/a`. That is
+`Evaporation_Dalton`, and **the water `waterVapourEvaporation` actually puts into the air is
+5.0e+06 mm/a — 5100x larger.** The routine does not apply a flux: it ASSIGNS
+`c[0] = c_fix + (c_eq - c_fix)*w_norm`, a re-pin onto the PRESCRIBED initial humidity, and ADDS
+`c_eq*weight` at levels 1..3. `Evaporation.y` is computed in the same loop and read by the print,
+the VTK and nothing else. **So `P - E` = 461 mm/a is not a water-budget non-closure; it is the
+difference between a real flux and a bulk-formula diagnostic that does not drive anything.**
+
+**FINDING 2: THE WHOLE COLUMN WATER IS A RESIDUE OF TWO 5e+06 mm/a TERMS.** The evaporation re-pin
+injects +5.0e+06 into the surface band and `RungeKutta` removes -7.8e+06, with the scalar
+de-checkerboard filters returning +2.5e+06. **Every one of these is ~5000x the precipitation**, and
+the NET is +1.6e+05 — a **2 %** residual of terms that individually dwarf every physical flux in
+the model. One iteration is 0.2 s, which is why per-call adjustments convert into annual rates
+this large; the point is not the absolute size but that **the model's water is set by the
+difference between two numerical re-pins, and a 0.01 % asymmetry between them is 500 mm/a.** So
+"where does the missing 500 mm/a come from" has no answer of the form "this term supplies it".
+
+**FINDING 3: THE MICROPHYSICS IS DISCONNECTED FROM THE COLUMN WATER — 0.69 mm/a AGAINST 983.6 OF
+RAIN.** The ice schemes' bucket is **0.0000**, which is correct and is the first thing the table
+shows: they write the RATE arrays `S_v`/`S_c`/`S_i`/`S_g`, which reach the water only through
+`rhs_c`/`rhs_cloud`/`rhs_ice`/`rhs_g` in the RK4. Integrated over the column:
+
+| the scheme's rate arrays, mm/a | vapour+cloud+ice+graupel | rain+snow | sum |
+|---|---|---|---|
+| **as RK4 applies them** (`S * r_humid`) | **+0.69** | **-0.69** | **-0.00** |
+| the same rates at `L/u_0` | **+1926.0** | **-1926.0** | **0.0** |
+
+**The rates conserve EXACTLY** — the sum is zero to the printed digit, so the schemes are
+self-consistent and this is not a microphysics bug. What RK4 then applies is **0.69 mm/a of column
+water while 983.6 mm/a of precipitation leaves the ground.**
+
+**AND THE COEFFICIENT IS THE SUSPECT, READ OFF TWO ADJACENT LINES.** `RHS_Atm_Turb.cpp:1296-1307`
+adds `coeff_trans * S_x * r_humid` with `coeff_trans = 1.0`; the convective moisture source on the
+very next line gets `coeff_MC_q = ndimLength()/(u_0*c_0)` (`:374`, `:1298`). `S_v` is a rate in
+**kg/(kg·s)** — `TwoCatIceScheme.h:571` says so on the assignment — and `rhs_c` is `d(c)/dt_nd`
+with `c` in kg/kg, so reaching a non-dimensional tendency needs the factor **`L/u_0` = 2003 s**.
+It is given `r_humid` instead, a DENSITY of ~1.2 kg/m³. The ratio is **~1670 at the surface** and
+**2800 mass-weighted**, which is exactly the 0.69 -> 1926 in the table. *Same shape as
+`ATM_BUOY_CONSISTENT`, where the buoyancy was 5e+05 too small for the same reason, and as the
+ocean's `buoy_nd`.*
+
+**READ THE 1926 AS A SCALE, NOT AS A REPAIR.** It is the same rates under the neighbouring
+convention, printed so the factor is a measurement rather than a comment. **No knob is written and
+nothing is flipped**: this tree flips defaults on measurements, and what has been measured is the
+size of the discrepancy, not what the model does when it is removed. The arm is one knob on that
+coefficient — and it must be expected to change the precipitation, because the same rates build
+the ground flux in PHYSICAL units (`P_x[i-1] = P_x[i] + rho*S_x*dz`, seconds) while the column
+debit does not.
+
+**FINDING 4: `SaturationAdjustment` DOES NOT CONSERVE TOTAL WATER.** +5.5e+05 mm/a, essentially
+all of it aloft, where `d_cnd + d_dep = d_q_v` — the identity this file cites as the reason the
+fractional adjustment is safe — makes it exactly zero. It is 10 % of the evaporation term, so it
+is not the largest thing here, but it is a term that is supposed to be structurally absent.
+
+**WHAT THE TABLE CANNOT SPLIT, AND IT SAYS SO RATHER THAN IMPLYING IT CAN.** The `RungeKutta`
+bucket is transport + the microphysics S-terms + the `std::max(0.0, ...)` floor that every RK4
+stage applies to `c`, `cloud`, `ice` and `gr` (`RungeKutta_Atm_Turb.cpp:188` and its fifteen
+siblings) — a water SOURCE of exactly the shape that manufactured 8129 mm/a in the microphysics
+before 2026-09-01. The S-term part is now printed (0.69 mm/a), so the remaining -7.85e+06 is
+transport and that floor together, and separating them needs a second instrument.
+
+**AND THE RAIN/SNOW ROW IS NOT THE GROUND FLUX.** `dP_rain` omits `S_r_cri`
+(`TwoCatIceScheme.h:613`, whose own comment says *"in S_r, NOT in dP_rain"*) and `dP_snow` omits
+`S_s_dep`, `S_i_cri` and `S_r_cri`, each for a stated double-counting reason. So
+`SUM(rho*(S_r+S_s)*dz)` and `P(ground)` are different quantities and differ in SIGN here. The row
+is a CONSERVATION CHECK on the six arrays, and it passes.
+
+**WHAT THIS IS AND IS NOT.** It IS: a closed, stage-attributed water budget on a spun-up field,
+with `unattributed` at exactly zero; the `P - E` line reinterpreted; the microphysics measured as
+disconnected from the water by a factor of ~2800 with a named coefficient; and two
+non-conservations (the saturation adjustment, the filters) sized for the first time. It is **NOT**
+a repair, and the window is **2 s of physical time** — the two windows measured agree to ~2 %, but
+a rate quoted from ten iterations is not a climate. Nothing is flipped.
 
 ## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
 

@@ -24,6 +24,7 @@
 #include "SaturationAdjustment.h"
 #include "VelocityInitializer.h"
 #include "ConvectiveAdjustment.h"
+#include "ColumnWaterBudget.h"
 #include "PressureSolverAtm.h"
 #include "ThermoAtm.h"
 #include "UtilsAtm.h"
@@ -1421,6 +1422,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         int momentum_stride = 1;
 
         t0_mark("pressure+project");
+        ColumnWaterBudget::mark(*this, "pressure+project");
         if(iter_n % moist_stride == 0){
 /*
             // Multi-sweep Jacobi: the original single-sweep cadence (one sweep every
@@ -1451,6 +1453,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             if(moist_phys_active){
                 SaturationAdjustment(*this).run();                      // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
                 t0_mark("SaturationAdjust");
+                ColumnWaterBudget::mark(*this, "SaturationAdjust");
                 // Temperature 2Δt de-checkerboard. c/cloud/ice receive the same stride-2 moist
                 // forcing AND damp_wiggles and stay stable; t got the forcing but NO damping —
                 // the only prognostic without it — letting an undamped 2Δt computational mode
@@ -1462,6 +1465,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
+                ColumnWaterBudget::mark(*this, "damp_wiggles(q)");
 
                 switch(CategoryIceScheme){                              // rain, snow graupel and precipitation production and reduction
                     case -1: cout << endl << endl << endl               // no CategoryIceScheme used
@@ -1481,8 +1485,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 AtomUtils::damp_wiggles(P_snow, &i_topography, true, true, true);
 
                 t0_mark("IceScheme");
+                ColumnWaterBudget::mark(*this, "IceScheme");
                 MoistConvection(*this).run(iter_n);                     // rainfall from convecting clouds
                 t0_mark("MoistConvection");
+                ColumnWaterBudget::mark(*this, "MoistConvection");
 
                 AtomUtils::damp_wiggles(P_conv, &i_topography, true, true, true);
                 AtomUtils::damp_wiggles(E_u,    &i_topography, true, true, true);
@@ -1570,6 +1576,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                         }
                     }
                 }
+                // The two clamp passes above are a water SOURCE, not a guard: the c/cloud/ice
+                // floor `if (cv < 0) cv = 0` and the CLOUD_ICE_MAX rescale both change the
+                // column total, and they are the same shape as the microphysics floor that
+                // manufactured 8129 mm/a. They get their own bucket for that reason.
+                ColumnWaterBudget::mark(*this, "cap_S+clamp");
             }  // moist_phys_active
 
             // Dry convective adjustment BEFORE densities(), which is where brunt_N2 is formed --
@@ -1579,15 +1590,19 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             // reached twice the dry adiabat in 59 % of columns by iteration 20.
             if(ConvectiveAdjustment::enabled()) ConvectiveAdjustment(*this).run();
             t0_mark("ConvectiveAdjust");
+            ColumnWaterBudget::mark(*this, "ConvectiveAdjust");
 
             ThermoAtm(*this).densities();
             ThermoAtm(*this).forces();
             ThermoAtm(*this).standAtm_DewPoint_HumidRel();              // International Standard Atmosphere temperature profile, dew point temperature, relative humidity profile
+            ColumnWaterBudget::mark(*this, "ThermoAtm(pre)");
             ThermoAtm(*this).waterVapourEvaporation();                  // correction of surface water vapour by evaporation
+            ColumnWaterBudget::mark(*this, "evaporation");
             ThermoAtm(*this).latentSensibleHeat();                      // latent and sensible heat
             ThermoAtm(*this).vegetationLand();                          // vegetation on land
             ThermoAtm(*this).co2Atmosphere();                           // greenhouse gas co2 as function of temperature
             t0_mark("ThermoAtm");
+            ColumnWaterBudget::mark(*this, "ThermoAtm(rest)");
 
             if(turb_model != "laminar" && !inviscid_phase) {
                 TurbulenceAtm(*this).run();                             // update turbulence sources (skipped in laminar mode / inviscid spin-up)
@@ -1612,6 +1627,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             BC_Atm(*this).bcScalarSurfSur();                            // scalar variable at surfaces extrapolated by von Neumann
             BC_Atm(*this).bcSolidGround();                              // values inside mountains
             t0_mark("BC_Atm");
+            ColumnWaterBudget::mark(*this, "BC_Atm");
 
             if(iter_n % checkpoint == 0){
                 // Psi is FILLED here and READ by print_min_max_atm, so the fill goes first.
@@ -1697,8 +1713,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // when diffusion_ramp=0 (inviscid spin-up). The former separate laminar
         // solveRungeKutta_Atmosphere / RHS_Atm.cpp path was dropped — inviscid is now an
         // independent switch (diffusion_ramp), decoupled from the turbulence selection.
+        ColumnWaterBudget::tick(*this, iter_n, dt * metricShellLength() / u_0);
         solveRungeKutta_Atmosphere_Turb();
         t0_mark("RungeKutta");
+        ColumnWaterBudget::mark(*this, "RungeKutta");
         ubudget_capture = false;
         vbudget_capture = false;
         wbudget_capture = false;
@@ -1784,6 +1802,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
         AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
         t0_mark("orographic_shapiro");
+        ColumnWaterBudget::mark(*this, "orographic_shapiro");
         // ==============================================================================================
 
         // Soft steep-massif field smoothing (2026-06-10, user request). The init-time terrain
@@ -1858,10 +1877,13 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             }
             apply_teq_relaxation();                             // 5: strong relax t -> Scotese+CO2 perturbation
             t0_mark("teq_relaxation");
+            ColumnWaterBudget::mark(*this, "radiation/teq");
         }
 
         t0_mark("unattributed");
+        ColumnWaterBudget::mark(*this, "unattributed");
         if(iter_n % checkpoint == 0) t0_report(iter_n);
+        if(iter_n % checkpoint == 0) ColumnWaterBudget::report(*this, iter_n);
         ThermoAtm(*this).printDataAtm();
 
         // Convergence monitor: sample the slow integral metrics and report secular drift.
