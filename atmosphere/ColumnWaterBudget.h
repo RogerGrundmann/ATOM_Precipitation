@@ -275,6 +275,11 @@ private:
             // L/u_0 without reaching for the private metricShellLength(): the caller
             // already passes dt*L/u_0 as the seconds per iteration.
             const double L_over_u0 = (m.dt != 0.0) ? sec_per_iter / m.dt : 0.0;
+            // The coefficient RK4 ACTUALLY uses, which is not `r_humid` once ATM_MICRO_NDIM is
+            // set -- reading the shipped one would make this row constant across a sweep on the
+            // very coefficient it is meant to measure. Mirrors RHS_Atm_Turb.cpp exactly.
+            static const double micro_s = [](){ const char* e = getenv("ATM_MICRO_NDIM");
+                                                return e ? atof(e) : 0.0; }();
             //
             // AND THE RAIN/SNOW RATES BESIDE THEM, AS A CONSERVATION CHECK ON THE SCHEME'S OWN
             // ARRAYS. A scheme that conserves has (S_v + S_c + S_i + S_g) + (S_r + S_s) = 0 at
@@ -302,10 +307,12 @@ private:
                                        + m.S_i.x[i][j][k] + m.S_g.x[i][j][k];
                         const double R = m.S_r.x[i][j][k] + m.S_s.x[i][j][k];
                         const double M = wj * mass[idx(m, i, j, k)];
-                        s     += M * S * m.r_humid.x[i][j][k] * m.dt;   // as shipped
-                        s_nd  += M * S * L_over_u0            * m.dt;   // as coeff_MC_q would
-                        sp    += M * R * m.r_humid.x[i][j][k] * m.dt;
-                        sp_nd += M * R * L_over_u0            * m.dt;
+                        double cm = m.r_humid.x[i][j][k];
+                        if(micro_s != 0.0) cm += micro_s * (L_over_u0 - cm);
+                        s     += M * S * cm         * m.dt;   // as RK4 applies it
+                        s_nd  += M * S * L_over_u0  * m.dt;   // the same rates at L/u_0
+                        sp    += M * R * cm         * m.dt;
+                        sp_nd += M * R * L_over_u0  * m.dt;
                     }
                 }
                 row[j]     = s;
@@ -361,9 +368,13 @@ private:
                  << "   E = " << E_mm * per_year
                  << "   P - E = " << (P_mm - E_mm) * per_year
                  << " mm/a" << endl;
+            static const double micro_ndim = [](){ const char* e = getenv("ATM_MICRO_NDIM");
+                                                   return e ? atof(e) : 0.0; }();
             cout << "      AGCM: [CWB] microphysics rate arrays over the column [mm/a], NOT the"
-                 << " ground flux (different subset -- see the header):" << endl;
-            cout << "      AGCM: [CWB]     as RK4 applies them (S*r_humid):  vap+cld+ice+grp "
+                 << " ground flux (different subset -- see the header);"
+                 << "  ATM_MICRO_NDIM = " << scientific << setprecision(3)
+                 << micro_ndim << fixed << endl;
+            cout << "      AGCM: [CWB]     as RK4 applies them (S*coeff):    vap+cld+ice+grp "
                  << setprecision(2) << Sq_mm * per_year << "   rain+snow " << Sp_mm * per_year
                  << "   sum " << (Sq_mm + Sp_mm) * per_year
                  << "  <- conservation check" << endl;

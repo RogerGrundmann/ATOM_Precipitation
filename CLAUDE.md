@@ -2521,6 +2521,85 @@ non-conservations (the saturation adjustment, the filters) sized for the first t
 a repair, and the window is **2 s of physical time** — the two windows measured agree to ~2 %, but
 a rate quoted from ten iterations is not a climate. Nothing is flipped.
 
+### The knob is written and swept: `ATM_MICRO_NDIM`, a 2783x coefficient correction that moves the precipitation 0.5 %
+
+**`ATM_MICRO_NDIM=<strength>`, default 0.0 = shipped, off-branch BYTE-IDENTICAL over 20 of 20
+written files at 1 thread** against a binary built before either this knob or `ATM_CWB_DIAG`
+existed (the 21st, `RUN_CONFIG.txt`, differs only in the output path). It blends the coefficient
+on the four microphysics source terms in `RHS_Atm_Turb.cpp`:
+
+    coeff_micro = r_humid + s * (L/u_0 - r_humid)
+
+so `s` = 0 is exactly `r_humid` and `s` = 1 is exactly `L/u_0` = **2002.9 s**, the advective unit
+the model prints in its own `[TIMESCALES]` banner.
+
+**IT DELIBERATELY DOES NOT MATCH `coeff_MC_q`, AND THAT IS THE ONE DESIGN DECISION IN IT.** The
+neighbouring convective moisture source uses `ndimLength()/(u_0*c_0)`, and `ndimLength()` returns
+`L_atm` = 400 unless `ATM_LENGTH_NDIM` is set — which is the "40x too weak" defect that knob
+exists to fix and whose own comment names `coeff_MC_*` among the terms left behind. Matching a
+neighbour that is itself 40x wrong would not be a repair. Same exception, same reason, as
+`HYD_BAROCLINIC_PGF` using `R_Earth` rather than the ocean's broken `inv_rm`.
+
+**A STRENGTH RATHER THAN A FLAG**, because the endpoint is a factor of ~2800 on a term feeding
+`c`, `cloud`, `ice` and `gr`, and the response is strongly non-linear in `s` (`L/u_0 >> rho`, so
+`s` = 0.001 is already 2.7x and `s` = 0.01 is ~18x).
+
+**FIVE ARMS, 600 -> 620 from `output_twctl/atm_restart_0Ma_600.bin`, `config_accept.xml` defaults,
+24 threads, one pinned binary, ALL EXIT 0 WITH ZERO NaN:**
+
+| `s` | coefficient | Precip mm/a | P_rain | P_snow | pattern r | sigma | PW mm | `max w_u` |
+|---|---|---|---|---|---|---|---|---|
+| **unset** | 1x | **1029.1** | 1030 | 2.436 | +0.461 | 2.47 | 30.3 | 30.804076 |
+| 0.001 | 2.7x | 1029.1 | 1030 | 2.436 | +0.461 | 2.47 | 30.3 | 30.804076 |
+| 0.01 | ~18x | 1029.1 | 1030 | 2.436 | +0.461 | 2.47 | 30.3 | 30.804076 |
+| 0.1 | ~170x | 1029.1 | 1030 | 2.432 | +0.461 | 2.47 | 30.3 | 30.804076 |
+| **1.0** | **~2783x** | **1034.3** | 1036 | 2.421 | **+0.460** | 2.47 | 30.3 | 30.804076 |
+| *NASA* | | *978.3* | | | | | | |
+
+**IT IS STABLE AT FULL STRENGTH AND IT IS CONNECTED, AND THE SECOND NEEDED ITS OWN TEST BECAUSE
+THE SWEEP LOOKS LIKE A DEAD KNOB.** Four of the five arms agree to every printed digit, `max w_u`
+included, which is exactly the signature of a knob that is not wired up. A 1-thread pair at
+`s` = 1.0 against unset settles it: **every written file differs after two iterations and every
+iteration-0 file is identical.** So the small-`s` nulls are physical.
+
+**THE CORRECTION IS 2783x AND THE INSTRUMENT MEASURES IT DIRECTLY**, `ATM_CWB_DIAG` on both arms:
+
+| microphysics rate arrays, mm/a | vap+cld+ice+grp | rain+snow | sum |
+|---|---|---|---|
+| **shipped** (`S * r_humid`) | **0.69** | -0.69 | -0.00 |
+| **`ATM_MICRO_NDIM=1.0`** | **1920.18** | -1920.18 | **0.00** |
+| *the same rates at `L/u_0`, printed independently* | *1920.2* | *-1920.2* | *0.0* |
+
+At `s` = 1 the applied row equals the `L/u_0` row to the digit, which is the arithmetic check that
+the blend reaches its endpoint, and **the conservation check still closes at 0.00** — correcting
+the coefficient does not break the schemes' mass balance, because it scales every rate together.
+
+**AND A 2783x CORRECTION MOVES THE MODEL'S HEADLINE OUTPUT BY 0.5 %, UPWARD.** Precipitation
+1029.1 -> 1034.3, pattern r 0.461 -> 0.460, centred RMS 1515.5 -> 1516.2, sigma 2.47 both, land
+830.2 -> 829.7 and ocean 1107.8 -> 1115.3 (NASA 782.3 / 1055.8), precipitable water 30.3 both. The
+stage table barely moves: evaporation 5.0008e+06 -> 4.9902e+06, `RungeKutta` -7.8455e+06 ->
+-7.8441e+06, NET 1.5578e+05 -> 1.5087e+05.
+
+**THE DIRECTION IS UP, AND THAT FOLLOWS FROM THE BUDGET RATHER THAN CONTRADICTING IT.** The net
+q-side term is POSITIVE — the schemes net-ADD to vapour+cloud+ice, because `S_ev` dominates — so
+amplifying it adds water. *Anyone expecting a 2800x sink to dry the model out has the sign of the
+net term backwards.*
+
+**AND THE NULL IS THE SAME WALL AS `ATM_HYDRO_PGF`'s `1/f`, PREDICTABLE WITHOUT RUNNING
+ANYTHING.** 1920 mm/a against a 30.7 mm reservoir is an e-folding of **5.8 days = 2.5e+06
+iterations**; these arms are 20 iterations = **4.0 seconds**, i.e. **1.6e-05 of one e-folding**.
+The reservoir duly does not move (30.7252 -> 30.7248 mm). **What the 0.5 % shows is that the term
+acts LOCALLY on a timescale the run can see even though it cannot drain the column** — the
+precipitation response is ~500x the reservoir response — and the corrected term is still only
+**0.02 %** of the `RungeKutta` bucket, so it cannot compete with the evaporation/transport cycle
+even when it is right.
+
+**DEFAULT STAYS 0.0**, for the reason this tree always gives: what has been measured is 20
+iterations, the drawdown this correction implies is 2.5e+06 iterations away, and its sign over a
+long run is not what its sign over four seconds is. **And it does NOT close the `P - E` gap**
+(461.3 -> 462.9 mm/a), which is correct and expected: the section above establishes that `P - E`
+is not a budget statement in this model.
+
 ## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
 
 **THE REPAIR FOR "THE SOLVER HAS NO FIXED POINT" HAS NOW BEEN RUN IN THE FULL MODEL, WHICH IT

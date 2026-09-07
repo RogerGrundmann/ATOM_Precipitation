@@ -1293,18 +1293,63 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         wbud_other.x[i][j][k] =  coeff_MC_vel * MC_w.x[i][j][k] - surf_drag * w_ijk;
     }
 
+    // ==================================================================
+    // ATM_MICRO_NDIM=<strength> -- the coefficient on the microphysics source terms.
+    // DEFAULT 0.0 = SHIPPED, and bit-identical: at 0 the expression below reduces to
+    // `coeff_trans * S_x * r_humid` with the same operands in the same order.
+    //
+    // THE DEFECT, MEASURED BY ATM_CWB_DIAG ON 2026-09-07. `S_v`, `S_c`, `S_i`, `S_g` are rates
+    // in kg/(kg*s) -- TwoCatIceScheme.h:571 says so on the assignment -- and `rhs_c` is
+    // d(c)/dt_nd with `c` in kg/kg, so reaching a non-dimensional tendency needs the factor
+    // L/u_0 = 2003 s. What they get is `r_humid`, a DENSITY of ~1.2 kg/m3 at the surface and
+    // ~0.4 aloft. The ratio is ~1670 at the surface and 2800 mass-weighted, and the column
+    // water budget measures the consequence directly: the ice schemes' rate arrays conserve
+    // EXACTLY (+0.69 / -0.69 mm/a, sum -0.00) and as RK4 applies them they move **0.69 mm/a of
+    // column water while 983.6 mm/a of precipitation leaves the ground**. The same rates at
+    // L/u_0 move 1926 mm/a, which is the right order for the flux. So the microphysics is
+    // very nearly disconnected from the water it is supposed to be moving.
+    //
+    // Same shape as `ATM_BUOY_CONSISTENT` (the buoyancy 5e5 too small), the ocean's `buoy_nd`
+    // (~1e-7 too small) and ATHAD's items 34/42: a physical rate handed to a non-dimensional
+    // tendency with the wrong -- or in this case simply the nearest available -- factor.
+    //
+    // WHY L/u_0 IS metricShellLength() AND DELIBERATELY NOT ndimLength(). The neighbouring
+    // convective moisture source uses `coeff_MC_q = ndimLength()/(u_0*c_0)`, and `ndimLength()`
+    // returns L_atm = 400 unless ATM_LENGTH_NDIM is set -- which is the "40x too weak" defect
+    // that knob exists to fix and whose own comment names `coeff_MC_*` as one of the terms left
+    // behind. Matching a neighbour that is itself 40x wrong would not be a repair, so this term
+    // uses the advective unit the model prints in its own [TIMESCALES] banner and that
+    // `force_nd` was moved onto on 2026-07-28. Same exception, for the same reason, as
+    // `HYD_BAROCLINIC_PGF` using R_Earth rather than the ocean's broken `inv_rm`.
+    //
+    // A STRENGTH RATHER THAN A FLAG, because the endpoint is a factor of ~2800 on a source term
+    // that feeds c, cloud, ice and gr, and this tree measures such a thing behind a ramp before
+    // it is run at full. The blend is on the COEFFICIENT, so s = 0 is exactly `r_humid` and
+    // s = 1 is exactly L/u_0; note the response is strongly non-linear in s, because
+    // L/u_0 >> rho -- s = 0.001 is already 2.7x the shipped term and s = 0.01 is ~18x.
+    //
+    // Default 0.0. Nothing is flipped on an argument in this tree.
+    // ==================================================================
+    static const double micro_ndim = [](){ const char* e = getenv("ATM_MICRO_NDIM");
+                                           return e ? atof(e) : 0.0; }();
+    double coeff_micro = r_humid.x[i][j][k];
+    if(micro_ndim != 0.0){
+        static const double L_over_u0 = metricShellLength() / u_0;   // fixed after init
+        coeff_micro += micro_ndim * (L_over_u0 - coeff_micro);
+    }
+
     rhs_c.x[i][j][k] = -transport_c + diffusion_c
-        + coeff_trans * S_v.x[i][j][k] * r_humid.x[i][j][k]
+        + coeff_trans * S_v.x[i][j][k] * coeff_micro
         + coeff_MC_q * MC_q.x[i][j][k];
 
     rhs_cloud.x[i][j][k] = -transport_cloud + diffusion_cloud
-        + coeff_trans * S_c.x[i][j][k] * r_humid.x[i][j][k];
+        + coeff_trans * S_c.x[i][j][k] * coeff_micro;
 
     rhs_ice.x[i][j][k] = -transport_ice + diffusion_ice
-        + coeff_trans * S_i.x[i][j][k] * r_humid.x[i][j][k];
+        + coeff_trans * S_i.x[i][j][k] * coeff_micro;
 
     rhs_g.x[i][j][k] = -transport_g + diffusion_g
-        + coeff_trans * S_g.x[i][j][k] * r_humid.x[i][j][k];
+        + coeff_trans * S_g.x[i][j][k] * coeff_micro;
 
     rhs_co2.x[i][j][k] = -transport_co2 + diffusion_co2;
 
