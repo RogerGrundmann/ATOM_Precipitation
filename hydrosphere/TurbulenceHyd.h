@@ -383,7 +383,6 @@ private:
                     const double Omega = std::sqrt(W12*W12 + W13*W13 + W23*W23);
 
                     // ================================================================
-                    const double z_above = std::max(m.rad.z[i] * m.L_hyd - z_floor, 1.0e-6);
 
                     if (turb_model == k_epsilon) {
                         compute_k_epsilon(i, j, k, z_floor, dtkedr, ddisdr,
@@ -417,10 +416,14 @@ private:
 
     // -----------------------------------------------------------------------
     // z_floor: physical height of the seafloor [m] = rad.z[i_bath] * L_hyd
+    // The tke/dis gradients below are recomputed INSIDE this function from the
+    // neighbours with the wall/Neumann handling (the *_neu locals), so the caller's
+    // plain centred versions are superseded rather than missing. Names commented out
+    // 2026-09-07 to say so, following the file's own /*Omega*/ idiom.
     void compute_k_epsilon(int i, int j, int k, double z_floor,
-        double dtkedr, double ddisdr,
-        double dtkedthe, double ddisdthe,
-        double dtkedphi, double ddisdphi,
+        double /*dtkedr*/, double /*ddisdr*/,
+        double /*dtkedthe*/, double /*ddisdthe*/,
+        double /*dtkedphi*/, double /*ddisdphi*/,
         double /*Omega*/)
     {
         const double C_eps_1 = 1.35;
@@ -459,10 +462,14 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // The tke/dis gradients below are recomputed INSIDE this function from the
+    // neighbours with the wall/Neumann handling (the *_neu locals), so the caller's
+    // plain centred versions are superseded rather than missing. Names commented out
+    // 2026-09-07 to say so, following the file's own /*Omega*/ idiom.
     void compute_k_omega(int i, int j, int k,
         double dtkedr, double ddisdr,
-        double dtkedthe, double ddisdthe,
-        double dtkedphi, double ddisdphi,
+        double /*dtkedthe*/, double /*ddisdthe*/,
+        double /*dtkedphi*/, double /*ddisdphi*/,
         double Omega_mag, double /*W_unused*/)
     {
         const double bet_star = 0.09;
@@ -476,7 +483,6 @@ private:
         if (sinthe == 0.0) sinthe = 1.0e-5;
         const double rmsinthe = rh * sinthe;
         const double exp_rm   = 1.0 / (rm + 1.0);
-        const double inv_rm   = 1.0 / rh;
 
         const bool neumann_bot = (i > 0      && is_land(m.h, i-1, j, k));
         const bool neumann_jm1 = (j > 0      && is_land(m.h, i, j-1, k));
@@ -484,8 +490,6 @@ private:
         const bool neumann_km1 = (k > 0      && is_land(m.h, i, j, k-1));
         const bool neumann_kp1 = (k < m.km-1 && is_land(m.h, i, j, k+1));
 
-        const double tke_im1 = neumann_bot ? m.tke.x[i][j][k] : m.tke.x[i-1][j][k];
-        const double dis_im1 = neumann_bot ? m.dis.x[i][j][k] : m.dis.x[i-1][j][k];
         const double tke_jm1 = neumann_jm1 ? m.tke.x[i][j][k] : m.tke.x[i][j-1][k];
         const double tke_jp1 = neumann_jp1 ? m.tke.x[i][j][k] : m.tke.x[i][j+1][k];
         const double dis_jm1 = neumann_jm1 ? m.dis.x[i][j][k] : m.dis.x[i][j-1][k];
@@ -551,11 +555,15 @@ private:
 
     // -----------------------------------------------------------------------
     // z_floor: physical height of the seafloor [m]
+    // The tke/dis gradients below are recomputed INSIDE this function from the
+    // neighbours with the wall/Neumann handling (the *_neu locals), so the caller's
+    // plain centred versions are superseded rather than missing. Names commented out
+    // 2026-09-07 to say so, following the file's own /*Omega*/ idiom.
     void compute_k_omega_SST(int i, int j, int k,
         double z_floor, double rm, double sinthe,
         double dtkedr, double ddisdr,
-        double dtkedthe, double ddisdthe,
-        double dtkedphi, double ddisdphi,
+        double /*dtkedthe*/, double /*ddisdthe*/,
+        double /*dtkedphi*/, double /*ddisdphi*/,
         double Omega, double /*W*/)
     {
         const double a1     = 0.31;
@@ -564,9 +572,6 @@ private:
         const double bet2   = 0.0368;
         const double gam1   = 0.413;
         const double gam2   = 0.2;
-        const double sig_k1 = 1.176;
-        const double sig_k2 = 1.0;
-        const double sig_w1 = 2.0;
         const double sig_w2 = 1.168;
 
         const double nue_water_nd = nue_water / (m.u_0 * m.L_hyd);
@@ -583,8 +588,6 @@ private:
         const bool neumann_km1 = (k > 0      && is_land(m.h, i, j, k-1));
         const bool neumann_kp1 = (k < m.km-1 && is_land(m.h, i, j, k+1));
 
-        const double tke_im1 = neumann_bot ? m.tke.x[i][j][k] : m.tke.x[i-1][j][k];
-        const double dis_im1 = neumann_bot ? m.dis.x[i][j][k] : m.dis.x[i-1][j][k];
         const double tke_jm1 = neumann_jm1 ? m.tke.x[i][j][k] : m.tke.x[i][j-1][k];
         const double tke_jp1 = neumann_jp1 ? m.tke.x[i][j][k] : m.tke.x[i][j+1][k];
         const double dis_jm1 = neumann_jm1 ? m.dis.x[i][j][k] : m.dis.x[i][j-1][k];

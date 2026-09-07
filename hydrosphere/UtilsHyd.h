@@ -139,8 +139,9 @@ public:
     }
 
     // ------------------------------------------------------------------
-    void writeFile(std::string& bathymetry_name, std::string& output_path,
-                   bool is_final_result)
+    // output_path is unused: every writer below builds its own path from m.output_path.
+    void writeFile(std::string& bathymetry_name, std::string& /*output_path*/,
+                   bool /*is_final_result*/)
     {
         using namespace std;
         cout << endl << endl << endl << "      OGCM: write_file" << endl;
@@ -162,6 +163,25 @@ public:
         // (The ATMOSPHERE needs no such change: it loops `for(iter_n = iter_start; ...)` with
         // iter_start = restart_from_iter, so ITS iter_n is already absolute. Same root
         // asymmetry as the nm-semantics split: nm is ABSOLUTE for the atm, ADDITIONAL here.)
+        // `is_final_result` IS ACCEPTED AND IGNORED HERE, AND THAT IS CORRECT -- checked
+        // 2026-09-07 after I briefly "fixed" it and had to revert. The atmosphere's identical
+        // writeFile DOES use it, to skip the VTK slices on the second of two back-to-back setup
+        // calls that would otherwise write the same filenames twice (UtilsAtm.h). I read the
+        // ocean's call sites with grep, saw writeFile(false) at cHydrosphereModel.cpp:374 and
+        // writeFile(true) at :394, and concluded the ocean had the same double write.
+        //
+        // IT DOES NOT: :394 IS INSIDE A COMMENTED-OUT BLOCK (the `Printout:` label and its
+        // goto, :371 and :391-395). The ocean makes exactly ONE setup call, with false. A guard
+        // was written, and a from-scratch 1-thread pair measured it: 4 stamp-0 radial writes in
+        // BOTH arms, 16 of 16 written files byte-identical -- it never fired, because there was
+        // nothing to guard.
+        //
+        // AND IT WOULD HAVE BEEN A LATENT BUG. The only live callers passing true are the
+        // DUMP-ONLY branch at :595, whose whole purpose is to re-emit ParaView output, and the
+        // in-loop call. A guard of the atmosphere's shape (skip when the stamp is 0) would
+        // silently skip exactly that dump if it were ever taken at total_iter_count == 0.
+        //
+        // So the parameter stays, unused, matching the atmosphere's signature. Do not "fix" it.
         m.paraview_vtk_radial(bathymetry_name, m.im - 2, m.total_iter_count);
         m.paraview_vtk_radial(bathymetry_name, m.im - 1, m.total_iter_count);
 

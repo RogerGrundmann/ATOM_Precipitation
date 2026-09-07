@@ -110,7 +110,6 @@ public:
         const double y1      = m.get_layer_height(1);                   // first-cell height above surface [m]
         const double y1_safe = std::max(y1, 1.0e-6);
         const double nd_omega = m.L_atm / m.u_0;                        // ω_phys [s⁻¹] → ω*
-        const double inv_u02  = 1.0 / (m.u_0 * m.u_0);
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int j = 0; j < m.jm; j++) {
@@ -341,7 +340,6 @@ private:
                     const double exp_rm       = m.metricExpRm(rm);
                     double sinthe             = sin(m.the.z[j]);
                     if (sinthe == 0.0) sinthe = 1.0e-5;
-                    const double rmsinthe     = rm * sinthe;
                     const double inv_2dr      = 1.0 / (2.0 * m.dr);
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
@@ -478,10 +476,13 @@ private:
 
     // -----------------------------------------------------------------------
     // y_mount: physical height of the topographic surface [m] (get_layer_height(i_mount))
+    // The nine velocity gradients are unused: this closure takes its production from
+    // m.prod.x, which compute_sources() forms from the same derivatives. Names
+    // commented out 2026-09-07, following the file's own /*Omega*/ idiom.
     void compute_k_epsilon(int i, int j, int k, double y_mount,
-        double dudr, double dvdr, double dwdr,
-        double dudthe, double dvdthe, double dwdthe,
-        double dudphi, double dvdphi, double dwdphi,
+        double /*dudr*/, double /*dvdr*/, double /*dwdr*/,
+        double /*dudthe*/, double /*dvdthe*/, double /*dwdthe*/,
+        double /*dudphi*/, double /*dvdphi*/, double /*dwdphi*/,
         double /*Omega*/)
     {
         const double C_eps_1 = 1.35;
@@ -530,26 +531,25 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // The tke/dis gradients below are recomputed INSIDE this function from the
+    // neighbours with the wall/Neumann handling (the *_neu locals), so the caller's
+    // plain centred versions are superseded rather than missing. Names commented out
+    // 2026-09-07 to say so, following the file's own /*Omega*/ idiom.
     void compute_k_omega(int i, int j, int k,
         double dtkedr, double ddisdr,
-        double dtkedthe, double ddisdthe,
-        double dtkedphi, double ddisdphi,
+        double /*dtkedthe*/, double /*ddisdthe*/,
+        double /*dtkedphi*/, double /*ddisdphi*/,
         double Omega_mag, double /*W_unused*/)
     {
         const double bet_star = 0.09;
         const double gam      = 0.52;
         const double C_lim    = 0.875;
         const double bet_0    = 0.0708;
-        const double sig_k    = 1.0;
-        const double sig_w    = 1.3;
 
         const double rm        = m.rad.z[i];
         double sinthe          = sin(m.the.z[j]);
         if (sinthe == 0.0) sinthe = 1.0e-5;
         const double rmsinthe  = rm * sinthe;
-        const double rm2       = rm * rm;
-        const double sinthe2   = sinthe * sinthe;
-        const double rm2sinthe = rm2 * sinthe;
 
         // Geometry for exp-stretching — placed here so Neumann corrections below can use exp_rm.
         // exp_rm = 1/(rm+1) is the Jacobian of the radial coordinate transformation;
@@ -559,10 +559,7 @@ private:
         // dtkedthe already carries the 1/rm factor, so the cosθ coefficient is
         // cosθ/(rm sinθ) rather than cosθ/(rm² sinθ).
         const double exp_rm   = m.metricExpRm(rm);
-        const double exp_2_rm = exp_rm * exp_rm;
         // ATM_METRIC_RADIUS — identity when off. See RungeKutta_Atm_Turb for the rationale.
-        const double inv_rm   = 1.0 / m.metricRadius(rm);
-        const double inv_rm2  = inv_rm * inv_rm;
 
         // Neumann BC at all six faces: replace a land neighbour's tke/dis with the
         // current cell's value (zero-gradient) so that sig_d, D_w, and the diffusion
@@ -573,8 +570,6 @@ private:
         const bool neumann_km1 = (k > 0      && is_land(m.h, i, j, k-1));
         const bool neumann_kp1 = (k < m.km-1 && is_land(m.h, i, j, k+1));
 
-        const double tke_im1 = neumann_bot ? m.tke.x[i][j][k] : m.tke.x[i-1][j][k];
-        const double dis_im1 = neumann_bot ? m.dis.x[i][j][k] : m.dis.x[i-1][j][k];
         const double tke_jm1 = neumann_jm1 ? m.tke.x[i][j][k] : m.tke.x[i][j-1][k];
         const double tke_jp1 = neumann_jp1 ? m.tke.x[i][j][k] : m.tke.x[i][j+1][k];
         const double dis_jm1 = neumann_jm1 ? m.dis.x[i][j][k] : m.dis.x[i][j-1][k];
@@ -653,11 +648,15 @@ private:
 
     // -----------------------------------------------------------------------
     // y_mount: physical height of the topographic surface [m] (get_layer_height(i_mount))
+    // The tke/dis gradients below are recomputed INSIDE this function from the
+    // neighbours with the wall/Neumann handling (the *_neu locals), so the caller's
+    // plain centred versions are superseded rather than missing. Names commented out
+    // 2026-09-07 to say so, following the file's own /*Omega*/ idiom.
     void compute_k_omega_SST(int i, int j, int k,
         double y_mount, double rm, double sinthe,
         double dtkedr, double ddisdr,
-        double dtkedthe, double ddisdthe,
-        double dtkedphi, double ddisdphi,
+        double /*dtkedthe*/, double /*ddisdthe*/,
+        double /*dtkedphi*/, double /*ddisdphi*/,
         double Omega, double /*W*/)
     {
         // Menter 1994 ABL constants
@@ -667,9 +666,6 @@ private:
         const double bet2     = 0.0368;
         const double gam1     = 0.413;
         const double gam2     = 0.2;
-        const double sig_k1   = 1.176;
-        const double sig_k2   = 1.0;
-        const double sig_w1   = 2.0;
         const double sig_w2   = 1.168;
 
         // Dimensionless molecular viscosity ν* = ν_air / (u_0 · L_atm)
@@ -682,16 +678,11 @@ private:
         const double y_phys = std::max(m.get_layer_height(i) - y_mount, 1.0e-6);
         const double y_star = y_phys / m.L_atm;  // dimensionless
 
-        const double rm2      = rm * rm;
-        const double sinthe2  = sinthe * sinthe;
         const double rmsinthe = rm * sinthe;
 
         // Geometry factors matching compute_k_omega convention
         const double exp_rm   = m.metricExpRm(rm);
-        const double exp_2_rm = exp_rm * exp_rm;
         // ATM_METRIC_RADIUS — identity when off. See RungeKutta_Atm_Turb for the rationale.
-        const double inv_rm   = 1.0 / m.metricRadius(rm);
-        const double inv_rm2  = inv_rm * inv_rm;
 
         // Neumann BC at all six faces: replace a land neighbour's tke/dis with the
         // current cell's value (zero-gradient) so that CD_kw, D_w, and the diffusion
@@ -702,8 +693,6 @@ private:
         const bool neumann_km1 = (k > 0      && is_land(m.h, i, j, k-1));
         const bool neumann_kp1 = (k < m.km-1 && is_land(m.h, i, j, k+1));
 
-        const double tke_im1 = neumann_bot ? m.tke.x[i][j][k] : m.tke.x[i-1][j][k];
-        const double dis_im1 = neumann_bot ? m.dis.x[i][j][k] : m.dis.x[i-1][j][k];
         const double tke_jm1 = neumann_jm1 ? m.tke.x[i][j][k] : m.tke.x[i][j-1][k];
         const double tke_jp1 = neumann_jp1 ? m.tke.x[i][j][k] : m.tke.x[i][j+1][k];
         const double dis_jm1 = neumann_jm1 ? m.dis.x[i][j][k] : m.dis.x[i][j-1][k];
@@ -725,9 +714,6 @@ private:
         const double ddisdphi_neu = (dis_kp1 - dis_km1) / (rmsinthe * 2.0 * m.dphi);
 
         // Local second-order derivatives for diffusion Laplacian (raw, exp_rm applied later)
-        const double d2tkedr2   = (m.tke.x[i+1][j][k] - 2.0*m.tke.x[i][j][k] + tke_im1) / (m.dr   * m.dr);
-        const double d2tkedthe2 = (tke_jp1 - 2.0*m.tke.x[i][j][k] + tke_jm1) / (m.dthe * m.dthe);
-        const double d2tkedphi2 = (tke_kp1 - 2.0*m.tke.x[i][j][k] + tke_km1) / (m.dphi * m.dphi);
 
         // Cross-diffusion term CD_kω using Neumann-corrected gradients
         const double CD_kw = std::max(

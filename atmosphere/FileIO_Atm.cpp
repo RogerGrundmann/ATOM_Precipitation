@@ -228,7 +228,11 @@ void cAtmosphereModel::AtmosphereDataTransfer(const string &Name_Bathymetry_File
 //     coupling moves SST STRUCTURE around without shifting the global ocean energy
 //     (the Scotese ocean-mean, the one thing we trust, is preserved exactly).
 // Under-relaxation across rounds is the caller's job (sst_coupling_alpha ~0.3-0.5).
-void cAtmosphereModel::read_Hydrosphere_SST(int Ma){
+// `Ma` is not used and does not need to be: the time slice is already carried by
+// `bathymetry_name` (FileIO_Atm.cpp:31 builds it as to_string(Ma) + BathymetrySuffix),
+// which becomes `stem_t` and then the `<stem>_Transfer_Hyd_SST_` prefix this scans for.
+// Kept in the signature to match its sibling readers rather than deleted.
+void cAtmosphereModel::read_Hydrosphere_SST(int /*Ma*/){
     if(sst_coupling_alpha <= 0.0) return;                              // OFF: one-way chain / Picard round 0
 
     cout << endl << "      AGCM: read_Hydrosphere_SST   alpha = " << sst_coupling_alpha << endl;

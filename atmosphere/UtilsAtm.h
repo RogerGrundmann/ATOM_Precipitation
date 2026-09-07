@@ -335,7 +335,8 @@ public:
         }
     }
 
-    void writeFile(std::string& bathymetry_name, std::string& output_path, bool is_final_result)
+    // output_path is unused: every writer below builds its own path from m.output_path.
+    void writeFile(std::string& bathymetry_name, std::string& /*output_path*/, bool is_final_result)
     {
         using namespace std;
         cout << endl << endl << endl << "      AGCM: write_file" << endl;
