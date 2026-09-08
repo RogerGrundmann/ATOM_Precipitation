@@ -44,6 +44,71 @@ public:
         : m(model)
     {}
 
+    // ==================================================================================
+    // ATM_SATADJ_DIAG=1 (print-only, default off) -- WHERE DOES THIS ROUTINE CREATE WATER?
+    //
+    // `ATM_CWB_DIAG` charges the SaturationAdjust stage **+5.5e+05 mm/a**, essentially all
+    // aloft, in a routine whose own comment says total water is conserved by the loop
+    // ("d_cnd + d_dep = d_q_v"). That identity holds for the RATES and not for what is
+    // WRITTEN, because four clips sit between them. This attributes the difference to each,
+    // and closes: sum of the buckets + unattributed = the measured change in column water.
+    //
+    // THE BUCKETS, in the order the routine executes them:
+    //   entry_clip  q_v_old/q_c_old/q_i_old are read as max(0, .) -- a negative field value
+    //               is silently lifted to zero and the write-back starts from the lifted one.
+    //   phase_split THE SUSPECT. d_q_v is bounded by the TOTAL condensate q_c_b + q_i_b, but
+    //               it is then split by TEMPERATURE, d_cnd = d_q_v*CND and d_dep = d_q_v*DEP,
+    //               and each half is subtracted with its own max(0, .). So a cold cell
+    //               holding LIQUID and no ice (CND ~ 0, DEP ~ 1) evaporates d_dep out of an
+    //               empty ice reservoir: q_v gains it and nothing loses it. Availability is
+    //               enforced on the sum and the split ignores it.
+    //   cold_delete the T < t_00 branch. On the shipped path it deletes cloud AND ice
+    //               outright (a SINK); under ATM_ICE_COLD (default on) it freezes instead
+    //               and must read exactly 0.
+    //   caf_neg / caf_cap / caf_fade / caf_supersat  the four in clampAndFade: the negative
+    //               clips, the 0.05 kg/kg condensate cap, the cold fade, and the always-on
+    //               supersaturation removal, which moves vapour to condensate and must read 0.
+    //
+    // Charged in the units ATM_CWB_DIAG uses -- cos-lat weighted, times the layer mass
+    // rho*dz, so a bucket is [mm] of column water per call and the two instruments are
+    // directly comparable. Cells below i_topography and the lid row are excluded, as there.
+    // Accumulated in a function-local static rather than a model member: adding a member
+    // moves sizeof(cAtmosphereModel) and that is this tree's stack-canary hazard.
+    // ==================================================================================
+    struct Budget {
+        double entry_clip = 0.0, phase_split = 0.0, cold_delete = 0.0, adj_total = 0.0;
+        double caf_neg = 0.0, caf_cap = 0.0, caf_fade = 0.0, caf_supersat = 0.0,
+               caf_total = 0.0;
+        double w_lat = 0.0;
+        long   calls = 0;
+        double cum_adj = 0.0, cum_caf = 0.0;
+    };
+    static Budget& budget(){ static Budget b; return b; }
+    // ATM_SATADJ_PHASE: 1 = clip each evaporation half to its own reservoir (the repair),
+    // 0 = shipped. Default 0 -- this changes the moist physics of the default configuration,
+    // and this tree flips defaults on measurements.
+    static bool satadjPhase(){
+        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_PHASE");
+                                    return e && atoi(e) != 0; }();
+        return v;
+    }
+    static bool diagOn(){
+        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_DIAG");
+                                    return e && atoi(e) != 0; }();
+        return v;
+    }
+    // The weight GetMean_2D/GetMean_3D use, replicated exactly as ColumnWaterBudget does.
+    static double latWeight(int j){
+        return (j <= 90) ? cos((90 - j) * M_PI / 180.0) : cos((j - 90) * M_PI / 180.0);
+    }
+    // Layer mass [kg/m2] at (i,j,k), 0 where ColumnWaterBudget carries no mass either.
+    double cellMass(int i, int j, int k) const {
+        if (i < m.i_topography[j][k] || i >= m.im - 1) return 0.0;
+        double rho = m.r_humid.x[i][j][k];
+        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+        return rho * (m.get_layer_height(i+1) - m.get_layer_height(i));
+    }
+
 
     void run() {
         using namespace std;
@@ -58,6 +123,7 @@ public:
         adjustSaturation();
         applyTopography();
         clampAndFade();
+        reportBudget();
         printReport();
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -107,9 +173,14 @@ private:
         // Physically, condensation only happens once a parcel has risen, cooled
         // adiabatically and reached its LCL aloft; the warm ocean surface is below
         // saturation by definition. So cloud forms from i = 1 up, not at i = 0.
-        #pragma omp parallel for collapse(2) schedule(static)
+        const bool diag = diagOn();
+        double b_entry = 0.0, b_phase = 0.0, b_cold = 0.0, b_total = 0.0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:b_entry,b_phase,b_cold,b_total)
         for (int i = 1; i < m.im - 1; i++) {
             for (int j = 0; j < m.jm; j++) {
+                const double wm_j = diag ? latWeight(j) : 0.0;
                 double *S_c_c_row = m.S_c_c.x[i][j];
                 double *c_row     = m.c.x[i][j];
                 double *cloud_row = m.cloud.x[i][j];
@@ -120,6 +191,9 @@ private:
 
                 for (int k = 0; k < m.km; k++) {
                     S_c_c_row[k] = 0.0;
+
+                    const double wm = diag ? wm_j * cellMass(i, j, k) : 0.0;
+                    const double q_t_raw = diag ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
 
                     double q_v_old = std::max(0.0, c_row[k]);
                     double q_c_old = std::max(0.0, cloud_row[k]);
@@ -160,6 +234,10 @@ private:
                         (q_v_old < q_sat &&
                         (q_c_old > 1e-12 || q_i_old > 1e-12))) {
 
+                        // charged only for cells that ENTER: a cell that does not enter is
+                        // never written, so its max(0, .) lifting does not reach the field.
+                        if (diag) b_entry += wm * ((q_v_old + q_c_old + q_i_old) - q_t_raw);
+
                         double q_v_b   = q_v_old;
                         double q_c_b   = q_c_old;
                         double q_i_b   = q_i_old;
@@ -181,7 +259,34 @@ private:
                             double d_cnd = d_q_v * CND;
                             double d_dep = d_q_v * DEP;
 
+                            // ATM_SATADJ_PHASE=1 -- SPLIT THE EVAPORATION BY AVAILABILITY AS
+                            // WELL AS BY PHASE. d_q_v is already bounded by the TOTAL condensate
+                            // q_c_b + q_i_b above, but it is then split by TEMPERATURE, and each
+                            // half is subtracted with its own max(0, .). So a cell whose
+                            // condensate is in the phase the temperature does NOT select --
+                            // liquid in a cold cell (CND ~ 0), ice in a warm one -- evaporates
+                            // out of an empty reservoir: q_v gains d_q_v in full and the
+                            // condensate loses only what it had. Measured with ATM_SATADJ_DIAG,
+                            // that is 100 % of this routine's +5.5e+05 mm/a non-conservation.
+                            //
+                            // The repair moves the unavailable part to the OTHER phase rather
+                            // than dropping it, because the total IS available by construction,
+                            // and then sets d_q_v to what was actually taken. The latent-heat
+                            // line below consumes the same corrected pair, so the energy follows
+                            // the mass: evaporating ice absorbs ls, not lv.
+                            if (satadjPhase() && d_q_v > 0.0) {
+                                if (d_cnd > q_c_b) { d_dep += d_cnd - q_c_b; d_cnd = q_c_b; }
+                                if (d_dep > q_i_b) {
+                                    const double back = d_dep - q_i_b;
+                                    d_dep = q_i_b;
+                                    d_cnd = std::min(q_c_b, d_cnd + back);
+                                }
+                                d_q_v = d_cnd + d_dep;
+                            }
+
                             q_v_b += d_q_v;
+                            if (diag) b_phase += wm * alpha_entry
+                                    * (std::max(0.0, d_cnd - q_c_b) + std::max(0.0, d_dep - q_i_b));
                             q_c_b  = std::max(0.0, q_c_b - d_cnd);
                             q_i_b  = std::max(0.0, q_i_b - d_dep);
 
@@ -253,6 +358,9 @@ private:
                             t_row[k]     = (T_original + alpha_entry * (T - T_original)) * inv_t_0;
                         }
  
+                        const double q_t_pre_cold = diag
+                            ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
+
                         if (T < m.t_00) {
                             // ATM_ICE_COLD: below the homogeneous-freezing point LIQUID cannot
                             // exist -- but ice must, and this is where cirrus lives. Freeze it
@@ -265,9 +373,24 @@ private:
                             ice_row[k]   = 0.0;
                             }
                         }
+                        if (diag) {
+                            b_cold  += wm * ((c_row[k] + cloud_row[k] + ice_row[k])
+                                             - q_t_pre_cold);
+                            b_total += wm * ((c_row[k] + cloud_row[k] + ice_row[k]) - q_t_raw);
+                        }
                     }
                 }
             }
+        }
+
+        if (diag) {
+            Budget& b = budget();
+            if (b.w_lat <= 0.0)
+                for (int j = 0; j < m.jm; j++) b.w_lat += latWeight(j) * m.km;
+            b.entry_clip  = b_entry / b.w_lat;
+            b.phase_split = b_phase / b.w_lat;
+            b.cold_delete = b_cold  / b.w_lat;
+            b.adj_total   = b_total / b.w_lat;
         }
     }
 
@@ -295,9 +418,14 @@ private:
         constexpr double T_max     = 333.15;   // 60 °C
         constexpr double cloud_cap = 0.05;     // kg/kg condensate ceiling
 
-        #pragma omp parallel for collapse(2) schedule(static)
+        const bool diag = diagOn();
+        double b_neg = 0.0, b_cap = 0.0, b_fade = 0.0, b_ss = 0.0, b_tot = 0.0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(+:b_neg,b_cap,b_fade,b_ss,b_tot)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
+                const double wm_j = diag ? latWeight(j) : 0.0;
                 double *c_row     = m.c.x[i][j];
                 double *cloud_row = m.cloud.x[i][j];
                 double *ice_row   = m.ice.x[i][j];
@@ -305,9 +433,16 @@ private:
                 double *p_row     = m.p_stat.x[i][j];
 
                 for (int k = 0; k < m.km; k++) {
+                    const double wm = diag ? wm_j * cellMass(i, j, k) : 0.0;
+                    const double q_t_in = diag
+                        ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
+
                     if (c_row[k]     < 0.0) c_row[k]     = 0.0;
                     if (cloud_row[k] < 0.0) cloud_row[k] = 0.0;
                     if (ice_row[k]   < 0.0) ice_row[k]   = 0.0;
+                    if (diag) b_neg += wm * ((c_row[k] + cloud_row[k] + ice_row[k]) - q_t_in);
+                    const double q_t_neg = diag
+                        ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
 
                     double T_dim = t_row_nd[k] * m.t_0;
                     // Upper temperature bound first (no air parcel exceeds ~60 °C); keeps
@@ -345,9 +480,18 @@ private:
                         t_row_nd[k] = T_dim * inv_t_0;
                     }
 
+                    // the supersaturation removal above moves vapour into condensate and
+                    // must be conservative; measured rather than assumed.
+                    const double q_t_ss = diag
+                        ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
+                    if (diag) b_ss += wm * (q_t_ss - q_t_neg);
+
                     // ---- Condensate upper bounds (CAP SAFETY NET) ----
                     if (cloud_row[k] > cloud_cap) cloud_row[k] = cloud_cap;
                     if (ice_row[k]   > cloud_cap) ice_row[k]   = cloud_cap;
+                    const double q_t_cap = diag
+                        ? (c_row[k] + cloud_row[k] + ice_row[k]) : 0.0;
+                    if (diag) b_cap += wm * (q_t_cap - q_t_ss);
 
                     // Existing cold fade: smoothly dry moisture toward 0 below t_00.
                     // ATM_ICE_COLD restricts it to the LIQUID. Vapour is not a condensate and
@@ -361,9 +505,48 @@ private:
                     cloud_row[k] *= alpha;
                     ice_row[k]   *= alpha;
                     }
+                    if (diag) {
+                        const double q_t_out = c_row[k] + cloud_row[k] + ice_row[k];
+                        b_fade += wm * (q_t_out - q_t_cap);
+                        b_tot  += wm * (q_t_out - q_t_in);
+                    }
                 }
             }
         }
+
+        if (diag) {
+            Budget& b = budget();
+            if (b.w_lat <= 0.0)
+                for (int j = 0; j < m.jm; j++) b.w_lat += latWeight(j) * m.km;
+            b.caf_neg      = b_neg  / b.w_lat;
+            b.caf_supersat = b_ss   / b.w_lat;
+            b.caf_cap      = b_cap  / b.w_lat;
+            b.caf_fade     = b_fade / b.w_lat;
+            b.caf_total    = b_tot  / b.w_lat;
+        }
+    }
+
+    // ATM_SATADJ_DIAG report. Per call and cumulative, in [mm] of column water on
+    // ColumnWaterBudget's own weights, so a row here is directly comparable with that
+    // instrument's SaturationAdjust bucket. `unattributed` is the identity check: it is the
+    // measured change minus the named mechanisms, and it must be ~0.
+    void reportBudget() const {
+        if (!diagOn()) return;
+        Budget& b = budget();
+        b.calls++;
+        b.cum_adj += b.adj_total;
+        b.cum_caf += b.caf_total;
+        const double adj_un = b.adj_total - (b.entry_clip + b.phase_split + b.cold_delete);
+        const double caf_un = b.caf_total - (b.caf_neg + b.caf_supersat + b.caf_cap + b.caf_fade);
+        printf("      AGCM: [SATADJ BUDGET] call %ld, mm of column water:\n", b.calls);
+        printf("        adjustSaturation  entry_clip %+.6e  phase_split %+.6e"
+               "  cold_delete %+.6e  |  total %+.6e  unattributed %+.6e\n",
+               b.entry_clip, b.phase_split, b.cold_delete, b.adj_total, adj_un);
+        printf("        clampAndFade      neg_clip   %+.6e  supersat    %+.6e"
+               "  cap %+.6e  fade %+.6e  |  total %+.6e  unattributed %+.6e\n",
+               b.caf_neg, b.caf_supersat, b.caf_cap, b.caf_fade, b.caf_total, caf_un);
+        printf("        cumulative        adjustSaturation %+.6e   clampAndFade %+.6e"
+               "   both %+.6e\n", b.cum_adj, b.cum_caf, b.cum_adj + b.cum_caf);
     }
 
     void printReport() const {
