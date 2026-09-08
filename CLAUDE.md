@@ -2291,16 +2291,38 @@ This also explains the sign of `ATM_PROJ_SWEEPS` being measured **negative** (-0
 -0.07 % at 100x on `Psi(ground)`), which was read as inertness with a rounding-level sign: it is
 this effect, and it is real.
 
+**AND THE NAMED REPAIR IS NOW MEASURED, AND IT IS NOT THE CURE** (2026-09-08). The probe also
+forms `u_new = aux - grad_wide(p)` at centres, interpolates it to FACES with the Rhie-Chow term at
+unit coefficient, and takes the face divergence — the quantity a staggered projection would make
+zero. On a uniform grid the algebra closes: the bracket's face difference is exactly `Lc - Lw`, so
+the face divergence of the corrected field should be `div_wide(u*) - Lc(p)`, i.e. the SOLVER's
+residual, and a face projection would inherit 98 % instead of 45 %. **It does not hold here.**
+
+| relaxations | solver | correction CENTRE | **correction FACE** |
+|---|---|---|---|
+| 200 | 70.01 % | 53.36 % | **50.24 %** |
+| 2 000 | 90.84 % | 48.14 % | **48.96 %** |
+| 10 000 | 98.17 % | 45.26 % | **46.52 %** |
+
+**THE FACE FIGURE TRACKS THE CENTRE ONE, NOT THE SOLVER, AND DEGRADES WITH CONVERGENCE THE SAME
+WAY.** The identity assumes a UNIFORM metric; here the metric factors sit INSIDE the gradient
+(`exp_rm` at the cell, not at the face) and the operator carries the extra first-derivative `num_a`
+from the stretch curvature. **So the shortfall is not the centre-vs-face choice, and a staggered
+rewrite bought on that argument would have delivered ~46 % where 45 % stands today.** Tested at
+unit Rhie-Chow coefficient, which is the natural choice for a pure projection because the
+correction IS `-grad p`; a different `d_f` was not swept, so what is refuted is the repair AS
+NAMED, not every possible face scheme.
+
 **AND THE OBVIOUS REPAIR IS RULED OUT BY THE SOLVER'S OWN COLOURING, WHICH IS WHY THIS SECTION
 STOPS HERE.** The natural fix — build the Poisson operator as the exact composition of the
 discrete divergence and gradient actually used, i.e. make it WIDE — cannot be solved by this
 solver: a `+-2` stencil leaves `(i+j+k)` parity UNCHANGED, so every stencil neighbour shares the
 cell's own colour and red-black Jacobi decouples into eight independent sub-grids that never
 communicate. **The wide operator and red-black relaxation are incompatible by construction.** The
-viable repair is the other direction — make the CORRECTION consistent with the compact operator by
-applying it at FACES (a staggered / Rhie-Chow momentum-interpolation projection: face gradients,
-face velocity correction, reconstruct to centres) — and that is a change to how the projection is
-applied, not a coefficient. It is not written.
+repair proposed here was the other direction — make the CORRECTION consistent with the compact
+operator by applying it at FACES (a staggered / Rhie-Chow momentum-interpolation projection) —
+**and that has now been measured and is NOT the cure; see the table above.** It is not written,
+and on this evidence it should not be.
 
 *`ATM_RHIE_CHOW` is not that repair and does not become it.* It adds a `D4` term to the divergence
 which damps the checkerboard; it does not make `div.grad` equal the operator being inverted, which
