@@ -1569,7 +1569,8 @@ is WEAKER in the repaired arm, 3.43 against 3.93 cm/s.
 the metric cuts horizontal diffusion by `inv_rm^2` ~ **4e8**, so nothing is left to damp grid-scale
 structure. **This ocean has no horizontal eddy viscosity of its own — it was getting one by accident
 from the metric error**, and that is also why the repaired arm's KE drift is worse (2.08 % against
-1.29 %).
+1.29 % — **but see the restart-ramp contamination flagged two subsections down; both figures need
+re-measuring**).
 
 **SO `HYD_METRIC_RADIUS` TRADES A SPURIOUS VERTICAL MODE FOR HORIZONTAL NOISE, AND IS NOT USABLE
 UNTIL A REAL HORIZONTAL VISCOSITY EXISTS.** The radial-velocity collapse (2065x) is real and so is
@@ -1689,6 +1690,12 @@ against 2.08 % repaired**, and `converged` is **0 for both**. So the repaired oc
 energy and is drifting FASTER in it, not settling sooner. Temperature drift is marginally better
 (0.0090 % against 0.0103 %). **Neither arm is converged and the repair does not make the ocean
 converge**; it removes a spurious vertical mode, which is a different claim.
+**⚠ BOTH DRIFT FIGURES ARE CONTAMINATED AND MUST BE RE-MEASURED BEFORE THEY ARE QUOTED AGAIN**
+(2026-09-07). These arms were RESTARTS, and the barotropic cold-start ramp re-fired on every
+restart — on a 300 -> 500 restart it accounts for **nine tenths** of the apparent KE growth. See
+*The ocean's KE ramp was ~90 % a cold-start ramp re-firing on every restart* below. The
+radial-velocity collapse and the rms table above are unaffected; only the KE-drift column and the
+`converged = 0` reading rest on it.
 
 **READ THIS AS A NUMERICAL RESULT, NOT A CLIMATE ONE.** 1000 iterations is 83 seconds. The KE-drift
 work in this tree's own record runs to 1600+ iterations and judges on exactly the column that says
@@ -2080,6 +2087,94 @@ whose minimum is **-0.01 C**, and nothing was within 1.9 C of a freezing point. 
 output was a WARNING in the same log.** The census print now reports cells scored, cells skipped as
 fresh, the coldest prescribed SST and `max(T_f - SST)` even when negative — so "the floor found
 nothing to do" and "the floor had nothing to read" no longer print the same line.
+
+### The ocean's KE ramp was ~90 % a cold-start ramp re-firing on every restart
+
+**`apply_barotropic_mode_split` MEASURED ITS RAMP WITH `iter_n`, AND THE HYDROSPHERE LOOPS
+`for(iter_n = 1; iter_n <= nm; ...)`, SO ITER_N RESTARTS AT 1 ON EVERY RESUME** (2026-09-07,
+`19d1187`). The ramp exists to bring the imposed depth-mean in over `N_ramp` = 120 iterations so
+that the full `u_bt` does not shock a near-zero from-scratch field (the CFL runaway at iteration
+65-69). **A restart is not a cold start**: its field already carries the barotropic mode at full
+strength, and the ramp tore it back down to `iter_n`/120 and spent 120 iterations putting it back.
+
+Same `iter_n` / `total_iter_count` asymmetry as the VTK-stamping bug recorded in `UtilsHyd.h`,
+which is why that file stamps with `total_iter_count`. Fixed the same way. The seed call before
+the loop stays on `iter_n`, which is what distinguishes it from the in-loop call.
+
+**FOUND WITH `HYD_KE_SPLIT=1`** (new, print-only, default off), which splits the same
+cos-lat/dz-weighted mean KE the convergence monitor reports into the PINNED depth-mean part and
+the FREE deviation part, and cross-checks against that monitor exactly (1.105863e-04 against
+`convergence_hyd.csv`'s 0.000110586). 300 -> 500 restart, 24 threads, mean KE [m2/s2]:
+
+| | | iter 325 | iter 500 | change |
+|---|---|---|---|---|
+| **BEFORE** | barotropic | 3.751e-05 | 8.142e-05 | **+117 %** |
+| | baroclinic | 1.856e-05 | 2.916e-05 | +57 % |
+| | **TOTAL** | 5.607e-05 | 1.106e-04 | **+97 %** |
+| **AFTER** | barotropic | 7.694e-05 | 8.288e-05 | **+8 %** |
+| | baroclinic | 2.679e-05 | 3.119e-05 | +16 % |
+| | **TOTAL** | 1.037e-04 | 1.141e-04 | **+10 %** |
+
+The pinned mode now starts AT the level the buggy run took 120 iterations to climb back to, and
+the buggy climb stopped dead at total iteration ~445 — exactly where `iter_n` reached 120.
+
+**CONSEQUENCE FOR EVERY OCEAN NUMBER IN THIS FILE: THE APPARENT KE RAMP OVER THIS WINDOW FALLS
+FROM +97 % TO +10 %, SO ROUGHLY NINE TENTHS OF IT WAS THIS ARTEFACT.** Every ocean KE-drift figure
+in this tree that was measured FROM A RESTART is affected, **including the 1000-iteration pair
+above whose drift (1.29 % control against 2.08 % repaired) and whose `converged = 0` conclusion
+this file quotes.** Those need re-measuring before they are quoted again.
+
+**WHAT SURVIVES.** The BAROCLINIC deviation still climbs **+16 % over 175 iterations**,
+monotonically and without the 2dt parity alternation the pinned mode shows. The ocean's missing
+velocity-proportional momentum sink is real; it was just far smaller than the instrument said.
+Fresh-run branch byte-identical, 16 of 16 written files, 1 thread, `restart_from_iter` = -1 —
+where `total_iter_count == iter_n` the fix is a no-op by construction and measures so.
+
+### The momentum sink is now written — `HYD_BC_DRAG`, on the component the barotropic split leaves alone
+
+**`HYD_BC_DRAG=<r in 1/s>`, default 0.0 = off and byte-identical** (2026-09-07, `94b4b66`). The
+ocean's horizontal momentum equation is `rhs_{v,w}` = -PGF - advection + diffusion (+ wind stress,
++ Coriolis), so its only sink is viscous diffusion, which damps GRADIENTS and not the large-scale
+wind-driven flow. The atmosphere converges partly because it HAS a Rayleigh drag
+(`rayleigh_kf` = 1/86400); the ocean had no equivalent.
+
+**WHY THE DEVIATION AND NOT THE FULL VELOCITY.** `apply_barotropic_mode_split` re-pins each
+column's depth-MEAN to the prescribed `v_bt` every iteration and leaves the deviation alone, so a
+drag on the full velocity has its barotropic part erased by the next re-pin.
+**THAT RETIRES A RECORDED CONCLUSION**: the 2026-07-18 A/B saw `-r*(v,w)` bite 28 % and then
+"recover", and recorded the drag as FAILING with the follow-up that friction must go INSIDE the
+Stommel solve instead. Measured with `HYD_KE_SPLIT` that reading does not hold — the drag was
+working on the only component it can reach and KE returned to the floor set by the pinned mode.
+And `project_barotropic` runs ONCE before the loop and its solve already HAS a friction parameter
+(`eps` = 3.0e-6 in `cTp`/`cTm`/`cP`), which sets the pinned CONSTANT and so cannot address a
+growth that lives in the deviation. `damp_baroclinic_deviation()` damps `v` and `w` toward the
+column mean rather than toward zero; order relative to the split is immaterial, they act on
+orthogonal parts.
+
+**SWEEP, 300 -> 500 from the same checkpoint, 24 threads, one pinned binary, KE split on in every
+arm, all exit 0:**
+
+| `r` [1/s] | baroclinic @325 | @500 | change | barotropic @325 | @500 |
+|---|---|---|---|---|---|
+| off | 2.679e-05 | 3.119e-05 | **+16.4 %** | 7.694e-05 | 8.288e-05 |
+| 0.01 | 2.648e-05 | 2.977e-05 | +12.4 % | 7.701e-05 | 8.318e-05 |
+| 0.03 | 2.588e-05 | 2.733e-05 | +5.6 % | 7.715e-05 | 8.377e-05 |
+| **0.10** | 2.390e-05 | 2.164e-05 | **-9.5 %** | 7.764e-05 | 8.555e-05 |
+
+**Monotone in `r`, and at 0.10 the baroclinic KE DECLINES — the growth is arrested and reversed,
+the first time anything in this tree has stopped the ocean's KE climbing.** The arrest threshold
+is between 0.03 and 0.10, about `r` = 0.05. The pinned mode moves +0.9 % across the whole sweep,
+which is the orthogonality claim measured rather than argued.
+
+**READ THE STRENGTH AS A NUMERICAL KNOB, NOT AS BOTTOM FRICTION.** One ocean iteration is
+0.0833 s, so an e-folding of `tau` seconds is `tau`/0.0833 iterations: 30 days is 3.1e+07, one day
+1.0e+06, one hour 4.3e+04. **The arrest value `r` = 0.05 is `tau` = 20 s = 240 iterations — five
+orders of magnitude stronger than a defensible interior or bottom drag.** The longest ocean run in
+this tree is ~1000 iterations, so anything that visibly acts here is far outside the physical
+range. Same wall, and the same honesty, as `HYD_A_H`. Horizontal only — the radial component has
+its own history and is pinned to zero at both radial walls. Off-branch verified at 1 thread,
+300 -> 320, 15 of 15 written files byte-identical. **Default stays 0.0**: what is measured is 200
+iterations, and the value that acts is not a physical one.
 
 ## The projection's shortfall is ADJOINTNESS, and converging the solver makes it WORSE
 
@@ -2717,6 +2812,63 @@ nothing is flipped: mode 2 abandons the Scotese baseline the whole tree is calib
 its `omega_rad` = 0.05 per iteration is a numerical rate with no `dt`, exactly like `omega_teq`.
 **What is settled is narrower and firmer than a default: the radiation is not structurally locked
 out of this model — mode 5 locks it out, and mode 2 runs.**
+
+## Both models drop half of `div(nu grad(phi))`, and their own `grad(nu)` was sitting there unread
+
+**`dnuedr`, `dnuedthe` AND `dnuedphi` ARE COMPUTED AT EVERY CELL IN BOTH RHS FILES WITH FULL
+BOUNDARY STENCILS — ONE-SIDED AT BOTH RADIAL ENDS, ONE-SIDED AT BOTH POLES, CENTRED IN THE
+INTERIOR, ABOUT TWENTY LINES EACH — AND READ BY NOTHING** (2026-09-07, `e76b289`, found by the
+second `-Wall -Wextra` sweep). Meanwhile the diffusion coefficients are LOCAL per-cell functions
+of `nue`: `diffusion_vel_re = 1/re_turb + nue`, `diffusion_t_re` that over `pr_turb`, and the
+tke/dis pair with their sigma scalings. **So both models form `nu(x)*grad^2(phi)` and drop the
+`grad(nu).grad(phi)` half of `div(nu grad(phi))`.** Not a dormant path: both default to
+`turb_model = k_omega_SST`, so `nue` is a live field.
+
+**`ATM_NUE_GRAD=<strength>` / `HYD_NUE_GRAD=<strength>`, default 0.0, byte-identical off.**
+
+    grad(nu).grad(phi) = dnuedr*dphidr*exp_2_rm + dnuedthe*dphidthe*inv_rm2
+                                                + dnuedphi*dphidphi*inv_rm2sinthe2
+
+added to `u`, `v`, `w`, `t`, `tke` and `dis` in each model.
+
+**THE METRIC IS THE ONE ITS NEIGHBOURS USE, AND IN THE OCEAN THAT IS THE BROKEN ONE, DELIBERATELY.**
+A physical gradient component here is `exp_rm*d/d(rad.z)`, `inv_rm*d/dthe`, `inv_rmsinthe*d/dphi`,
+so the inner product of two gradients carries exactly the factors the second-derivative terms
+beside it already carry. The ocean's is the 200-400 m metric (`HYD_METRIC_RADIUS` default 0) and
+this term inherits it: **it CORRECTS the existing diffusion operator, so it must be scaled like
+the operator, not like the physics.** That is the opposite of `HYD_BAROCLINIC_PGF`'s choice and
+for the opposite reason — that term had to balance Coriolis, this one has to complete a Laplacian.
+
+**THE SCALE FACTOR ON `grad(nu)` IS SET PER BRANCH, NOT ASSUMED.** `d/dnue` of the coefficient is
+1 for velocity, `1/pr_turb` for `t`, and for tke/dis it is `1/sig`, `sig` or `1/blend(...)`
+depending on which closure is active — **the k-omega branch uses the MULTIPLY convention where
+the other two divide.** In the laminar branch `nue` is zeroed, so the factors stay 0.
+(`grad(blend)` is neglected in the SST branch and the code says so.)
+
+**WHAT IT IS NOT.** For the scalars `t`, `tke` and `dis` this completes `div(kappa grad(phi))`
+EXACTLY. For the velocity components it is the leading variable-viscosity correction: the full
+stress form `div(nu*(grad(u)+grad(u)^T))` also carries `grad(nu).grad(u)^T` plus spherical
+curvature terms coupling `grad(nu)` to the components. What is added is the Laplacian form.
+**`c`/`cloud`/`ice`/`gr`/`co2` and ocean salinity get NOTHING and correctly so** —
+`diff_prec_re_inv` and `diff_co2_re_inv` are CONSTANTS with no `nue` in them, which is itself
+worth knowing: **this tree diffuses moisture molecularly and heat turbulently.**
+
+**CONNECTED AND STABLE AT FULL STRENGTH, AND CONNECTIVITY NEEDED ITS OWN CHECK**, because the
+atmosphere's printed diagnostics do not move — Precip 1.029e+03, `r` +0.461, sigma 2.47, `max w_u`
+30.804076 in both arms, **which is what a dead knob looks like**. Every field written after
+iteration 0 differs in BOTH models while every iteration-0 file is identical. As rms relative
+difference after 20 iterations at `s` = 1.0, 24 threads, all four arms exit 0 with zero NaN:
+
+| | atmosphere | ocean |
+|---|---|---|
+| velocity | 5e-06 .. 1.3e-05 | 2.4e-04 .. 4.0e-04 |
+| scalars | 2.9e-04, 8.1e-04 | 2.7e-05 |
+
+**About 30x larger in the ocean, consistent with its sharper `nue` field.** Off-branch verified at
+1 thread against the pre-change binary: atmosphere 600 -> 604, 20 of 21 byte-identical; ocean
+300 -> 320, 15 of 15. **Defaults stay 0.0** — connected, correctly sized against its neighbours,
+stable at full strength, and NOT shown to change a climate: 20 iterations is 4 s in the atmosphere
+and 1.7 s in the ocean.
 
 ## Open risks
 
@@ -4278,14 +4430,66 @@ line is.
 
   **VERIFIED**: the default branch is `CategoryIceScheme` = 2, so OneCat never executes, and a
   1-thread `nm` = 4 run before and after is byte-identical over all 13 written files.
-  **STILL OPEN IN OneCat, AND LARGER THAN THIS WAS**: its `ice` is DIAGNOSTIC — set by
-  `SaturationAdjustment`, never debited by the scheme's own `S_i` — so `S_s` draws
-  `thr.S_i_au + thr.S_d_au` from a reservoir nothing depletes. Its own comment at `:274` says so.
-  That is a mass-conservation defect of the same family as the one repaired in TwoCat on
-  2026-09-01, and it is untouched.
+  **AND THE LARGER DEFECT IT NAMED IS NOW FIXED: `S_i` WAS ASSIGNED NOWHERE, SO OneCat
+  MANUFACTURED 567.5 mm/a OF WATER** (2026-09-07, `4fb2dda`). `m.S_i` was written nowhere in the
+  file while `S_s` gained `thr.S_i_au + thr.S_d_au`. Every OTHER term in the scheme is a
+  conserving pair — `S_c_c` between `S_v` and `S_c`, `S_ev` between `S_v` and `S_r`,
+  `S_au`/`S_ac`/`S_shed` between `S_c` and `S_r`, `S_rim` between `S_c` and `S_s`, `S_frz` and
+  `S_melt` between `S_r` and `S_s` — so those two ice->snow rates were the WHOLE of the
+  non-closure: snow created from a reservoir nothing depleted, and `rhs_ice`'s microphysics term
+  reading an array the scheme never wrote. **The file's own comment described this ("cloud ice
+  here is diagnostic ... so ice cannot be depleted") as if it were a design choice; it was the
+  defect.** `S_i = -(thr.S_i_au + thr.S_d_au)`, with TwoCat's ice-availability limiter ported
+  ahead of it — **the limiter is part of the repair, not an extra**: written without it, "snow
+  from nothing" becomes "negative ice", and the RK4 stages' `std::max(0.0, ...)` on `ice` is
+  itself a water SOURCE. The two rates need it for different reasons — `S_i_au = c_i_au*ice` is
+  proportional and safe alone, but `S_d_au` is sized by the DEPOSITION rate and knows nothing
+  about how much ice is present. **The debit is `ice` and not vapour**, which is the one judgement
+  in it: `S_d_au` is sized by `S_i_dep` and so looks like a vapour term, but this scheme
+  deliberately does not apply `S_i_dep`, because `SaturationAdjustment` owns vapour->ice and
+  writes `ice` DIRECTLY; debiting `c` would take the same water twice.
 
-- **`dt_rain_dim` IS SET AND NEVER USED IN THE DEFAULT SCHEME, AND WHAT IT POINTS AT IS A
-  QUESTION RATHER THAN A FINDING.** `TwoCatIceScheme.h:317`. Harmless alone — `S_ev` uses
+  **MEASURED WITH `ATM_CWB_DIAG`'s CONSERVATION CHECK**, `CategoryIceScheme` = 1, 600 -> 610 from
+  `output_twctl/atm_restart_0Ma_600.bin`, 24 threads, two pinned binaries, mm/a:
+
+  | | vap+cld+ice+grp | rain+snow | sum |
+  |---|---|---|---|
+  | before, as RK4 applies them | 0.16 | -0.01 | 0.14 |
+  | **before, the same rates at `L/u_0`** | **-418.9** | **+986.4** | **+567.5 manufactured** |
+  | after, as RK4 applies them | 0.02 | -0.02 | 0.00 |
+  | **after, the same rates at `L/u_0`** | **-919.1** | **+919.1** | **0.0 closes exactly** |
+
+  **567.5 mm/a is 58 % of NASA's entire precipitation, AND IT CHANGES NOTHING OBSERVABLE TODAY** —
+  Precip 1.064e+04 -> 1.065e+04, `P_snow` 1.051e+04 both, pattern `r` -0.249 both — **because the
+  applied microphysics coefficient is 2783x too small** (`ATM_MICRO_NDIM`), so 567.5 mm/a of
+  manufactured water reaches the column as 0.14. The conservation repair only becomes visible once
+  that coefficient is right; it is made now because a scheme that creates mass is wrong whether or
+  not the wrongness is currently scaled away.
+
+- **AND OneCat HAD NO SUB-TERRAIN GUARD AT ALL, SO IT COMPUTED MICROPHYSICS INSIDE MOUNTAINS**
+  (2026-09-07, `bc7048b`). `grep -c i_topography`: `TwoCatIceScheme.h` **3**, `OneCatIceScheme.h`
+  **0**. TwoCat zeros `P_rain`, `P_snow`, `Precipitation` and every `S_*` for cells with
+  `i < i_topography` (`:272`) because those cells are INSIDE the mountain — their `t`, `p`,
+  `r_humid`, `cloud` and `ice` are sub-terrain copies, not air — and feeding them to the rate laws
+  produces an unphysical `dP_rain` that the top-down flux integration then carries up into the
+  real column. **That is what drove the iteration-323 `P_rain` runaway at (i=6, j=30, k=209), the
+  Gulf of Alaska inside-mountain cell.** OneCat accumulated its flux from the bottom of the GRID
+  rather than from the ground. Ported. **Zeroing `S_i` matters here specifically and is why this
+  went second**: until `4fb2dda` `S_i` was never assigned, so a stale sub-terrain value could not
+  arise; it now carries the ice->snow debit and needs clearing inside the terrain like every other
+  rate. Measured, `CategoryIceScheme` = 1, 600 -> 610: Precip 1.065e+04 -> 1.063e+04, `P_snow`
+  1.051e+04 -> 1.050e+04, `r` -0.249 -> -0.248. **Small, and connected** — 12 of 14 written files
+  differ, including the stamp-0 slices, because the moist physics runs once at setup. **The effect
+  is modest because only land columns with `i_topography` > 0 are touched and OneCat's
+  precipitation is dominated by snow — but a scheme integrating a flux through rock is wrong at
+  any magnitude.** The DEFAULT branch is untouched, which is the check that matters since TwoCat
+  ships: 1 thread, 600 -> 604, 20 of 21 byte-identical.
+  **STILL OPEN IN OneCat**: no cloud-water availability limiter of the kind TwoCat carries
+  at `:540`.
+
+- **`dt_rain_dim` WAS SET AND NEVER USED IN THE DEFAULT SCHEME, AND WHAT IT POINTS AT IS A
+  QUESTION RATHER THAN A FINDING** — the declaration is DELETED (`3bb67d7`) and the question below
+  is preserved verbatim as a comment in its place, not acted on. `TwoCatIceScheme.h:317`. Harmless alone — `S_ev` uses
   `pow(R_ev, exp_4_9)` on the AREA-WEIGHTED rate, which is also why `Rain_pow_4_9` at `:289` went
   dead when `ATM_RAIN_AREA` landed. What it points at is that **`dt_snow_dim` = `step[i]/0.96`, a
   SNOW fall-transit time, is the timescale for CLOUD-WATER processes**: `S_c_frz = cloud/dt_snow_dim`
@@ -4313,10 +4517,64 @@ line is.
 
 - **THE `-Wall -Wextra` SWEEP IS CHEAP AND HAD NEVER BEEN RUN, AND ITS MAIN RESULT IS
   REASSURING.** `g++ -fsyntax-only -Wall -Wextra` over every `atmosphere/*.cpp` and
-  `hydrosphere/*.cpp` takes about a minute and returns **46 warnings, ALL unused-variable or
+  `hydrosphere/*.cpp` takes about a minute and returned **46 warnings, ALL unused-variable or
   unused-but-set** — not one uninitialised read, sign-compare, dangling reference or format
-  mismatch. The two entries above are the only ones with content. Re-run it after any large port;
-  a build's own `-Wall` output scrolls past and nobody reads it.
+  mismatch. Re-run it after any large port; a build's own `-Wall` output scrolls past and nobody
+  reads it.
+
+  **THE SECOND SWEEP IS DONE, THE TREE IS NOW AT ZERO WARNINGS, AND ITS BIGGEST FIND IS A NUMBER
+  IN EVERY RUN LOG** (2026-09-07, `3bb67d7` + `0a65518`, over `atmosphere/`, `hydrosphere/` AND
+  `lib/`).
+
+  **`Evaporation_average` PRINTED THE DALTON VALUE.** The row labelled `Evaporation_average per
+  year` passed `Evaporation_Dalton_average` — a copy-paste from the row above it — while the
+  correctly computed ACTIVE-model average was discarded, which is exactly what the compiler's
+  "set but not used" surfaced. **The shipped `evap_model` is "Meyer"**
+  (`cAtmosphereDefaults.cpp.inc:68`), **so every run log in this tree has reported Dalton under
+  the active model's name**: the row read 535.7 mm/a and now reads 509.3, with the separately
+  labelled Dalton and Meyer rows still showing 535.7 and 509.3. This also explains a 4 %
+  discrepancy noticed the same day between the column water budget's `E` (a `GetMean_2D` of the
+  ACTIVE `m.Evaporation`) and the run log's figure: two formulas.
+
+  Also deleted: `sfc_coupled`, the last reader of the removed `ATM_SFC_COUPLED`;
+  `MoistConvection::run(int iter)`'s parameter, which shadowed the member and was thrown away by
+  `iter = m.iter_n` three lines later — **the `int Ma` shape again, harmless for the same
+  accidental reason** (both call sites passed the same value); `dt_rain_dim` and `Rain_pow_4_9`;
+  `log_val`/`dT`/`e_actual` in `InitValues_Atm`, a disabled dewpoint/stability block where only
+  the LEAVES had been commented out, leaving the roots live; **and 34 dead declarations in the two
+  turbulence files** — scaffolding left behind when the diffusion moved into the RHS. The unused
+  PARAMETERS are marked with the `/*name*/` idiom those files already use, each with a note on why
+  (k-epsilon takes its production from `m.prod.x`; the k-omega/SST tke/dis gradients are
+  RECOMPUTED inside the function with wall/Neumann handling, so the caller's plain centred versions
+  are superseded rather than missing). **`atmosphere/`, `hydrosphere/` and `lib/` now compile with
+  ZERO `-Wall -Wextra` warnings, from 46.**
+
+  **AND `int Ma` IS GONE FROM BOTH MODELS** (`2946554`) — declared in `cAtmosphereModel.h` and
+  `cHydrosphereModel.h` and ASSIGNED NOWHERE. **It was not what was first reported.** Classifying
+  all 41 occurrences against their enclosing signature shows every real use is the SHADOWING
+  parameter (`RunTimeSlice(int Ma)` -> `run_3D_loop` -> `save_state`/`load_state`), and the only
+  unshadowed hits are the letters "Ma" inside string literals — there is no `m.Ma` / `->Ma` /
+  `this->Ma` anywhere. **So it was dead, not UB, and the restart filenames were never affected.**
+  What it cost is that the FIRST use outside a shadowing function would have compiled silently and
+  read an uninitialised int; now it is a compile error. Verified a no-op in both models after a
+  forced full rebuild, because removing a member moves `sizeof` and that is this tree's
+  stack-canary hazard.
+
+  **TWO OF MY OWN CLAIMS WERE REVERTED IN THE SAME PASS, AND THEY HAVE ONE SHAPE: GREPPING CALL
+  SITES WITHOUT CHECKING THEY WERE LIVE.** (1) *"`UtilsHyd::writeFile` accepts `is_final_result`
+  and ignores it while the atmosphere uses it to skip a duplicate write"* — I found
+  `writeFile(false)` at `cHydrosphereModel.cpp:374` and `writeFile(true)` at `:394` by grep and
+  **missed that `:394` is inside a commented-out block** (`Printout:` and its goto). The ocean
+  makes ONE setup call; the ported guard never fired (from-scratch 1-thread pair: 4 stamp-0 radial
+  writes in BOTH arms, 16 of 16 byte-identical) and was REVERTED. **It would also have been a
+  latent bug** — the live `true` caller is the DUMP-ONLY branch at `:595`, which a stamp-0 guard
+  would silently skip. (2) *"the k-omega sigma constants are unused, so the closures' k and omega
+  diffusion carries no sigma scaling"* — **wrong**: `sig_k`, `sig_w`, `sig_k1/k2`, `sig_w1` ARE
+  read in both RHS files (`diffusion_tke_re = 1/re_turb + nue/sig_k`). The unused copies were
+  SEPARATE shadowing declarations inside the turbulence headers. A redundant-declaration issue,
+  not a missing term. **Note what caught the first one: byte-identity ALONE would have passed the
+  bad guard silently, because a no-op guard produces identical output. When a "fix" is a guard,
+  verify that it FIRES, not just that nothing changed.**
 
 ## The build hazard, because it produced a crash that looked like a success
 
