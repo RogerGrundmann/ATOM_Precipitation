@@ -513,6 +513,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  A_H="                                       << ev("HYD_A_H", "0")
              << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
              << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")
+             << "  SSS_FILL="                                  << ev("HYD_SSS_FILL", "1")
              << "   (* = compiled-in default, not set in the environment)" << endl;
         cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
              << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "

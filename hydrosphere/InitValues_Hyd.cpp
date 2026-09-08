@@ -1018,6 +1018,12 @@ void cHydrosphereModel::initSalinity() {
     // ========================================================================
     const int i_max = im - 1;
 
+    // HYD_SSS_FILL: 1 = fill the NASA SSS file's missing-data cells (default, the repair),
+    // 0 = the shipped branch, which copied the -32767 sentinel into the salinity field.
+    // Only the Ma==0 (2-D field) branch is affected; the Ma>0 zonal-mean branch has skipped
+    // the sentinel since `1cba198` and is unchanged either way.
+    const int sss_fill = [](){ const char* e = getenv("HYD_SSS_FILL"); return e ? atoi(e) : 1; }();
+
     bool nasa_sss = false;
     if (use_NASA_salinity) {
         struct stat info;
@@ -1025,34 +1031,73 @@ void cHydrosphereModel::initSalinity() {
             Array_2D sss(jm, km, 0.0);
             read_IC(salinity_file, sss.y, jm, km);                          // [psu]
 
-            if (Ma_slice == 0) {
-                #pragma omp parallel for collapse(2)
+            // The NASA SSS file uses -32767 as its missing-data sentinel over
+            // ice-masked ocean (increasingly poleward of ~60°: ~70% of ocean cells at
+            // 60-90°N, 41% south of 60°S, a few per cent in marginal seas elsewhere;
+            // 20.5% of the modern ocean surface in total). It is the ONLY one of the
+            // five NASA/reconstruction input fields that carries a sentinel at all --
+            // measured: SurfaceTemperature, SurfacePrecipitation, v_surface and
+            // w_surface have none -- so this guard belongs here and nowhere else.
+            //
+            // The zonal mean is taken over ocean cells with VALID data: averaging the
+            // sentinels in poisons zmean to hugely negative values -> the surface
+            // salinity clamped to 0 poleward of ±60° (fresh-cap artefact + wrong polar
+            // density/buoyancy). A fully ice-masked latitude gets n=0 -> zmean=0 and is
+            // filled from the nearest valid row below. Used by BOTH branches now: the
+            // Ma>0 profile IS this mean, and Ma==0 uses it to fill the missing cells.
+            std::vector<double> zmean(jm, 0.0);
+            for (int j = 0; j < jm; j++) {
+                double sum = 0.0; int n = 0;
                 for (int k = 0; k < km; k++)
-                    for (int j = 0; j < jm; j++)
-                        c.x[i_max][j][k] = sss.y[j][k] / c_35 + c_paleo_nd;
-            } else {
-                // zonal-mean latitude profile over ocean cells with VALID data.
-                // The NASA SSS file uses -32767 as its missing-data sentinel over
-                // ice-masked ocean (increasingly poleward of ~60°: ~70% of cells at
-                // 65-80°, 100% at the poles). Those cells are is_water=true in the
-                // paleo geography, so averaging them in poisoned zmean to hugely
-                // negative values -> the surface-salinity IC clamped to 0 poleward of
-                // ±60° (fresh-cap artefact + wrong polar density/buoyancy). Require
-                // sss > 0 to skip the sentinel; a fully ice-masked latitude then gets
-                // n=0 -> zmean=0 and is filled from the nearest valid row below.
-                std::vector<double> zmean(jm, 0.0);
-                for (int j = 0; j < jm; j++) {
-                    double sum = 0.0; int n = 0;
-                    for (int k = 0; k < km; k++)
-                        if (is_water(h, i_max, j, k) && sss.y[j][k] > 0.0) { sum += sss.y[j][k]; ++n; }
-                    zmean[j] = (n > 0) ? sum / (double)n : 0.0;
+                    if (is_water(h, i_max, j, k) && sss.y[j][k] > 0.0) { sum += sss.y[j][k]; ++n; }
+                zmean[j] = (n > 0) ? sum / (double)n : 0.0;
+            }
+            // fill all-land / all-ice-masked latitude rows from the nearest valid neighbour
+            for (int j = 0; j < jm; j++) if (zmean[j] == 0.0)
+                for (int d = 1; d < jm; d++) {
+                    if (j-d >= 0   && zmean[j-d] > 0.0) { zmean[j] = zmean[j-d]; break; }
+                    if (j+d < jm   && zmean[j+d] > 0.0) { zmean[j] = zmean[j+d]; break; }
                 }
-                // fill all-land / all-ice-masked latitude rows from the nearest valid neighbour
-                for (int j = 0; j < jm; j++) if (zmean[j] == 0.0)
-                    for (int d = 1; d < jm; d++) {
-                        if (j-d >= 0   && zmean[j-d] > 0.0) { zmean[j] = zmean[j-d]; break; }
-                        if (j+d < jm   && zmean[j+d] > 0.0) { zmean[j] = zmean[j+d]; break; }
+
+            if (Ma_slice == 0) {
+                // HYD_SSS_FILL=1 (default) fills the sentinel cells from zmean[j];
+                // =0 restores the shipped branch, which copied -32767 psu straight in.
+                //
+                // WHAT THE SHIPPED BRANCH DID, and it is why this is a repair and not a
+                // re-tune: the sentinel enters as c_surf = -32767/c_35 = -936 non-dim, and
+                // Step 4's linear profile c(i) = c_floor*(1-s) + c_surf*s then crosses zero
+                // at s = 0.0011 -- i.e. between i=0 and i=1 -- so EVERY level above the
+                // seafloor cell hits the `if (c < 0) c = 0` clamp. A sentinel column is
+                // therefore 0 psu from i=1 to the surface. That is the ~12% of fluid cells
+                // below 5 psu (median 0.028 psu, spanning every level) that
+                // HYD_PHYDRO_SALT's plausibility floor rejects, and the reason its
+                // fallback to r_water manufactures the very horizontal density gradient
+                // the salt-aware field is being built to provide.
+                //
+                // The Ma>0 branch was given this guard on 2026-07-18 (`1cba198`); the
+                // Ma==0 branch was recorded as the remaining half and never got it, and
+                // Ma==0 is what every ocean run in this tree uses.
+                long n_fill_w = 0, n_fill_l = 0;
+                for (int k = 0; k < km; k++) {
+                    for (int j = 0; j < jm; j++) {
+                        double s_psu = sss.y[j][k];                              // [psu]
+                        if (!(s_psu > 0.0) && sss_fill) {
+                            s_psu = zmean[j];
+                            if (is_water(h, i_max, j, k)) ++n_fill_w; else ++n_fill_l;
+                        }
+                        c.x[i_max][j][k] = s_psu / c_35 + c_paleo_nd;
                     }
+                }
+                long n_water = 0;
+                for (int j = 0; j < jm; j++)
+                    for (int k = 0; k < km; k++)
+                        if (is_water(h, i_max, j, k)) ++n_water;
+                printf("       SSS missing-data fill: %s -- %ld ocean surface cells filled"
+                       " (%.2f %% of %ld), %ld land cells; HYD_SSS_FILL=%d\n",
+                       sss_fill ? "ON" : "OFF (shipped: sentinel copied in)",
+                       n_fill_w, n_water > 0 ? 1e2 * (double)n_fill_w / (double)n_water : 0.0,
+                       n_water, n_fill_l, sss_fill);
+            } else {
                 #pragma omp parallel for collapse(2)
                 for (int k = 0; k < km; k++)
                     for (int j = 0; j < jm; j++)
