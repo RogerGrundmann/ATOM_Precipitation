@@ -2691,6 +2691,9 @@ debit does not.
 all of it aloft, where `d_cnd + d_dep = d_q_v` — the identity this file cites as the reason the
 fractional adjustment is safe — makes it exactly zero. It is 10 % of the evaporation term, so it
 is not the largest thing here, but it is a term that is supposed to be structurally absent.
+**ATTRIBUTED 2026-09-08 AND IT IS ONE CLIP**: the evaporation is bounded by the TOTAL condensate
+and then split by TEMPERATURE, so the half taken from the phase that is not there is created from
+nothing. 100.0 % of the term, repaired behind `ATM_SATADJ_PHASE`; see the subsection below.
 
 **WHAT THE TABLE CANNOT SPLIT, AND IT SAYS SO RATHER THAN IMPLYING IT CAN.** The `RungeKutta`
 bucket is transport + the microphysics S-terms + the `std::max(0.0, ...)` floor that every RK4
@@ -2711,6 +2714,83 @@ disconnected from the water by a factor of ~2800 with a named coefficient; and t
 non-conservations (the saturation adjustment, the filters) sized for the first time. It is **NOT**
 a repair, and the window is **2 s of physical time** — the two windows measured agree to ~2 %, but
 a rate quoted from ten iterations is not a climate. Nothing is flipped.
+
+### `SaturationAdjustment`'s non-conservation is ONE clip, and the clip is 100 % of it
+
+**`ATM_SATADJ_DIAG=1` (print-only, default off) AND `ATM_SATADJ_PHASE=1` (the repair, default 0),
+2026-09-08; off-branch BYTE-IDENTICAL over 20 of 21 files at 1 thread.** The column water budget
+charges this routine **+5.5e+05 mm/a**, essentially all aloft, in a routine whose own header says
+total water is conserved by the loop — `d_cnd + d_dep = d_q_v`. **That identity holds for the
+RATES. What is WRITTEN passes through four clips**, and one of them is not a safety net:
+
+    if (d_q_v > 0) { max_evap = q_c_b + q_i_b; if (d_q_v > max_evap) d_q_v = max_evap; }
+    d_cnd = d_q_v * CND;   d_dep = d_q_v * DEP;          // split by TEMPERATURE
+    q_v_b += d_q_v;                                       // vapour gains in full
+    q_c_b  = max(0, q_c_b - d_cnd);                       // condensate loses what it has
+    q_i_b  = max(0, q_i_b - d_dep);
+
+**AVAILABILITY IS ENFORCED ON THE SUM AND THE SPLIT IGNORES IT.** A cell whose condensate is in
+the phase the temperature does NOT select — liquid in a cold cell (`CND` ~ 0), ice in a warm one —
+evaporates out of an empty reservoir: `q_v` gains `d_q_v` in full and nothing loses it. A water
+source with no term behind it, largest exactly where the budget said the non-conservation lives.
+
+**THE INSTRUMENT CHARGES EVERY MECHANISM IN THE ROUTINE AND CLOSES AS AN IDENTITY**, in
+`ColumnWaterBudget`'s own units (cos-lat weighted, times the layer mass `rho*dz`, so a row is
+[mm] of column water per call and the two instruments are directly comparable). Iterations
+601-620 from `output_cwb/atm_restart_0Ma_600.bin`, 24 threads, per call:
+
+| `adjustSaturation` | entry_clip | **phase_split** | cold_delete | total | unattributed |
+|---|---|---|---|---|---|
+| mm/call | 0.0 | **+7.8328e-03** | 6e-21 | +7.8328e-03 | **+1.2e-16** |
+
+| `clampAndFade` | neg_clip | supersat | cap | **fade** | total |
+|---|---|---|---|---|---|
+| mm/call | 0.0 | **0.0** | 0.0 | **-8.3310e-04** | -8.3310e-04 |
+
+**THE PHASE SPLIT IS 100.0 % OF IT.** The entry `max(0, .)` never fires, the 0.05 kg/kg condensate
+cap never fires, the negative clips never fire, and the always-on supersaturation removal is
+**exactly** conservative as its comment claims. `cold_delete` is 1e-21 only because `ATM_ICE_COLD`
+is on by default and freezes rather than deletes — on the pre-2026-08-31 branch it was a second,
+larger term.
+
+**CROSS-CHECKED AGAINST THE INDEPENDENT INSTRUMENT, WHICH IS WHAT MAKES IT AN ATTRIBUTION RATHER
+THAN A PLAUSIBLE STORY.** Five calls fall in the CWB window (`moist_stride` = 2 over 10
+iterations), and 5 x 6.9997e-03 mm x (365*8.64e4 / 2.003 s) = **5.51e+05 mm/a** against
+`ColumnWaterBudget`'s own `SaturationAdjust` row of **5.5007e+05**. To 0.2 %.
+
+**THE REPAIR MOVES THE UNAVAILABLE HALF TO THE OTHER PHASE RATHER THAN DROPPING IT** — the total
+IS available by construction — and then sets `d_q_v` to what was actually taken. The latent-heat
+line consumes the same corrected pair, so **the energy follows the mass**: evaporating ice absorbs
+`ls`, not `lv`, which the shipped split got wrong in the same cells.
+
+| same checkpoint, same window, 24 threads | shipped | **`ATM_SATADJ_PHASE=1`** |
+|---|---|---|
+| `phase_split`, mm/call | +7.8328e-03 | **0.0000e+00 exactly** |
+| `adjustSaturation` total, mm/call | +7.8328e-03 | **+1.0e-17** |
+| **CWB `SaturationAdjust`, mm/a** | **+5.5007e+05** | **-3.9815e+04** |
+| CWB NET, mm/a | +1.7584e+05 | +1.6688e+05 |
+
+**AND THE RESIDUAL IS THE COLD FADE AND NOTHING ELSE**: -5.0605e-04 mm/call x 5 x 1.574e+07 =
+-3.98e+04 mm/a, to the digit. After the repair this routine's entire non-conservation is ONE NAMED
+SINK — `clampAndFade`'s `cloud *= alpha` below `t_00`, which removes liquid without moving it to
+ice. That is the next question rather than this one.
+
+**WHAT IT DOES TO THE MODEL, at 20 iterations = 4 SECONDS, so a local response and not a climate:**
+
+| | shipped | repaired | NASA |
+|---|---|---|---|
+| Precip mm/a | 1029.1 | 1032.7 | 978.3 |
+| **pattern r** | +0.461 | **+0.465** | |
+| centred RMS | 1515.5 | 1504.8 | |
+| land / ocean | 830.2 / 1107.8 | **810.8** / 1120.5 | 782.3 / 1055.8 |
+| **35-65 deg** | **157.8** | **165.0** | 981.1 |
+| **65-90 deg** | **7.3** | **11.1** | 364.2 |
+| precipitable water | 30.3 | 30.2 mm | |
+
+**Every scored quantity improves, and the two STARVED bands move the right way** — which is
+coherent with where the spurious source was: cold cells holding liquid, i.e. mid and high
+latitudes aloft. **DEFAULT STAYS 0**: four seconds is not evidence for a default in a tree that
+has been caught six times by a cancelling pair, and this one wants a from-scratch arm.
 
 ### The knob is written and swept: `ATM_MICRO_NDIM`, a 2783x coefficient correction that moves the precipitation 0.5 %
 
