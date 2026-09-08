@@ -1124,10 +1124,10 @@ public:
             const double v = e ? atof(e) : 0.0;
             return (v > 0.0) ? v : 2.0; }();
 
-        double s_div = 0.0, s_rc = 0.0, s_rw = 0.0;  long n = 0, n_clamped = 0;
+        double s_div = 0.0, s_rc = 0.0, s_rw = 0.0, s_lf = 0.0;  long n = 0, n_clamped = 0;
 
         #pragma omp parallel for collapse(2) schedule(static) \
-                reduction(+:s_div,s_rc,s_rw,n,n_clamped)
+                reduction(+:s_div,s_rc,s_rw,s_lf,n,n_clamped)
         for (int i = 2; i < m.im-2; i++) {
             for (int j = 2; j < m.jm-2; j++) {
                 for (int k = 2; k < m.km-2; k++) {
@@ -1194,9 +1194,44 @@ public:
                                     + (cw(k+1) - cw(k-1)) * inv_2dphi * inv_rs;
                     if (!AtomUtils::is_finite_safe(Lc) || !AtomUtils::is_finite_safe(Lw)) continue;
 
+                    // ---- Lf: the FACE divergence of the CORRECTED velocity -------------
+                    // The projection is collocated, so "did it work?" has two different
+                    // answers and this tree has only ever computed one of them. Lw above is
+                    // the CENTRE field's own 2*dr divergence. But a collocated projection is
+                    // consistent in the FACE sense: with Rhie-Chow momentum interpolation at
+                    // unit coefficient,
+                    //     u_f = avg(u) - [ (p_N - p_P)/D - avg(grad_wide p) ]
+                    // the face divergence of the corrected field is div_wide(u*) - Lc(p) --
+                    // the SOLVER's residual, not the correction's. That is an algebraic
+                    // identity (the bracket's face difference is exactly Lc - Lw), and it is
+                    // computed here rather than asserted, from the model's own aux and p_dyn.
+                    //
+                    // u_new = aux - grad_wide(p), at centres, with the metric the correction uses.
+                    auto un = [&](int ii){
+                        return m.aux_u.x[ii][j][k] - cu(ii); };
+                    auto vn = [&](int jj){
+                        return m.aux_v.x[i][jj][k] - cv(jj); };
+                    auto wn = [&](int kk){
+                        return m.aux_w.x[i][j][kk] - cw(kk); };
+                    // face value between ii and ii+1: plain average MINUS the Rhie-Chow term
+                    auto uf = [&](int ii){
+                        const double exf = 0.5 * (ex(ii) + ex(ii+1));
+                        const double g_f = (m.p_dyn.x[ii+1][j][k] - m.p_dyn.x[ii][j][k]) / m.dr * exf;
+                        return 0.5 * (un(ii) + un(ii+1)) - (g_f - 0.5 * (cu(ii) + cu(ii+1))); };
+                    auto vf = [&](int jj){
+                        const double g_f = (m.p_dyn.x[i][jj+1][k] - m.p_dyn.x[i][jj][k]) / m.dthe * inv_rm;
+                        return 0.5 * (vn(jj) + vn(jj+1)) - (g_f - 0.5 * (cv(jj) + cv(jj+1))); };
+                    auto wf = [&](int kk){
+                        const double g_f = (m.p_dyn.x[i][j][kk+1] - m.p_dyn.x[i][j][kk]) / m.dphi * inv_rs;
+                        return 0.5 * (wn(kk) + wn(kk+1)) - (g_f - 0.5 * (cw(kk) + cw(kk+1))); };
+                    const double Lf = (uf(i) - uf(i-1)) / m.dr   * exp_rm
+                                    + (vf(j) - vf(j-1)) / m.dthe * inv_rm
+                                    + (wf(k) - wf(k-1)) / m.dphi * inv_rs;
+
                     s_div += div_src * div_src;
                     s_rc  += (Lc - div_src) * (Lc - div_src);
                     s_rw  += (div_src - Lw) * (div_src - Lw);
+                    if (AtomUtils::is_finite_safe(Lf)) s_lf += Lf * Lf;
                     n++;
                 }
             }
@@ -1206,16 +1241,20 @@ public:
         const double rms_div = sqrt(s_div / n);
         const double rms_rc  = sqrt(s_rc  / n);
         const double rms_rw  = sqrt(s_rw  / n);
+        const double rms_lf  = sqrt(s_lf  / n);
         const ios::fmtflags f = cout.flags();
         const streamsize    pr = cout.precision();
         cout << "      ATOM: [PROJ CONSISTENCY] " << tag
              << "  rms div_src = "   << scientific << setprecision(3) << rms_div
              << "   solver residual |Lc-div| = " << rms_rc
-             << "   correction leaves |div-Lw| = " << rms_rw << endl;
+             << "   correction leaves |div-Lw| = " << rms_rw
+             << "   FACE divergence after correction |Lf| = " << rms_lf << endl;
         cout << "      ATOM: [PROJ CONSISTENCY] removed by the SOLVER's operator = "
              << fixed << setprecision(2) << 100.0*(1.0 - (rms_div > 0 ? rms_rc/rms_div : 0.0))
-             << " %   removed by the APPLIED correction = "
+             << " %   removed by the APPLIED correction, CENTRE = "
              << 100.0*(1.0 - (rms_div > 0 ? rms_rw/rms_div : 0.0))
+             << " %   FACE = "
+             << 100.0*(1.0 - (rms_div > 0 ? rms_lf/rms_div : 0.0))
              << " %   (" << n << " clean cells, " << n_clamped
              << " = " << (n > 0 ? 100.0*n_clamped/n : 0.0) << " % source-clamped)" << endl;
         cout.flags(f); cout.precision(pr);
