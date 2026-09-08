@@ -2787,6 +2787,51 @@ ice. That is the next question rather than this one.
 | **65-90 deg** | **7.3** | **11.1** | 364.2 |
 | precipitable water | 30.3 | 30.2 mm | |
 
+**THE FROM-SCRATCH ARM IS RUN, AND IT IS A SEVENTH CANCELLING PAIR** (2026-09-08,
+`output_sp600ctl` / `output_sp600on`; `config_accept.xml` defaults, `nm` = 600 from scratch, moist
+physics from iteration 0, 24 threads, ONE pinned binary, 64 min per arm; both exit 0 with **zero
+NaN**, `max w_u` 30.8047 against the +-100 clamp in both).
+
+**THE CONTROL IS ALSO THE OFF-BRANCH CHECK AND IT REPRODUCES `output_twctl` TO THREE FIGURES** —
+Precip **997.7** against the recorded 998.4, `r` **+0.457** identical, bands **3430.1 / 270.3 /
+156.6 / 7.5** against 3432.2 / 271.0 / 156.6 / 7.5 — on a binary that has since gained
+`ATM_MICRO_NDIM`, `ATM_CWB_DIAG`, `ATM_SATADJ_*`, `ATM_RADIATION_MODE` and the face-divergence
+probe, none of which touches the default branch.
+
+**THE MANUFACTURED WATER IS 7.7 % OF THE RESERVOIR OVER 120 SECONDS.** Cumulative over 301 calls:
+`phase_split` **+2.3639 mm** of column water in the control against **+2.4e-15 mm** repaired, on a
+precipitable water of 30.3 mm. The CWB row goes **+5.4877e+05 -> -3.3183e+04 mm/a**.
+
+| iteration 600 | control | **`ATM_SATADJ_PHASE=1`** | NASA |
+|---|---|---|---|
+| **Precip mm/a** | **997.7 (+2.0 %)** | **947.3 (-3.2 %)** | 978.3 |
+| **pattern r** | +0.457 | **+0.459** | |
+| **centred RMS** | 1464.3 | **1405.5 (-4.0 %)** | |
+| **sigma model/NASA** | 2.39 | **2.29** | 1.00 |
+| 0-15 deg | 3430.1 | **3241.9 (-5.5 %)** | 1487.0 |
+| 15-35 deg | 270.3 | 255.9 | 761.4 |
+| **35-65 deg** | 156.6 | **159.9 (+2.1 %)** | 981.1 |
+| **65-90 deg** | 7.5 | **10.1 (+35 %)** | 364.2 |
+| land / ocean | 804.1 / 1074.3 | 753.5 / 1024.1 | 782.3 / 1055.8 |
+| **P/E** | 1.96 | **1.88** | 1.00 |
+| precipitable water | 30.3 | 30.2 mm | |
+
+**EVERY SHAPE METRIC IMPROVES AND THE GLOBAL MEAN OVERSHOOTS.** The centred RMS falls 4 %, sigma
+moves toward 1 for the first time since the flip of 2026-09-01, the tropical spike falls 5.5 %,
+**both starved bands rise**, and `P/E` moves toward closure. And the mean goes from +2.0 % of NASA
+to **-3.2 %**, because **about 5 % of this model's precipitation was the manufactured water**.
+*That is the seventh occurrence of the cancelling-pair pattern in this file, and the rule recorded
+against the last one applies here:* **"the global mean was never the problem and is not the target.
+Quote `r`, `sigma` and the four bands, or quote nothing."** By that rule this is an improvement; by
+the mean alone it is a 5 % regression, and both statements are about the same run.
+
+**AND IT PUTS A KNOWN FITTED CONSTANT BACK IN PLAY, WHICH IS THE REASON NOT TO FLIP IT ALONE.**
+`ATM_RH_MIN_PTOP` = 475 was chosen because it was *predicted from the curve and then confirmed* to
+land on NASA — at 992 mm/a, on the branch that carried this source. Remove 5 % of the
+precipitation and that fit no longer sits where it was fitted. **A flip of `ATM_SATADJ_PHASE`
+implies a re-look at `ATM_RH_MIN_PTOP`**, in the same way `ATM_ICE_LIMIT_ARRIVING` and
+`ATM_RAIN_AREA` had to be flipped as a pair.
+
 **Every scored quantity improves, and the two STARVED bands move the right way** — which is
 coherent with where the spurious source was: cold cells holding liquid, i.e. mid and high
 latitudes aloft. **DEFAULT STAYS 0**: four seconds is not evidence for a default in a tree that
