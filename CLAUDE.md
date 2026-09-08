@@ -1262,6 +1262,13 @@ rejected cells have median salinity **0.028 psu** and span **every level, i = 0 
 coast-surface artefact the recorded bug describes. `project_hydro_salinity_ic`'s "coast-adjacent
 water cells still 0" is a much larger defect than that phrase suggests, and it is now the largest
 single obstacle to using this field.
+**⚠ FOUND AND FIXED 2026-09-08, AND THE ATTRIBUTION IN THE SENTENCE ABOVE WAS WRONG.** It is not
+the coast-adjacent artefact: it is the SSS file's -32767 missing-data sentinel, which the `Ma` = 0
+branch of `initSalinity` copied straight in. `HYD_SSS_FILL` (default on) takes this floor from
+**269 637 to 19 607 rejected cells per call, -93 %**, and the ocean's mean salinity from 28.6 to
+34.5 psu. See *The ~12 % of spuriously fresh ocean was the SSS file's missing-data sentinel* below.
+The coast-adjacent artefact is real and is what remains — 0.44 % of fluid cells, two orders
+smaller than the defect it was credited with.
 
 **TWO LIMITS OF THE FLOOR, BOTH MEASURED RATHER THAN ARGUED.** It is a fixed 1005 kg/m3 threshold,
 and `C_p` alone reaches 1019 at 4 km, so on a deep grid it would stop catching fresh cells
@@ -2087,6 +2094,73 @@ whose minimum is **-0.01 C**, and nothing was within 1.9 C of a freezing point. 
 output was a WARNING in the same log.** The census print now reports cells scored, cells skipped as
 fresh, the coldest prescribed SST and `max(T_f - SST)` even when negative — so "the floor found
 nothing to do" and "the floor had nothing to read" no longer print the same line.
+
+### The ~12 % of spuriously fresh ocean was the SSS file's missing-data sentinel, copied straight in
+
+**`HYD_SSS_FILL=1`, NEW AND DEFAULT ON 2026-09-08; `=0` restores the shipped branch and is
+BYTE-IDENTICAL.** `initSalinity`'s NASA branch has two halves. The `Ma>0` half was given a
+missing-data guard on 2026-07-18 (`1cba198`) after the polar surface salinity was found sitting at
+exactly 0; that write-up recorded *"the Ma=0 2-D branch has the SAME latent sentinel bug"* as its
+follow-up (1), and it was never done. **`Ma` = 0 is the slice every ocean run in this tree uses.**
+
+    c.x[i_max][j][k] = sss.y[j][k] / c_35 + c_paleo_nd;      // sss = -32767 where masked
+
+**MEASURED RATHER THAN READ OFF THE SOURCE: 20.5 % OF OCEAN SURFACE CELLS CARRY THE SENTINEL** —
+70 % of the ocean north of 60N, 41 % south of 60S, 5-15 % elsewhere in marginal seas; the model's
+own new census prints 8816 of 43457 (20.29 %). **And salinity is the ONLY input field affected**:
+of the five NASA/reconstruction files, `SurfaceTemperature`, `SurfacePrecipitation`, `v_surface`
+and `w_surface` contain no value below -1000 at all, and `SurfaceSalinity` contains 30 234.
+
+**WHY IT REACHES EVERY LEVEL, WHICH IS THE PART THE "SURFACE SALINITY" FRAMING HIDES.** The
+sentinel enters as `c_surf` = -32767/`c_35` = **-947** non-dim, and Step 4's linear profile
+`c(i) = c_floor*(1-s) + c_surf*s` crosses zero at **s = 0.0011** — between `i` = 0 and `i` = 1. So
+every level above the seafloor cell hits the `if (c < 0) c = 0` clamp, and **a sentinel column is
+0 psu from `i` = 1 to the surface.** That is exactly the defect the bug register carried as B.8:
+*"~12 % of fluid cells below 5 psu, median 0.028 psu, spanning every level i = 0..40 — NOT the
+coast-surface artefact the recorded bug describes"*. It is not a coastal artefact and it is not a
+surface artefact; it is an ice mask in a data file.
+
+**THE FIX IS THE ONE THE OTHER HALF ALREADY USES**, so the two branches stop disagreeing: the
+zonal mean over ocean cells with VALID data, with the nearest-valid-row fill for fully masked
+rows, computed once and used by both — as the `Ma>0` profile, and as the per-cell fill value at
+`Ma` = 0. No new constant.
+
+**FROM SCRATCH, `nm` = 2, 1 thread, both arms exit 0. 3-D census over 1 642 794 fluid cells:**
+
+| | < 5 psu | < 30 psu | median | **mean** |
+|---|---|---|---|---|
+| **shipped** (`HYD_SSS_FILL=0`) | **13.73 %** | 21.86 % | 34.564 | **28.601 psu** |
+| **repaired** (default) | **0.02 %** | 0.44 % | 34.625 | **34.499 psu** |
+
+**The shipped ocean was 6 psu fresh in the MEAN.** The repaired mean is 34.50 against Earth's
+34.7.
+
+**AND IT UNBLOCKS TWO KNOBS, ONE OF THEM UNPREDICTED.**
+
+| | shipped | repaired |
+|---|---|---|
+| `HYD_PHYDRO_SALT` plausibility floor, cells rejected per call | 269 637 | **19 607 (-93 %)** |
+| `HYD_T_FREEZE_SFC` census: surface cells raised | 2742 of 34641 | **9627 of 43457** |
+| ... of which skipped as < 5 psu | **8816** | **0** |
+
+The floor's fallback to `r_water` at a rejected cell puts a density DISCONTINUITY next to its
+salty neighbour, **manufacturing the very horizontal gradient the salt-aware `p_hydro` is built to
+provide** — which is why this was the prerequisite for `HYD_BAROCLINIC_PGF` rather than a
+follow-up. And the surface freezing floor was blind to a fifth of the ocean surface: **the 8816
+cells its own census reported as "skipped as < 5 psu" ARE the sentinel cells**, and that line has
+been printing in every log since 2026-09-05.
+
+**WHAT IS LEFT IS NOW SMALL, AND IT IS THE OTHER RECORDED FOLLOW-UP.** 0.44 % of fluid cells below
+30 psu, median 28.3 psu, **62 % of them adjacent to land or seafloor** — the coast-adjacent
+artefact of the same 2026-07-18 note, a real defect two orders of magnitude smaller than the one
+it had been conflated with.
+
+**⚠ ONLY FROM-SCRATCH RUNS SEE THIS.** `load_state` overwrites `c`, so **every existing checkpoint
+in this tree — including `hyd_restart_0Ma_300.bin`, the seed of every ocean arm since
+2026-09-04 — carries the fresh field.** Any measurement of what the repair does to a CIRCULATION
+has to start from scratch, and none has been made: what is measured here is the initial state.
+Off-branch verified at 1 thread from scratch, 18 of 18 written files byte-identical including the
+364 MB restart.
 
 ### The ocean's KE ramp was ~90 % a cold-start ramp re-firing on every restart
 
