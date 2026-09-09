@@ -631,6 +631,61 @@ TwoCat's answer is also partly set by the `max(0, ...)` floor, by a factor of ~4
 ~1e+7, and its `S_ev` carries no rain-area fraction either. Reverting buys a scheme whose numbers
 are MOSTLY rates, not one that is clean.
 
+### The precipitation is NOT stable past iteration 600 — it resumes climbing, and the drift is entirely tropics and subtropics
+
+**THE "STABLE BETWEEN 100 AND 600" BY-PRODUCT RECORDED BELOW DOES NOT EXTEND TO 1200**
+(2026-09-09). Measured off `output_bctlL`, a 600 -> 1200 restart from
+`output_twctl/atm_restart_0Ma_600.bin` at 24 threads that has been on disk since the
+`ATM_BUOY_CONSISTENT` A/B: it was run as that arm's CONTROL, and the control's own trajectory was
+never read. *Tenth occurrence of "the answer was in output nobody opened", and the second where
+the output was a control rather than a probe.*
+
+| iteration | 600 | 700 | 800 | 900 | 1000 | 1100 | 1200 |
+|---|---|---|---|---|---|---|---|
+| **Precip, high parity** | **998.4** | 1014.9 | 1032.1 | 1056.1 | 1084.4 | 1125.2 | **1181.5** |
+| Precip, low parity | — | 921.2 | 933.8 | 953.7 | 977.7 | 1014 | **1062** |
+| **pattern r** | +0.457 | +0.458 | +0.458 | +0.457 | +0.456 | +0.455 | **+0.453** |
+| centred RMS | — | 1477.9 | 1495.9 | 1520.0 | 1547.1 | 1589.5 | **1652.2** |
+| **sigma model/NASA** | — | 2.41 | 2.44 | 2.47 | 2.51 | 2.57 | **2.66** |
+| *NASA* | *978.3* | | | | | | *978.3* |
+
+**+18.4 % ON THE HIGH PARITY AND +15.3 % ON THE LOW ONE, MONOTONE, STILL CLIMBING AT 1200 — AND
+EVERY SHAPE METRIC DEGRADES WITH IT.** The sawtooth amplitude is roughly constant (94 -> 120), so
+this is not the 2dt alternation collapsing the way the pre-flip run's did; both parities rise
+together.
+
+**AND THE DRIFT IS ONE SHAPE: THE TROPICAL SPIKE GROWING, WITH THE STARVED BANDS FROZEN.**
+
+| mm/a by \|latitude\| | 700 | 900 | 1100 | 1200 | change | NASA |
+|---|---|---|---|---|---|---|
+| **0-15** | 3479.5 | 3589.3 | 3758.9 | **3896.2** | **+12.0 %** | 1487.0 |
+| **15-35** | 285.7 | 329.1 | 413.6 | **483.3** | **+69.2 %** | 761.4 |
+| **35-65** | **156.5** | **156.5** | **156.4** | **156.3** | **-0.1 %** | 981.1 |
+| 65-90 | 7.5 | 7.4 | 7.4 | 7.3 | -2.7 % | 364.2 |
+| land / ocean | 815.0 / 1094.0 | 847.9 / 1138.5 | 903.7 / 1212.9 | 955.4 / 1271.1 | +17.2 / +16.2 % | 782.3 / 1055.8 |
+
+**156.5 -> 156.3 IS THE FIFTH OCCURRENCE OF THAT NUMBER**, and it is now measured over 600
+iterations of free drift rather than across a knob: the storm-track band does not move whatever
+happens, which is *no dynamical change can move a precipitation band in this tree* arriving from
+the other direction. The 15-35 deg band gaining 69 % while 35-65 gains nothing is the model
+walking AWAY from the observed distribution, not toward it — the subtropics are already 3x too
+dry, but they are gaining rain that belongs 20 degrees poleward.
+
+**AND IT IS A CONVERSION-EFFICIENCY DRIFT, NOT A MOISTENING — precipitable water is 30.27 mm at
+EVERY checkpoint**, unchanged to four figures while precipitation rises 18 %. Same signature as
+the pre-flip 1000-iteration run recorded under `ATM_CLOUD_FRAC` below ("the precipitation is
+growing four times faster than the condensate that feeds it"), so the 2026-09-01 mass-conservation
+flip did not cure it — it deferred it past iteration 600.
+
+**CONSEQUENCE FOR EVERY NUMBER IN THIS FILE, AND IT IS NARROW BUT REAL.** Nothing is retracted:
+the arms are comparisons at a fixed iteration count against a control at the same count, which is
+what makes them valid, and the knob measured against this control moved precipitation **-0.3 %**
+where the control drifted **+18 %**. What changes is that **an absolute precipitation figure from
+this tree is only meaningful with its iteration count attached**, and 600 is not a converged
+state — it is a point on a curve that is still rising. The same warning already stands on the
+accepted configuration's 992 mm/a; it now applies to the 998.4 that replaced it.
+
+
 ## The jet spin-down is the radial Shapiro filter, measured two ways and 100 % attributed
 
 **THE JET IS NOT SPINNING DOWN. IT IS BEING FILTERED AWAY** (2026-09-01). Over the 1000-iteration
@@ -739,6 +794,9 @@ momentum budget; the precipitation columns of this table measure the advective d
 *Useful by-product*: the control is `Precip` 998.4 at `r` = 0.457 after 600 iterations against
 975.8 at `r` = 0.456 at `nm` = 100 — so under the 2026-09-01 defaults the precipitation field is
 STABLE between iterations 100 and 600, where the pre-flip 1000-iteration run climbed 992 -> 1215.
+**AND IT IS NOT STABLE PAST 600**: over 600 -> 1200 the same configuration climbs **998.4 -> 1181.5
+(+18.4 %)**, monotone and still rising, with `r` 0.457 -> 0.453 and sigma 2.41 -> 2.66. See *The
+precipitation is NOT stable past iteration 600* above.
 And both arms wrote `atm_restart_0Ma_600.bin`, the first spun-up checkpoints on the CURRENT
 default configuration; every probe before this restarted from a ThreeCat-conditioned state.
 
