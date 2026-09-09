@@ -109,6 +109,8 @@ cout << endl << endl << endl << "      AGCM: read_Atmosphere_Surface_Data ......
         {
             read_IC(Name_SurfaceNASATemperature_File, temperature_NASA.y, jm, km);
             read_IC(Name_SurfaceNASAPrecipitation_File, precipitation_NASA.y, jm, km);
+            // record what was actually read, so the scoring print cannot name another file
+            AtomUtils::precipRefFileName() = Name_SurfaceNASAPrecipitation_File;
 
 //            read_IC(velocity_v_file, velocity_v_NASA.y, jm, km);                // reconstructed v-velocity in m/s
 

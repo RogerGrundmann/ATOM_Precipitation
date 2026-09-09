@@ -24,6 +24,20 @@ else get_logger()
 namespace AtomUtils{
     using namespace std;
 
+    // THE PRECIPITATION REFERENCE FIELD THE RUN ACTUALLY LOADED.
+    //
+    // `FileIO_Atm.cpp` substitutes `<Ma>Ma_Reconstructed_Precipitation.xyz` for the NASA file
+    // when `Ma > 0` and use_earthbyte_reconstruction is set, but the scoring print in
+    // `ThermoAtm.h` named `SurfacePrecipitation_NASA.xyz` as a hard-coded string -- so on a
+    // paleo run it named a file it had not read, and every "scored against NASA" line in a
+    // reconstruction log was mislabelled. Set where the read happens, read where the score is
+    // printed.
+    //
+    // A function-local static rather than a cAtmosphereModel member, deliberately, and for the
+    // same reason IceSchemeCommon::floorAudit() is one: adding a member moves
+    // sizeof(cAtmosphereModel), which is this tree's stack-canary hazard.
+    inline std::string& precipRefFileName(){ static std::string s; return s; }
+
     // ---- Which Coriolis approximation BOTH spheres use (ATOM_CORIOLIS_NONTRAD) ----
     //
     // The two used to disagree, silently, in a coupled model that exchanges momentum at the sea

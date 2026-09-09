@@ -893,8 +893,10 @@ public:
                 const double r  = (sm > 0.0 && sn > 0.0) ? (mn / w_t) / (sm * sn) : 0.0;
                 const double rmse = sqrt(se / w_t + (mbar - nbar) * (mbar - nbar));
 
-                cout << " precipitation scored against SurfacePrecipitation_NASA.xyz"
-                        " (cos-lat weighted, surface, mm/a):" << endl;
+                const std::string& ref = AtomUtils::precipRefFileName();
+                cout << " precipitation scored against "
+                     << (ref.empty() ? std::string("<no reference file loaded>") : ref)
+                     << " (cos-lat weighted, surface, mm/a):" << endl;
                 printf("      model %8.1f   NASA %8.1f   bias %+8.1f (%+.1f %%)"
                        "   pattern r = %+.3f   centred RMS %7.1f   sigma model/NASA = %.2f\n",
                        mbar, nbar, mbar - nbar,
