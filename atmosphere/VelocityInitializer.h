@@ -298,6 +298,230 @@ public:
     // same one write_meridional_streamfunction uses for pre-densities() cells. v only: the
     // constraint is on the meridional overturning, and w is zonal.
     // ==================================================================
+    // ==================================================================
+    // SIX CLOSED CELLS, BUILT FROM A STREAMFUNCTION
+    // ATM_CELLS_FROM_PSI=1, DEFAULT 0 = OFF and byte-identical unset.
+    //
+    // WHY. The prescribed v is a LINEAR RAMP in height between two hand-set endpoints at nine
+    // latitudes (init_v_or_w above). Nothing in that construction constrains INT(rho*v*dz), so
+    // Psi(ground) starts at 1.55e+11 kg/s where it must be ZERO, and balance_column_mass_flux()
+    // then removes 94.8 % of it AFTER the fact. A ramp also ignores rho, so the return branch
+    // aloft is not the mass-compensating counterpart of the surface branch -- the cell cannot
+    // close even in principle, only be corrected. And the polar rows (0.5, 0.6) have a shear of
+    // 0.1 m/s against Hadley's 7.0 and no sign reversal at all: unchanged in EVERY commit since
+    // `f03ff0b`, so this model has never had a closed polar cell.
+    //
+    // THE FIX IS TO BUILD v FROM Psi INSTEAD OF BUILDING Psi FROM v. Prescribe
+    //
+    //     Psi(phi,z) = A(phi) * sin( pi * (z - z_g) / (H - z_g) )
+    //
+    // per column, where z_g is that column's own ground (get_layer_height(i_topography)) and H
+    // the model lid. Psi vanishes at BOTH ends by construction, so INT(rho*v*dz) = 0 EXACTLY in
+    // every column and the cells close at every latitude at iteration 0. Differentiating the
+    // diagnostic's own definition, Psi(z) = 2*pi*a*cos(phi) * INT_z^H rho*v dz (MinMax_Atm.cpp),
+    //
+    //     v(phi,z) = -(1 / (2*pi*a*cos(phi)*rho(z))) * dPsi/dz
+    //
+    // which carries 1/rho, so the return branch is automatically STRONGER in thin air aloft --
+    // the property a linear ramp cannot express and the reason the shipped cell needs a
+    // correction to close.
+    //
+    // A(phi) gives three cells per hemisphere with edges at 0/30/60/90 degrees, Psi = 0 at every
+    // edge so the cells are genuinely separate, and alternating sign so Hadley is thermally
+    // direct, Ferrel indirect and polar direct:
+    //
+    //     A(phi) = -sign(phi) * (-1)^n * A_n * sin( pi*(|phi| - phi_lo) / 30 )
+    //
+    // with n = 0,1,2 for Hadley/Ferrel/polar. The leading -sign(phi) is what makes the northern
+    // surface branch equatorward; note the shipped path gets its hemispheric antisymmetry from a
+    // separate `if (j > 90) v = -v` in the non-dimensionalisation pass, which this function does
+    // NOT go through -- it writes non-dimensional v directly, after that pass.
+    //
+    // AMPLITUDES ARE OBSERVED VALUES, not the model's current ones: 120 / 40 / 12 * 1e9 kg/s
+    // against a shipped Hadley of ~200e9 and a Ferrel of ~150e9 at iteration 20. So this makes
+    // the two strong cells WEAKER and the polar cell exist for the first time. Each is a knob.
+    //
+    // THE BUILT-IN CHECK: balance_column_mass_flux() runs immediately after this and prints the
+    // correction it applies. If the cells really close, that correction collapses to round-off.
+    // A non-zero value there means this function is wrong, and it is measured rather than argued.
+    void install_cells_from_streamfunction()
+    {
+        static const bool on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
+                                     return e && atoi(e) != 0; }();
+        if (!on) return;
+        auto amp = [](const char* n, double d){ const char* e = getenv(n);
+                                                return (e ? atof(e) : d) * 1.0e9; };
+        const double A_had = amp("ATM_PSI_HADLEY", 120.0);
+        const double A_fer = amp("ATM_PSI_FERREL",  40.0);
+        // 26 rather than an observed 12: the taper and the ground-to-tropopause span cut the
+        // installed cell to ~46 % of the prescribed value in the north and ~22 % in the south,
+        // so the knob is not the cell. Measured at 26: 75N reaches 12.10e9 = 10.1 % of Hadley
+        // and 75S 5.85e9 = 4.9 %, both inside the observed 5-15 %. The asymmetry is Antarctica
+        // shortening the span and must NOT be tuned out -- forcing the south to 10 % needs ~53,
+        // which puts the north at 20 %.
+        const double A_pol = amp("ATM_PSI_POLAR",   26.0);
+        const double a_E   = m.r_Earth * 1000.0;                 // r_Earth is in km
+        const double inv_u0 = 1.0 / m.u_0;
+        const double cos60 = cos(60.0 * M_PI / 180.0);
+        double vmax = 0.0, worst_res = 0.0; long ncol = 0;
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(max:vmax) reduction(max:worst_res) reduction(+:ncol)
+        for (int j = 0; j < m.jm; j++) {
+            for (int k = 0; k < m.km; k++) {
+                const double lat  = 90.0 - (double)j * 180.0 / (double)(m.jm - 1);
+                const double cphi = cos(lat * M_PI / 180.0);
+                if (fabs(cphi) < 1.0e-6) {                       // the pole rows carry no cell
+                    for (int i = 0; i < m.im; i++) m.v.x[i][j][k] = 0.0;   // v -> 0 at the pole
+                    continue;
+                }
+                const double alat = fabs(lat);
+                const int    n    = (alat < 30.0) ? 0 : (alat < 60.0) ? 1 : 2;
+                const double lo   = (n == 0) ? 0.0 : (n == 1) ? 30.0 : 60.0;
+                const double A_n  = (n == 0) ? A_had : (n == 1) ? A_fer : A_pol;
+                const double sgn  = (lat >= 0.0 ? -1.0 : 1.0) * ((n % 2 == 0) ? 1.0 : -1.0);
+                // POLAR TAPER. v carries 1/cos(phi), so a cell of fixed Psi amplitude implies a
+                // wind that runs away toward the pole. Psi must vanish at the pole in any case,
+                // so taper the amplitude with cos(phi), normalised to 1 at 60 deg: equatorward
+                // of 60 this is inert, and it bounds v in the polar band without a cap (a cap
+                // would break the closure this whole construction exists to provide).
+                const double taper = (alat <= 60.0) ? 1.0 : (cphi / cos60);
+                const double A     = sgn * A_n * taper * sin(M_PI * (alat - lo) / 30.0);
+
+                const int i0 = m.i_topography[j][k];
+                // CONFINE THE CELL TO THE TROPOSPHERE. The overturning is a tropospheric
+                // circulation, and carrying it to the 16 km lid also divides by a stratospheric
+                // rho ~0.1, which is where the unphysical 28.5 m/s in the first version came
+                // from. Psi = 0 from the tropopause up, so the cell closes below it.
+                int it = m.get_tropopause_layer(j);
+                if (it >= m.im) it = m.im - 1;
+                // WHERE THE GROUND REACHES THE TROPOPAUSE THERE IS NO ROOM FOR A CELL, so set
+                // the column to zero and move on. It must not be SKIPPED -- a skipped column
+                // keeps the old ramp, whose integral does not vanish, and balance_column_mass_flux
+                // then has something to remove after all (the first version installed 61 451 of
+                // 65 341 columns and its 4.3e-02 correction was entirely those 3 890). And it
+                // must not fall back to the LID either, which is what the second version did:
+                // over the Antarctic plateau that gave those columns a full-depth cell, and in
+                // the zonal mean it appeared as a second circulation ABOVE the tropopause
+                // reaching 2.04e9 kg/s at 10.9 km at 75S against only 0.24e9 at 75N -- the
+                // hemispheric asymmetry being the tell, since the Arctic has no such terrain.
+                // Zero has a vanishing column integral, so the mass-balance check still holds.
+                if (it <= i0) {
+                    for (int i = 0; i < m.im; i++) m.v.x[i][j][k] = 0.0;
+                    continue;
+                }
+                const double z_g  = m.get_layer_height(i0);
+                const double span = m.get_layer_height(it) - z_g;
+                if (!(span > 0.0)) continue;
+                ncol++;
+
+                // Pass 1: the analytic profile, rv = rho*v at each level.
+                //
+                // ATM_PSI_SHAPE selects the VERTICAL shape of the cell, and it matters more than
+                // it looks:
+                //
+                //   0  Psi = A*sin(pi*zeta),  v ~ cos(pi*zeta)/rho
+                //      The obvious choice and it is WRONG AT THE TOP. cos is maximal at BOTH
+                //      ends and 1/rho is also largest at the top, so the return branch is
+                //      amplified twice at the same boundary: measured at 15N it grows
+                //      monotonically to -2.28 m/s at 12 030 m -- the fastest flow in the column
+                //      -- and then drops DISCONTINUOUSLY to zero above the tropopause. In
+                //      streamlines that is a thin fast sheet pinned to the lid, which is not
+                //      what a Hadley cell looks like. (Found by the user looking at the plot;
+                //      no closure or mass check could see it, they all passed.)
+                //
+                //   1  Psi = A*(27/4)*zeta*(1-zeta)^2,  v ~ (1-zeta)*(1-3*zeta)/rho   [DEFAULT]
+                //      v is maximal at the surface, reverses at zeta = 1/3 so the return flow
+                //      occupies the upper TWO THIRDS as a real cell does, and goes to zero
+                //      SMOOTHLY at the tropopause -- no discontinuity, no sheet. Psi peaks at
+                //      zeta = 1/3 with value (4/27)*A, so the 27/4 normalises the knob to mean
+                //      the cell's actual maximum. Closure is untouched: Psi = 0 at both ends.
+                static const int shape = [](){ const char* e = getenv("ATM_PSI_SHAPE");
+                                               return e ? atoi(e) : 1; }();
+                std::vector<double> rv(m.im, 0.0), wq(m.im, 0.0);
+                for (int i = i0; i <= it; i++) {
+                    double rho = m.r_humid.x[i][j][k];
+                    if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                    const double zeta = (m.get_layer_height(i) - z_g) / span;
+                    const double dPsi = (shape == 0)
+                        ? A * (M_PI / span) * cos(M_PI * zeta)
+                        : A * (27.0 / 4.0) / span * (1.0 - zeta) * (1.0 - 3.0 * zeta);
+                    rv[i] = -dPsi / (2.0 * M_PI * a_E * cphi);                     // = rho*v
+                }
+                // Trapezoid weights, exactly those balance_column_mass_flux and the Psi
+                // diagnostic use, so "the discrete integral vanishes" means the same thing here
+                // as it does there.
+                for (int i = i0; i < it; i++) {
+                    const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                    if (!(dz > 0.0)) continue;
+                    wq[i] += 0.5 * dz;  wq[i+1] += 0.5 * dz;
+                }
+                // THE TOP HALF-INTERVAL, which the first version omitted and which was the whole
+                // of the 3.6e-02 the balance still had to remove. Psi = A*sin(pi*zeta) puts v at
+                // its EXTREMUM at the tropopause (cos(pi) = -1) and this function sets v = 0
+                // above it, so balance_column_mass_flux -- which integrates i0..im-2 -- picks up
+                // a trapezoid term 0.5*rv[it]*dz over [it, it+1] that was not in these weights.
+                // Include it, and the integral this function zeroes becomes exactly the integral
+                // that routine computes.
+                if (it + 1 < m.im) {
+                    const double dz_top = m.get_layer_height(it+1) - m.get_layer_height(it);
+                    if (dz_top > 0.0) wq[it] += 0.5 * dz_top;
+                }
+                // Pass 2: MAKE THE DISCRETE INTEGRAL VANISH BY BALANCING THE TWO BRANCHES.
+                // The analytic derivative integrates to zero in the CONTINUUM; on a 41-level
+                // grid stretched 23x it does not, and the first version left 4.1e-02 (non-dim v,
+                // ~10 % of the cell) for balance_column_mass_flux to remove as a CONSTANT SHIFT
+                // -- which moves the zero-crossing and distorts the cell. Scaling the poleward
+                // and equatorward branches instead makes them carry equal and opposite mass
+                // flux, which is what a closed cell IS, and leaves the sign structure and the
+                // crossing height untouched.
+                double P = 0.0, N = 0.0;
+                for (int i = i0; i <= it; i++) {
+                    const double c = rv[i] * wq[i];
+                    if (c > 0.0) P += c; else N -= c;
+                }
+                // A column needs BOTH branches present for this to work. With shape 0 that was
+                // automatic -- cos(pi*zeta) is +1 at zeta=0 and -1 at zeta=1, so even a 2-level
+                // column has one of each. With shape 1, v VANISHES at zeta=1, so a column with
+                // very few levels above its ground can sample only one sign, P or N comes out
+                // zero, no balancing is possible and the column's integral does not vanish:
+                // measured, that took the worst relative residual from 3.6e-16 straight to
+                // 1.00e+00 and put 7.0e-02 back into balance_column_mass_flux. Zero those
+                // columns -- a zero column has a vanishing integral, so closure survives, and
+                // they are shallow columns that cannot hold a cell in any case.
+                if (!(P > 0.0 && N > 0.0)) {
+                    for (int i = 0; i < m.im; i++) m.v.x[i][j][k] = 0.0;
+                    continue;
+                }
+                {
+                    const double half = 0.5 * (P + N);
+                    const double fp = half / P, fn = half / N;
+                    for (int i = i0; i <= it; i++) rv[i] *= (rv[i] > 0.0 ? fp : fn);
+                }
+                // residual of the discrete integral, reported rather than assumed
+                double res = 0.0, scale = 0.0;
+                for (int i = i0; i <= it; i++) { res += rv[i]*wq[i]; scale += fabs(rv[i])*wq[i]; }
+                if (scale > 0.0 && fabs(res)/scale > worst_res) worst_res = fabs(res)/scale;
+
+                for (int i = 0; i < m.im; i++) {
+                    if (i < i0 || i > it) { m.v.x[i][j][k] = 0.0; continue; }
+                    double rho = m.r_humid.x[i][j][k];
+                    if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                    const double v_phys = rv[i] / rho;
+                    m.v.x[i][j][k] = v_phys * inv_u0;
+                    if (fabs(v_phys) > vmax) vmax = fabs(v_phys);
+                }
+            }
+        }
+        std::cout << "      AGCM: [CELLS FROM PSI] installed over " << ncol
+                  << " columns;  Psi Hadley/Ferrel/polar = "
+                  << A_had/1e9 << " / " << A_fer/1e9 << " / " << A_pol/1e9 << " e9 kg/s;  max |v| = "
+                  << vmax << " m/s;  worst relative residual of the discrete column integral = "
+                  << std::scientific << std::setprecision(2) << worst_res << std::defaultfloat
+                  << "  (balance_column_mass_flux should now find ~nothing to remove)"
+                  << std::endl;
+    }
+
     void balance_column_mass_flux()
     {
         if (!massBalance()) return;

@@ -577,6 +577,10 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // iterations and the longest run here is 1600, so it cannot be waited for either. This
     // supplies it as an initial condition instead.
     VelocityInitializer(*this).balance_thermal_wind();
+    // SIX CLOSED CELLS FROM A STREAMFUNCTION (ATM_CELLS_FROM_PSI=1, default 0 = off and
+    // byte-identical). Runs AFTER densities() so rho is real, and immediately BEFORE the mass
+    // balance -- which is the check: if the cells close, that correction has nothing to remove.
+    VelocityInitializer(*this).install_cells_from_streamfunction();
     VelocityInitializer(*this).balance_column_mass_flux();
 
     {
@@ -1287,6 +1291,11 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
           << "  POISSON_METRIC_FIX=" << ev("ATM_POISSON_METRIC_FIX", "0*")
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
+          << "  RADIAL_SHAPIRO_STRENGTH_VW=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH_VW", "(=STRENGTH)*")
+          << "  POLAR_CELL_SHEAR=" << ev("ATM_POLAR_CELL_SHEAR", "0.1*")
+          << "  HADLEY_SL=" << ev("ATM_HADLEY_SL", "4.0N/3.0S*")
+          << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "0*")
+          << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
