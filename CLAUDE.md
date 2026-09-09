@@ -670,6 +670,82 @@ TwoCat's answer is also partly set by the `max(0, ...)` floor, by a factor of ~4
 ~1e+7, and its `S_ev` carries no rain-area fraction either. Reverting buys a scheme whose numbers
 are MOSTLY rates, not one that is clean.
 
+### The moisture transport, measured: a real Hadley cell, NO eddy transport, and precipitation decoupled from both
+
+**`ATM_MFC_DIAG=1`, new 2026-09-09, print-only, default off.** The question it answers was put by
+the user from a plot: *the precipitation PATTERN looks nothing like NASA's while precipitable water
+looks right.* Those are consistent, and the reason is that they are different kinds of quantity.
+**PW is a STATE** — temperature through Clausius-Clapeyron times a largely PRESCRIBED relative
+humidity (`ATM_RH_PROFILE` plus the `ATM_RH_MIN` floor, both scaffolds chosen to land in the
+observed band) — **while P is a FLUX**, and in equilibrium `P - E = -div(INT rho_v V dz)`, so the
+GEOGRAPHY of precipitation is set by moisture CONVERGENCE. A model can hold exactly the right
+amount of water and put the rain in the wrong places, and this tree does.
+
+The probe integrates `PrecipitableWater`'s own integrand — vapour density `e/(R_v T)` with
+`e = q p/ep` — times the horizontal velocity, from `i_topography` up, and takes the spherical
+divergence. Run from `output_sp600ctl/atm_restart_0Ma_600.bin` on that arm's own branch
+(`ATM_SATADJ_PHASE=0 ATM_BUOY_CONSISTENT=0`), 24 threads, mm/a:
+
+| | MFC | P - E |
+|---|---|---|
+| global cos-lat mean | **-0.74** | +509.29 |
+| rms magnitude | **1363.19** | 559.85 |
+| **0-15 deg** | **+1455.31** | +1789.71 |
+| **15-35 deg** | **-1224.19** | **+152.84** |
+| **35-65 deg** | **+68.65** | +40.48 |
+| 65-90 deg | -13.54 | -7.64 |
+| **r(MFC, P-E)** | **+0.302** | *balance needs +1* |
+| **regression slope** | **+0.150** | *balance needs +1* |
+
+**THE GLOBAL MEAN IS -0.74 mm/a ON TERMS OF ±1400, WHICH IS THE OPERATOR'S OWN CONTROL** — a
+divergence integrates to zero over a sphere, and it does.
+
+**FINDING 1: THE CELLS ARE TRANSPORTING MOISTURE, AND THE TROPICAL BRANCH IS ABOUT THE RIGHT
+SIZE.** 0-15 deg converges **+1455 mm/a** against the +1790 that `P - E` asks for, and 15-35 deg
+diverges **-1224**. Convergence at the ITCZ, divergence in the subtropical descent: that is a
+working Hadley overturning. **So "the precipitation pattern is wrong because the initial cell
+structure is wrong" is REFUTED as stated** — the prescribed cell is moving water, at the right
+sign and the right order, in the half of the globe where it exists. (What IS wrong with the
+initial profile is separate and already recorded: it does not conserve column mass, leaving
+`Psi(ground)` = 1.55e+11 where it must be zero, of which `ATM_V_MASSBAL` removes 94.8 %.)
+
+**FINDING 2: THE PRECIPITATION DOES NOT FOLLOW THE TRANSPORT, AND THE SUBTROPICS PROVE IT.**
+`r` = **+0.302** and the slope is **+0.150**, where moisture balance requires both to be 1. The
+clearest single cell of evidence is 15-35 deg: **the model's own circulation exports 1224 mm/a of
+moisture from a band that rains 153 mm/a MORE than it evaporates.** No column can do that. It is
+possible here only because the water budget does not close — `P/E` = 1.78, and the surface source
+is a re-pin rather than a flux (`waterVapourEvaporation` ASSIGNS `c[0]`, and the `E` in the budget
+line is a Dalton diagnostic that drives nothing). **The rain is not being fed by the transport.**
+
+**FINDING 3: IN MID-LATITUDES THE TRANSPORT IS SIMPLY ABSENT.** 35-65 deg convergence is
+**+68.65 mm/a** against NASA's **981.1** of precipitation in that band — about **7 %** of what it
+needs. That is the missing baroclinic eddy transport, measured as a MOISTURE SUPPLY rather than as
+a rainfall shortfall, and it is the same defect the momentum budget reports as `wbud_advh`
+**80x below** Coriolis. **The storm track is starved of water as well as of momentum.**
+
+**AND THE SAME CONCLUSION FROM THE OTHER SIDE, IN ONE CORRELATION.** On the `nm` = 100 field,
+cos-lat weighted over the globe: **r(model P, model PW) = +0.619 against r(NASA P, model PW) =
++0.344.** The model's rain tracks its own column water about **twice as tightly** as real rain
+tracks that same field — and better than it tracks the observed rainfall (r = +0.456). That is the
+signature of precipitation being DIAGNOSED locally from what is in the column instead of being
+DELIVERED where the water was carried. It is why the field comes out as a broad tropical maximum
+where `q_sat` and the RH floor are both largest, with little poleward of it, and why
+`sigma` = 2.33.
+
+**SO "THIS IS A CIRCULATION RESULT, NOT A MICROPHYSICS ONE" NOW HAS A MECHANISM AND A NUMBER.**
+The band table below says the model is 6x too dry at 35-65 deg; this says its moisture supply
+there is 7 % of requirement. **And it is not reachable by a microphysics constant** — that work is
+done, and it is what made the land/ocean partition right (766/1059 against 782/1056). It needs the
+structural items: a pressure that answers the flow, thermal wind so eddies can grow, and
+integration lengths this tree cannot presently afford.
+
+**CAVEATS.** The MFC is an INSTANTANEOUS snapshot ten iterations past the checkpoint, not a time
+mean, while `P` carries the 2dt sawtooth — the two printed parities agree to 0.03 % on MFC, so the
+sawtooth is not in this term. The Earth radius is a literal in the probe (6.371e6 m) because this
+tree has no named constant for it; the metric carries `r0` in units of `L_atm`. And the probe is
+read-only: it allocates two 2-D scratch fields and writes no model array.
+
+
 ### The precipitation is NOT stable past iteration 600 — it resumes climbing, and the drift is entirely tropics and subtropics
 
 **THE "STABLE BETWEEN 100 AND 600" BY-PRODUCT RECORDED BELOW DOES NOT EXTEND TO 1200**

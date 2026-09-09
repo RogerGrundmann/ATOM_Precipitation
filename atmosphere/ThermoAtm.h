@@ -914,6 +914,118 @@ public:
             }
         }
 
+        // ================ MOISTURE FLUX CONVERGENCE -- `ATM_MFC_DIAG=1` ================
+        //
+        // WHY THIS EXISTS. Precipitable water can be RIGHT while the precipitation PATTERN is
+        // wrong, and the two are not in tension: PW is a STATE variable -- temperature through
+        // Clausius-Clapeyron times a largely PRESCRIBED relative humidity (ATM_RH_PROFILE plus
+        // the ATM_RH_MIN floor) -- while P is a FLUX. In equilibrium
+        //
+        //     P - E = -div( INT rho_v * V_horizontal dz )
+        //
+        // so the GEOGRAPHY of precipitation is set by moisture CONVERGENCE, i.e. by the
+        // circulation, not by how much water the column holds. This measures that term on the
+        // model's own 3-D field so that "the transport is missing" is a number rather than an
+        // inference from the band table.
+        //
+        // The integrand is `PrecipitableWater`'s verbatim -- vapour density e/(R_v T) with
+        // e = q p / ep -- times the horizontal velocity, integrated from i_topography up. If
+        // the model were in moisture balance, MFC and P - E would be the same field: r -> +1
+        // and the regression slope -> 1. Print-only; nothing here writes a model field.
+        static const bool mfc_on = [](){ const char* e = getenv("ATM_MFC_DIAG");
+                                         return e && atoi(e) != 0; }();
+        if(mfc_on){
+            // This tree has no named Earth-radius constant -- the metric carries r0 in units of
+            // L_atm (cAtmosphereModel.h:691, 397.5) rather than in metres.
+            constexpr double R_EARTH_M = 6.371e6;
+            const double yr = 365.0 * 8.64e4;
+            std::vector<std::vector<double> > Fn(m.jm, std::vector<double>(m.km, 0.0));
+            std::vector<std::vector<double> > Fe(m.jm, std::vector<double>(m.km, 0.0));
+
+            #pragma omp parallel for collapse(2)
+            for(int j = 0; j < m.jm; j++){
+                for(int k = 0; k < m.km; k++){
+                    double fn = 0.0, fe = 0.0;
+                    for(int i = m.i_topography[j][k]; i < m.im - 1; i++){
+                        const double t_actual = m.t.x[i][j][k] * m.t_0;
+                        const double p_actual = m.p_stat.x[i][j][k];
+                        if(t_actual < PrecipWaterConstants::MIN_SAFE_TEMP
+                            || p_actual < PrecipWaterConstants::MIN_SAFE_PRESSURE) continue;
+                        const double e_vap = PrecipWaterConstants::HPA_TO_PA * m.c.x[i][j][k] * p_actual / m.ep;
+                        const double rho_v = e_vap / (m.R_WaterVapour * t_actual);   // kg/m3
+                        const double step  = m.get_layer_height(i + 1) - m.get_layer_height(i);
+                        // `v` is meridional with SOUTH positive in this tree and `w` is zonal
+                        // with EAST positive (see the velocity-convention note in CLAUDE.md),
+                        // so the northward flux carries the minus sign.
+                        fn += rho_v * (-m.v.x[i][j][k] * m.u_0) * step;
+                        fe += rho_v * ( m.w.x[i][j][k] * m.u_0) * step;
+                    }
+                    Fn[j][k] = fn;  Fe[j][k] = fe;
+                }
+            }
+
+            const double dphi = M_PI / (double)(m.jm - 1);
+            const double dlam = 2.0 * M_PI / (double)(m.km - 1);
+            double wt = 0.0, s_mfc = 0.0, s_pme = 0.0, s_absm = 0.0, s_absp = 0.0;
+            double mm2 = 0.0, nn2 = 0.0, mn2 = 0.0;
+            double bwt[4] = {0,0,0,0}, bmfc[4] = {0,0,0,0}, bpme[4] = {0,0,0,0};
+
+            // two passes: means, then the centred moments the correlation needs
+            for(int pass = 0; pass < 2; pass++){
+                double mbar_m = (pass && wt > 0.0) ? s_mfc / wt : 0.0;
+                double mbar_p = (pass && wt > 0.0) ? s_pme / wt : 0.0;
+                for(int j = 1; j < m.jm - 1; j++){
+                    const double lat  = 90.0 - j * 180.0 / (double)(m.jm - 1);
+                    const double cphi = cos(lat * M_PI / 180.0);
+                    if(fabs(cphi) < 1e-6) continue;
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    const double alat = fabs(lat);
+                    const int b = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
+                    const double cN = cos((90.0 - (j - 1) * 180.0 / (double)(m.jm - 1)) * M_PI / 180.0);
+                    const double cS = cos((90.0 - (j + 1) * 180.0 / (double)(m.jm - 1)) * M_PI / 180.0);
+                    for(int k = 0; k < m.km; k++){
+                        const int kp  = (k + 1) % (m.km - 1);
+                        const int km1 = (k - 1 + m.km - 1) % (m.km - 1);
+                        // phi increases NORTHWARD, i.e. with DECREASING j
+                        const double dFphi = (Fn[j-1][k] * cN - Fn[j+1][k] * cS) / (2.0 * dphi);
+                        const double dFlam = (Fe[j][kp] - Fe[j][km1]) / (2.0 * dlam);
+                        const double div   = (dFlam + dFphi) / (R_EARTH_M * cphi);  // kg/(m2 s)
+                        const double mfc   = -div * yr;                             // mm/a
+                        const double pme   = m.Precipitation.x[0][j][k] * yr
+                                           - m.Evaporation.y[j][k] * 365.0;         // mm/a
+                        if(pass == 0){
+                            wt += w;  s_mfc += w * mfc;  s_pme += w * pme;
+                            s_absm += w * fabs(mfc);  s_absp += w * fabs(pme);
+                            bwt[b] += w;  bmfc[b] += w * mfc;  bpme[b] += w * pme;
+                        }else{
+                            const double dm = mfc - mbar_m, dp = pme - mbar_p;
+                            mm2 += w * dm * dm;  nn2 += w * dp * dp;  mn2 += w * dm * dp;
+                        }
+                    }
+                }
+            }
+            const double sm = sqrt(mm2 / wt), sp = sqrt(nn2 / wt);
+            const double rr = (sm > 0.0 && sp > 0.0) ? (mn2 / wt) / (sm * sp) : 0.0;
+            const double slope = (mm2 > 0.0) ? mn2 / mm2 : 0.0;   // regression of P-E on MFC
+
+            cout << " moisture flux convergence from the 3-D field (cos-lat weighted, mm/a):"
+                 << endl;
+            printf("      MFC mean %+9.2f   P-E mean %+9.2f    rms |MFC| %9.2f   rms |P-E| %9.2f"
+                   "   ratio %6.3f\n",
+                   wt > 0 ? s_mfc/wt : 0.0, wt > 0 ? s_pme/wt : 0.0,
+                   wt > 0 ? s_absm/wt : 0.0, wt > 0 ? s_absp/wt : 0.0,
+                   (s_absp > 0.0) ? s_absm / s_absp : 0.0);
+            printf("      pattern r(MFC, P-E) = %+.3f   sigma(MFC)/sigma(P-E) = %6.3f"
+                   "   regression slope = %+7.3f   (balance needs r -> +1, slope -> +1)\n",
+                   rr, (sp > 0.0) ? sm / sp : 0.0, slope);
+            printf("      by |latitude|   0-15 %+9.2f /%+9.2f   15-35 %+9.2f /%+9.2f"
+                   "   35-65 %+9.2f /%+9.2f   65-90 %+9.2f /%+9.2f   (MFC / P-E)\n",
+                   bwt[0] > 0 ? bmfc[0]/bwt[0] : 0.0, bwt[0] > 0 ? bpme[0]/bwt[0] : 0.0,
+                   bwt[1] > 0 ? bmfc[1]/bwt[1] : 0.0, bwt[1] > 0 ? bpme[1]/bwt[1] : 0.0,
+                   bwt[2] > 0 ? bmfc[2]/bwt[2] : 0.0, bwt[2] > 0 ? bpme[2]/bwt[2] : 0.0,
+                   bwt[3] > 0 ? bmfc[3]/bwt[3] : 0.0, bwt[3] > 0 ? bpme[3]/bwt[3] : 0.0);
+        }
+
         row(" precipitable water average", precipitablewater_average, " mm",
             " precipitation NASA average per year", precipitation_NASA_average, " mm/a",
             " precipitation NASA average per day", precipitation_NASA_average / 365.0, " mm/d");
