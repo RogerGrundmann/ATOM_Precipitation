@@ -2892,8 +2892,45 @@ implies a re-look at `ATM_RH_MIN_PTOP`**, in the same way `ATM_ICE_LIMIT_ARRIVIN
 
 **Every scored quantity improves, and the two STARVED bands move the right way** — which is
 coherent with where the spurious source was: cold cells holding liquid, i.e. mid and high
-latitudes aloft. **DEFAULT STAYS 0**: four seconds is not evidence for a default in a tree that
-has been caught six times by a cancelling pair, and this one wants a from-scratch arm.
+latitudes aloft.
+
+**FLIPPED ON BY DEFAULT 2026-09-09, AT THE USER'S INSTRUCTION, AND ALONE — `ATM_RH_MIN_PTOP` WAS
+SWEPT IN THE SAME STEP AND DELIBERATELY NOT MOVED.** The paragraph above says a flip of this knob
+implies a re-look at `ATM_RH_MIN_PTOP`, because 475 was fitted to land on NASA on the branch that
+carried this source. The re-look was done and its answer is to leave it: **raising `PTOP` buys the
+mean back and hands the whole shape gain back with it.** Four arms, `nm` = 100 from scratch, one
+pinned binary `cli/atm_ptop`, `config_accept.xml` defaults, 24 threads, all exit 0 with zero NaN:
+
+| arm | `SATADJ_PHASE` | `RH_MIN_PTOP` | Precip | **r** | **centred RMS** | **sigma** | 35-65 | 65-90 | land | ocean |
+|---|---|---|---|---|---|---|---|---|---|---|
+| control | 0 | 475 | **975.8 (-0.3 %)** | +0.456 | 1432.1 | 2.33 | 157.1 | 7.6 | 766.3 | 1058.7 |
+| **the flip** | **1** | **475** | **931.8 (-4.7 %)** | **+0.457** | **1378.6** | **2.25** | **160.4** | **10.2** | 713.8 | 1018.2 |
+| | 1 | 500 | 1028.4 (+5.1 %) | **+0.462** | 1516.5 | 2.48 | 161.2 | 10.2 | **794.4** | 1121.0 |
+| | 1 | 525 | 1098.7 (+12.3 %) | +0.456 | 1641.9 | **2.66** | 162.1 | 10.2 | 848.8 | 1197.6 |
+| *NASA* | | | *978.3* | | | *1.00* | *981.1* | *364.2* | *782.3* | *1055.8* |
+
+**THE MEAN AND THE SHAPE POINT IN OPPOSITE DIRECTIONS ALONG THIS KNOB, AND THE SHAPE IS THE ONE
+THAT MATTERS BY THIS FILE'S OWN RULE.** `PTOP` = 500 recovers the mean and overshoots it, at
+**sigma 2.25 -> 2.48 and centred RMS 1379 -> 1517 — both worse than the control ever was**; 525 is
+worse again on both. The mechanism is the one the original `PTOP` sweep recorded: above ~500 hPa
+the ice is saturated, so everything the floor adds lower down is LIQUID, and tropical liquid is
+exactly the amplitude error `sigma` measures. **`r` is the one metric that prefers 500 (+0.462) and
+it should be discounted here** — a pattern correlation is insensitive to amplitude, so it can
+improve while the field's variance runs away from NASA's, which is what `sigma` and the RMS say is
+happening; and `r` falls back to +0.456 at 525, so it is not monotone either.
+
+**AND THE `nm` = 100 AND `nm` = 600 PAIRS AGREE ON EVERY METRIC'S DIRECTION**, which is the
+cross-check that decided it: mean down, `r` up, centred RMS down, `sigma` down, both starved bands
+up, `P/E` toward closure, at 20 seconds of physical time and at 120. **`ATM_SATADJ_PHASE=0`
+restores the shipped branch exactly**, and the `[RUN CONFIG]` banner now prints `SATADJ_PHASE`
+with a `*` when it is compiled-in.
+
+**WHAT THE FLIP DOES NOT CLAIM.** The mean is now **-3.2 % of NASA at 600 iterations** where the
+old branch was +2.0 %, and by the mean alone that is a regression — both statements are about the
+same run and this file's rule picks the shape. The land/ocean split moves the WRONG way
+(766/1059 -> 714/1018 against 782/1056), which is the one scored quantity that does not improve
+and is recorded here rather than left out. And the residual non-conservation in this routine is
+now ONE named sink, `clampAndFade`'s `cloud *= alpha` below `t_00`, at **-3.98e+04 mm/a**.
 
 ### The knob is written and swept: `ATM_MICRO_NDIM`, a 2783x coefficient correction that moves the precipitation 0.5 %
 

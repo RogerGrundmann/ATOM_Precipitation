@@ -1281,6 +1281,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  ICE_LIMITERS=" << ev("ATM_ICE_LIMITERS", "0*")
           << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
           << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
+          << "  SATADJ_PHASE=" << ev("ATM_SATADJ_PHASE", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")

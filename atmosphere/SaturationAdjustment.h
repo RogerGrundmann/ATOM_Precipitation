@@ -85,11 +85,22 @@ public:
     };
     static Budget& budget(){ static Budget b; return b; }
     // ATM_SATADJ_PHASE: 1 = clip each evaporation half to its own reservoir (the repair),
-    // 0 = shipped. Default 0 -- this changes the moist physics of the default configuration,
-    // and this tree flips defaults on measurements.
+    // 0 = shipped. **DEFAULT ON since 2026-09-09**, at the user's instruction; `=0` restores
+    // the shipped branch exactly. The measurement it was flipped on: the entry clip bounds
+    // d_q_v by the TOTAL condensate and the split is then by TEMPERATURE, so a cell holding
+    // liquid in cold air evaporates out of an EMPTY ice reservoir -- ATM_SATADJ_DIAG charges
+    // that one clip 100.0 % of the routine's non-conservation and closes to 1.2e-16. On a
+    // from-scratch 600 it removes +2.3639 mm of manufactured column water (on a precipitable
+    // water of 30.3 mm) and every SHAPE metric improves: centred RMS -4.0 %, sigma 2.39 ->
+    // 2.29, r +0.457 -> +0.459, the two starved bands +2.1 % and +35 %. The global MEAN goes
+    // +2.0 % -> -3.2 % of NASA, because ~5 % of this model's precipitation WAS that water --
+    // read it by this tree's own rule (quote r, sigma and the four bands, or quote nothing).
+    // ATM_RH_MIN_PTOP was swept 475/500/525 in the same step and NOT moved: raising it buys
+    // the mean back and hands the shape gain straight back with it (sigma 2.25 -> 2.48).
     static bool satadjPhase(){
         static const bool v = [](){ const char* e = getenv("ATM_SATADJ_PHASE");
-                                    return e && atoi(e) != 0; }();
+                                    return e ? (atoi(e) != 0) : true;   // DEFAULT ON 2026-09-09
+                                  }();
         return v;
     }
     static bool diagOn(){
