@@ -79,14 +79,36 @@ public:
         // southern Ferrel cell
         init_v_or_w(m.v, 150, -0.2,  0.0);                              // lat: -60   j=150
         init_v_or_w(m.v, 135,  4.0, -1.5);                              // lat: -45   j=135
+        // ---- THE TWO HADLEY CELLS ARE ASYMMETRIC, AND IT IS A HALF-APPLIED EDIT ----
+        //
+        // `git log --follow` on this file, every version: the pair was SYMMETRIC at 3.0/3.0 in
+        // `f03ff0b` (initial commit) and `ee821ab`, and the asymmetry arrives in `24ff23a`
+        // ("revive Hadley/Ferrel cells", 2026-06-19), which raised the NORTHERN surface branch
+        // 3.0 -> 4.0 and left the southern one at 3.0 -- with the intended southern replacement
+        // WRITTEN AND COMMENTED OUT directly above it. Both were meant to go to 4.0; the north
+        // got the edit and the south got the comment. Fifth instance of this tree's "a comment
+        // describing code that does not run" class.
+        //
+        // Measured consequence: `Psi` at iteration 20 is -142.0 north against +123.4 south
+        // (1.15x), and precipitation at iteration 20 is NH/SH **1.42** where NASA is 1.04 --
+        // 2.9x in the subtropics and 18x over the polar caps. Most of that is a spin-up
+        // transient (by iteration 600 the ratio is 1.07), but the initial condition is lopsided
+        // by construction and the transient is what a plot at low iteration counts shows.
+        //
+        // ATM_HADLEY_SL=<m/s> gives BOTH hemispheres the same surface branch. Unset returns the
+        // shipped LITERALS (4.0 north, 3.0 south) and is bit-identical; 4.0 completes what
+        // `24ff23a` intended, 3.0 restores the symmetric pair this model ran with for its first
+        // two months. Do not read 3.5 as "the compromise" -- it splits the difference between a
+        // value and a mistake.
+        static const bool   hadley_set = (getenv("ATM_HADLEY_SL") != nullptr);
+        static const double hadley_sl  = [](){
+            const char* e = getenv("ATM_HADLEY_SL"); return e ? atof(e) : 4.0; }();
         // northern Hadley cell
         init_v_or_w(m.v,  60,  0.0,  0.5);                              // lat:  30   j=60
-//        init_v_or_w(m.v,  75, -3.0,  3.0);                              // lat:  15   j=75
-        init_v_or_w(m.v,  75, -3.0,  4.0);                              // lat:  15   j=75
+        init_v_or_w(m.v,  75, -3.0, hadley_set ? hadley_sl : 4.0);      // lat:  15   j=75
         // southern Hadley cell
         init_v_or_w(m.v, 120,  0.0,  0.5);                              // lat: -30   j=120
-//        init_v_or_w(m.v, 105, -3.0,  4.0);                              // lat: -15   j=105
-        init_v_or_w(m.v, 105, -3.0,  3.0);                              // lat: -15   j=105
+        init_v_or_w(m.v, 105, -3.0, hadley_set ? hadley_sl : 3.0);      // lat: -15   j=105
 
         // initialise w: tropopause and surface values per latitude.
         // w is the ZONAL jet (East+). The SURFACE value (2nd coeff) is what the
