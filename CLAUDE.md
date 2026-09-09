@@ -923,6 +923,122 @@ filter recover the 35-65 deg band, 157 against NASA's 981 — is UNANSWERED**, n
 TwoCat configuration, and needs far longer than 100 iterations because baroclinic eddies have to
 grow before they rain.
 
+## The six-cell structure: the model never had one, and now it does at initialisation
+
+**THE USER FOUND THIS BY LOOKING AT `output_sp600on`** (2026-09-09): the Hadley/Ferrel cells are
+squeezed and the polar cells absent. Measured, `Psi` at ~5 km, 1e9 kg/s, over that run:
+
+| iteration | 75N | 45N | 15N | 15S | 45S | 75S |
+|---|---|---|---|---|---|---|
+| 20 | -2.6 | **+98.9** | **-142.0** | +123.4 | **-109.6** | +1.9 |
+| 600 | **+1.5** | +68.7 | **-44.8** | +39.8 | -78.4 | **-1.5** |
+
+**Hadley falls to 31 %, Ferrel to 69 %, and the polar cells SIGN-FLIP into noise.** Three separate
+defects, and they needed separating before any of them could be fixed.
+
+### 1. The radial Shapiro filter erases the cells, exactly as it erases the jet
+
+`v_momentum_budget_600.csv` was already on disk and had never been read for this. At 15N:
+
+| z | `vbar` | `dv_radial` | `dv_dyn` (ALL physics) | ratio |
+|---|---|---|---|---|
+| 3316 m | +0.90 | -3.55e-04 | -2.59e-05 | 13.7 |
+| **6719 m** | **-0.60** | **+7.74e-04** | **+9.71e-07** | **796** |
+| 9007 m | -0.51 | +7.33e-04 | +4.77e-06 | 154 |
+
+The filter pushes BOTH branches toward zero, and at the Ferrel core it is 1.4x the dynamics AND
+OPPOSITE IN SIGN — the physics is trying to maintain that cell and the filter is beating it.
+**`ATM_RADIAL_SHAPIRO_STRENGTH_VW`** (default = the global knob, bit-identical) applies the filter
+to `v`/`w` only, leaving `u`'s CFL guard at full strength — the hazard and the damage are in
+different components. Measured 20 -> 200: Hadley -40.3 % -> **-25.0 %**, Ferrel 45S -15.2 % ->
+**-3.5 %**. Fitting `decay = A*s + B` gives A = 20.4, B = 19.9, so **about half the Hadley decay is
+the filter**.
+
+### 2. The polar cells were never cells, in any commit this repository has ever had
+
+`init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps surface -> tropopause, so a CELL is the difference:
+Hadley `(-3.0, +4.0)` shear 7.0, Ferrel `(+4.0, -1.5)` shear 5.5, **polar `(+0.5, +0.6)` shear 0.1
+and no sign reversal**. What appeared as a polar cell in `Psi` is `ATM_V_MASSBAL` removing the
+column mean afterwards. `git log --follow`: **(0.5, 0.6) is byte-identical in every commit since
+`f03ff0b`**, and `24ff23a` is titled *"revive Hadley/Ferrel cells"* — not polar. `ATM_POLAR_CELL_SHEAR`.
+
+**AND THE HADLEY PAIR IS ASYMMETRIC BY A HALF-APPLIED EDIT.** Symmetric at 3.0/3.0 in `f03ff0b` and
+`ee821ab`; `24ff23a` raised the NORTH to 4.0 and left the south at 3.0, **with the intended southern
+replacement written and commented out directly above the live line**. Fifth instance of "a comment
+describing code that does not run". Consequence: `Psi` 1.15x asymmetric, and precipitation NH/SH
+**1.42 at iteration 20** against NASA's 1.04 — but 1.07 by iteration 600, so it is a spin-up
+transient. `ATM_HADLEY_SL`.
+
+### 3. `Psi`'s zonal mean divided by a level-varying count
+
+`write_meridional_streamfunction` divided each level by `n`, the FLUID-cell count at that level,
+which varies with height wherever terrain varies with longitude. `balance_column_mass_flux` makes
+every COLUMN's integral vanish and `Psi(ground)` still did not. **The natural experiment that proves
+it**: with the repaired initial condition five of six bands closed and only the SOUTHERN polar one
+did not — 1.750 against 0.137 for its northern twin. That band is Antarctica; the Arctic at the same
+latitude is ocean and closed. Fixing the divisor: 1.750 -> 0.496. Integrating **each column then
+averaging** — the definition, since each column's integral carries a bottom half-weight at its OWN
+ground: **every band to 0.0000**. Written as an ADDITIONAL column `psi_fixdiv_kg_per_s`, so no
+recorded `Psi` number changes meaning.
+
+### `ATM_CELLS_FROM_PSI`: build `v` from `Psi` instead of `Psi` from `v`
+
+`Psi(phi,z) = A(phi)*S(zeta)` per column, `zeta` measured from that column's own ground to the
+tropopause, `v = -(1/(2*pi*a*cos(phi)*rho)) dPsi/dz`. Closure is then structural. Amplitudes are
+knobs; `ATM_PSI_SHAPE=1` (default) uses `S ~ zeta*(1-zeta)^2` so `v` is maximal at the surface,
+reverses at `zeta` = 1/3 and goes to zero SMOOTHLY at the tropopause.
+
+| lat | Psi(ground) | cell | ratio |
+|---|---|---|---|
+| 75N | -0.000000 | 6.15 | **0.0000** |
+| 45N | 0.000000 | 42.80 | **0.0000** |
+| 15N | -0.000000 | 129.16 | **0.0000** |
+| 75S | 0.000000 | 3.35 | **0.0000** |
+
+**`balance_column_mass_flux` finds 3.461e-17 to remove against 2.6e-01 on the shipped ramp** — the
+built-in check, because if the cells close there is nothing left for it to do.
+
+**FOUR WRONG VERSIONS GOT HERE AND TWO OF THEM WERE CAUGHT BY THE USER IN THE PLOT, NOT BY ANY
+CHECK.** (1) the analytic derivative integrates to zero in the CONTINUUM, not on a 23x-stretched
+41-level grid; (2) the top half-interval at the tropopause was omitted; (3) columns whose ground
+reaches the tropopause fell back to the LID, which over the Antarctic plateau put a second
+circulation ABOVE the tropopause — **every mass check passed**; (4) `Psi ~ sin(pi*zeta)` puts `v` at
+its maximum AT the tropopause and `1/rho` amplifies it there too, giving a thin fast sheet pinned to
+the lid that dropped discontinuously to zero — **also invisible to every check**. *Numerical checks
+verified the integral and said nothing about the shape.*
+
+### What 600 iterations say, and it retracts a claim made the same day
+
+`output_cellpsi`, closed-cell IC + `_VW=0.25`, 600 from scratch, exit 0, zero NaN:
+
+| iteration | 75N | 45N | 15N | 15S | 45S | 75S |
+|---|---|---|---|---|---|---|
+| **cell, 20** | 11.7 | 39.1 | 120.2 | 119.0 | 40.6 | 5.0 |
+| **cell, 600** | 6.5 | **58.3** | 95.6 | 94.0 | **63.9** | 1.8 |
+| change | -44 % | **+49 %** | -20 % | -21 % | **+57 %** | -64 % |
+| **closure, 20** | 0.024 | 0.056 | 0.019 | 0.022 | 0.033 | 0.094 |
+| **closure, 600** | 0.760 | 0.554 | **0.193** | **0.196** | 0.523 | **1.952** |
+
+**THE HADLEY CELLS ARE STILL CLOSED AT 600. The Ferrel cells are marginal and GROW by ~50 %. The
+polar cells are gone.** And `Psi(ground)` grows at a similar ABSOLUTE rate at every latitude —
+~5 / 32 / 18 e9 by iteration 600 — so it is an accumulating offset that does not scale with the
+cell: **the polar cells fail because they are small, not because they are polar.**
+
+**⚠ RETRACTED: "the dynamics reopen the cells within twenty iterations, `Psi(ground)` 0 -> 89e9".**
+That was measured with the DISCONTINUOUS sine profile, and a jump in `v` is a divergence source — so
+the initial condition under test was injecting the divergence then attributed to the time loop, and
+it was read through the old divisor as well. Corrected: at iteration 100 every band is closed
+(0.11 at 15N), and at 600 the tropics still are. **D.1 is real and roughly an order of magnitude
+slower than that claim**, and the structural verdict drawn from it — that only a solver rewrite
+could keep cells closed — is UNPROVEN, not established.
+
+**AND THE PRECIPITATION DOES NOT NOTICE ANY OF IT.** 949.9 mm/a at `r` = +0.459, RMS 1405.8, sigma
+2.29, against the control's 947.3 / +0.459 / 1405.5 / 2.29. **Six closed cells, a 50 % stronger
+Ferrel circulation and a quarter-strength filter move the headline field by 0.3 %** — *no dynamical
+change can move a precipitation band in this tree*, confirmed on the largest circulation change yet
+made. **Everything in this section is DEFAULT OFF.**
+
+
 ## There is no thermal wind, because nothing in the horizontal momentum equations carries the temperature
 
 **THE QUESTION THIS FILE ASKED — "why is `pgf` = 1.5e-11 at the jet core?" — HAS AN ARITHMETIC
