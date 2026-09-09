@@ -1782,9 +1782,24 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // checkerboard / near-surface CFL blow-up it guards against. 0 = filter off (CFL risk).
         static const double radial_shapiro_strength = [](){
             const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH"); return e ? atof(e) : 1.0; }();
+        // ATM_RADIAL_SHAPIRO_STRENGTH_VW=<s> -- the SAME filter on the HORIZONTAL components
+        // only. Default = whatever the global knob is, so unset is bit-identical and the two
+        // together behave exactly as the single knob always did.
+        //
+        // WHY THE SPLIT. The CFL hazard this filter guards is in the RADIAL component: `u` is
+        // what ran to +-100 m/s at coastlines (BC_Atm.h:697 records it), and `radial_shapiro_filter`
+        // on `u` is the guard. The DAMAGE is in the horizontal components: `dw_radial` is 437x the
+        // resolved dynamics at the jet core, and `dv_radial` is up to 796x it in the Hadley cell's
+        // upper branch, which is what erases the meridional cells (2026-09-09; see CLAUDE.md,
+        // *The six-cell structure is being erased by the radial Shapiro filter*). Easing the single
+        // global knob buys the cells at the price of the guard; easing only v and w does not.
+        static const double radial_shapiro_strength_vw = [](){
+            const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH_VW");
+            if(e) return atof(e);
+            const char* g = getenv("ATM_RADIAL_SHAPIRO_STRENGTH"); return g ? atof(g) : 1.0; }();
         AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2, radial_shapiro_strength);
-        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength);
-        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength);
+        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
+        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
         if(do_vbudget){ vb_diff(vb_radial); wb_diff(wb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
             write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
             write_w_momentum_budget(iter_n, wb_dyn, wb_polar, wb_orog, wb_radial);
