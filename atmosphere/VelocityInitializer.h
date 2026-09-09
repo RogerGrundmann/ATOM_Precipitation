@@ -37,12 +37,42 @@ public:
         // initialise v: tropopause and surface values per latitude
         // equator
         init_v_or_w(m.v,  90,  0.0,  0.0);                              // lat:   0   j=90
+        // ---- THE POLAR CELLS ARE THE ONLY ROWS WHOSE TWO ENDPOINTS HAVE THE SAME SIGN ----
+        //
+        // `init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps linearly from the SURFACE value to the
+        // TROPOPAUSE value, so what makes a row an overturning CELL is the DIFFERENCE between the
+        // two -- the shear -- and every other row straddles zero:
+        //
+        //     Hadley  j=75   (-3.0, +4.0)   shear 7.0, sign reversal
+        //     Ferrel  j=45   (+4.0, -1.5)   shear 5.5, sign reversal
+        //     polar   j=15   (+0.5, +0.6)   shear 0.1, NO sign reversal
+        //
+        // 0.1 m/s against 7.0 is not a weak polar cell, it is an almost uniform 0.55 m/s drift
+        // through the whole troposphere. What appears in `Psi` as a polar cell is `ATM_V_MASSBAL`
+        // (default on since 2026-08-28) subtracting the density-weighted column mean afterwards,
+        // which turns ANY same-signed column into a sign-reversing one of amplitude ~= the shear.
+        // So the polar cell's strength is set by an accidental 0.1, and it measures 1.9 % of the
+        // Hadley cell's `Psi` where the real atmosphere has 10-20 % (2026-09-09; the sense is
+        // right -- equatorward at the surface, poleward aloft -- only the amplitude is not).
+        //
+        // ATM_POLAR_CELL_SHEAR=<m/s> sets that shear about the SAME column mean of 0.55, so the
+        // default 0.1 reproduces (0.5, 0.6) EXACTLY and is bit-identical. ~0.55 puts `Psi` at
+        // roughly a tenth of the Hadley cell, which is where observations put it.
+        // The unset branch returns the shipped LITERALS rather than recomputing them, because
+        // 0.55 + 0.5*0.1 is 0.6000000000000001 in double and not 0.6 -- so the arithmetic form
+        // would NOT be bit-identical off, which is this tree's standing requirement for a knob.
+        static const bool   polar_set   = (getenv("ATM_POLAR_CELL_SHEAR") != nullptr);
+        static const double polar_shear = [](){
+            const char* e = getenv("ATM_POLAR_CELL_SHEAR"); return e ? atof(e) : 0.1; }();
+        const double pc_mean = 0.55;
+        const double pc_trop = polar_set ? (pc_mean - 0.5 * polar_shear) : 0.5;
+        const double pc_sl   = polar_set ? (pc_mean + 0.5 * polar_shear) : 0.6;
         // northern polar cell
         init_v_or_w(m.v,   0,  0.5,  0.0);                              // lat:  90   j=0
-        init_v_or_w(m.v,  15,  0.5,  0.6);                              // lat:  75   j=15
+        init_v_or_w(m.v,  15,  pc_trop, pc_sl);                         // lat:  75   j=15
         // southern polar cell
         init_v_or_w(m.v, 180,  0.5,  0.0);                              // lat: -90   j=180
-        init_v_or_w(m.v, 165,  0.5,  0.6);                              // lat: -75   j=165
+        init_v_or_w(m.v, 165,  pc_trop, pc_sl);                         // lat: -75   j=165
         // northern Ferrel cell
         init_v_or_w(m.v,  30, -0.2,  0.0);                              // lat:  60   j=30
         init_v_or_w(m.v,  45,  4.0, -1.5);                              // lat:  45   j=45
