@@ -211,8 +211,33 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
     // zonal-mean meridional wind [m/s] and zonal-mean meridional MASS flux [kg/(m²·s)],
     // both over fluid cells. r_humid is dimensional [kg/m³], so rho*v*u_0 is already a
     // mass flux.
+    // ---- THE DIVISOR, AND WHY IT DECIDED WHETHER CELLS CLOSE ----
+    //
+    // The zonal mean below used to divide by `n`, the number of FLUID cells at that level. `n`
+    // changes with height wherever terrain varies with longitude, so each level was averaged
+    // over a DIFFERENT population and the vertical integral of `rvbar` stopped being the zonal
+    // mean of the column-integrated mass flux. balance_column_mass_flux() makes every COLUMN's
+    // integral vanish -- with ATM_CELLS_FROM_PSI it vanishes to 3.5e-17 -- yet Psi(ground) did
+    // not, and the gap was this.
+    //
+    // Physically the fixed divisor is also the correct one: no mass crosses rock, so a
+    // sub-terrain cell contributes ZERO to the zonal mean rather than being excluded from it.
+    // Dividing by `n` inflates levels that clip terrain by km/n.
+    //
+    // MEASURED, and it is the sharpest evidence: with the streamfunction initial condition five
+    // of six latitude bands closed and only the SOUTHERN polar one did not (ratio 1.75 against
+    // 0.137 for its northern twin). That band is Antarctica -- high terrain varying strongly
+    // with longitude, so `n` varies most with height. The Arctic at the same latitudes is ocean,
+    // `n` is constant, and it closed.
+    //
+    // BOTH are written: `psi_kg_per_s` keeps the historical definition so every Psi number
+    // recorded in this tree stays comparable, and `psi_fixdiv_kg_per_s` is the corrected one.
+    // This tree has already had one silent Psi redefinition (the constant-density fix of
+    // 2026-08-26, which made every earlier number a different quantity) and does not need a
+    // second one.
     vector<vector<double> > vbar(im, vector<double>(jm, 0.0));
     vector<vector<double> > rvbar(im, vector<double>(jm, 0.0));
+    vector<vector<double> > rvbar_fix(im, vector<double>(jm, 0.0));
     for(int i = 0; i < im; i++){
         for(int j = 0; j < jm; j++){
             double sum = 0.0, rsum = 0.0; int n = 0;
@@ -224,13 +249,15 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
                 if(!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;  // pre-densities()
                 sum += vv; rsum += rho * vv; n++;
             }
-            vbar[i][j]  = (n > 0) ? (sum  / n) * u_0 : 0.0;
-            rvbar[i][j] = (n > 0) ? (rsum / n) * u_0 : 0.0;
+            vbar[i][j]      = (n > 0) ? (sum  / n) * u_0 : 0.0;
+            rvbar[i][j]     = (n > 0) ? (rsum / n) * u_0 : 0.0;
+            rvbar_fix[i][j] = (rsum / (double)km) * u_0;        // rock contributes zero flux
         }
     }
 
     // meridional mass streamfunction, integrated downward from the lid (Ψ_top = 0)
     vector<vector<double> > psi(im, vector<double>(jm, 0.0));
+    vector<vector<double> > psi_fix(im, vector<double>(jm, 0.0));
     for(int j = 0; j < jm; j++){
         const double cosphi = sin(the.z[j]);                    // cos(latitude) = sin(colatitude)
         const double coeff  = two_pi * a * cosphi;
@@ -238,7 +265,42 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
             const double dz   = get_layer_height(i + 1) - get_layer_height(i);   // [m] > 0
             const double rvm  = 0.5 * (rvbar[i][j] + rvbar[i + 1][j]);           // [kg/(m²·s)]
             psi[i][j] = psi[i + 1][j] + coeff * rvm * dz;                        // [kg/s]
+            (void)rvbar_fix;                                  // superseded, see below
         }
+    }
+
+    // THE EXACT ZONAL MEAN: INTEGRATE EACH COLUMN, THEN AVERAGE -- not the reverse.
+    //
+    // Averaging the profiles first and applying uniform trapezoid weights afterwards is still
+    // not the zonal mean of the column integrals, because each column's integral carries a
+    // BOTTOM HALF-WEIGHT 0.5*dz at its OWN ground level i_topography, and that level differs
+    // with longitude. Fixing the divisor alone took the southern polar band from 1.750 to 0.496;
+    // this takes it the rest of the way, because it is the definition rather than an
+    // approximation to it:
+    //
+    //     Psi(phi,z) = 2*pi*a*cos(phi) * (1/km) * SUM_k INT_z^top rho*v dz
+    //
+    // With balance_column_mass_flux() making every column's integral vanish, Psi(ground) is then
+    // zero to round-off BY CONSTRUCTION -- which is the check, and it is why this is worth the
+    // extra loop rather than being left as a 0.5 ratio nobody can interpret.
+    for(int j = 0; j < jm; j++){
+        const double coeff = two_pi * a * sin(the.z[j]);
+        vector<double> acc(im, 0.0);
+        for(int k = 0; k < km; k++){
+            double running = 0.0;
+            for(int i = im - 2; i >= 0; i--){
+                if(i < i_topography[j][k]){ acc[i] += running; continue; }   // rock: flux unchanged
+                const double dz = get_layer_height(i + 1) - get_layer_height(i);
+                double r1 = r_humid.x[i][j][k], r2 = r_humid.x[i+1][j][k];
+                if(!AtomUtils::is_finite_safe(r1) || r1 <= 0.0) r1 = r_air;
+                if(!AtomUtils::is_finite_safe(r2) || r2 <= 0.0) r2 = r_air;
+                const double v1 = v.x[i][j][k], v2 = v.x[i+1][j][k];
+                if(AtomUtils::is_finite_safe(v1) && AtomUtils::is_finite_safe(v2))
+                    running += 0.5 * (r1 * v1 + r2 * v2) * dz * u_0;
+                acc[i] += running;
+            }
+        }
+        for(int i = 0; i < im; i++) psi_fix[i][j] = coeff * acc[i] / (double)km;
     }
 
     auto lat_of = [&](int j){ return 90.0 - (double)j * 180.0 / (double)(jm - 1); };  // °N positive
@@ -248,12 +310,12 @@ void cAtmosphereModel::write_meridional_streamfunction(int iter){
     fname << output_path << "meridional_streamfunction_" << iter << ".csv";
     ofstream f(fname.str().c_str());
     if(f.is_open()){
-        f << "lat_deg,height_m,vbar_mps,psi_kg_per_s\n";
+        f << "lat_deg,height_m,vbar_mps,psi_kg_per_s,psi_fixdiv_kg_per_s\n";
         for(int j = 0; j < jm; j++){
             const double lat = lat_of(j);
             for(int i = 0; i < im; i++){
                 f << lat << "," << get_layer_height(i) << ","
-                  << vbar[i][j] << "," << psi[i][j] << "\n";
+                  << vbar[i][j] << "," << psi[i][j] << "," << psi_fix[i][j] << "\n";
             }
         }
         f.close();
