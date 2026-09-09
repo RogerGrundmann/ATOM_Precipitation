@@ -1288,7 +1288,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  POISSON_METRIC_FIX=" << ev("ATM_POISSON_METRIC_FIX", "0*")
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
-          << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
+          << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
           << "  TW_BALANCE_V="  << ev("ATM_TW_BALANCE_V",  "0*")

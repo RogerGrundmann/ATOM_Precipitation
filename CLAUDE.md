@@ -61,7 +61,7 @@ times out of four.**
 |---|---|---|
 | `ATM_PROJ_SWEEPS` | **inert**: -0.04 % at 10x, -0.07 % at 100x, cost 8x and 96x | -52.5 % |
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
-| `ATM_BUOY_TREF` / `_CONSISTENT` | unmeasured, and the budget says not worth it | 5.49x at the surface |
+| `ATM_BUOY_TREF` / `_CONSISTENT` | **`_CONSISTENT` IS THE DEFAULT SINCE 2026-09-09** — a factor of 5.0e5 on the body force; `ubud_buoy` x400 000, band p05 ageostrophic residual 0.996 -> 0.336. `_TREF` alone stays off (the consistent branch implies it) | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
 | `ATM_RAD_TOPO` | **NEW HERE, AND STILL DEFAULT OFF** — this tree's defect, not ATHAD's. The two "flipped on" claims below are WRONG, corrected 2026-09-02: `MultiLayerRadiation.h:293` is `e && atoi(e) != 0`, and every run's own `[RUN CONFIG]` banner prints `RAD_TOPO=0*` | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
@@ -124,6 +124,41 @@ worth it" WAS WRONG ON ITS SECOND HALF** (2026-08-27). Measured: `ubud_buoy` **0
 extra-`dt` defect (its items 34/42) is confirmed here at the same order of magnitude. What is
 still true is that it does not move `Psi`: that force is RADIAL and `Psi` is meridional.
 
+**FLIPPED ON BY DEFAULT 2026-09-09, AT THE USER'S INSTRUCTION, AND THE INSTABILITY THIS FILE
+PREDICTED IS REFUTED.** The code comment beside it said **EXPECT IT TO BE UNSTABLE** — the largest
+coefficient ever run on this term in the family was an intermediate 336, which drove a polar
+vertical runaway, and the consistent value is **61.29 against a shipped 1.226e-4**. It is not
+unstable. 600 iterations from `output_twctl/atm_restart_0Ma_600.bin` at full strength, 24 threads,
+against its own control over the same window (`output_bconL` / `output_bctlL`, both exit 0, zero
+NaN):
+
+| iteration 1200 | control | **`ATM_BUOY_CONSISTENT=1`** | NASA |
+|---|---|---|---|
+| Precip mm/a | 1181.5 | **1177.8 (-0.3 %)** | 978.3 |
+| pattern r | +0.453 | +0.451 | |
+| centred RMS | 1652.2 | 1651.7 | |
+| sigma | 2.66 | 2.66 | |
+| 0-15 / 15-35 / 35-65 / 65-90 | 3896 / 483 / 156.3 / 7.3 | 3882 / 485 / 154.4 / 6.6 | 1487 / 761 / 981 / 364 |
+| **`max w_u`** | **30.804076** | **30.804076** | *±100 clamp* |
+
+**`max w_u` IS THE SAME VALUE TO SIX DECIMALS, SO THE CFL GUARD IS NOWHERE NEAR TOUCHED AT FULL
+PHYSICAL STRENGTH.** And the +20 % in that column is the CONTROL's own drift, not the knob's — see
+*The precipitation is NOT stable past iteration 600* below, which was measured off this very
+control. **Reading the knob against a control at the same iteration count is the whole of the
+attribution**; against the 600-iteration state it would have looked like a 20 % regression.
+
+**WHAT IT BUYS IS BALANCE, NOT VELOCITY.** The extratropical band p05 ageostrophic residual goes
+**0.996 -> 0.437 at 100 iterations and 0.336 at 600**, because the force reaches momentum through
+the model's own elliptic pressure — the only one of the three thermal-wind routes that does. It
+moves the precipitation **-0.3 %** and every shape metric by less than the parity noise, which is
+what *no dynamical change can move a precipitation band in this tree* requires of it.
+
+**AND IT FLIPS `ATM_BUOY_TREF`'s REPAIR ON WITH IT, BY CONSTRUCTION.** The consistent branch
+divides by `t_buoy_ref` as well, because fixing the `dt` without the reference temperature just
+rescales an incorrect force — so `ATM_BUOY_TREF=1` is now the unreachable middle arm rather than a
+separate option. **`ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly**, and the
+`[RUN CONFIG]` banner prints `BUOY_CONSISTENT=1*`.
+
 **`ATM_BUOY_MOIST`, and why it needs the row above.** The shipped buoyancy is
 `(t - t_ref_level[i])`, TEMPERATURE ONLY. Water vapour is lighter than dry air, and the model
 already computes the virtual temperature — `r_humid = p/((1 + R_W_R_A_m1*c - cloud - ice)*T)` —
@@ -137,6 +172,10 @@ would have added a uniform updraft rather than a buoyancy.
 **On the shipped branch it is a null in the 10th digit — because the buoyancy itself is inert.**
 With `ATM_BUOY_CONSISTENT=1` it is **+4.9 %** on `ubud_buoy`. *Adding moisture to a force that is
 not acting cannot show anything*, and that is the whole content of the first measurement.
+**AND SINCE 2026-09-09 THAT CONDITION IS MET BY DEFAULT**: `ATM_BUOY_CONSISTENT` is now on, so
+`ATM_BUOY_MOIST` is for the first time a knob that can act on the shipped configuration. It stays
+default OFF and its +4.9 % was measured on a restart arm; it has not been re-measured since the
+flip.
 
 **AND SURFACE EVAPORATION THEREFORE CANNOT DRIVE CONVECTION.** It moistens levels 0-3 and reaches
 the momentum equation through nothing on the shipped branch. It also **never writes `t`**, so it
