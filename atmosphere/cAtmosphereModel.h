@@ -306,10 +306,44 @@ public:
     // three sites, i.e. no floor at all, so the closure and the RHS have disagreed about the
     // metric poleward of 57 deg all along. Syncing it is a change to the DEFAULT branch and so
     // needs its own knob and its own arm; it is recorded here and not made.
+    // FLIPPED TO 0.26 ON 2026-09-10, AT THE USER'S INSTRUCTION. 0.26 is cos(75 deg) to 0.5 %,
+    // so the metric is EXACT at the latitude the polar cells are scored at, where the shipped
+    // 0.55 made 1/sin 2.13x too small and the zonal diffusion 4.5x too weak.
+    // ATM_METRIC_SIN_FLOOR=0.55 restores the shipped branch, and the banner prints 0.26* when
+    // the default is in force. BOTH DIRECTIONS VERIFIED AT ONE THREAD, which is the only way to
+    // check it -- a 24-thread pair differed by 0.05 % on Precip and could not tell the flip from
+    // the threads. 6 of 7 written files byte-identical each way; the 7th is RUN_CONFIG.txt,
+    // differing only in the starred/unstarred marker.
+    //
+    // ⚠ IT IS A NULL ON WHAT IT WAS PROPOSED TO FIX, AND THAT IS RECORDED HERE RATHER THAN LEFT
+    // OUT. Measured on the closed-cell IC at nm = 60, 24 threads, the cell closure and amplitude
+    // are identical to four significant figures at floors 0.55, 0.26 AND 0.02:
+    //
+    //     closure   75N     45N     15N     15S     45S     75S
+    //     0.55    0.0532  0.1139  0.0014  0.0050  0.0849  0.0691
+    //     0.26    0.0533  0.1139  0.0014  0.0050  0.0849  0.0688
+    //     cell     11.85   35.79  117.66  115.97   38.58    4.36   (all three, 1e9 kg/s)
+    //
+    // The only movement anywhere is 75S closure by 0.4 %. So this flip is a CORRECTNESS change --
+    // the metric at 75 deg stops being 2.13x wrong -- and NOT a measured improvement. The whole
+    // 0.55 -> 0.02 sweep left Precip, max w_u, max u and the pattern correlation identical.
+    //
+    // AND THE EVIDENCE IS 60 ITERATIONS = 12 SECONDS. The failure the floor guards is a
+    // high-latitude coastal PGF blow-up at i=1, and this tree's documented failure points are at
+    // iterations 155, 357 and 483 -- so the sweep is a SCREEN, not a clearance. The 0.55/0.40
+    // pair was an exact null on every diagnostic, which says this screen cannot see whatever
+    // motivated raising 0.4 -> 0.55 in the first place. If a high-latitude instability appears in
+    // a long run, THIS IS THE FIRST THING TO PUT BACK.
+    //
+    // What the sweep did establish: no NaN at any floor down to 0.02 (which exposes 88.9 deg, one
+    // grid row from the pole), and the high-latitude radial velocity rises monotonically but only
+    // +2.2 % across a 27.5x amplification of the 1/sin force -- because below ~0.19 the floor
+    // only reaches rows where v -> 0 by construction and the polar zonal filter is already pinned
+    // at its 12-pass cap. The filter, not the floor, is doing the work here.
     static double metricSinFloor(){
         static const double v = [](){
             const char* e = getenv("ATM_METRIC_SIN_FLOOR");
-            double f = e ? atof(e) : 0.55;
+            double f = e ? atof(e) : 0.26;
             if (!(f > 0.0)) f = 1.0e-6;      // 0 or nonsense means "no floor", not a divide by zero
             if (f > 1.0) f = 1.0;
             return f; }();
