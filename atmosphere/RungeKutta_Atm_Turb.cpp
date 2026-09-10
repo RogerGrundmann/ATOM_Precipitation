@@ -100,10 +100,11 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
     const double inv_dphi2 = 1.0 / (dphi * dphi);
 
     // Precompute sin/cos tables — only depend on j
+    const double sin_floor = cAtmosphereModel::metricSinFloor();
     std::vector<double> sinthe_tbl(jm), costhe_tbl(jm);
     for(int j = 0; j < jm; j++){
         sinthe_tbl[j] = sin(the.z[j]);
-        if(sinthe_tbl[j] < 0.55) sinthe_tbl[j] = 0.55;   // metric floor ~57° (was 0.4/~66°): caps the 1/sinθ amplification of the high-lat coastal pressure-gradient force that blows up at i=1
+        if(sinthe_tbl[j] < sin_floor) sinthe_tbl[j] = sin_floor;   // metric floor, ATM_METRIC_SIN_FLOOR, default 0.55 ~57° (was 0.4/~66°): caps the 1/sinθ amplification of the high-lat coastal pressure-gradient force that blows up at i=1
         costhe_tbl[j] = cos(the.z[j]);
     }
 

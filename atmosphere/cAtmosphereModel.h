@@ -271,6 +271,51 @@ public:
     // Planetary radius in rad.z units when ATM_METRIC_RADIUS is on; 0.0 means off.
     double m_metric_r0 = 0.0;
 
+    // ==================================================================
+    // THE POLAR METRIC FLOOR:  sin(theta) >= ATM_METRIC_SIN_FLOOR, default 0.55 = shipped.
+    //
+    // sin(theta) is cos(latitude) here (theta is COLATITUDE), and it divides every zonal
+    // derivative -- 1/(r sin) d/dphi, 1/(r sin)^2 d2/dphi2 -- and every cot(theta) curvature
+    // term. On a lat-lon grid the zonal cell width shrinks like cos(lat), so those terms
+    // diverge at the pole and the explicit scheme goes with them. The shipped guard is a hard
+    // FLOOR on the sine, which is a different device from the polar zonal filter beside it:
+    // the filter removes short zonal wavelengths, the floor lies about the geometry.
+    //
+    // WHAT IT COSTS, WHICH IS THE REASON TO SWEEP IT. The floor is the latitude poleward of
+    // which the metric is simply not the metric:
+    //
+    //     floor 0.55  ->  wrong poleward of 56.6 deg;  at 75 deg 1/sin is 2.13x too SMALL,
+    //                     and the zonal diffusion, which carries 1/sin^2, is 4.5x too weak
+    //     floor 0.40  ->  wrong poleward of 66.4 deg;  at 75 deg 1.55x and 2.4x
+    //     floor 0.26  ->  exact at 75 deg, the latitude the polar cells are scored at
+    //
+    // The cot(theta) curvature terms survive zonal averaging, so this is visible to `Psi` and
+    // is not confined to the eddy scales the filter handles.
+    //
+    // HISTORY: the literal was 0.4 (~66 deg) and was RAISED to 0.55 to cap the 1/sin
+    // amplification of the high-latitude coastal pressure-gradient force that blew up at i=1
+    // (RungeKutta_Atm_Turb.cpp). So lowering it is walking back toward a known failure, and
+    // where that failure now sits is a measurement nobody has taken -- the constant has never
+    // been swept, and it was a hard-coded literal at three sites.
+    //
+    // THREE SITES, AND THEY MUST AGREE: the RHS geometry (RungeKutta_Atm_Turb.cpp), the Poisson
+    // operator (PressureSolverAtm.h) and the residuum diagnostic (UtilsAtm.h). A solver that
+    // disagrees with the RHS about the metric is the defect class this repo keeps finding.
+    //
+    // NOT INCLUDED, DELIBERATELY: TurbulenceAtm.h uses `if (sinthe == 0.0) sinthe = 1.0e-5` at
+    // three sites, i.e. no floor at all, so the closure and the RHS have disagreed about the
+    // metric poleward of 57 deg all along. Syncing it is a change to the DEFAULT branch and so
+    // needs its own knob and its own arm; it is recorded here and not made.
+    static double metricSinFloor(){
+        static const double v = [](){
+            const char* e = getenv("ATM_METRIC_SIN_FLOOR");
+            double f = e ? atof(e) : 0.55;
+            if (!(f > 0.0)) f = 1.0e-6;      // 0 or nonsense means "no floor", not a divide by zero
+            if (f > 1.0) f = 1.0;
+            return f; }();
+        return v;
+    }
+
 private:
 
     static cAtmosphereModel* m_model;

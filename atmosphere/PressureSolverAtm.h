@@ -36,10 +36,11 @@ public:
         auto begin = std::chrono::high_resolution_clock::now();
 
         // precompute sin(the) table — only depends on j, avoids redundant sin() calls
+        const double sin_floor = cAtmosphereModel::metricSinFloor();
         std::vector<double> sinthe_table(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_table[j] = sin(m.the.z[j]);
-            if (sinthe_table[j] < 0.55) sinthe_table[j] = 0.55;   // metric floor ~57° — keep in sync with the RHS geometry floor (RungeKutta_Atm*.cpp)
+            if (sinthe_table[j] < sin_floor) sinthe_table[j] = sin_floor;   // metric floor, ATM_METRIC_SIN_FLOOR — keep in sync with the RHS geometry floor (RungeKutta_Atm*.cpp)
         }
 
         // Precompute land mask — eliminates repeated function call overhead

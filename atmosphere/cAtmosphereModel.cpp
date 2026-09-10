@@ -1298,6 +1298,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
+          << "  METRIC_SIN_FLOOR=" << ev("ATM_METRIC_SIN_FLOOR", "0.55*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")

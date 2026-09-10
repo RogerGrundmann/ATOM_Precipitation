@@ -102,7 +102,7 @@ public:
             for (int j = 1; j < m.jm - 1; j++) {
                 for (int k = 1; k < m.km - 1; k++) {
 
-                    double sinthe = std::max(0.55, sin(m.the.z[j]));   // metric floor ~57°, in sync with RHS/pressure-solver (residuum diagnostic only)
+                    double sinthe = std::max(cAtmosphereModel::metricSinFloor(), (double)sin(m.the.z[j]));   // metric floor, ATM_METRIC_SIN_FLOOR, in sync with RHS/pressure-solver (residuum diagnostic only)
 
                     for (int i = 10; i <= 30; i++) {
                         double rm       = m.rad.z[i];
