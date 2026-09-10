@@ -1024,6 +1024,32 @@ polar cells are gone.** And `Psi(ground)` grows at a similar ABSOLUTE rate at ev
 ~5 / 32 / 18 e9 by iteration 600 — so it is an accumulating offset that does not scale with the
 cell: **the polar cells fail because they are small, not because they are polar.**
 
+**⚠⚠ EVERY NUMBER IN THE `change` ROW ABOVE IS THE OFFSET, NOT THE CELL — CORRECTED 2026-09-10,
+FROM THAT RUN'S OWN FILES AND WITHOUT RE-RUNNING ANYTHING.** `cell` was read as `max|Psi|` down the
+column, and `Psi(ground)` is an additive contaminant sitting on top of it. Score it instead as
+`max|Psi - Psi(ground)|`, over the same `output_cellpsi` files, iteration 20 -> 600:
+
+| | 75N | 45N | 15N | 15S | 45S | 75S |
+|---|---|---|---|---|---|---|
+| **raw**, as quoted above | -44 % | **+49 %** | -20 % | -21 % | **+57 %** | -32 % |
+| **detrended** | **-3.5 %** | **-12 %** | **-3.4 %** | **-3.4 %** | **-15 %** | **-10 %** |
+
+**THE CELLS BARELY DECAY AT ALL.** The offset has the SAME sign as the Ferrel cell, inflating it,
+and the OPPOSITE sign to the Hadley and polar cells, eating them — so it faked a growth and a
+collapse in the same table. **"The Ferrel cells GROW by ~50 %" is an ARTEFACT: detrended they
+WEAKEN by 12-15 %. "The polar cells are gone" is mostly one too: 75N loses 3.5 % over 600
+iterations and 75S 10 %.**
+
+**AND THE DETRENDING IS CROSS-VALIDATED BY AN ARM THAT REMOVES THE OFFSET FROM THE PHYSICS.** At
+iteration 200 the detrended control gives 45N = 32.80e9 and `ATM_V_MASSBAL_STRIDE=1` — which
+actually deletes the drift every step — gives **33.79e9, 3 % apart.** Two independent routes to the
+same number, so the offset really is additive and largely decoupled from the dynamics.
+
+**CONSEQUENCE: THE POLAR CELLS WERE BEING MEASURED AWAY MORE THAN THEY WERE DECAYING**, and the
+real target is 3.5-15 % over 600 iterations rather than 44-64 %. *Eleventh occurrence of "the
+answer was in output nobody opened", and the third where the output was a control rather than a
+probe.*
+
 **⚠ RETRACTED: "the dynamics reopen the cells within twenty iterations, `Psi(ground)` 0 -> 89e9".**
 That was measured with the DISCONTINUOUS sine profile, and a jump in `v` is a divergence source — so
 the initial condition under test was injecting the divergence then attributed to the time loop, and
@@ -1038,6 +1064,136 @@ Ferrel circulation and a quarter-strength filter move the headline field by 0.3 
 change can move a precipitation band in this tree*, confirmed on the largest circulation change yet
 made. **Everything in this section is DEFAULT OFF.**
 
+
+### The offset is a standing leak, and `ATM_V_MASSBAL_STRIDE` removes it — 15x on closure, free
+
+**`balance_column_mass_flux()` IS CALLED ONCE, AT `cAtmosphereModel.cpp:584`, AND THE TIME LOOP
+STARTS 758 LINES LATER** (2026-09-10). It removes 94.8 % of `Psi(ground)` at initialisation and it
+does not stay removed. **`ATM_V_MASSBAL_STRIDE=<N>` re-applies it every N iterations; default
+0 = off and byte-identical** (6 of 7 written files at 1 thread against a pre-change binary).
+
+**WHY THIS MODE.** On `output_cellpsi`'s own v-momentum budget the eroding tendency `dv_dyn` is
+dominated by its COLUMN MEAN at every latitude carrying a cell — mean/rms **2.57 / 3.70 / 1.30 /
+1.36 / 8.23 / 3.18** at 75N/45N/15N/15S/45S/75S. A column-mean tendency is not a cell, it is an
+OFFSET. The accounting closes: `<dv_dyn>` x 600 iterations is 0.055 m/s at 75N and 0.126 at 45N,
+which through `Psi = 2*pi*a*cos(phi)*INT(rho dz)*dv` predicts 5.9e9 and 3.7e10 against a MEASURED
+`Psi(ground)` of **4.97e9 and 3.23e10 — both within ~20 %**.
+
+**WHY IT IS LEGITIMATE EVERY ITERATION.** In a real atmosphere `INT(rho*v*dz)` per column need not
+vanish instantaneously — its divergence is `d(p_s)/dt`. **This model has no prognostic surface
+pressure**: `p_stat` is diagnosed barometrically from the temperature and does not respond to mass
+convergence at all. A column-integrated mass flux here has nothing to raise and nowhere to go.
+
+Four arms, closed-cell IC + `_VW=0.25`, `nm` = 200 from scratch, 24 threads, one pinned binary:
+
+| closure at 200 | 75N | 45N | 15N | 15S | 45S | 75S | **mean** |
+|---|---|---|---|---|---|---|---|
+| stride 0 | 0.1736 | 0.2721 | 0.0608 | 0.0588 | 0.2397 | 0.2208 | **0.1710** |
+| **stride 1** | **0.0014** | **0.0016** | **0.0011** | **0.0000** | **0.0013** | 0.0612 | **0.0111** |
+| stride 10 | 0.0049 | 0.0250 | 0.0024 | 0.0015 | 0.0175 | 0.1370 | 0.0314 |
+| stride 100 | 0.0843 | 0.1659 | 0.0377 | 0.0395 | 0.1456 | 0.0656 | 0.0898 |
+
+**15x ON THE MEAN, 100-180x ON FIVE OF SIX BANDS, AND IT COSTS NOTHING**: `max w_u` 34.194269 /
+34.193712 / 34.193737 / 34.194015, `Precip` 927.1-927.2, `r` +0.456 in all four, zero NaN, +1 % of
+wall clock. **The leak is continuous rather than a startup transient** — the knob's own correction
+is 4.27e-02 non-dim `v` at iteration 1 and still 1.02e-02 at iteration 200, i.e. fully regenerated
+every step, which is also why stride 100 is nearly useless.
+
+**TWO POLAR CANDIDATES WERE CHECKED AND REFUTED, both from output nobody had opened.** `dv_polar`,
+the polar zonal filter, is **1e-16 in the zonal mean at every latitude including 75N/75S** — it
+conserves the zonal mean even through its solid-neighbour substitution, at 12 capped passes per
+iteration. And the radial filter is not preferentially eating the polar cell, whose profile is
+SMOOTHER in index space than the Hadley one (rms 1-2-1 second difference 0.044 against 0.110).
+**Nothing polar is doing this.**
+
+**READ AT 200 ITERATIONS = 40 SECONDS.** Default stays 0.
+
+### `ATM_TROPO_INDEX_FIX`: the tropopause height is turned into an index by dividing by the stretch amplitude
+
+`init_tropopause_layers()` sets `tropopause_layers[j] = round(h / L_atm)` — the conversion for a
+UNIFORM 400 m grid, where `cAtmosphereModel.h:695` states that **L_atm is the AMPLITUDE OF THE
+EXPONENTIAL STRETCH, not a grid step**. Default 0 = shipped, byte-identical (6 of 7 at 1 thread).
+
+| lat | intended | shipped index -> height | fixed |
+|---|---|---|---|
+| 0 | 15000 m | 38 -> 13239 m (88 %) | 39 -> 14567 m (97 %) |
+| 45 | 12308 m | 31 -> 6719 m (55 %) | 37 -> 12030 m (98 %) |
+| **75** | **9330 m** | **23 -> 2987 m (32 %)** | **34 -> 9007 m (97 %)** |
+| 90 | 8000 m | 20 -> 2163 m (27 %) | 33 -> 8173 m (102 %) |
+
+**AND IT IS WHY 75S IS THE WORST BAND EVERYWHERE IN THIS FILE.**
+`install_cells_from_streamfunction` zeroes any column with no room between ground and tropopause.
+At 75 deg the false tropopause is **2987 m** and the Antarctic plateau stands at **2500-4000 m**,
+i.e. at or above it — the run log reads *"installed over 61 451 columns"* of 65 341. So the
+southern polar cell is built from only the low-lying part of its latitude circle: **2.90e9 against
+75N's 10.58e9, a factor of 3.6**, and with a comparable absolute offset it closes worst at every
+mass-balance stride. **The streamfunction's own two divisor columns confirm the terrain
+independently**: `max|psi_old|/max|psi_fixdiv|` is 1.000 at 45N/15N/15S/45S/85N and **1.975 at 75S,
+2.005 at 85S** — about half those latitude circles is land.
+
+**⚠ WHAT THE FIX COSTS.** In the tropics the corrected index is **39 of 40, one level below the
+lid** — the shell is 16 023 m against an intended 15 000 m tropopause, and the top layer is 1456 m
+thick, so 0 and 15 deg both land on 39 and the tropopause goes FLAT across the tropics in index
+space. Clamped to `im-2`. **It moves three consumers at once** — `ThermoAtm.h:440`,
+`balance_thermal_wind` (three sites) and the cell construction. **UNMEASURED: nothing has been run
+with it on.**
+*It also fixed a latent race it would otherwise have introduced*: `init_tropopause_layers()` ran in
+an `omp parallel sections` block alongside `init_layer_heights()`, whose output the fix reads. Both
+are now sequential.
+
+### `ATM_METRIC_SIN_FLOOR`: the polar metric floor, swept at last — and flipped to 0.26
+
+`sin(theta)` is `cos(latitude)` here and divides every zonal derivative and every `cot(theta)`
+curvature term. The guard is a hard FLOOR, a different device from the polar zonal filter beside
+it: the filter removes short zonal wavelengths, **the floor lies about the geometry**. It was a
+hard-coded literal at three sites — RHS geometry, Poisson operator, residuum diagnostic — was
+raised 0.4 -> 0.55 for a coastal blow-up at i=1, and **had never been swept**.
+
+**FLIPPED 0.55 -> 0.26 ON 2026-09-10, AT THE USER'S INSTRUCTION.** 0.26 is cos(75 deg) to 0.5 %, so
+the metric is exact where the polar cells are scored — at 0.55, `1/sin` there is **2.13x too
+small** and the zonal diffusion, carrying `1/sin^2`, **4.5x too weak**. `=0.55` restores the shipped
+branch. **BOTH DIRECTIONS VERIFIED AT ONE THREAD**, 6 of 7 files byte-identical each way; a
+24-thread pair differed 0.05 % on `Precip` and **could not tell the flip from the threads**.
+
+**⚠ IT IS A NULL ON WHAT IT WAS FLIPPED FOR, AND THAT IS THE HEADLINE.** At `nm` = 60 the cell
+closure and amplitude are identical to four figures at 0.55, 0.26 AND 0.02 — closure 75N
+0.0532/0.0533/0.0533, cells 11.85/35.79/117.66/115.97/38.58/4.36 in all three; the only movement
+anywhere is 75S closure by **0.4 %**. The whole sweep left `Precip` 7.977e+02, `max w_u` 36.943735,
+`max u` 0.067101 and `r` +0.441 IDENTICAL at every floor. **This is a CORRECTNESS change, not a
+measured improvement**, and it goes against this tree's rule of flipping on measurements.
+
+Seven arms, `nm` = 60, 24 threads, **all exit 0 with zero NaN down to a floor of 0.02**:
+
+| floor | 0.55 | 0.40 | 0.30 | 0.20 | 0.10 | 0.05 | 0.02 |
+|---|---|---|---|---|---|---|---|
+| binds poleward of | 56.6 | 66.4 | 72.5 | 78.5 | 84.3 | 87.1 | 88.9 deg |
+| `1/s` vs 0.55 | 1.0 | 1.4 | 1.8 | 2.8 | 5.5 | 11.0 | **27.5** |
+| max\|u\| >60 deg, iter 60 | 0.05148 | 0.05151 | 0.05155 | 0.05161 | 0.05180 | 0.05209 | **0.05259** |
+
+**A 27.5x AMPLIFICATION OF THE FORCE BUYS +2.2 % OF VELOCITY**, and `max|v|`/`max|w|` are identical
+to six figures throughout. The reason is that below ~0.19 the floor only reaches rows where
+`v -> 0` by construction **and the polar zonal filter is already pinned at its 12-pass cap: the
+filter, not the floor, is doing the work.** That is also why raising 0.4 -> 0.55 bought nothing —
+the 0.55/0.40 pair is an exact null on every diagnostic. The effect is strictly confined to the
+rows where the floor binds: 0.05 against 0.10 differs by <= 3e-4 poleward of 80 deg and by
+**exactly zero** equatorward of 75 deg.
+
+**AND THE EVIDENCE IS 12 SECONDS.** The failure the floor guards is a high-latitude coastal PGF
+blow-up at i=1, and this tree's documented failure points are iterations 155, 357 and 483. The
+sweep is a SCREEN, not a clearance. **IF A HIGH-LATITUDE INSTABILITY APPEARS IN A LONG RUN, THIS IS
+THE FIRST THING TO PUT BACK.**
+
+**NOT TOUCHED, TWO WAYS**: `TurbulenceAtm.h`'s three sites use `if (sinthe == 0.0) sinthe = 1.0e-5`,
+no floor at all, so the closure and the RHS now disagree about the metric poleward of **75 deg
+instead of 57**. Narrower than before, still there, and it needs its own knob and arm. **And the
+OCEAN still floors at 0.4** — `RungeKutta_Hyd_Turb.cpp:55` and three sites in `PressureSolverHyd.h`
+— unswept, with no knob; the 0.4 this file used to quote for the atmosphere is still live one model
+over.
+
+*A caution the sweep produced by accident*: the seven arms all printed `Precip` 7.977e+02 and
+`max w_u` 36.943735 EXACTLY, while two later 24-thread arms at the same settings printed 7.981 and
+7.977. **Agreement inside one sweep script is not evidence that a re-run reproduces it** — this
+tree's thread non-determinism is intermittent, not steady.
 
 ## There is no thermal wind, because nothing in the horizontal momentum equations carries the temperature
 
