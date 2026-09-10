@@ -1297,6 +1297,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "0*")
           << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
+          << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
@@ -1813,6 +1814,15 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
             write_w_momentum_budget(iter_n, wb_dyn, wb_polar, wb_orog, wb_radial);
         }
+
+        // RE-IMPOSE THE COLUMN MASS-FLUX CONSTRAINT (ATM_V_MASSBAL_STRIDE=<N>, default 0 = off
+        // and byte-identical). The setup call at line ~584 removes 94.8 % of Psi(ground) once;
+        // the model's own v-momentum budget says the tendency that puts it back is dominated by
+        // its COLUMN MEAN (mean/rms 2.6-8.2 at every latitude carrying a cell), which is exactly
+        // the mode that routine removes. Placed AFTER the budget writes deliberately, so the
+        // four captured stages keep meaning what they meant in every recorded run; the
+        // correction is reported on its own line. See balance_column_mass_flux_in_loop().
+        VelocityInitializer(*this).balance_column_mass_flux_in_loop(iter_n);
 
         // Radial de-checkerboarding for the SCALARS at orographic columns. The earlier
         // velocity radial filters do nothing for t/c/cloud/ice, which carry their own

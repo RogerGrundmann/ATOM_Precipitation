@@ -525,6 +525,82 @@ public:
     void balance_column_mass_flux()
     {
         if (!massBalance()) return;
+        long n_cols = 0;
+        const double worst = apply_column_mass_flux_balance(&n_cols);
+        std::cout << "      ATOM: column mass-flux balance applied to " << n_cols
+                  << " columns, largest correction " << std::scientific << std::setprecision(3)
+                  << worst << " (non-dim v)" << std::endl;
+    }
+
+    // ==================================================================
+    // THE SAME CONSTRAINT, RE-IMPOSED INSIDE THE TIME LOOP
+    // ATM_V_MASSBAL_STRIDE=<N>, DEFAULT 0 = OFF and byte-identical unset.
+    //
+    // WHY. balance_column_mass_flux() above is called ONCE, before the loop, and it removes
+    // 94.8 % of Psi(ground) at initialisation. It does not stay removed. Measured on
+    // `output_cellpsi` -- the 600-iteration closed-cell run, whose Psi(ground) starts at
+    // 3.5e-17 and does not -- the eroding tendency `dv_dyn` in the model's own v-momentum
+    // budget is dominated by its COLUMN MEAN at every latitude that carries a cell:
+    //
+    //     lat        75N    45N    15N    15S    45S    75S
+    //     mean/rms   2.57   3.70   1.30   1.36   8.23   3.18      (iteration 600)
+    //
+    // A column-mean tendency is not a cell, it is an OFFSET, and it is exactly the mode this
+    // routine removes. The accounting closes: <dv_dyn> x 600 iterations is 0.055 m/s at 75N
+    // and 0.126 at 45N, which through Psi = 2*pi*a*cos(phi)*INT(rho dz)*dv predicts 5.9e9 and
+    // 3.7e10 kg/s against a MEASURED Psi(ground) of 4.97e9 and 3.23e10. Both within ~20 %.
+    // So the closure loss is this drift accumulating, and the polar cells fail first because
+    // they are the smallest -- not because anything polar is acting on them. (Two candidates
+    // that ARE polar were checked and refuted: `dv_polar`, the polar zonal filter, is 1e-16 in
+    // the zonal mean at every latitude including 75N/75S -- it conserves the zonal mean even
+    // through its solid-neighbour substitution; and the radial filter is not preferentially
+    // eating the polar cell, whose profile is SMOOTHER in index space than the Hadley one.)
+    //
+    // WHY THE CONSTRAINT IS LEGITIMATE EVERY ITERATION AND NOT ONLY AT SETUP. In a real
+    // atmosphere INT(rho*v*dz) per column need not vanish instantaneously -- its divergence is
+    // d(p_s)/dt. THIS MODEL HAS NO PROGNOSTIC SURFACE PRESSURE: `p_stat` is diagnosed
+    // barometrically from the temperature by densities() and does not respond to the flow's
+    // mass convergence at all (CLAUDE.md, the `dt` subsection). So a column-integrated mass
+    // flux here has nothing to raise and nowhere to go, and letting one accumulate is
+    // unphysical by construction rather than merely inconvenient.
+    //
+    // WHAT IT IS NOT. It is not a projection: it removes one number per column, the
+    // density-weighted column mean of v, and leaves the SHEAR -- which is what defines the
+    // cell -- untouched. It writes `v` only and lets storeIntermediateData3D sync `vn`, which
+    // is the convention every filter in the loop already follows.
+    //
+    // CAVEAT ON THE INSTRUMENT: the call site sits AFTER write_v_momentum_budget, so the four
+    // captured stages (dyn/polar/orog/radial) and their `dv_net` are the PRE-balance net. The
+    // correction this routine applies is reported on its own line instead.
+    static int massBalanceStride(){
+        static const int v = [](){
+            const char* e = getenv("ATM_V_MASSBAL_STRIDE"); return e ? atoi(e) : 0; }();
+        return v;
+    }
+
+    void balance_column_mass_flux_in_loop(int iter_n)
+    {
+        const int stride = massBalanceStride();
+        if (stride <= 0 || iter_n % stride != 0) return;
+        const double worst = apply_column_mass_flux_balance(nullptr);
+        // One line per VTK checkpoint rather than one per application: at stride 1 over 600
+        // iterations the per-call print is 600 lines of log for one number.
+        static int calls = 0;
+        static double worst_max = 0.0;
+        calls++;
+        if (worst > worst_max) worst_max = worst;
+        if (calls == 1 || iter_n % 100 == 0) {
+            std::cout << "      ATOM: [V_MASSBAL_STRIDE] iter " << iter_n << ", call " << calls
+                      << ", correction " << std::scientific << std::setprecision(3) << worst
+                      << " (max so far " << worst_max << ", non-dim v)"
+                      << std::defaultfloat << std::endl;
+        }
+    }
+
+    // The shared core. Subtracts the density-weighted column mean of v from every fluid column
+    // and returns the largest correction applied, in non-dimensional v.
+    double apply_column_mass_flux_balance(long* n_cols_out)
+    {
         long n_cols = 0; double worst = 0.0;
         #pragma omp parallel for collapse(2) schedule(static) reduction(+:n_cols) reduction(max:worst)
         for (int j = 0; j < m.jm; j++) {
@@ -554,9 +630,8 @@ public:
             }
         }
         // The walls are re-imposed by bcRadius afterwards; this only shifts interior v.
-        std::cout << "      ATOM: column mass-flux balance applied to " << n_cols
-                  << " columns, largest correction " << std::scientific << std::setprecision(3)
-                  << worst << " (non-dim v)" << std::endl;
+        if (n_cols_out) *n_cols_out = n_cols;
+        return worst;
     }
 
     // DEFAULT ON since 2026-08-28. ATM_V_MASSBAL=0 restores the unbalanced prescribed profile
