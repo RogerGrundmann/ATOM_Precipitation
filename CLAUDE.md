@@ -1106,7 +1106,36 @@ iteration. And the radial filter is not preferentially eating the polar cell, wh
 SMOOTHER in index space than the Hadley one (rms 1-2-1 second difference 0.044 against 0.110).
 **Nothing polar is doing this.**
 
-**READ AT 200 ITERATIONS = 40 SECONDS.** Default stays 0.
+**CONFIRMED AT 600 ITERATIONS FROM SCRATCH** (2026-09-10, `output_ms600ctl` / `output_ms600on`, a
+PAIR with one pinned binary under the current defaults, 24 threads, both exit 0 with zero NaN):
+
+| mean closure | iter 20 | iter 200 | **iter 600** |
+|---|---|---|---|
+| stride 0 | 0.0411 | 0.1711 | **0.5380** |
+| **stride 1** | 0.0091 | 0.0111 | **0.0144** |
+
+**The control degrades 13x over the run and stride 1 is FLAT.** Per band at 600: 75N
+**0.7632 -> 0.0010** (763x), 45N 0.5538 -> 0.0012, 15N 0.1926 -> 0.0016, 45S 0.5228 -> 0.0013, and
+the southern polar cell **1.0000 -> 0.0810** — in the control `Psi`'s maximum has migrated onto the
+ground entirely, which is the same failure mode `Psi_max` shows in the shipped configuration.
+Still free: `Precip` 949.9 against 949.6, `r` +0.459 both, centred RMS 1406.0 / 1405.5, `max w_u`
+31.791495 / 31.791041.
+
+**AND THE DETRENDING SHORTCUT HAS A LIMIT, WHICH THIS PAIR MEASURES.** The cross-check above holds
+at iteration 200 (32.80e9 detrended against 33.79e9 with the knob, 3 % apart); by 600 the two
+diverge, because an offset that has grown to closure ~1 is no longer a small additive perturbation:
+
+| detrended cell at 600, 1e9 kg/s | 75N | 45N | 15N | 15S | 45S | 75S |
+|---|---|---|---|---|---|---|
+| stride 0, detrended | 11.52 | 32.29 | 113.98 | 112.38 | 33.43 | 4.11 |
+| stride 1, no offset by construction | 8.87 | 29.90 | 105.22 | 103.16 | 39.26 | **1.55** |
+
+**So `max|Psi - Psi(ground)|` is a good estimate of the cell while the leak is small and only
+approximate once it is not** — use it to re-read old runs, not as a substitute for removing the
+leak. The 75S column is the sharpest case: 4.11 detrended against 1.55 actual, i.e. most of what
+the control still showed as a southern polar cell at 600 was the offset.
+
+**Default stays 0.**
 
 ### `ATM_TROPO_INDEX_FIX`: the tropopause height is turned into an index by dividing by the stretch amplitude
 
@@ -1178,10 +1207,20 @@ the 0.55/0.40 pair is an exact null on every diagnostic. The effect is strictly 
 rows where the floor binds: 0.05 against 0.10 differs by <= 3e-4 poleward of 80 deg and by
 **exactly zero** equatorward of 75 deg.
 
-**AND THE EVIDENCE IS 12 SECONDS.** The failure the floor guards is a high-latitude coastal PGF
-blow-up at i=1, and this tree's documented failure points are iterations 155, 357 and 483. The
-sweep is a SCREEN, not a clearance. **IF A HIGH-LATITUDE INSTABILITY APPEARS IN A LONG RUN, THIS IS
-THE FIRST THING TO PUT BACK.**
+**THE EVIDENCE WAS 12 SECONDS; IT IS NOW 120, AND IT PASSES ALL THREE DOCUMENTED FAILURE POINTS**
+(2026-09-10, later the same day). `output_ms600ctl` is this configuration at 0.26 for **600
+iterations from scratch** and yesterday's `output_cellpsi` is the SAME configuration at 0.55, so the
+pair is a direct 600-iteration A/B: detrended cells **identical to four significant figures at all
+six latitudes** (11.52 / 32.29 / 113.98 / 112.38 / 33.43 / 4.11), `Precip mean` **9.499e+02 in
+both**, and the only movement anywhere is 75N closure 0.760 -> 0.763, the same 0.4 % seen at 60
+iterations. Exit 0, zero NaN, straight through iterations **155, 357 and 483** — all three of this
+tree's documented failure points.
+**So "a screen, not a clearance" is now too pessimistic FOR THIS CONFIGURATION**, and two limits
+remain: the arm carries `ATM_CELLS_FROM_PSI=1` and `_VW=0.25`, which are NOT defaults, so the
+default configuration has not been run at 0.26 for 600; and what is cleared is that the flip is
+HARMLESS, not that it is useful — the null on the cells is unchanged at 600.
+**IF A HIGH-LATITUDE INSTABILITY APPEARS IN A LONG RUN, THIS IS STILL THE FIRST THING TO PUT
+BACK.**
 
 **NOT TOUCHED, TWO WAYS**: `TurbulenceAtm.h`'s three sites use `if (sinthe == 0.0) sinthe = 1.0e-5`,
 no floor at all, so the closure and the RHS now disagree about the metric poleward of **75 deg
