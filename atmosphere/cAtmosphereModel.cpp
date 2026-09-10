@@ -408,14 +408,13 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     initMetricRadius();
     checkMetricConsistency();
 
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        { init_layer_heights(); }
-
-        #pragma omp section
-        { init_tropopause_layers(); }
-    }
+    // SEQUENTIAL, NOT `omp parallel sections`. These two used to run concurrently, which was
+    // safe only because the shipped height->index conversion reads L_atm and nothing else.
+    // ATM_TROPO_INDEX_FIX makes init_tropopause_layers() read m_layer_heights, which
+    // init_layer_heights() builds -- so the section would have been a genuine race. Both are
+    // O(im)/O(jm) loops over a few hundred elements; the parallelism bought nothing.
+    init_layer_heights();
+    init_tropopause_layers();
 
     // Print-only, and it needs the layer heights, so it runs after the section above.
     checkRadialMetric();
@@ -1299,6 +1298,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
           << "  METRIC_SIN_FLOOR=" << ev("ATM_METRIC_SIN_FLOOR", "0.55*")
+          << "  TROPO_INDEX_FIX=" << ev("ATM_TROPO_INDEX_FIX", "0*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")

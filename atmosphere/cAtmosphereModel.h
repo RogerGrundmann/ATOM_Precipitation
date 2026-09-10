@@ -482,6 +482,9 @@ private:
     void calculate_node_weights();
     void init_steps();
     void init_tropopause_layers();
+    // Height [m] -> radial grid index for the tropopause. ATM_TROPO_INDEX_FIX;
+    // see the definition in InitValues_Atm.cpp for the defect and its measured cost.
+    double tropopause_index(double h_m);
     void RHS_Atmosphere_Turb(int i, int j, int k, const CellGeometry& geo);   // single dynamical core (laminar RHS_Atmosphere dropped 2026-07-08)
     void solveRungeKutta_Atmosphere_Turb();
     void fft(Array &);

@@ -325,6 +325,79 @@ void cAtmosphereModel::debug_vapor_output(int i, int j, int k,
 /*
 *
 */
+// ==================================================================
+// THE TROPOPAUSE HEIGHT IS CONVERTED TO A GRID INDEX BY DIVIDING BY L_atm
+// ATM_TROPO_INDEX_FIX=1, DEFAULT 0 = SHIPPED and bit-identical unset.
+//
+// THE DEFECT. `round(h / L_atm)` is the conversion for a UNIFORM grid of 400 m layers, and
+// cAtmosphereModel.h:695 says in as many words that L_atm = 400 m is "the AMPLITUDE OF THE
+// EXPONENTIAL STRETCH, not a grid step". The grid is z_i = (exp(zeta*(r-r0)) - 1)*L_atm with
+// zeta = 3.715, spread 23.21x -- 38.9 m at the bottom, over a kilometre aloft -- so the index
+// this returns lands nowhere near the height asked for, and it gets worse poleward because the
+// map from index to height is convex:
+//
+//     lat   intended    shipped index -> height        fixed index -> height
+//       0     15000 m        38 -> 13239 m  (88 %)        39 -> 14567 m  ( 97 %)
+//      15     14644 m        37 -> 12030 m  (82 %)        39 -> 14567 m  ( 99 %)
+//      30     13671 m        34 ->  9007 m  (66 %)        38 -> 13239 m  ( 97 %)
+//      45     12308 m        31 ->  6719 m  (55 %)        37 -> 12030 m  ( 98 %)
+//      60     10800 m        27 ->  4510 m  (42 %)        36 -> 10927 m  (101 %)
+//      75      9330 m        23 ->  2987 m  (32 %)        34 ->  9007 m  ( 97 %)
+//      90      8000 m        20 ->  2163 m  (27 %)        33 ->  8173 m  (102 %)
+//
+// WHERE IT DOES MEASURED DAMAGE, AND IT IS THE SOUTHERN POLAR CELL.
+// install_cells_from_streamfunction() confines each cell to i_topography..tropopause and ZEROES
+// any column with no room between them. At 75 deg the false tropopause is 2987 m and the
+// Antarctic plateau stands at 2500-4000 m, i.e. AT OR ABOVE IT, so those columns get no cell at
+// all: the run log reads "installed over 61 451 columns" of 65 341, and the 3 890 missing are
+// concentrated there. Measured consequences at iteration 200 (ATM_V_MASSBAL_STRIDE=1):
+//
+//   - the southern polar cell is 2.90e9 kg/s against 75N's 10.58e9, a factor of 3.6, because it
+//     is built from only the low-lying part of its latitude circle;
+//   - with a 3.6x smaller cell against a comparable absolute Psi(ground) offset, 75S is the
+//     worst-closing band at EVERY mass-balance stride -- 0.0612 where the other five reach
+//     0.0016 or better;
+//   - and the streamfunction's own two divisor columns confirm the terrain independently:
+//     max|psi_old|/max|psi_fixdiv| is 1.000 at 45N/15N/15S/45S/85N and 1.975 at 75S, 2.005 at
+//     85S -- about half of those latitude circles is land.
+//
+// With the corrected index (34, 9007 m) every one of those Antarctic columns has 9-15 levels of
+// room and carries a cell.
+//
+// ⚠ WHAT THE FIX COSTS, AND IT IS WHY THIS IS NOT FLIPPED ON. In the tropics the corrected
+// index is 39 of 40 -- ONE LEVEL BELOW THE LID. That is not the conversion's fault: this tree's
+// shell is 16 023 m and the intended equatorial tropopause is 15 000 m, so there is genuinely
+// only ~1 km of stratosphere above it, and the top layer is 1456 m thick, so 0 deg and 15 deg
+// both land on 39 and the tropopause becomes FLAT across the tropics in index space. Any
+// consumer that treats "tropopause" as "with stratosphere above it" -- ThermoAtm's lapse
+// construction, balance_thermal_wind's shear integration, install_cells_from_streamfunction's
+// cell span -- meets a very different field. The index is clamped to im-2 so at least one level
+// always remains above it, and no further judgement is applied.
+//
+// THREE CONSUMERS, AND THIS MOVES ALL OF THEM AT ONCE: ThermoAtm.h:440, VelocityInitializer.h's
+// balance_thermal_wind (three sites) and install_cells_from_streamfunction. That breadth is the
+// reason for the knob rather than a repair in place.
+//
+// ORDERING HAZARD, FIXED WITH IT: init_tropopause_layers() used to run in an
+// `omp parallel sections` block ALONGSIDE init_layer_heights(). The shipped conversion reads
+// only L_atm so the two were independent; this one reads m_layer_heights, which the other
+// section builds. The two calls are now sequential (cAtmosphereModel.cpp) -- two O(im)/O(jm)
+// loops, so the parallelism bought nothing and the race would have been real.
+double cAtmosphereModel::tropopause_index(double h_m){
+    static const bool fix = [](){
+        const char* e = getenv("ATM_TROPO_INDEX_FIX"); return e && atoi(e) != 0; }();
+    if(!fix) return round(h_m / L_atm);                 // shipped: L_atm as if it were a grid step
+    if(m_layer_heights.size() < (std::size_t)im) return round(h_m / L_atm);   // not built yet
+    int best = 1; double bd = 1.0e30;
+    for(int i = 1; i <= im - 2; i++){                   // clamp: always leave one level above
+        const double d = std::fabs((double)m_layer_heights[i] - h_m);
+        if(d < bd){ bd = d; best = i; }
+    }
+    return (double)best;
+}
+/*
+*
+*/
 void cAtmosphereModel::init_tropopause_layers(){                                                                                                                                                         
     cout << endl << endl << endl << "      AGCM: init_tropopause_layers" << endl;                                                                                                                        
                                                                                                                                                                                                            
@@ -354,7 +427,7 @@ void cAtmosphereModel::init_tropopause_layers(){
         double h = AtomUtils::Agnesi(tropopause_equator, x);                                                                                                                                             
         tropo_height_cache[j]       = h;
         tropo_height_cache[j_max-j] = h;                                                                                                                                                               
-        tropopause_layers[j]        = round(h / L_atm);                                                                                                                                                 
+        tropopause_layers[j]        = tropopause_index(h);
         tropopause_layers[j_max-j]  = tropopause_layers[j];                                                                                                                                             
     }                                                                                                                                                                                                    
                                                                                                                                                                                                            
