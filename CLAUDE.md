@@ -954,6 +954,42 @@ different components. Measured 20 -> 200: Hadley -40.3 % -> **-25.0 %**, Ferrel 
 **-3.5 %**. Fitting `decay = A*s + B` gives A = 20.4, B = 19.9, so **about half the Hadley decay is
 the filter**.
 
+### `ATM_RADIAL_SHAPIRO_STRENGTH_VW=0` freezes the Hadley cells, and the poles resist
+
+**THE FILTER IS ~90 % OF THE TROPICAL CELL DECAY AND ~10 % OF THE NORTHERN POLAR ONE**
+(2026-09-11, `output_vw0` against `output_bcs0`, ONE VARIABLE — `_VW` 0.25 -> 0 — same binary
+`cli/atm_rot600`, both `nm` = 600 from scratch with `BUOY_CONSISTENT=0`, `CELLS_FROM_PSI=1`,
+`V_MASSBAL_STRIDE=1`, `TROPO_INDEX_FIX=1`). Detrended cell decay, iteration 20 -> 600:
+
+| | 75N | 45N | 15N | 15S | 45S | **75S** |
+|---|---|---|---|---|---|---|
+| `_VW=0.25` | -22.0 % | -20.4 % | **-20.3 %** | -20.8 % | -9.3 % | **-61.2 %** |
+| **`_VW=0`** | **-20.5 %** | **-6.9 %** | **-1.7 %** | **-1.7 %** | **-2.7 %** | **-33.6 %** |
+
+**THE HADLEY CELLS ESSENTIALLY FREEZE — 20.3 % -> 1.7 %, A 12x REDUCTION** — and the Ferrel cells
+go 20.4 % -> 6.9 %. That is the jet result reproduced in the meridional circulation: easing the
+radial Shapiro filter does not slow the decay, it removes it.
+
+**AND IT COSTS NOTHING IN STABILITY.** 600 iterations from scratch, exit 0, **zero NaN**, straight
+through iterations **155, 357 and 483** — this tree's three documented failure points — and
+`max|u|` is **identical to `bcs0` to five figures** (0.025303 against 0.025298). The CFL guard the
+filter exists for lives on `u`, which `_VW` does not touch: *the hazard and the damage really are
+in different components*, and this is that claim measured at zero rather than at quarter strength.
+
+**THE TWO POLAR BANDS RESIST, AND THAT IS THE RESIDUAL `B` TERM MADE CONCRETE.** 75N moves only
+-22.0 -> -20.5 % and 75S still loses **33.6 %**. So yesterday's fit `decay = A*s + B` was right
+that a substantial `B` exists, and it is now located: **`B` is concentrated at the poles**, where
+`dv_orog` — the OROGRAPHIC Shapiro filter — is **16x the dynamics at 75S** on `bcs0`'s own budget.
+The filter accounts for the tropics and the mid-latitudes; something else, most likely orographic,
+accounts for the poles. Not chased.
+
+**WHAT THIS IS NOT.** It stops the cells WEAKENING; it does not give the model a circulation that
+anything MAINTAINS. The meridional `pgf` is **-2.4e-09 against Coriolis -4.2e-05**, four orders,
+so with the filter off the cells FREEZE at their initial value rather than being sustained — the
+same ceiling the jet hit at strength 0. **Default stays at the global knob** (bit-identical): what
+is measured is 600 iterations on a non-default configuration (`CELLS_FROM_PSI=1`), and nothing has
+been run at `_VW=0` on the shipped default.
+
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
 `init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps surface -> tropopause, so a CELL is the difference:

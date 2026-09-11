@@ -28,6 +28,189 @@ public:
     // the initial projection can relax harder than the time loop without the two counts being
     // entangled -- see project_initial_velocity and ATHAD README item 68, where setting the
     // time-loop knob silently changed the startup state as well and an attribution was lost.
+
+    // =============================================================================================
+    // ATM_PRESS_LINE_SOLVE=1 -- RADIAL LINE-IMPLICIT RELAXATION. Default 0 = off, bit-identical.
+    //
+    // THE PROBLEM IT SOLVES, and it is NOT the adjointness one. This tree has measured, four
+    // separate ways, that its pressure cannot answer a body force: meridional pgf/coriolis =
+    // 2.5e-05, the projection removing 45-53 % of what it should, the cell budget's pgf =
+    // -2.4e-09 against coriolis = -4.2e-05, and (2026-09-11) the elliptic pressure opposing only
+    // 24 % of the buoyancy, leaving 80 % of it as a net radial force that `u` integrates into a
+    // 51x runaway.
+    //
+    // The tempting repair -- make div.grad equal the operator by projecting on FACES -- does NOT
+    // fix that, and the algebra says so before any run: correcting the face flux by the face
+    // gradient gives the CENTRE velocity the average of its two adjacent face gradients, which is
+    // the 2*dr wide gradient again. What a face scheme removes is the `Lc - Lw` residual, and
+    // that is GRID-SCALE by construction (Lc - Lw annihilates smooth fields). The runaway is
+    // SMOOTH -- vertical 2dz index 0.007..0.019, monotone from ground to lid -- so adjointness is
+    // not what fails to remove it.
+    //
+    // WHAT FAILS IS THE RELAXATION. Jacobi's error decays like (1 - c/N^2) per sweep, so a
+    // DOMAIN-SCALE mode needs O(N^2) sweeps; ATM_PROJECT_IN_LOOP=10 duly removed 5.5 % of the
+    // divergence per call and changed the runaway by 0.16 %. And the operator is RADIALLY
+    // DOMINATED -- c_r = 431 against c_the = 16.5, a ratio of 26 -- so the mode that will not
+    // converge is exactly the one that lives down a column. A body force like buoyancy is smooth
+    // and column-scale: the worst case for pointwise Jacobi, and the best case for a line solve,
+    // which converges every radial mode EXACTLY in one pass.
+    //
+    // This is the atmosphere's version of the repair the ocean section already names: "a direct
+    // tridiagonal solve in the radial direction, or a preconditioner that handles the anisotropy,
+    // in place of the fixed Jacobi sweep count".
+    //
+    // WHAT IT IS AND IS NOT. It is the SAME OPERATOR -- same num1/num2/num3/num_a/denom, same
+    // source, same boundary handling -- relaxed a different way, so it has the SAME FIXED POINT
+    // and a converged answer is unchanged. Only the rate changes. That makes it verifiable:
+    // run both to convergence and they must agree.
+    //
+    // MEASURED 2026-09-11, at initialisation, 200 outer sweeps, against the pointwise solver
+    // (`ATM_PROJ_CONSISTENCY=1` on both, same field, same sweep count):
+    //
+    //                                   pointwise    line solve
+    //     solver residual |Lc - div|    1.635e-03    6.965e-04
+    //     removed by the SOLVER            61.26 %      83.49 %
+    //     removed by the CORRECTION        41.70 %      33.45 %
+    //     p_dyn checkerboard index          0.0289      0.0125
+    //     rms p_dyn                     1.291e-03    3.934e-03
+    //
+    // IT DOES WHAT IT WAS BUILT FOR -- operator convergence 61 -> 83 % at equal sweeps, the
+    // residual cut 2.35x, a pressure field 2.3x SMOOTHER and 3x STRONGER.
+    //
+    // ⚠ AND `div(u)` AFTER THE PROJECTION GETS WORSE, 2.933e-03 -> 3.369e-03, BECAUSE THE
+    // APPLIED CORRECTION DEGRADES AS THE SOLVER CONVERGES. That is not a defect in this code, it
+    // is the adjointness defect recorded under *The projection's shortfall is ADJOINTNESS*:
+    // p_dyn satisfies the COMPACT operator ever more exactly, including at the grid scale where
+    // compact and wide differ most, so the WIDE gradient applied to it removes less and less.
+    // **THE SOLVER FIX AND THE ADJOINTNESS FIX ARE A PAIR AND EITHER ALONE MAKES div(u) WORSE** --
+    // the eighth cancelling pair in this tree, and the first one introduced rather than found.
+    //
+    // ON THE ACTUAL TARGET -- can the pressure answer a body force? -- it is NECESSARY AND NOT
+    // SUFFICIENT. `ATM_UBUD_BALANCE`, 600->680 from tr600d, against the pointwise run:
+    //
+    //                           pointwise   line solve
+    //     corr(pgf, buoy)         -0.7509     -0.8202
+    //     slope(pgf on buoy)      -0.2379     -0.2497
+    //     cancellation             0.2038      0.2159
+    //     rms NET rhs_u / larger   0.7959      0.7837
+    //
+    // The CORRELATION improves materially, -0.75 -> -0.82: a converged pressure tracks the
+    // buoyancy's SHAPE much better. The AMPLITUDE barely moves -- 20.4 -> 21.6 % cancellation --
+    // so the pressure still responds with a quarter of the required magnitude and 78 % of the
+    // buoyancy still survives as net radial force. **The binding constraint is the amplitude, and
+    // the amplitude is set by the wide-gradient correction.** The face-consistent correction is
+    // the other half of the repair, and these numbers are the argument for building it.
+    //
+    // The column equation is the existing pointwise update rearranged, with the theta/phi
+    // neighbours lagged:
+    //     -(num1 - num_a) p[i-1] + denom p[i] - (num1 + num_a) p[i+1]
+    //         = num2 (p[j+1] + p[j-1]) + num3 (p[k+1] + p[k-1]) - div_src - rc
+    // Diagonally dominant by construction: |a| + |c| = 2*num1 against denom = 2*(num1+num2+num3),
+    // so Thomas is stable without pivoting.
+    //
+    // THREE THINGS TAKEN FROM THE OCEAN'S HYD_LINE_SOLVE, WHICH WAS WRITTEN FIRST AND COST MORE:
+    //   - the column ENDS ARE LAGGED, not folded. Substituting the Neumann BC into the i=1 row is
+    //     algebraically exact and destabilises anyway: at a corner where the radial Neumann meets
+    //     the theta one the row loses aRm AND aTm from its diagonal while its off-diagonals are
+    //     unchanged, so that mode's iteration matrix has spectral radius exactly 1. The pointwise
+    //     scheme leaves it marginal and slow; an exact radial solve removes the damping that was
+    //     hiding it. Measured there as p_dyn running to its clamp at the pole-bottom corner.
+    //   - LAND SPLITS A COLUMN INTO RUNS. Each maximal contiguous run of fluid cells is solved as
+    //     its own tridiagonal system; land cells keep the pointwise pass's Neumann-wall treatment.
+    //   - RED-BLACK ON (j+k), so a column's theta/phi neighbours are never being written while it
+    //     is read -- the same race-free discipline the pointwise sweep uses on (i+j+k).
+    //
+    // The source is cached rather than recomputed: div_src depends only on aux_*, which run() does
+    // not modify, so it is formed once by the pointwise pass and reused by every line pass. The
+    // cache is a function-local static, NOT a model member -- adding a member moves
+    // sizeof(cAtmosphereModel) and that is this tree's stack-canary hazard.
+    void relax_radial_lines(const std::vector<double>& rhs_cache,
+                            const std::vector<char>&   is_fluid)
+    {
+        const int im = m.im, jm = m.jm, km = m.km;
+        const double dr    = m.dr,   dthe = m.dthe, dphi = m.dphi;
+        const double inv_dr2   = 1.0 / (dr * dr);
+        const double inv_dthe2 = 1.0 / (dthe * dthe);
+        const double inv_dphi2 = 1.0 / (dphi * dphi);
+        const double inv_2dr   = 0.5 / dr;
+        static const bool poisson_metric_fix = [](){
+            const char* e = getenv("ATM_POISSON_METRIC_FIX"); return e && atoi(e) != 0; }();
+        const bool anelastic = (int)m.m_dlnrho_dr.size() == m.im
+                               && [](){ const char* e = getenv("ATM_ANELASTIC");
+                                        return e && atoi(e) != 0; }();
+
+        for (int colour = 0; colour < 2; colour++) {
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int j = 1; j < jm - 1; j++) {
+                for (int k = 1; k < km - 1; k++) {
+                    if (((j + k) & 1) != colour) continue;
+                    const double sinthe  = sin(m.the.z[j]);
+                    if (fabs(sinthe) < 1.0e-12) continue;          // pole rows: left to the BCs
+                    const double sinthe2 = sinthe * sinthe;
+
+                    std::vector<double> aa(im, 0.0), bb(im, 0.0), cc(im, 0.0), dd(im, 0.0);
+                    // assemble the column
+                    for (int i = 1; i < im - 1; i++) {
+                        if (!is_fluid[(size_t)(i*jm + j)*km + k]) continue;
+                        const double rm      = m.rad.z[i];
+                        const double exp_rm  = m.metricExpRm(rm);
+                        const double exp_2rm = exp_rm * exp_rm;
+                        const double curv    = m.metricCurv(rm);
+                        const double rmet    = m.metricRadius(rm);
+                        const double inv_rm  = 1.0 / rmet;
+                        const double inv_rm2 = inv_rm * inv_rm;
+                        const double m_the = poisson_metric_fix ? inv_rm2 : inv_rm;
+                        const double m_phi = poisson_metric_fix ? (inv_rm2 / sinthe2)
+                                                               : (inv_rm / sinthe);
+                        const double num1  = exp_2rm * inv_dr2;
+                        const double num2  = m_the * inv_dthe2;
+                        const double num3  = m_phi * inv_dphi2;
+                        const double dlr   = anelastic ? m.m_dlnrho_dr[i] : 0.0;
+                        const double num_a = exp_2rm * (dlr - curv) * inv_2dr;
+                        const double denom = 2.0 * num1 + 2.0 * num2 + 2.0 * num3;
+
+                        aa[i] = -(num1 - num_a);
+                        bb[i] =   denom;
+                        cc[i] = -(num1 + num_a);
+                        dd[i] =   num2 * (m.p_dyn.x[i][j+1][k] + m.p_dyn.x[i][j-1][k])
+                                + num3 * (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1])
+                                + rhs_cache[(size_t)(i*jm + j)*km + k];
+                    }
+                    // maximal contiguous fluid runs, each its own tridiagonal system
+                    int i = 1;
+                    std::vector<double> cp(im, 0.0), dp(im, 0.0);
+                    while (i < im - 1) {
+                        if (!is_fluid[(size_t)(i*jm + j)*km + k]) { i++; continue; }
+                        int lo = i, hi = i;
+                        while (hi + 1 < im - 1 && is_fluid[(size_t)((hi+1)*jm + j)*km + k]) hi++;
+                        if (hi > lo) {
+                            // LAG THE ENDS: the neighbours just outside the run are known values
+                            // this pass, moved to the right-hand side. Not folded -- see the note.
+                            dd[lo] -= aa[lo] * m.p_dyn.x[lo-1][j][k];
+                            dd[hi] -= cc[hi] * m.p_dyn.x[hi+1][j][k];
+                            // Thomas
+                            cp[lo] = cc[lo] / bb[lo];
+                            dp[lo] = dd[lo] / bb[lo];
+                            for (int n = lo + 1; n <= hi; n++) {
+                                const double den = bb[n] - aa[n] * cp[n-1];
+                                if (fabs(den) < 1.0e-300) { cp[n] = 0.0; dp[n] = dd[n]; continue; }
+                                cp[n] = cc[n] / den;
+                                dp[n] = (dd[n] - aa[n] * dp[n-1]) / den;
+                            }
+                            double x = dp[hi];
+                            if (is_finite_safe(x)) m.p_dyn.x[hi][j][k] = x;
+                            for (int n = hi - 1; n >= lo; n--) {
+                                x = dp[n] - cp[n] * x;
+                                if (is_finite_safe(x)) m.p_dyn.x[n][j][k] = x;
+                            }
+                        }
+                        i = hi + 1;
+                    }
+                }
+            }
+        }
+    }
+
     void run(bool verbose = true, int sweeps_override = -1)
     {
         using namespace std;
@@ -173,6 +356,20 @@ public:
                                                const int v = e ? atoi(e) : 1;
                                                return v > 0 ? v : 1; }();
         const int n_press_sweeps = (sweeps_override > 0) ? sweeps_override : n_sweeps_knob;
+
+        // ATM_PRESS_LINE_SOLVE -- see relax_radial_lines() above. The source is cached on the
+        // first pass and reused: div_src is formed from aux_*, which run() does not modify.
+        // Function-local statics, NOT model members (sizeof(cAtmosphereModel) is a stack-canary
+        // hazard in this tree). Allocated only when the knob is on.
+        static const bool line_solve = [](){
+            const char* e = getenv("ATM_PRESS_LINE_SOLVE"); return e && atoi(e) != 0; }();
+        static std::vector<double> rhs_cache;
+        static std::vector<char>   is_fluid;
+        const size_t ncell = (size_t)m.im * m.jm * m.km;
+        if (line_solve && rhs_cache.size() != ncell) {
+            rhs_cache.assign(ncell, 0.0);
+            is_fluid.assign(ncell, 0);
+        }
 
         for (int sweep = 0; sweep < n_press_sweeps; sweep++) {
 
@@ -509,12 +706,21 @@ public:
                            + (m.p_dyn.x[i][j][k+1] + m.p_dyn.x[i][j][k-1]) * num3
                            + (m.p_dyn.x[i+1][j][k] - m.p_dyn.x[i-1][j][k]) * num_a
                            - div_src - rc) * inv_denom;
+                        if (line_solve) {
+                            const size_t idx = (size_t)(i*m.jm + j)*m.km + k;
+                            rhs_cache[idx] = -div_src - rc;
+                            is_fluid[idx]  = 1;
+                        }
                     }
                 } // k
             } // j
         } // i
 
         } // colour
+
+        // RADIAL LINE PASS. Runs after the pointwise colour sweep, on the same operator and the
+        // same cached source, so it is a change of RELAXATION only -- same fixed point.
+        if (line_solve) relax_radial_lines(rhs_cache, is_fluid);
 
         } // sweep
 

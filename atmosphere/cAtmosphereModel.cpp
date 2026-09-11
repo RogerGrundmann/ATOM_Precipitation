@@ -1300,6 +1300,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "0*")
           << "  CELLS_U_FROM_PSI=" << ev("ATM_CELLS_U_FROM_PSI", "0*")
           << "  CELL_ROT_DIAG=" << ev("ATM_CELL_ROT_DIAG", "0*")
+          << "  PRESS_LINE_SOLVE=" << ev("ATM_PRESS_LINE_SOLVE", "0*")
           << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
