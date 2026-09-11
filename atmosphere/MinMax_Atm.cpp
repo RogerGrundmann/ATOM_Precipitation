@@ -204,6 +204,231 @@ void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string
 * Averaging rho*v zonally rather than multiplying the two zonal means also keeps the
 * correlation term <rho'v'>, which is the part a warm rising branch carries.
 */
+
+// ============================================================================================
+// ATM_CELL_ROT_DIAG=1 -- WHICH WAY DO THE CELLS ACTUALLY TURN. Print-only, default off.
+//
+// WHY THIS EXISTS, AND IT IS A GAP THIS TREE HAS HAD ALL ALONG. The user reported (2026-09-11)
+// that the polar cells turn the wrong way in a glyph plot. Nothing in this model could check
+// it:
+//
+//   - Psi is built from the ZONAL-MEAN MERIDIONAL WIND ALONE (write_meridional_streamfunction
+//     integrates rho*v and nothing else), so it is BLIND to the radial velocity by
+//     construction. A cell can have a perfectly correct Psi and a vertical velocity that turns
+//     the plotted arrows the other way, and every cell table in CLAUDE.md would still read
+//     "correct".
+//   - the only (v,u) field written is the zonal VTK slice at ONE longitude, k_zonal = 87, which
+//     cuts Tibet and the Antarctic plateau. At 75S that slice has 25 of its 41 levels in rock,
+//     so the southern polar cell -- the one this tree scores worst everywhere -- cannot be read
+//     off it at all.
+//
+// So the rotation of the cells has never been measured. This measures it.
+//
+// WHAT IT COMPUTES. The zonal means of the RADIAL and MERIDIONAL velocity first, on the same
+// masking and the same rock-contributes-zero divisor the corrected Psi uses, and then the
+// rotation of that mean field in the meridional plane:
+//
+//     omega = d(ubar)/dy - d(vbar_north)/dz          [1/s], y NORTHWARD, z UP
+//
+// v is stored SOUTHWARD-positive here, so vbar_north = -vbar; and j increases SOUTHWARD, so
+// d/dy = -(1/(a*Delta)) d/dj. This is the plane-Cartesian curl of the field a glyph plot draws,
+// which is the quantity the eye judges -- NOT the full spherical vorticity, whose curvature
+// terms are irrelevant to which way an arrow points. Said plainly so nobody quotes it as
+// vorticity.
+//
+// HOW TO READ IT. A thermally DIRECT cell (Hadley, polar) and a thermally INDIRECT one (Ferrel)
+// must have OPPOSITE omega, and the two hemispheres mirror, so the test is always against the
+// HADLEY CELL OF THE SAME HEMISPHERE. Earth: 75 and 15 agree, 45 opposes. The print also gives
+// the sign Psi implies, and flags DISAGREE wherever the two differ -- which is the whole point,
+// because that is the case Psi cannot see.
+//
+// It also reports, per hemisphere, the latitude at which the zonal-mean RADIAL velocity changes
+// sign between 60 and 90 degrees -- the ascent/descent boundary of the polar cell. Continuity
+// against a cell whose amplitude peaks at 75 puts it near 70; init_u's linear blend between
+// -ua_90 at the pole and +ua_60 at 60 puts it at 78.0, and the projection leaves it near 77.7.
+void cAtmosphereModel::report_cell_rotation(int iter){
+    static const bool on = [](){ const char* e = getenv("ATM_CELL_ROT_DIAG");
+                                 return e && atoi(e) != 0; }();
+    if(!on) return;
+    using namespace std;
+    const double a     = r_Earth * 1000.0;
+    const double Delta = M_PI / (double)(jm - 1);         // radians of latitude per j index
+    const double dy    = a * Delta;                       // metres per j index
+
+    // Zonal means over fluid cells, rock contributing ZERO rather than being excluded -- the
+    // same divisor the corrected streamfunction uses, and for the same reason: no mass crosses
+    // rock, and dividing by the fluid count inflates levels that clip terrain by km/n.
+    vector<vector<double> > ubar(im, vector<double>(jm, 0.0));
+    vector<vector<double> > vbar(im, vector<double>(jm, 0.0));   // NORTHWARD positive
+    vector<vector<double> > rvbar(im, vector<double>(jm, 0.0));  // rho*v northward, for Psi
+    for(int i = 0; i < im; i++){
+        for(int j = 0; j < jm; j++){
+            double us = 0.0, vs = 0.0, rs = 0.0;
+            for(int k = 0; k < km; k++){
+                if(i < i_topography[j][k]) continue;
+                const double uu = u.x[i][j][k], vv = v.x[i][j][k];
+                double rho = r_humid.x[i][j][k];
+                if(!AtomUtils::is_finite_safe(uu) || !AtomUtils::is_finite_safe(vv)) continue;
+                if(!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
+                us += uu; vs += -vv; rs += rho * (-vv);      // -v = northward
+            }
+            ubar[i][j]  = us / (double)km * u_0;
+            vbar[i][j]  = vs / (double)km * u_0;
+            rvbar[i][j] = rs / (double)km * u_0;
+        }
+    }
+    // Psi from the same means, integrated downward from the lid, so the two senses are formed
+    // from ONE field and a disagreement cannot be a difference of convention.
+    vector<vector<double> > psi(im, vector<double>(jm, 0.0));
+    for(int j = 0; j < jm; j++){
+        const double coeff = 2.0 * M_PI * a * sin(the.z[j]);       // cos(latitude)
+        for(int i = im - 2; i >= 0; i--)
+            psi[i][j] = psi[i+1][j] + coeff * 0.5 * (rvbar[i][j] + rvbar[i+1][j])
+                        * (get_layer_height(i+1) - get_layer_height(i));
+    }
+
+    // Function-local, NOT members: adding a member moves sizeof(cAtmosphereModel) and that is
+    // this tree's stack-canary hazard (see the build-hazard note in CLAUDE.md). Same reason the
+    // floor-injection counter in IceSchemeCommon is a function-local static.
+    vector<double> rot_om(jm, 0.0), rot_psi(jm, 0.0), rot_a(jm, 0.0), rot_b(jm, 0.0);
+    vector<int>    rot_n(jm, 0);
+
+    // THE AVERAGING WINDOW IS FIXED IN HEIGHT, AND THAT IS NOT A DETAIL.
+    //
+    // The first version of this took the window from tropopause_layers[j] and from the HIGHEST
+    // ground on the latitude circle. Both were wrong, and the print said so on its face by
+    // reporting `levels = 0` at 75N and 75S -- the two bands it exists to measure:
+    //
+    //   - the highest ground anywhere on a latitude circle is the Antarctic plateau at 75S and a
+    //     single mountain elsewhere, so one column deleted the whole band. It also made the
+    //     level count wildly asymmetric between mirror latitudes (15N 20, 15S 9), which is a
+    //     terrain artefact and not a hemispheric difference.
+    //   - and the SHIPPED tropopause index at 75 deg is 23 = 2987 m, BELOW that plateau, so the
+    //     window ran from 26 down to 22 and was empty. Worse, tropopause_layers is exactly what
+    //     ATM_TROPO_INDEX_FIX changes: a window taken from it would differ between the two
+    //     branches, and the diagnostic could not compare them at all.
+    //
+    // So the window is ground-to-~10 km in METRES, identical on every branch and at every
+    // latitude. Terrain needs no masking here because ubar/vbar are zonal means in which rock
+    // already contributes zero.
+    int itop_fixed = im - 2;
+    for(int i = 0; i < im - 1; i++) if(get_layer_height(i) >= 10000.0){ itop_fixed = i; break; }
+    if(itop_fixed > im - 2) itop_fixed = im - 2;
+
+    // ---- PLOT-NORMALISED, AND THE PHYSICAL CURL IS THE WRONG MEASURE ----
+    //
+    // The first version averaged omega = du/dy - dv/dz in METRES and it is not a discriminator
+    // of cell sense at all. A tropospheric cell is ~1000:1 FLAT, so the two terms differ by
+    // three orders of magnitude, their difference is whichever one is larger plus noise, and
+    // every band comes out looking alike. Measured, it read -2.7e-06 at 45N -- indistinguishable
+    // from zero -- and fired a DISAGREE against a Psi that was perfectly healthy (-3.95e+10).
+    //
+    // What the eye judges, and what uv_plot in Paraview_Atm.cpp draws, is the rotation of the
+    // field AFTER the two axes are brought to comparable length. So normalise the coordinates:
+    // Z' = z/H over the shell depth and Y' = y/L pole to pole, giving
+    //
+    //     omega' = (L/H) du/dy  -  (H/L) dv/dz
+    //
+    // with L/H = pi*a / h_top ~ 1249 here. This is the SHAPE-PRESERVING normalisation and it is
+    // deliberately NOT tied to Paraview's dx = 0.1 / dy = 0.05 plot constants, which are
+    // arbitrary and would couple this print to a writer's cosmetics; the picture's own ratio is
+    // 555, a factor 2.25 from this one, which matters only where the two terms nearly cancel.
+    // BOTH TERMS ARE THEREFORE PRINTED, and a band whose terms are within 3x AND of opposite
+    // sign is flagged `marginal` rather than being given a confident sense.
+    const double H_shell = get_layer_height(im - 1);
+    const double L_merid = M_PI * a;
+    const double aspect  = (H_shell > 0.0) ? (L_merid / H_shell) : 1.0;
+
+    auto band = [&](int j)->void{
+        const int itop = itop_fixed;
+        double accA = 0.0, accB = 0.0; int n = 0;
+        for(int i = 1; i <= itop - 1; i++){
+            if(j < 1 || j > jm - 2) continue;
+            const double dudy = -(ubar[i][j+1] - ubar[i][j-1]) / (2.0 * dy);   // j is southward
+            const double dz   = get_layer_height(i+1) - get_layer_height(i-1);
+            if(!(dz > 0.0)) continue;
+            const double dvdz = (vbar[i+1][j] - vbar[i-1][j]) / dz;
+            accA += aspect * dudy;          // the du/dy half, stretched to plot proportions
+            accB += dvdz / aspect;          // the dv/dz half, compressed to match
+            n++;
+        }
+        const double A = (n > 0) ? accA / n : 0.0;
+        const double B = (n > 0) ? accB / n : 0.0;
+        // Psi's own sense: the sign of the column extremum measured from the GROUND value, so
+        // the standing Psi(ground) offset cannot flip it (the 2026-09-10 detrending lesson).
+        const double pg = psi[0][j];
+        double pk = 0.0;
+        for(int i = 0; i < im; i++) if(fabs(psi[i][j] - pg) > fabs(pk)) pk = psi[i][j] - pg;
+        rot_om[j] = A - B; rot_a[j] = A; rot_b[j] = B; rot_psi[j] = pk; rot_n[j] = n;
+    };
+
+    const int JS[6] = {15, 45, 75, 105, 135, 165};       // 75N 45N 15N 15S 45S 75S
+    for(int q = 0; q < 6; q++) band(JS[q]);
+
+    cout << "      AGCM: [CELL ROT] iter " << iter
+         << " -- rotation of the PLOTTED (v,u) zonal-mean field in ASPECT-NORMALISED"
+         << " coordinates, omega\' = (L/H)du/dy - (H/L)dv/dz, L/H = " << fixed
+         << setprecision(0) << aspect << defaultfloat
+         << ".  Sense is vs the HADLEY cell of the SAME hemisphere." << endl;
+    cout << "        lat   (L/H)du/dy    (H/L)dv/dz       omega\'    sense(omega)  sense(Psi)"
+         << "   Psi-Psi(gnd) e9" << endl;
+    for(int q = 0; q < 6; q++){
+        const int j = JS[q];
+        const double lat = 90.0 - (double)j * 180.0 / (double)(jm - 1);
+        const int jref = (lat > 0.0) ? 75 : 105;                  // 15N / 15S
+        const bool isref = (j == jref);
+        const bool so_dir = (rot_om[j]  * rot_om[jref]  > 0.0);
+        const bool sp_dir = (rot_psi[j] * rot_psi[jref] > 0.0);
+        // A band whose two terms nearly cancel has a sense that depends on the normalisation
+        // constant rather than on the flow; say so instead of asserting one.
+        const double mA = fabs(rot_a[j]), mB = fabs(rot_b[j]);
+        const bool marginal = (rot_a[j] * rot_b[j] > 0.0) && mA > 0.0 && mB > 0.0
+                              && (mA < 3.0 * mB) && (mB < 3.0 * mA);
+        const char* so = isref ? "reference" : (marginal ? "marginal" : (so_dir ? "direct  " : "INDIRECT"));
+        const char* sp = isref ? "reference" : (sp_dir ? "direct  " : "INDIRECT");
+        const bool disagree = !isref && !marginal && (so_dir != sp_dir);
+        cout << "      " << setw(5) << (int)lat << "  " << scientific << setprecision(3)
+             << setw(12) << rot_a[j] << " " << setw(13) << rot_b[j] << " "
+             << setw(12) << rot_om[j] << "   " << so << "     " << sp
+             << "   " << setw(11) << rot_psi[j] / 1.0e9 << defaultfloat
+             << (disagree ? "   <== DISAGREE: Psi cannot see this" : "")
+             << (marginal ? "   (terms within 3x: sense depends on the normalisation)" : "")
+             << endl;
+    }
+    // The polar ascent/descent boundary, from the zonal-mean radial velocity.
+    for(int hemi = 0; hemi < 2; hemi++){
+        const int ja = (hemi == 0) ? 0  : jm - 1;        // pole
+        const int jb = (hemi == 0) ? 30 : jm - 31;       // 60 deg
+        const int st = (hemi == 0) ? 1 : -1;
+        // A FIXED reference HEIGHT, ~5 km, for the same reason the window above is fixed: taken
+        // from the terrain it gave 7412 m in the north against 9007 m in the south and the two
+        // hemispheres were not comparable.
+        int iref = im - 3;
+        for(int i = 0; i < im - 2; i++) if(get_layer_height(i) >= 5000.0){ iref = i; break; }
+        double prev = ubar[iref][ja]; int jprev = ja; bool found = false;
+        for(int j = ja + st; j != jb + st; j += st){
+            const double cur = ubar[iref][j];
+            if(prev != 0.0 && cur * prev < 0.0){
+                const double f = fabs(prev) / (fabs(prev) + fabs(cur));
+                const double jz = (double)jprev + st * f;
+                cout << "      [CELL ROT] " << (hemi == 0 ? "N" : "S")
+                     << " polar ascent/descent boundary (zonal-mean u sign change at "
+                     << (int)get_layer_height(iref) << " m): "
+                     << fixed << setprecision(1)
+                     << fabs(90.0 - jz * 180.0 / (double)(jm - 1)) << " deg"
+                     << defaultfloat
+                     << "   (continuity against a cell peaking at 75 wants ~70; init_u's blend"
+                     << " gives 78.0)" << endl;
+                found = true; break;
+            }
+            prev = cur; jprev = j;
+        }
+        if(!found) cout << "      [CELL ROT] " << (hemi == 0 ? "N" : "S")
+                        << " polar band: zonal-mean u does not change sign between 60 and 90 deg"
+                        << endl;
+    }
+}
+
 void cAtmosphereModel::write_meridional_streamfunction(int iter){
     const double a      = r_Earth * 1000.0;   // Earth radius [m] (r_Earth is in km)
     const double two_pi = 2.0 * M_PI;

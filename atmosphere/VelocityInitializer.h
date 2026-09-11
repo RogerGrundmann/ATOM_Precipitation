@@ -7,6 +7,8 @@
 #include <cmath>
 #include <iomanip>
 #include <cstdlib>
+#include <algorithm>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -520,6 +522,201 @@ public:
                   << std::scientific << std::setprecision(2) << worst_res << std::defaultfloat
                   << "  (balance_column_mass_flux should now find ~nothing to remove)"
                   << std::endl;
+    }
+
+
+    // ================================================================================
+    // THE CELLS HAD NO VERTICAL VELOCITY OF THEIR OWN: ATM_CELLS_U_FROM_PSI
+    // Default 0 = off and byte-identical. Requires ATM_CELLS_FROM_PSI=1; inert without it.
+    //
+    // THE DEFECT, found by the user looking at the glyphs (2026-09-11): the arrows point UPWARD
+    // over most of the polar band, and at the pole itself they should descend. They do descend
+    // -- but only poleward of 77.7 deg, and the cells are scored at 75.
+    //
+    // install_cells_from_streamfunction() writes v AND NOTHING ELSE. u keeps whatever init_u
+    // left, and init_u prescribes only four latitudes per hemisphere -- 0, 30, 60, 90 -- with
+    //     ua_00, ua_30, ua_60, ua_90 = 0.02894, 0.02315, 0.01736, 0.011574
+    // which is 0.02894 * (1, 0.8, 0.6, 0.4): a smooth ramp with an alternating sign, not a
+    // balance of anything. form_diagonals(m.u, 0, 30) then blends LINEARLY from -ua_90 at the
+    // pole to +ua_60 at 60 deg, so the vertical velocity changes sign at
+    //     j = 30 * 0.011574 / (0.011574 + 0.01736) = 12.0  ->  78.0 deg
+    // against a MEASURED 77.7 deg (87E, i=14, post-projection initial state). The descending
+    // branch of the polar cell therefore gets 12 degrees of latitude and the ascending branch
+    // 18, and cos-weighted the descent is only ~16 % of the cell's area.
+    //
+    // So in the ATM_CELLS_FROM_PSI configuration the glyphs draw a streamfunction-derived v
+    // against an unrelated analytic u, and project_initial_velocity(200) does not repair it --
+    // the 77.7 deg crossing is measured AFTER the projection.
+    //
+    // THE REPAIR IS CONTINUITY, NOT THE ANALYTIC Psi. Deriving u from A*dPsi/dphi would be
+    // wrong here: Pass 2 above RESCALES the two branches by fp/fn to make the discrete column
+    // integral vanish, so after that rv is no longer exactly -dPsi/dz, and each column carries
+    // its own i0, span and taper. Integrating the model's OWN discrete continuity against the v
+    // that was actually written makes u consistent with the field the model holds rather than
+    // with the field the formula describes.
+    //
+    //   v here is SOUTHWARD-positive, so with V = -v northward and f = rho*v*cos(phi):
+    //     (1/(a cos phi)) d(rho V cos phi)/dphi + d(rho u)/dz = 0
+    //   and phi(j) decreases with j (j=0 is 90N, dphi/dj = -PI/(jm-1) = -Delta), so
+    //     d(rho u)/dz = -(1/(a cos phi)) * (1/Delta) * df/dj
+    //   integrated upward from rho*u = 0 at the ground.
+    //
+    // THE BUILT-IN CHECK. Integrating that over the whole column gives
+    // d/dj of INT(rho v cos phi dz), and install_cells has just made INT(rho v dz) vanish in
+    // every column -- so rho*u must return to ZERO at the top of a column whose neighbours also
+    // closed. The residual at the top is printed rather than assumed, as the top half-interval
+    // omission was caught that way before.
+    //
+    // NOT TOUCHED: the pole rows (cos phi -> 0 divides here, and they carry no cell), land
+    // cells, and columns the loop above zeroed. u above the tropopause is left at whatever the
+    // integration returns, which is the residual and should be ~0.
+    void install_u_from_cells()
+    {
+        static const bool on = [](){ const char* e = getenv("ATM_CELLS_U_FROM_PSI");
+                                     return e && atoi(e) != 0; }();
+        if (!on) return;
+        static const bool cells_on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
+                                           return e && atoi(e) != 0; }();
+        if (!cells_on) {
+            std::cout << "      AGCM: [CELLS U] ATM_CELLS_U_FROM_PSI set but ATM_CELLS_FROM_PSI"
+                      << " is off -- nothing to derive u from, ignored." << std::endl;
+            return;
+        }
+        const double a_E    = m.r_Earth * 1000.0;
+        const double inv_u0 = 1.0 / m.u_0;
+        const double Delta  = M_PI / (double)(m.jm - 1);          // radians of latitude per j
+        const double dlam   = 2.0 * M_PI / (double)(m.km - 1);    // radians of longitude per k
+        double umax = 0.0, worst_top = 0.0, scale_top = 0.0;
+        std::vector<double> resid;   // per-column |rho*u(top)| / peak |rho*u|, for the quantiles
+        std::vector<double> imbal;   // per-column |P-N|/(P+N) BEFORE balancing -- how much was needed
+        long nzeroed = 0;
+
+        auto rho_at = [&](int i, int j, int k){
+            double r = m.r_humid.x[i][j][k];
+            if (!AtomUtils::is_finite_safe(r) || r <= 0.0) r = m.r_air;
+            return r;
+        };
+        // f = rho * v_phys * cos(phi); land and out-of-cell cells carry v = 0, so f = 0 there
+        auto f_at = [&](int i, int j, int k){
+            const double lat = 90.0 - (double)j * 180.0 / (double)(m.jm - 1);
+            return rho_at(i,j,k) * m.v.x[i][j][k] * m.u_0 * cos(lat * M_PI / 180.0);
+        };
+        // g = rho * w_phys, the ZONAL mass flux. Omitting this was wrong and it is not a small
+        // term: w is the jet, 10-30 m/s against v's ~1, and it carries strong zonal structure
+        // over topography. Continuity in 3-D is
+        //     d(rho u)/dz = -(1/(a cos phi)) * [ d(rho V cos phi)/dphi + d(rho w)/dlambda ]
+        // and a meridional-only version is a ZONAL-MEAN statement being applied per column.
+        auto g_at = [&](int i, int j, int k){
+            return rho_at(i,j,k) * m.w.x[i][j][k] * m.u_0;
+        };
+
+        #pragma omp parallel for collapse(2) schedule(static) \
+                reduction(max:umax) reduction(max:worst_top) reduction(max:scale_top)
+        for (int j = 1; j < m.jm - 1; j++) {                       // pole rows excluded
+            for (int k = 0; k < m.km; k++) {
+                const double lat  = 90.0 - (double)j * 180.0 / (double)(m.jm - 1);
+                const double cphi = cos(lat * M_PI / 180.0);
+                if (fabs(cphi) < 1.0e-6) continue;
+                const int i0 = m.i_topography[j][k];
+
+                // d(rho u)/dz at each level: centred in j for the meridional part and in k
+                // (periodic) for the zonal part.
+                const int km1 = (k == 0) ? m.km - 2 : k - 1;          // phi is periodic
+                const int kp1 = (k == m.km - 1) ? 1 : k + 1;
+                std::vector<double> src(m.im, 0.0);
+                for (int i = i0; i < m.im; i++) {
+                    const double dfdj = 0.5 * (f_at(i, j+1, k) - f_at(i, j-1, k));
+                    const double dgdk = 0.5 * (g_at(i, j, kp1) - g_at(i, j, km1));
+                    src[i] = -(dfdj / Delta + dgdk / dlam) / (a_E * cphi);
+                }
+                // MAKE THE COLUMN CLOSE AT BOTH RADIAL WALLS, WITH A BOUNDED CORRECTION.
+                // Each column's INT(rho v dz) vanishes over ITS OWN range, but i0 and it differ
+                // between neighbouring j, so on the landward side of every terrain step the
+                // j-derivative integrates over a range the neighbour does not share and the
+                // column does not close: measured without any correction the median column
+                // closes exactly (0.0000) and the p95 leaves 100 % of its peak at the lid. A
+                // non-zero rho*u at a RIGID LID is a worse error than a redistribution, and
+                // both radial walls are no-flow, so force both endpoints.
+                //
+                // NOT by scaling the two signs the way Pass 2 does it for v. That was tried and
+                // it is catastrophic here: with P or N near zero the factor half/P is unbounded,
+                // and a worst-column imbalance of 0.9998 produced max|u| = 84 m/s. Pass 2 gets
+                // away with it because v's two branches are set by an analytic shape that always
+                // has both; this source is a j-DERIVATIVE and can legitimately be nearly
+                // one-signed next to terrain.
+                //
+                // Subtracting a correction proportional to |src| instead is bounded by
+                // construction: the removed amount at each level is R*|src[i]|/INT|src|, which
+                // is at most |src[i]|, so no level can more than double. It also cannot act
+                // where src is zero.
+                {
+                    double R = 0.0, S = 0.0;
+                    for (int i = i0; i < m.im - 1; i++) {
+                        const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                        if (!(dz > 0.0)) continue;
+                        R += 0.5 * (src[i] + src[i+1]) * dz;
+                        S += 0.5 * (fabs(src[i]) + fabs(src[i+1])) * dz;
+                    }
+                    if (S > 0.0) {
+                        const double imb = fabs(R) / S;
+                        #pragma omp critical
+                        { imbal.push_back(imb); }
+                        // A column that is essentially one-signed cannot hold a closed vertical
+                        // circulation; zero it rather than flatten it to noise.
+                        if (imb > 0.9) {
+                            for (int i = 0; i < m.im; i++) m.u.x[i][j][k] = 0.0;
+                            #pragma omp critical
+                            { nzeroed++; }
+                            continue;
+                        }
+                        const double corr = R / S;
+                        for (int i = i0; i < m.im; i++) src[i] -= corr * fabs(src[i]);
+                    }
+                }
+                // integrate upward, trapezoid, from rho*u = 0 at the ground
+                double ru = 0.0, ru_peak = 0.0;
+                for (int i = 0; i <= i0; i++) m.u.x[i][j][k] = 0.0;
+                for (int i = i0; i < m.im - 1; i++) {
+                    const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                    if (dz > 0.0) ru += 0.5 * (src[i] + src[i+1]) * dz;
+                    const double up = ru / rho_at(i+1, j, k);
+                    m.u.x[i+1][j][k] = up * inv_u0;
+                    if (fabs(up) > umax) umax = fabs(up);
+                    if (fabs(ru) > ru_peak) ru_peak = fabs(ru);     // the cell's own mass flux
+                }
+                m.u.x[m.im-1][j][k] = 0.0;                          // rigid lid, as BC_Atm sets
+                // THE CLOSURE RESIDUAL IS |rho*u| LEFT AT THE TOP, against that column's OWN
+                // peak. Taking the peak instead of the endpoint -- which the first version of
+                // this print did -- measures the cell rather than the residual and always reads
+                // ~1. Seventh instrument-shaped defect in this tree, and mine.
+                if (ru_peak > 0.0) {
+                    const double rel = fabs(ru) / ru_peak;
+                    if (rel > worst_top) worst_top = rel;
+                    #pragma omp critical
+                    { resid.push_back(rel); }
+                }
+                if (ru_peak > scale_top) scale_top = ru_peak;
+            }
+        }
+        std::sort(resid.begin(), resid.end());
+        auto q = [&](double f){ return resid.empty() ? 0.0
+                     : resid[std::min(resid.size()-1, (std::size_t)(f*resid.size()))]; };
+        std::cout << "      AGCM: [CELLS U] u rebuilt from discrete continuity against the"
+                  << " installed v over " << resid.size() << " columns;  max |u| = "
+                  << umax << " m/s;  peak column |rho*u| = " << std::scientific
+                  << std::setprecision(2) << scale_top << std::defaultfloat
+                  << ";  CLOSURE |rho*u(top)|/peak: median " << std::fixed << std::setprecision(4)
+                  << q(0.5) << "  p95 " << q(0.95) << "  worst " << worst_top
+                  << std::defaultfloat
+                  << std::endl;
+        std::sort(imbal.begin(), imbal.end());
+        auto qi = [&](double f){ return imbal.empty() ? 0.0
+                     : imbal[std::min(imbal.size()-1, (std::size_t)(f*imbal.size()))]; };
+        std::cout << "      AGCM: [CELLS U] ascent/descent imbalance removed |P-N|/(P+N):"
+                  << std::fixed << std::setprecision(4)
+                  << "  median " << qi(0.5) << "  p95 " << qi(0.95) << "  worst " << qi(1.0)
+                  << std::defaultfloat << ";  columns zeroed for carrying one sign only = "
+                  << nzeroed << std::endl;
     }
 
     void balance_column_mass_flux()

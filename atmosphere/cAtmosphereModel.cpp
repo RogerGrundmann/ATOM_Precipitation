@@ -580,6 +580,10 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // byte-identical). Runs AFTER densities() so rho is real, and immediately BEFORE the mass
     // balance -- which is the check: if the cells close, that correction has nothing to remove.
     VelocityInitializer(*this).install_cells_from_streamfunction();
+    // ATM_CELLS_U_FROM_PSI: rebuild the RADIAL velocity from the installed v by discrete
+    // continuity. Must run AFTER the v loop (it differences v across neighbouring j) and
+    // BEFORE the mass balance, which only shifts v by a column constant. Default off.
+    VelocityInitializer(*this).install_u_from_cells();
     VelocityInitializer(*this).balance_column_mass_flux();
 
     {
@@ -1294,6 +1298,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  POLAR_CELL_SHEAR=" << ev("ATM_POLAR_CELL_SHEAR", "0.1*")
           << "  HADLEY_SL=" << ev("ATM_HADLEY_SL", "4.0N/3.0S*")
           << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "0*")
+          << "  CELLS_U_FROM_PSI=" << ev("ATM_CELLS_U_FROM_PSI", "0*")
+          << "  CELL_ROT_DIAG=" << ev("ATM_CELL_ROT_DIAG", "0*")
           << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
           << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
@@ -1647,6 +1653,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // on the first -- the same defect ATHAD's README item 42 records. The vtk and
                 // the CSV were always correct; only the printed extrema were behind.
                 write_meridional_streamfunction(iter_n);   // Hadley/Ferrel cell strength (zonal-mean v + Ψ) per vtk checkpoint
+                // ATM_CELL_ROT_DIAG -- which way the cells actually TURN. Runs immediately after
+                // the streamfunction so both are formed from the same field at the same iteration,
+                // which is what lets the print flag a Psi/omega disagreement. Print-only.
+                report_cell_rotation(iter_n);
                 print_min_max_atm();
 
                 // ATM_VTK_STRIDE -- write the VTK SLICES only every n-th checkpoint. Default 1

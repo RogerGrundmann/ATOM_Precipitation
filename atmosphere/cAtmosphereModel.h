@@ -489,6 +489,7 @@ private:
     void SetDefaultConfig();
     void print_min_max_atm();
     void write_meridional_streamfunction(int iter);   // zonal-mean v + meridional mass streamfunction Ψ (Hadley/Ferrel cell diagnostic)
+    void report_cell_rotation(int iter);              // ATM_CELL_ROT_DIAG: which way the cells actually turn in the plotted (v,u) field
     // Zonal-mean meridional-wind momentum budget (Hadley/Ferrel spin-down attribution):
     // zonal_mean_v fills vbar[i][j] in m/s; write_v_momentum_budget writes the per-step
     // Δv̄ contributions (RK4 dynamics + each post-RK4 filter) differenced across one iteration.
