@@ -121,6 +121,63 @@ void cAtmosphereModel::print_min_max_atm(){
                  << "   (" << fixed << setprecision(4)
                  << ((big > 0.0) ? mx[n] / big : 0.0) << " of the largest)" << endl;
         }
+        // ============================================================================
+        // ATM_UBUD_BALANCE=1 -- DO THE BUOYANCY AND THE RADIAL PRESSURE GRADIENT OPPOSE
+        // EACH OTHER? Print-only, default off. Asked by the user 2026-09-11 while chasing the
+        // radial-velocity runaway, and the max|term| table above cannot answer it: those six
+        // maxima sit in six DIFFERENT cells, so their ratio says nothing about a local balance.
+        //
+        // In a Boussinesq system the elliptic pressure is what opposes a body force: the Poisson
+        // source is div(aux) with aux_u = rhs_u + dpdr_exp, so the buoyancy IS in the source and
+        // p_dyn should respond to it. If the two anti-correlate with a regression slope near -1,
+        // the pressure is absorbing the buoyancy and the residual driving u is small. If they do
+        // not, the residual is what the radial velocity integrates -- which is the runaway.
+        //
+        // Reported over FLUID cells only, on the same i >= i_topography masking the rest of this
+        // file uses: rms of each term, their correlation, the slope of pgf ON buoy, and the rms
+        // of the SUM against the rms of the larger term -- the last being the cancellation
+        // actually achieved, which is the number the question asks for.
+        static const bool ubud_bal = [](){ const char* e = getenv("ATM_UBUD_BALANCE");
+                                           return e && atoi(e) != 0; }();
+        if(ubud_bal){
+            double sp = 0.0, sb = 0.0, spp = 0.0, sbb = 0.0, spb = 0.0, ss = 0.0, sn = 0.0;
+            long n = 0;
+            for(int i = 0; i < im; i++)
+                for(int j = 0; j < jm; j++)
+                    for(int k = 0; k < km; k++){
+                        if(i < i_topography[j][k]) continue;
+                        const double P = ubud_pgf.x[i][j][k], B = ubud_buoy.x[i][j][k];
+                        if(!std::isfinite(P) || !std::isfinite(B)) continue;
+                        const double net = P + B + ubud_cor.x[i][j][k] + ubud_advv.x[i][j][k]
+                                         + ubud_advh.x[i][j][k] + ubud_diff.x[i][j][k];
+                        sp += P; sb += B; spp += P*P; sbb += B*B; spb += P*B;
+                        ss += (P+B)*(P+B); sn += net*net; n++;
+                    }
+            if(n > 1){
+                const double N = (double)n;
+                const double mp = sp/N, mb = sb/N;
+                const double vp = spp/N - mp*mp, vb = sbb/N - mb*mb, cv = spb/N - mp*mb;
+                const double rp = (vp > 0.0 && vb > 0.0) ? cv/std::sqrt(vp*vb) : 0.0;
+                const double slope = (vb > 0.0) ? cv/vb : 0.0;
+                const double rmsP = std::sqrt(spp/N), rmsB = std::sqrt(sbb/N);
+                const double rmsS = std::sqrt(ss/N),  rmsN = std::sqrt(sn/N);
+                const double bigger = std::max(rmsP, rmsB);
+                const std::ios::fmtflags f2 = cout.flags();
+                cout << " [UBUD BALANCE] over " << n << " fluid cells:" << endl
+                     << "      rms pgf = " << scientific << setprecision(3) << rmsP
+                     << "   rms buoy = " << rmsB
+                     << "   rms(pgf+buoy) = " << rmsS << endl
+                     << "      corr(pgf,buoy) = " << fixed << setprecision(4) << rp
+                     << "   slope(pgf on buoy) = " << slope
+                     << "   cancellation = " << (bigger > 0.0 ? 1.0 - rmsS/bigger : 0.0)
+                     << "   (1 = perfect opposition, 0 = none)" << endl
+                     << "      rms NET rhs_u (all six terms) = " << scientific
+                     << setprecision(3) << rmsN
+                     << "   = " << fixed << setprecision(4)
+                     << (bigger > 0.0 ? rmsN/bigger : 0.0) << " of the larger term" << endl;
+                cout.flags(f2);
+            }
+        }
         cout.flags(saved);
         cout.precision(prec);
     }

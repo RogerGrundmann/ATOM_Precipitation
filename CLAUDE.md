@@ -1160,6 +1160,26 @@ mass-balance stride. **The streamfunction's own two divisor columns confirm the 
 independently**: `max|psi_old|/max|psi_fixdiv|` is 1.000 at 45N/15N/15S/45S/85N and **1.975 at 75S,
 2.005 at 85S** — about half those latitude circles is land.
 
+**MEASURED AT 600 FROM SCRATCH (2026-09-11), AND IT HOLDS.** `output_tr600d` against
+`output_ms600on` (stride 1, both 600 from scratch, one binary, 62 min, exit 0, zero NaN):
+
+| cell change vs control | 75N | 45N | 15N | 15S | 45S | **75S** |
+|---|---|---|---|---|---|---|
+| iteration 20 | +6.8 % | +5.6 % | -8.0 % | -7.7 % | +0.9 % | **+159.8 %** |
+| **iteration 600** | +10.5 % | +3.4 % | **-17.2 %** | **-17.0 %** | -8.0 % | **+174.4 %** |
+
+**The southern polar cell is 2.7x stronger and STAYS so, and its closure improves 25x at 600**
+(0.0810 -> 0.0033) — it stops being the outlier at every checkpoint, not just at initialisation.
+Closure improves in all six bands. **The cost GROWS**: the Hadley cells lose 8 % at iteration 20
+and **17 % at 600**, which is the deeper span spreading the same prescribed `Psi` over nearly the
+whole shell, and is not a transient. Precipitation 949.6 -> 953.0 mm/a, `r` +0.459 both — null, as
+every dynamical arm in this tree is.
+**The polar ascent/descent boundary, both hemispheres read at 5512 m: N 71.5 -> 71.7 deg,
+S 87.1 -> 72.7 deg.** Shipped, the southern polar descent is confined to the last THREE degrees of
+latitude against 18.5 in the north; the fix makes the hemispheres symmetric.
+⚠ Read the ROTATION half of that arm with the runaway caveat above: past iteration ~60 the radial
+runaway has destroyed the cells' vertical structure in BOTH arms.
+
 **⚠ WHAT THE FIX COSTS.** In the tropics the corrected index is **39 of 40, one level below the
 lid** — the shell is 16 023 m against an intended 15 000 m tropopause, and the top layer is 1456 m
 thick, so 0 and 15 deg both land on 39 and the tropopause goes FLAT across the tropics in index
@@ -2734,6 +2754,97 @@ its own history and is pinned to zero at both radial walls. Off-branch verified 
 300 -> 320, 15 of 15 written files byte-identical. **Default stays 0.0**: what is measured is 200
 iterations, and the value that acts is not a physical one.
 
+## The radial velocity runs away, and it is `ATM_BUOY_CONSISTENT=1`
+
+**`max u-component` GROWS NEAR-LINEARLY IN EVERY LONG RUN IN THIS TREE** — 0.088 m/s at iteration
+120 to **1.296 at 620** — and it is identical in `output_ms600on`, `output_ms600ctl` and
+`output_tr600d`, i.e. independent of the tropopause fix, of `ATM_V_MASSBAL_STRIDE` and of
+`ATM_CELLS_U_FROM_PSI`. For a large-scale vertical velocity that is three orders too big:
+continuity against the cells wants ~1e-3 m/s.
+
+**FROM-SCRATCH PAIR, ONE VARIABLE, ONE BINARY** (2026-09-11; `output_tr600d` IS the `=1` arm, so
+only the `=0` arm had to be run — 62 min, not two hours; both exit 0, zero NaN):
+
+| iter | 60 | 140 | 260 | 380 | 500 | **620** |
+|---|---|---|---|---|---|---|
+| `ATM_BUOY_CONSISTENT=1` (default) | 0.0648 | 0.1044 | 0.3017 | 0.6367 | 0.9842 | **1.2966** |
+| **`=0`** | 0.0595 | 0.0439 | 0.0340 | 0.0312 | 0.0282 | **0.0253** |
+
+Growth over iterations 320->620: **`=1` gives +2.79e-03 m/s per iteration, `=0` gives -2.47e-05.**
+The shipped branch does not merely grow more slowly — it **DECAYS**, monotonically from iteration
+60, settling near 0.025 m/s. **51x at iteration 620.**
+
+**AND REMOVING IT COSTS THE CIRCULATION NOTHING MEASURABLE.** At iteration 600 the two arms'
+detrended cells agree within **0.4 %** at all six latitudes, **peak heights are IDENTICAL at every
+latitude**, and closure matches to four decimals; at iteration 200 they agree to every printed
+digit.
+
+**WHY THE 2026-09-09 ACCEPTANCE DID NOT SEE IT.** That flip was judged on `max w_u` (30.804076,
+"the same value to six decimals, so the CFL guard is nowhere near touched"), precipitation,
+pattern `r` and the band p05 ageostrophic residual. **`max u-component` — the radial velocity, the
+component that runs away — was not among them**, and `max w_u` is a different component which
+genuinely did not move. The flip's benefit (residual 0.996 -> 0.336, the force reaching momentum
+through the model's own elliptic pressure) is real and is not in question. Its cost was never
+measured. **THE DEFAULT IS NOT CHANGED HERE** — this is a measurement that puts the flip back on
+the table, and this tree flips on measurements, in both directions.
+
+**CONSEQUENCE FOR EVERY LONG RUN: the runaway destroys the cells' VERTICAL structure by iteration
+~60.** `ATM_CELL_ROT_DIAG`'s polar ascent/descent boundary prints four times in a 600-iteration run
+and then 56 times as *"zonal-mean u does not change sign between 60 and 90 deg"*. So a glyph plot
+or a rotation reading past iteration ~60 is measuring the runaway, not the circulation.
+
+### The mechanism: the pressure opposes only 24 % of the buoyancy
+
+**`ATM_UBUD_BALANCE=1`, new 2026-09-11, print-only, default off.** The `max|term|` table beside it
+CANNOT answer this question — those six maxima sit in six different cells. This reports, over
+fluid cells, the rms of each `rhs_u` term, their correlation, the regression slope, the
+cancellation achieved and the rms NET. `output_ubal2`, iterations 640/660/680, and `output_bc0`:
+
+| | `CONSISTENT=1` | `=0` |
+|---|---|---|
+| rms `ubud_buoy` | **3.894** | 7.7e-06 |
+| rms `ubud_pgf` | 1.169 | 0.901 |
+| **corr(pgf, buoy)** | **-0.751** | *degenerate* |
+| **slope(pgf on buoy)** | **-0.238** | *degenerate* |
+| **cancellation** | **0.204** | *degenerate* |
+| **rms NET `rhs_u`** | **3.099 = 0.796 of the larger** | 0.903 |
+
+**THEY DO ANTI-CORRELATE — THE ELLIPTIC ROUTE WORKS — AND THE PRESSURE RESPONDS WITH LESS THAN A
+QUARTER OF THE REQUIRED AMPLITUDE.** Only 20 % of the buoyancy is cancelled locally; **80 %
+survives as net radial force**, and that net is CONSTANT (3.106 / 3.103 / 3.099), which is exactly
+why `u` grows LINEARLY rather than exponentially or saturating.
+⚠ **The slope and cancellation columns on the `=0` branch divide by the variance of a 7.7e-06
+field and are meaningless** — quote only the two rms columns and the net there.
+⚠ **The maxima give the OPPOSITE answer and are wrong**: `ubud_pgf` max 29.6 against `ubud_buoy`
+max 12.4 suggests the pressure dominates 2.4x, where by rms the buoyancy is **3.3x larger**.
+
+**`ATM_PROJECT_IN_LOOP` DOES NOT ARREST IT.** `output_pl0`/`pl1`, 600->700, 10 sweeps: `max|u|`
+1.527 against 1.525, **0.16 %**. The in-loop velocity projection removes **5.5 %** of the
+divergence per call (9.563e-02 -> 9.032e-02). And the divergence is **100 % RADIAL** — the
+`ratio rms/radial` drifts 0.845 at iteration 20 to **1.00 by 200** and stays there while the rms
+grows 1.77e-03 -> 9.31e-03.
+
+**THIS IS THE FOURTH INDEPENDENT MEASUREMENT POINTING AT THE SAME PLACE.** The meridional
+`pgf`/`coriolis` = 2.5e-05 (*There is no thermal wind*); the projection removing 45-53 % of what it
+should and getting WORSE as the solver converges (*The projection's shortfall is ADJOINTNESS*);
+the cell budget's `pgf` = -2.4e-09 against `coriolis` = -4.2e-05; and now 24 % opposition of a body
+force. **This model's pressure cannot answer a body force.** That these are ONE defect is NOT
+proven — it has not been tested — but four measurements now converge on it.
+
+### And the glyphs: plot `uv_plot`, never `u-v-Cell`
+
+**THE POLAR CELLS TURN THE RIGHT WAY AND THE GLYPH FIELD WAS THE PROBLEM** (2026-09-11, found by
+the user looking at the plot). The zonal slice writes TWO vector fields, and its geometry is
+**X = height, Y = latitude**, with one plot unit worth **555x** more metres along Y than along X.
+
+`u-v-Cell` writes raw m/s into that geometry — it matches the written scalars exactly, checked at
+four points, so nothing is mis-written — but its arrows therefore do not point along the DRAWN
+flow. Measured from `output_rotf`'s own POINTS block: it draws the northern Ferrel cell rotating
+**WITH** Hadley instead of against it, and the southern polar cell at 2.87e-02, an order of
+magnitude weaker than any other band. `uv_plot`, which is scaled into plot coordinates, gives
+**all six senses correct**. `u-v-Cell`'s own comment already says it is "close to useless as a
+glyph here"; the trap is that it has the obvious-looking name.
+
 ## The projection's shortfall is ADJOINTNESS, and converging the solver makes it WORSE
 
 **`ATM_PROJ_CONSISTENCY=1`, new 2026-09-06, print-only, default off.** This tree concluded, BY
@@ -3064,6 +3175,13 @@ evaporation, condensation and transport, summed to close — not another knob.
 **THAT INSTRUMENT IS NOW WRITTEN, AND THE QUESTION WAS MIS-POSED: SEE THE SECTION BELOW.** There
 is no 500 mm/a source. `P - E` is the residue of two terms of **5e+06 mm/a**, and the `E` in it is
 a diagnostic that reaches the water field nowhere.
+
+**⚠ AND THE FIRST CHECKPOINT AFTER A RESTART CAPTURES NO RADIAL MOMENTUM BUDGET** (2026-09-11).
+`ubud_*` are filled only when `do_vbudget = (iter_n % checkpoint == 0)` fires, and on a restart the
+first such checkpoint yields ZERO: `output_pl0`'s first two budget prints read 0.000e+00 and its
+later four read 2.963e+01. **A 20-iteration restart therefore measures NOTHING** — it prints a
+full, plausible-looking table of zeros. Any restart shorter than ~40 iterations cannot read
+`ubud_*`, which is plausibly why `rhs_u`'s balance had never been looked at. Cost one wasted arm.
 
 **⚠ `nm` MEANS DIFFERENT THINGS IN THE TWO MODELS, AND THE FIRST ATTEMPT AT THIS RUN WAS A
 SILENT NO-OP.** `cAtmosphereModel.cpp:1319` is `for(iter_n = iter_start; iter_n <= nm; iter_n++)`,
