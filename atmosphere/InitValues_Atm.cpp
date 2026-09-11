@@ -374,9 +374,55 @@ void cAtmosphereModel::debug_vapor_output(int i, int j, int k,
 // cell span -- meets a very different field. The index is clamped to im-2 so at least one level
 // always remains above it, and no further judgement is applied.
 //
-// THREE CONSUMERS, AND THIS MOVES ALL OF THEM AT ONCE: ThermoAtm.h:440, VelocityInitializer.h's
-// balance_thermal_wind (three sites) and install_cells_from_streamfunction. That breadth is the
-// reason for the knob rather than a repair in place.
+// THE CONSUMERS, CORRECTED 2026-09-11 BY GREP AGAINST HEAD -- the list first written here was
+// wrong in both directions, and the difference matters because it moves the fix's reach from the
+// thermodynamics onto the DEFAULT initial velocity field.
+//
+//   - balance_thermal_wind DOES NOT READ THE TROPOPAUSE AT ALL. It was named for three sites it
+//     does not have: `grep -n get_tropopause_layer VelocityInitializer.h` returns 396, 859, 879
+//     and 900, and balance_thermal_wind spans 702-811.
+//   - ThermoAtm.h:440 is DIAGNOSTIC ONLY. Its i_trop bounds the fill of TempStand, TempDewPoint
+//     and HumidityRel, and those three reach Results_Atm's print and the VTK writers and nothing
+//     dynamical. Tropopause.y is likewise VTK-only, and it carries the HEIGHT, which this does
+//     not change.
+//   - THE THREE REAL SITES ARE init_u, init_v_or_w AND init_v_or_w_above_tropopause -- the
+//     analytic velocity IC, which is LIVE ON EVERY RUN behind no knob at all. init_u builds the
+//     RADIAL profile; init_v_or_w is called for the MERIDIONAL v (the Hadley/Ferrel/polar ramps)
+//     AND for the ZONAL w (the jet), so all three components move with the index.
+//   - install_cells_from_streamfunction (site 396) is gated on ATM_CELLS_FROM_PSI and overwrites
+//     v only, so under that knob the v-ramp change is masked and the u and w changes are not.
+//
+// MEASURED 2026-09-11, nm = 20 from scratch, 24 threads, ATM_CELLS_FROM_PSI=1 + _VW=0.25, one
+// pinned binary, all arms exit 0 with zero NaN. AT INITIALISATION the predicted repair lands and
+// one effect was unpredicted: columns given a cell 61 451 -> 64 619 of 65 341, and the initial
+// max|v| 13.583 -> 3.026 m/s. That factor of 4.5 is the defect stated as a velocity -- a 26e9
+// kg/s polar cell forced into a 2987 m column needs 13.6 m/s of meridional wind to carry it, and
+// with 8173 m of room it needs 3.0.
+//
+// AT ITERATION 20, WITH THE STANDING LEAK REMOVED (ATM_V_MASSBAL_STRIDE=1, so this compares the
+// CELLS and not the offset sitting on them). closure = |Psi(ground)|/cell:
+//
+//     closure        75N     45N     15N     15S     45S     75S
+//     shipped     0.0019  0.0021  0.0012  0.0001  0.0011  0.0484
+//     fixed       0.0007  0.0004  0.0041  0.0051  0.0004  0.0052
+//
+//     detrended cell, 1e9 kg/s
+//     shipped      11.78   36.95  118.87  117.05   39.59    4.25
+//     fixed        12.58   39.00  109.32  108.05   39.96   11.03
+//
+// 75S WAS THE OUTLIER AT EVERY STRIDE AND IS NOT ANY MORE: closure 0.0484 -> 0.0052 and its cell
+// +160 %, so the N/S polar asymmetry goes 2.77x -> 1.14x. That is this knob's whole purpose,
+// measured. Two costs come with it: the TROPICAL cell loses 8 % (109 against 119), because the
+// same prescribed Psi is now spread over a span reaching 14 567 m; and tropical closure is ~3x
+// worse (0.0041 against 0.0012) -- small in absolute terms, and three orders below the 0.163 the
+// same comparison shows WITHOUT the stride, which is the leak and not this knob. The two knobs
+// are coupled and must be read together.
+// max w_u falls 37.608 -> 26.438 m/s on BOTH stride branches, so that is this fix and not the
+// stride. The jet weakens 27.19 -> 23.56 m/s and its core rises 9007 -> 9923 m, which is init_u
+// and init_v_or_w placing their tropopause values higher.
+// Precipitation is IDENTICAL to the printed digit in all four arms -- 541.3 mm/a, r +0.349,
+// centred RMS 1280.4, every band -- which is what 20 iterations = 4 s of physical time requires
+// of any dynamical arm in this tree.
 //
 // ORDERING HAZARD, FIXED WITH IT: init_tropopause_layers() used to run in an
 // `omp parallel sections` block ALONGSIDE init_layer_heights(). The shipped conversion reads
@@ -411,9 +457,17 @@ void cAtmosphereModel::init_tropopause_layers(){
     double x_max = tropopause_equator                                                                                                                                                                    
                    * std::sqrt(tropopause_equator / tropopause_pole - 1.0);                                                                                                                              
                   
-  cout << "tropopause_pole=" << tropopause_pole                                                                                                                                                            
-       << " x_max=" << x_max                                                                                                                                                                               
-       << " pole_index=" << round(tropopause_pole/L_atm) << endl;                                                                                                                                          
+  // The pole index is reported from tropopause_index(), i.e. from the conversion actually in
+  // force, and with the HEIGHT that index lands on beside it. It used to print
+  // round(tropopause_pole/L_atm) unconditionally, so under ATM_TROPO_INDEX_FIX=1 it reported 20
+  // where the model was using 33 -- an instrument that lies on the branch under test.
+  cout << "tropopause_pole=" << tropopause_pole
+       << " x_max=" << x_max
+       << " pole_index=" << (int)tropopause_index(tropopause_pole)
+       << " -> " << get_layer_height((int)tropopause_index(tropopause_pole)) << " m"
+       << "   equator_index=" << (int)tropopause_index(tropopause_equator)
+       << " -> " << get_layer_height((int)tropopause_index(tropopause_equator)) << " m"
+       << endl;
 
 
 
