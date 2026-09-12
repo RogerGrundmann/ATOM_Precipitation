@@ -60,7 +60,7 @@ void cAtmosphereModel::SetDefaultConfig() {
   // atmosphere section
   nm = 400;
   checkpoint = 20;
-  panorama_print = 100;
+  panorama_print = 300;
   coeff_Dalton = 0.7;
   convection_perturbation = 1;
   convection_mode = 1;

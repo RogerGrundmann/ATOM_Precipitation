@@ -159,7 +159,12 @@ def main():
 #            ('nm', 'the maximum number of iterations', 'int', 100),
             ('nm', 'the maximum number of iterations', 'int', 400),
             ('checkpoint', "control when to write output files", 'int', 20),
-            ('panorama_print', "control when to write panorama files", 'int', 100),
+            # 300 since 2026-09-12 (was 100). The panorama .vts is the dominant disk cost in this
+            # tree BY FAR: 917 MB per file against 27 MB for a VTK slice set, so the 600-iteration
+            # output_vw1200 wrote 5.5 GB of panorama against 557 MB of slices. At 300 a 1200-iter
+            # run writes 4 panoramas instead of 12. Unrelated to ATM_VTK_STRIDE, which thins the
+            # SLICES on a multiple of `checkpoint`; this is an absolute iteration count.
+            ('panorama_print', "control when to write panorama files", 'int', 300),
 
 
             ('coeff_Dalton', "diffusion coefficient in evaporation by Dalton", 'double', 0.7),

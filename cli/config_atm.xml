@@ -54,7 +54,7 @@
     <atmosphere>
         <nm>400</nm>  <!-- the maximum number of iterations(int) -->
         <checkpoint>20</checkpoint>  <!-- control when to write output files(int) -->
-        <panorama_print>100</panorama_print>  <!-- control when to write panorama files(int) -->
+        <panorama_print>300</panorama_print>  <!-- control when to write panorama files(int) -->
         <coeff_Dalton>0.7</coeff_Dalton>  <!-- diffusion coefficient in evaporation by Dalton(double) -->
         <convection_perturbation>1</convection_perturbation>  <!-- convective trigger perturbation: 0=fixed, 1=Bechtold (2008) surface-flux-based for shallow/fixed for deep(int) -->
         <convection_mode>1</convection_mode>  <!-- convection type: 0=deep only (precipitating), 1=deep+shallow (non-precipitating if p_diff<p_stat_diff), 2=deep+shallow+midlevel (also non-precipitating for cloud base above p_stat_midlevel/700 hPa)(int) -->
