@@ -954,6 +954,75 @@ different components. Measured 20 -> 200: Hadley -40.3 % -> **-25.0 %**, Ferrel 
 **-3.5 %**. Fitting `decay = A*s + B` gives A = 20.4, B = 19.9, so **about half the Hadley decay is
 the filter**.
 
+### The filter changes the cell's SHAPE, not just its size, and it eats the UPPER branch
+
+**ASKED 2026-09-12** — *"what drives the cell shape to change from iter=0 to iter=400 that much,
+the initial velocity profile is completely gone and I thought it only would change the size but
+not the form"*. **The expectation is right about the PHYSICS and the acting term is not physics.**
+Measured on `output_pdc600` (600 from scratch, `_VW=0.25`), normalised by the cell amplitude so
+size is divided out, at 15N:
+
+| normalised `Psi`-`Psi`(gnd) | 0.13 km | 0.82 | 2.41 | 3.32 | **4.51** | 6.09 | 8.17 | **10.93 km** |
+|---|---|---|---|---|---|---|---|---|
+| iter 20 | -0.046 | -0.309 | -0.777 | -0.922 | **-1.000** | -0.942 | -0.674 | **-0.188** |
+| iter 400 | -0.049 | -0.330 | -0.813 | -0.951 | **-1.000** | -0.842 | -0.436 | **-0.068** |
+| change | 6 % | 7 % | 5 % | 3 % | — | **-11 %** | **-35 %** | **-64 %** |
+
+**BELOW THE MAXIMUM THE SHAPE IS INVARIANT TO A FEW PER CENT AND ABOVE IT THE RETURN BRANCH IS
+ERASED.** In `vbar` itself the asymmetry is starker: at 10.93 km it goes **-1.110 -> -0.379,
+-66 %**, against the 938 m branch's **+0.972 -> +0.846, -13 %.** The amplitude falls 16 %. So the
+cell is not decaying, it is becoming BOTTOM-HEAVY, and the `Psi` maximum duly migrates downward —
+4988 -> 4510 -> 4075 m over 500 iterations, the same thing the jet does over 1000 (9007 -> 5512 m).
+
+**ONE VARIABLE SAYS IT IS THE FILTER AND NOTHING ELSE** (`output_bcs0` `_VW=0.25` against
+`output_vw0` `_VW=0`, both `BUOY_CONSISTENT=0`, 600 from scratch, one binary), normalised `Psi` at
+15N, iteration 20 -> 400:
+
+| | 4.51 km | 4.99 | 5.51 | 6.09 | 6.72 | **7.41 km** | amplitude |
+|---|---|---|---|---|---|---|---|
+| `_VW=0.25`, iter 20 | -1.000 | -1.000 | -0.982 | -0.942 | -0.879 | **-0.791** | 109.32 |
+| `_VW=0.25`, iter 400 | -1.000 | -0.976 | -0.925 | -0.841 | -0.727 | **-0.588** | 91.28 (**-16.5 %**) |
+| `_VW=0`, iter 20 | -0.998 | -1.000 | -0.985 | -0.949 | -0.891 | -0.807 | 112.55 |
+| **`_VW=0`, iter 400** | **-0.998** | **-1.000** | **-0.985** | **-0.949** | **-0.890** | **-0.806** | 111.31 (**-1.1 %**) |
+
+**With the filter off the profile is IDENTICAL TO THREE DECIMALS AT EVERY LEVEL after 380
+iterations.** So the filter is the whole of the shape change as well as ~90 % of the amplitude
+decay — *the earlier result that `_VW=0` "freezes the Hadley cells" is stronger than recorded: it
+freezes their FORM too.*
+
+**AND THE REASON IT IS TOP-HEAVY IS THE STRETCHED GRID, MEASURED RATHER THAN ARGUED.** A 1-2-1
+filter removes the INDEX-space second difference, and that is the quantity the 23.21x stretch
+inflates aloft. Down the 15N column at iteration 400:
+
+| z | 938 m | 2163 | 3316 | 4988 | 6719 | 8173 | **9007** | 9923 |
+|---|---|---|---|---|---|---|---|---|
+| layer `dz` | 124 m | 238 | 346 | 501 | 662 | 797 | 875 | 960 m |
+| `(dz/dz_0)^2` | 10 | 38 | 79 | 166 | 289 | 420 | **505** | 608 |
+| **1-2-1 `d2(vbar)`** | -0.0041 | -0.0049 | -0.0152 | -0.0159 | +0.0550 | +0.0956 | **+0.0905** | +0.0611 |
+| `dv_radial` /iter | -4.7e-05 | +1.5e-05 | +1.8e-05 | -2.8e-04 | +9.2e-05 | +6.1e-04 | **+7.6e-04** | +7.9e-04 |
+| \|`dv_radial`/`dv_dyn`\| | 1.1 | 0.4 | 0.7 | 30 | 145 | 290 | **17 679** | 382 |
+
+**The profile is SMOOTH IN METRES and sharply curved PER INDEX aloft** — `|d2(vbar)|` is 0.004 to
+0.005 below 2 km and **0.09 to 0.10 at 8-9 km, a factor of 20** — because the levels there are
+eight times further apart. `dv_radial` carries the SAME SIGN as `d2(vbar)` at every level, which is
+the mechanism identified rather than inferred: on the upper branch `vbar` is negative and
+`dv_radial` is POSITIVE, i.e. pushed toward zero, at **145 to 17 700x the entire resolved
+dynamics**, where below 3.3 km it is comparable to them (0.4-1.1x).
+
+Integrating the tendencies over iterations 20-480 at 15N (budget written every 20 iterations, so
+this is a RANKING and not a closed budget — a rectangle rule on a decaying rate closes to 134 % on
+the upper branch and 38 % on the lower):
+
+| 15N | actual `vbar` change | `dv_radial` | `dv_dyn` (ALL physics) | `dv_orog` |
+|---|---|---|---|---|
+| **10.93 km, upper branch** | **+0.731 m/s** | **+0.980** | **+0.0007** | 0.000 |
+| 0.94 km, lower branch | -0.127 m/s | -0.025 | -0.021 | -0.002 |
+
+**On the upper branch a numerical smoother is 1400x the whole of the resolved dynamics; on the
+lower branch the two are comparable and both are small.** That 66 %-against-13 % asymmetry IS the
+change of form. **A smoother does not scale a profile, it reshapes it** — and one that is uniform
+in index space on this tree's grid reshapes it from the top down.
+
 ### `ATM_RADIAL_SHAPIRO_STRENGTH_VW=0` freezes the Hadley cells, and the poles resist
 
 **THE FILTER IS ~90 % OF THE TROPICAL CELL DECAY AND ~10 % OF THE NORTHERN POLAR ONE**
