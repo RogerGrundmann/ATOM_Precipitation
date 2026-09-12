@@ -1435,8 +1435,13 @@ its own arm.
 re-derived 2026-09-06 under the reference density; they read 87 and 131 while this file used
 43.7). A geostrophically balanced mid-latitude pressure field in these units is `p_dyn` ~ **40** —
 **13x above the ceiling**, so the conclusion is unchanged and its margin is smaller.
-**Neither binds today** — max \|`p_dyn`\| is 0.017 at iteration 600, 176x
-below the ceiling — so they are a LATENT barrier and not the present cause. But any repair that
+**⚠ "NEITHER BINDS TODAY" WAS TRUE OF THE PRE-FLIP BRANCH AND IS FALSE UNDER THE CURRENT
+DEFAULTS — CORRECTED 2026-09-12.** The 0.017 quoted here, 176x below the ceiling, is an
+`ATM_BUOY_CONSISTENT=0` number. With the 2026-09-09 default flip `max|p_dyn|` grows monotonically
+to the ceiling, first clips at iteration **~400** of a 600-iteration from-scratch run, and
+truncates **4.8-7.6 %** of all cells thereafter. So the ceiling is a PRESENT cause, not a latent
+barrier, and the pressure-amplitude measurements taken past iteration 400 were taken through it —
+see *And the 24 % was measured through a CLAMP* below. But any repair that
 gives this model a real thermal pressure field will hit them before it works, and re-sizing them
 is part of that repair rather than a follow-up. *Sixth instrument-shaped defect in this tree,
 after `Psi`'s constant density, `Q_Sensible`, `brunt_N2`'s terrain extrema, the "OLR" that was the
@@ -2866,6 +2871,82 @@ should and getting WORSE as the solver converges (*The projection's shortfall is
 the cell budget's `pgf` = -2.4e-09 against `coriolis` = -4.2e-05; and now 24 % opposition of a body
 force. **This model's pressure cannot answer a body force.** That these are ONE defect is NOT
 proven — it has not been tested — but four measurements now converge on it.
+
+### And the 24 % was measured through a CLAMP: `p_dyn_ceiling` has been binding since iteration ~400
+
+**THE PRESSURE'S AMPLITUDE WAS NOT SOLVER-LIMITED, IT WAS CLAMP-LIMITED, AND EVERY RUN HAS BEEN
+PRINTING IT** (2026-09-12, from `output_lsbal` / `output_ubal2` — both already on disk — plus two
+new arms). `PressureSolverAtm.h`'s ceiling carries a counter and a `*** CEILING BINDING ***`
+marker, added on 2026-09-06 precisely because *"the first repair that works will hit the clamp
+before it shows a circulation, and would otherwise look like a null."* **That is what happened,
+and the marker was in the log.** *Twelfth occurrence of "the answer was in output nobody opened",
+and the first where the output was a warning the previous session had asked for.*
+
+| 600 from scratch, current defaults (`output_tr600d`) | iter 20 | 120 | 320 | 420 | **~400 on** | 600 |
+|---|---|---|---|---|---|---|
+| `max\|p_dyn\|` pre-clip | 7.9e-04 | 1.8e-02 | 1.1e-01 | 1.8e-01 | **pegs at 3.0** | **3.076** |
+| cells clipped | 0 | 0 | 0 | 0 | 132 -> | **128 644 = 4.80 %** |
+
+**IT BINDS IF AND ONLY IF `ATM_BUOY_CONSISTENT=1`.** At 600 from scratch, `max|p_dyn|` is
+**4.3e-03** (`output_vw0`), **4.2e-02** (`output_bcs0`) and **1.7e-02** (`output_sp600ctl`) — all
+three `=0` arms, never one clipped cell, and the 1.7e-02 is exactly the 0.017 this file quotes as
+"176x below the ceiling". With `=1` it is **3.076, pegged**, and `output_bc0` (a `=0` restart FROM
+the clipped state) shows the field decaying back through the ceiling, 7254 clipped cells -> 0 in
+~120 iterations. **So "neither clamp binds today" was a statement about the PRE-FLIP branch and
+stopped being true on 2026-09-09**; the paragraph in *`p_dyn` is not in the units this tree has
+always said it is* is corrected accordingly. The clipping is localised: the `ubud_pgf` extremum is
+pinned at **exactly -29.629630** in both arms at every checkpoint, at DIFFERENT cells each time,
+always the Antarctic coastal ground layer at 38 m (74-80S, 92-131E) — a saturated plateau whose
+value is set by the clamp and not by the field.
+
+**FOUR ARMS, 600 -> 680 from `output_tr600d`'s checkpoint (md5 `ad8d87f6`), 24 threads, ONE
+VARIABLE PER EDGE, all exit 0 with ZERO NaN** and `max w_u` 22.95 against the +-100 clamp in all
+four. `ATM_PDYN_CEILING=50` is above the ~40 non-dim a geostrophically balanced mid-latitude field
+needs; `cli/atm` with `ATM_PRESS_LINE_SOLVE` unset is byte-identical to `atm_rot600`, which is what
+makes `pdc_pw` a legitimate partner for `ubal2`:
+
+| iteration 680 | solver | ceiling | `max\|p_dyn\|` | clipped | **rms `pgf`** | corr | **cancellation** | **NET / larger** | `max\|u\|` |
+|---|---|---|---|---|---|---|---|---|---|
+| `ubal2` | pointwise | 3.0 | 3.076 | **5.35 %** | 1.169 | -0.751 | 0.2038 | 0.7959 | 2.5981 |
+| `lsbal` | line | 3.0 | 3.415 | **7.60 %** | **1.116** | -0.820 | 0.2159 | 0.7837 | 2.5854 |
+| `pdc_pw` | pointwise | **50** | 4.120 | **0** | 1.263 | -0.773 | 0.2285 | 0.7712 | 2.5981 |
+| **`pdc_ls`** | **line** | **50** | **6.853** | **0** | **1.418** | **-0.857** | **0.2908** | **0.7089** | 2.5840 |
+
+**THE CLAMPED ARMS ARE PINNED AND THE RELEASED ONE IS STILL CLIMBING.** Over 640/660/680 the
+pointwise-clamped `rms pgf` reads 1.168 / 1.169 / 1.169 — FLAT — the line-solve-clamped one
+**FALLS** 1.148 / 1.129 / 1.116, and the released line solve **RISES** 1.255 / 1.339 / 1.418 with
+cancellation 0.2381 / 0.2670 / 0.2908, monotone and not converged at the end of the arm.
+
+**AND THEY ARE SUPER-ADDITIVE, WHICH IS THE ATTRIBUTION.** On `rms pgf`: the ceiling alone
+**+8 %**, the line solve alone **-5 %**, together **+21 %**. On cancellation: +12 %, +6 %, together
+**+43 %** where additive would be +18 %. The released line solve reaches `max|p_dyn|` **6.853
+against the pointwise 4.120, 1.66x** — so the converged column mode is exactly the thing that
+wants the amplitude, and the clamp was exactly what stopped it. **NINTH CANCELLING PAIR IN THIS
+TREE, and the commit that introduced the line solve named the wrong partner**: it wrote that the
+solver fix and the ADJOINTNESS fix are a pair. The partner is the CLAMP.
+
+**SO YESTERDAY'S CONCLUSION IS CORRECTED.** *"The pressure tracks the buoyancy's SHAPE much better
+and its AMPLITUDE barely moves, so the binding constraint is the amplitude and the amplitude is set
+by the wide-gradient correction, so the face-consistent correction is the other half"* — the shape
+half stands (corr -0.751 -> -0.820 -> -0.857), the amplitude half was measured through a clamp and
+is **NOT established**. A face-consistent correction is no longer the evidenced next step.
+
+**WHAT IT DOES NOT DO, AND THIS IS THE LIMIT THAT MATTERS: THE RUNAWAY IS NOT ARRESTED.**
+`max|u|` is **2.598102 against 2.598105** between `pdc_pw` and `ubal2` — identical to six figures,
+so the ceiling ALONE moves the radial velocity by nothing — and `pdc_ls` gives 2.5840 against
+`lsbal`'s 2.5854, **-0.06 %**. Growth per iteration over 600-680 is 2.42e-03 pointwise against
+2.22e-03 with the line solve, an 8 % reduction where 100 % is needed. **71 % of the buoyancy still
+survives as net radial force even in the best arm**, and 80 iterations is 16 s of physical time —
+far too short for a 0.796 -> 0.709 change in the net to show in an integrated velocity.
+Precipitation is 953.1-953.4 mm/a in all four and `Psi` is identical to four figures at every
+checkpoint: null, as every dynamical arm in this tree is.
+
+**NOTHING IS FLIPPED.** `ATM_PDYN_CEILING` stays at its shipped phase-dependent value. What is
+settled is that the ceiling is NOT latent under the current defaults, that releasing it is stable
+over 80 iterations at 2.3x the shipped value, and that the amplitude measurement it was
+contaminating has to be retaken. What is NOT settled is whether a released ceiling is stable over a
+600-iteration from-scratch run — the value was lowered 10.0 -> 3.0 for the iteration-483 runaway,
+and no arm here goes near that — nor whether the cancellation keeps climbing past 0.29.
 
 ### And the glyphs: plot `uv_plot`, never `u-v-Cell`
 
