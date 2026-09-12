@@ -1059,6 +1059,68 @@ same ceiling the jet hit at strength 0. **Default stays at the global knob** (bi
 is measured is 600 iterations on a non-default configuration (`CELLS_FROM_PSI=1`), and nothing has
 been run at `_VW=0` on the shipped default.
 
+### ★ THE ATMOSPHERE CONVERGES WITH `_VW=0`, AND IT HAS NEVER CONVERGED WITH THE FILTER ON
+
+**`converged` = 1 IN EXACTLY THE TWO `_VW=0` ARMS AND IN NONE OF THE SIX `_VW=0.25` ONES**
+(2026-09-12). This tree's convergence monitor has read `converged` = 0 in every atmosphere run
+ever recorded, and the standing note says *"circulation never fully converges"*. It converges when
+the radial Shapiro filter is off on `v`/`w`, at iteration ~225, and then holds for 375 more:
+
+| 600 from scratch | `_VW` | `BUOY_CONSISTENT` | ceiling | **mean KE m2/s2** | **drift KE %** | **conv** |
+|---|---|---|---|---|---|---|
+| **`output_vw0`** | **0** | 0 | 3.0 | **36.369** | **0.052** | **1** |
+| **`output_vw0pdc`** | **0** | **1** | **50** | **36.434** | **0.016** | **1** |
+| `output_bcs0` | 0.25 | 0 | 3.0 | 19.329 | 4.145 | 0 |
+| `output_tr600d` | 0.25 | 1 | 3.0 | 19.401 | 4.052 | 0 |
+| `output_pdc600` | 0.25 | 1 | 50 | 19.399 | 4.057 | 0 |
+| `output_ms600on` / `ms600ctl` / `cellpsi` | 0.25 | 1 | 3.0 | 27.58 | 3.51 | 0 |
+| `output_sp600ctl` / `twctl` | 0.25 | 0 | 3.0 | 20.499 | 5.591 | 0 |
+
+**NEITHER THE BUOYANCY BRANCH NOR THE CEILING MATTERS — 36.37 against 36.43 across `BUOY` 0/1 AND
+ceiling 3/50, both converged; 19.33 / 19.40 / 19.40 across the same, none converged.** The one
+variable that separates the table is `_VW`.
+
+**THE MECHANISM IS THAT THE FILTER IS A CONTINUOUS KE SINK, AND IT IS REMOVING HALF THE MODEL'S
+KINETIC ENERGY.** The filtered arms hold **53 %** of the unfiltered KE and are still draining at
+**~4 % per 100 iterations at iteration 600**: `pdc600` runs 30.87 -> 25.55 -> 23.32 -> 21.87 ->
+20.80 -> 19.95 -> 19.40, monotone, **-37 % over the run**. `vw0pdc` runs 36.482 -> 36.462 ->
+36.448 -> 36.4448 -> 36.4444 -> 36.4402 -> 36.434, i.e. **flat to 0.13 % over 575 iterations**.
+*A model losing 4 % of its kinetic energy every hundred iterations cannot converge, and that is
+the whole of why this one never did.*
+
+**⚠ AND `output_vw0` HAS BEEN ON DISK SINCE 2026-09-11 CARRYING THIS RESULT.** It was run to answer
+the CELL-decay question, its `convergence.csv` was never opened, and the cell answer was written up
+without it. **Fourteenth occurrence of "the answer was in output nobody opened", and the largest:
+the first converged atmosphere in this tree sat unread in a run made for something else.**
+
+**WHAT IT COSTS, AND IT IS ONE NUMBER.** `max|w_u|` goes **19.77 -> 40.60 m/s**, 2.05x — the zonal
+wind is no longer being filtered away — and it EQUILIBRATES rather than running away: -29.8, -36.2,
+-35.4, -41.1, -40.8, **-40.6** over the run, flat-to-falling from iteration ~400, at **41 % of the
++-100 clamp**. `max|u|` is **1.296528 against 1.296571**, identical to five figures, so **`_VW` has
+nothing to do with the radial runaway** — that is `ATM_BUOY_CONSISTENT` and nothing else, confirmed
+on a third pair. Exit 0, zero NaN, through 155, 357 and 483.
+
+**AND THE CELLS REPRODUCE THE RECORDED `_VW=0` FIGURES ON A DIFFERENT BRANCH**, which is the
+cross-validation: iteration 20 -> 600 decay **-20.4 / -7.3 / -1.7 / -1.7 / +2.3 / -33.7 %** at
+75N/45N/15N/15S/45S/75S against the recorded -20.5 / -6.9 / -1.7 / -1.7 / -2.7 / -33.6 % measured
+at `BUOY_CONSISTENT=0` with the shipped ceiling. **The Hadley figure is -1.7 % against `pdc600`'s
+-20.3 %, the same 12x**, and the `Psi` PEAK HEIGHT is unchanged at every latitude (3316 / 4510 /
+4988 / 4988 / 4075 / 4988 m at both 20 and 600) where `pdc600`'s migrates down to
+3316 / 4075 / 4075 / 4075 / 3678 / 4510.
+
+**⚠ WHAT "CONVERGED" DOES AND DOES NOT MEAN HERE, AND THIS IS THE QUALIFICATION THAT MATTERS.**
+It means the volume-mean KE and temperature stopped changing. It does NOT mean the circulation
+reached a dynamical balance: with the filter off the cells FREEZE rather than being maintained —
+the meridional `pgf` is **-2.4e-09 against `coriolis` -4.2e-05**, four orders — so the steady state
+is the initial condition sitting still, not a balance. **Convergence was bought by removing a sink,
+not by supplying a force.** And it buys no climate: Precip **947.2 against 953.3 (-0.6 %)**,
+`r` +0.458 against +0.460, sigma 2.29 against 2.30 — null, like every dynamical arm in this tree.
+
+**DEFAULT UNCHANGED** (`_VW` follows the global knob). What is settled is that the filter, not the
+physics, is what has kept this model from converging, and that a converged atmosphere is reachable
+in 62 minutes. What is not settled is whether a frozen circulation is worth having, and whether
+`max|w_u|` = 40.6 stays put past 600.
+
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
 `init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps surface -> tropopause, so a CELL is the difference:
