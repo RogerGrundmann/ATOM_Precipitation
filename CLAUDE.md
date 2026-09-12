@@ -1219,6 +1219,65 @@ line above it, so **`min w_d` has been printing as `min w_u` in every run this t
 made**, and a grep for `min w_u` returns two different quantities (-58.60 at the lid and -0.855 at
 38 m). Fixed to `" min w_d "`; print-only, and it postdates the byte verification above.
 
+### `w_u` HAS NO LIVE CONSUMER ITS GROWTH CAN REACH — and the trace found two larger things
+
+**TRACED 2026-09-12, READ-ONLY, NO CODE WRITTEN.** Five readers of `w_u`; the growth to 58.6 m/s
+reaches none of them in a way that acts:
+
+| site | what it does | does the lid value reach it? |
+|---|---|---|
+| `MoistConvection.h:973` | `sigma_p = min(1, \|M_u\|/(rho*\|w_u\|*u_0))`, Nordeng's convective area fraction | **NO** — read at CLOUD BASE (`i_base`) only |
+| `:1627` | the same formula inside `ATM_MC_DIAG` | print-only |
+| `:1415-1421` -> `RHS_Atm_Turb.cpp:1363` | `MC_w` = `safe_cap(-d[M_u*(w_u-w) + M_d*(w_d-w)]/dz * u_0, MCv_max)` | the ONLY momentum route, and see below |
+| `:1086-1099` | its own recurrence | self-feeding — the amplifier |
+| `UtilsAtm.h:433`, `Paraview_Atm.cpp` | restart binary, VTK/panorama | persists across restarts; plotted |
+
+**THE AMPLIFIER IS EXPLICIT AND STRUCTURAL.**
+`w_u[i] = (M_u[i-1]*w_u[i-1] + dz*E_u[i-1]*w[i-1]) / M_u[i]`, so wherever `M_u` DECREASES with
+height the value is multiplied by `M_u[i-1]/M_u[i]` per level — a geometric amplifier UP the
+column, the same shape as ThreeCat's `P_snow_0` in a denominator. Guarded only BELOW
+`coeff_recurr` = 0.1, where `w_u` is replaced by the environment `w`. **That is why the extremum
+sits at the top of the column, at the lid.**
+
+**AND THE MOMENTUM ROUTE IS DEAD TO IT: `max\|MC_w\|` IS EXACTLY 1.0000e-02 = `MCv_max` AT EVERY
+CHECKPOINT OF BOTH RUNS, FROM ITERATION 0 THROUGH 1200.** Saturated the whole time. Whatever `w_u`
+does, `MC_w` reads the cap. **So there is nothing to write for `w_u`** — and that conclusion cost
+one trace and no runs.
+
+**★ A. `max w_u` IS THIS TREE'S MOST-CITED STABILITY WITNESS AND IT IS AN UNCONSUMED DIAGNOSTIC.**
+This file leans on *"max w_u against the +-100 clamp"* in the `ATM_BUOY_CONSISTENT` acceptance
+(*"the same value to six decimals, so the CFL guard is nowhere near touched at full physical
+strength"*), the `ATM_METRIC_SIN_FLOOR` sweep, the ThreeCat arms and the `ATM_HYDRO_PGF` arms. It
+measures the updraft recurrence's `1/M_u` amplification near the column top, **not a wind**, and it
+reaches momentum only through a term that is pegged. *Eighth instrument-shaped defect in this tree,
+after `Psi`'s constant density, `Q_Sensible`, `brunt_N2`'s terrain extrema, the "OLR" that was the
+lid temperature, `ATM_SR_DIAG`'s ground bucket, the two pressure clamps, and `min w_d` printing as
+`min w_u`.* **Every acceptance that rested on it needs a different stability witness** — `max|w|`,
+`max|u|` and mean KE are the resolved ones and all three are available in every log.
+
+**★ B. THE CONVECTIVE MOMENTUM TRANSPORT IS A CLAMP RESIDUAL, AND IT IS CORIOLIS-SIZED.** Median
+\|term\| in the w-equation, 20-70 deg, above 3 km, `output_vw1200` at iteration 1200:
+
+| term | median | vs `coriolis` |
+|---|---|---|
+| `adv_vert` | 1.72e-05 | 8.4x |
+| `coriolis` | 2.05e-06 | 1.00 |
+| **`drag_mc`** | **1.51e-06** | **0.74**, non-zero in 32 % of cells |
+| `diffusion` | 4.31e-07 | 0.21 |
+| `adv_horiz` | 4.99e-08 | 0.024 |
+| `pgf` | 2.97e-09 | 0.0015 |
+| `dw_radial` | **exactly 0** | `_VW=0` confirmed in the budget |
+
+**A term pegged at its cap is ~74 % of Coriolis where it acts.** Seventh occurrence of the
+clamp-residual pattern. ⚠ **`drag_mc` BUNDLES `coeff_MC_vel*MC_w` WITH THE SURFACE RAYLEIGH DRAG**,
+so the split is not measured — above 3 km the surface drag should be small but that has NOT been
+checked. And `coeff_MC_vel = ndimLength()/u_0^2` carries the `ATM_LENGTH_NDIM` 40x defect whose own
+comment names `coeff_MC_*` among the terms left behind, so this saturated term is 40x weaker than
+its own convention intends.
+
+**NEXT INSTRUMENT, NOT WRITTEN: one print splitting `drag_mc` into its two halves and counting the
+cells `MCv_max` truncates.** Not a repair to `w_u`.
+
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
 `init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps surface -> tropopause, so a CELL is the difference:
