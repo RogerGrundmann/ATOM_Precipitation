@@ -273,7 +273,7 @@ void cAtmosphereModel::print_min_max_atm(){
 
     searchMinMax_3D(" max u_d ", " min u_d ", "m/s", u_d, 1.0);
     searchMinMax_3D(" max v_d ", " min v_d ", "m/s", v_d, 1.0);
-    searchMinMax_3D(" max w_d ", " min w_u ", "m/s", w_d, 1.0);
+    searchMinMax_3D(" max w_d ", " min w_d ", "m/s", w_d, 1.0);
 
 
     cout << endl 

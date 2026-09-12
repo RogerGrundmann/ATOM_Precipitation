@@ -348,8 +348,9 @@ public:
     // A non-zero value there means this function is wrong, and it is measured rather than argued.
     void install_cells_from_streamfunction()
     {
+        // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores the shipped analytic ramp exactly.
         static const bool on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
-                                     return e && atoi(e) != 0; }();
+                                     return e ? atoi(e) != 0 : true; }();
         if (!on) return;
         auto amp = [](const char* n, double d){ const char* e = getenv(n);
                                                 return (e ? atof(e) : d) * 1.0e9; };
@@ -576,7 +577,7 @@ public:
                                      return e && atoi(e) != 0; }();
         if (!on) return;
         static const bool cells_on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
-                                           return e && atoi(e) != 0; }();
+                                           return e ? atoi(e) != 0 : true; }();
         if (!cells_on) {
             std::cout << "      AGCM: [CELLS U] ATM_CELLS_U_FROM_PSI set but ATM_CELLS_FROM_PSI"
                       << " is off -- nothing to derive u from, ignored." << std::endl;
@@ -731,7 +732,8 @@ public:
 
     // ==================================================================
     // THE SAME CONSTRAINT, RE-IMPOSED INSIDE THE TIME LOOP
-    // ATM_V_MASSBAL_STRIDE=<N>, DEFAULT 0 = OFF and byte-identical unset.
+    // ATM_V_MASSBAL_STRIDE=<N>, DEFAULT 1 SINCE 2026-09-12 (was 0 = off). `=0` restores the
+    // shipped branch, which is byte-identical to every run recorded before that date.
     //
     // WHY. balance_column_mass_flux() above is called ONCE, before the loop, and it removes
     // 94.8 % of Psi(ground) at initialisation. It does not stay removed. Measured on
@@ -771,7 +773,7 @@ public:
     // correction this routine applies is reported on its own line instead.
     static int massBalanceStride(){
         static const int v = [](){
-            const char* e = getenv("ATM_V_MASSBAL_STRIDE"); return e ? atoi(e) : 0; }();
+            const char* e = getenv("ATM_V_MASSBAL_STRIDE"); return e ? atoi(e) : 1; }();
         return v;
     }
 

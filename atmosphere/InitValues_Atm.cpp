@@ -431,7 +431,8 @@ void cAtmosphereModel::debug_vapor_output(int i, int j, int k,
 // loops, so the parallelism bought nothing and the race would have been real.
 double cAtmosphereModel::tropopause_index(double h_m){
     static const bool fix = [](){
-        const char* e = getenv("ATM_TROPO_INDEX_FIX"); return e && atoi(e) != 0; }();
+        // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores round(h/L_atm) exactly.
+        const char* e = getenv("ATM_TROPO_INDEX_FIX"); return e ? atoi(e) != 0 : true; }();
     if(!fix) return round(h_m / L_atm);                 // shipped: L_atm as if it were a grid step
     if(m_layer_heights.size() < (std::size_t)im) return round(h_m / L_atm);   // not built yet
     int best = 1; double bd = 1.0e30;

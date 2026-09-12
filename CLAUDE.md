@@ -1121,6 +1121,75 @@ physics, is what has kept this model from converging, and that a converged atmos
 in 62 minutes. What is not settled is whether a frozen circulation is worth having, and whether
 `max|w_u|` = 40.6 stays put past 600.
 
+### ⚠ `max|w_u|` DOES NOT STAY PUT: it is a LID-TRAPPED mode, and `converged` = 1 is blind to it
+
+**FOUR DEFAULTS FLIPPED 2026-09-12 AT THE USER'S INSTRUCTION**, on the convergence result above:
+`ATM_CELLS_FROM_PSI` 0 -> 1, `ATM_TROPO_INDEX_FIX` 0 -> 1, `ATM_RADIAL_SHAPIRO_STRENGTH_VW`
+(inherit) -> **0.0**, `ATM_V_MASSBAL_STRIDE` 0 -> 1, plus `ATM_VTK_STRIDE` 1 -> **5** (a slice set
+every 100 ITERATIONS at the shipped `checkpoint` = 20; every CSV stays on `checkpoint`).
+**BOTH DIRECTIONS VERIFIED, 13 OF 14 WRITTEN FILES BYTE-IDENTICAL EACH WAY**, 1 thread, `nm` = 20
+**from scratch** (mandatory: `load_state()` overwrites everything `CELLS_FROM_PSI` and
+`TROPO_INDEX_FIX` produce, so a restart cannot exercise either): new binary CLEAN against
+`cli/atm_preflip` with the four SET, and new binary with the four SET BACK against `atm_preflip`
+clean. The comparison includes both momentum budgets, the streamfunction CSV, all six VTK slices
+and both transfer files; **the only difference is `RUN_CONFIG.txt`, and only in the `*` markers.**
+*The VTK stride itself is NOT exercised by that check — at `nm` = 20 only one checkpoint occurs and
+stride 1 and stride 5 both write it.*
+
+**⚠ AND `ATM_RADIAL_SHAPIRO_STRENGTH` NO LONGER REACHES `v`/`w`.** `_VW` used to INHERIT it, so the
+global knob moved all three components; it now governs `u` alone — the component the CFL guard is
+actually for. **Every `ATM_RADIAL_SHAPIRO_STRENGTH` sweep recorded in this file was taken under the
+inheriting behaviour, so the `v`/`w` half of those sweeps is not reproducible without `_VW` set.**
+
+**THE 1200-ITERATION CONTINUATION SAYS THE 40.6 WAS A PLATEAU BETWEEN STEPS, NOT AN EQUILIBRIUM**
+(`output_vw1200`, restart from `vw0pdc`'s own iteration-600 checkpoint md5 `3d875ea1`, `nm` = 1200
+so iterations 601-1200, 24 threads, 71 min, exit 0, **zero NaN**):
+
+| iteration | 600 | 700 | 800 | 900 | 1000 | 1100 | **1200** |
+|---|---|---|---|---|---|---|---|
+| **`max\|w_u\|`** | **40.60** | 46.73 | 46.59 | 52.85 | 52.73 | 52.63 | **58.60** |
+| mean KE m2/s2 | 36.434 | 36.42 | 36.41 | 36.39 | 36.370 | 36.345 | **36.329** |
+| `converged` | 1 | 0 | 0 | **1** | **1** | **1** | **1** |
+
+**A STAIRCASE: it jumps ~+6 m/s, plateaus or decays slightly, then jumps again** — steps near 700,
+900 and 1200 — with a roughly LINEAR envelope of **+3 m/s per 100 iterations**, +44 % over the
+window. At 58.60 it is **59 % of the +-100 clamp**, and on that envelope it reaches the clamp near
+**iteration 2580**. The plateau at 600 that looked like equilibration (41.1 -> 40.8 -> 40.6) was
+one tread of the staircase.
+
+**IT IS A LID MODE, WHICH IS WHY THE FILTER MATTERED THERE.** The extremum sits at **16 023 m — the
+model lid — at 24-25N, 43-46E**, in this arm and in `vw0pdc` and `pdc600` before it. `BC_Atm` pins
+the RADIAL component at both walls (`u.x[im-1] = 0`, `u.x[0] = 0`, recorded as the cure for +-100
+m/s coastal blow-ups) and **the ZONAL component at the lid is not pinned at all**; with `_VW=0`
+nothing damps it. *So the radial Shapiro filter was doing a real job at the top boundary, and
+easing it on `v`/`w` buys the cells and the convergence at the price of an unconstrained lid.*
+
+**AND THE CONVERGENCE MONITOR CANNOT SEE IT, WHICH RETIRES `converged` = 1 AS EVIDENCE OF A STEADY
+STATE.** Mean KE is **36.434 -> 36.329, FALLING 0.29 %**, `drift_KE` 0.044-0.058 %, and the flag
+reads 1 at 875, 1000, 1125 and 1200 — while `max|w_u|` climbs 44 %. **The growth is a
+REDISTRIBUTION into a lid-trapped mode, not an energy gain**, and a cos-lat volume mean is blind to
+a mode confined to one boundary layer of cells. *That was the branch pre-registered in
+`run_vw1200.sh` as the outcome that would matter, and it is the one that happened.*
+
+**AND `_VW=0` DOES NOT CURE THE POST-600 PRECIPITATION DRIFT.** Precip **947.2 -> 1090.7,
++15.2 %**, `r` +0.458 -> +0.452, centred RMS 1406 -> 1547, sigma **2.29 -> 2.51** — against the
+filtered control's +18.4 % over the same 600 -> 1200 window (*The precipitation is NOT stable past
+iteration 600*). So that drift is **not** the radial filter; removing the filter leaves it almost
+untouched. `max|u|` goes **1.2965 -> 2.3378, +80 %**, the radial runaway continuing exactly as
+`ATM_BUOY_CONSISTENT` predicts and `_VW` does not touch.
+
+**WHAT THIS MEANS FOR THE FLIP.** `_VW=0` still does what it was flipped for — the cells keep their
+amplitude and their form, and the KE stops draining — but **"the atmosphere converges" must now be
+read as "the volume-mean KE and T converge", not as a steady state.** The honest next instrument is
+a lid-pinned or lid-sponged zonal wind, not a filter setting: **the mode is at a boundary the model
+does not constrain.** Defaults are NOT reverted; what is added is the caveat and the trajectory.
+
+**And one print was lying.** `Results_Atm.cpp:276` read
+`searchMinMax_3D(" max w_d ", " min w_u ", ...)` — the min label was a copy-paste from the `w_u`
+line above it, so **`min w_d` has been printing as `min w_u` in every run this tree has ever
+made**, and a grep for `min w_u` returns two different quantities (-58.60 at the lid and -0.855 at
+38 m). Fixed to `" min w_d "`; print-only, and it postdates the byte verification above.
+
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
 `init_v_or_w(v, j, coeff_trop, coeff_sl)` ramps surface -> tropopause, so a CELL is the difference:

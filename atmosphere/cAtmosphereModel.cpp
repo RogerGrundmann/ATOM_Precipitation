@@ -1294,18 +1294,18 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
           << "  POISSON_METRIC_FIX=" << ev("ATM_POISSON_METRIC_FIX", "0*")
           << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
-          << "  RADIAL_SHAPIRO_STRENGTH_VW=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH_VW", "(=STRENGTH)*")
+          << "  RADIAL_SHAPIRO_STRENGTH_VW=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH_VW", "0.0*")
           << "  POLAR_CELL_SHEAR=" << ev("ATM_POLAR_CELL_SHEAR", "0.1*")
           << "  HADLEY_SL=" << ev("ATM_HADLEY_SL", "4.0N/3.0S*")
-          << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "0*")
+          << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "1*")
           << "  CELLS_U_FROM_PSI=" << ev("ATM_CELLS_U_FROM_PSI", "0*")
           << "  CELL_ROT_DIAG=" << ev("ATM_CELL_ROT_DIAG", "0*")
           << "  PRESS_LINE_SOLVE=" << ev("ATM_PRESS_LINE_SOLVE", "0*")
           << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
           << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
-          << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "0*")
+          << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "1*")
           << "  METRIC_SIN_FLOOR=" << ev("ATM_METRIC_SIN_FLOOR", "0.26*")
-          << "  TROPO_INDEX_FIX=" << ev("ATM_TROPO_INDEX_FIX", "0*")
+          << "  TROPO_INDEX_FIX=" << ev("ATM_TROPO_INDEX_FIX", "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "1*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
@@ -1313,7 +1313,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  TW_LATMIN="     << ev("ATM_TW_LATMIN",     "15*")
           << "  PDYN_CEILING="  << ev("ATM_PDYN_CEILING",  "3.0*")
           << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
-          << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "1*")
+          << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "5*")
           << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
@@ -1676,8 +1676,14 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // wrote 3.0 GB of VTK per arm. ATM_VTK_STRIDE=5 makes that 0.6 GB and leaves
                 // every CSV in place.
                 static const int vtk_stride = [](){
+                    // DEFAULT 5 SINCE 2026-09-12 (was 1). At the shipped `checkpoint` = 20
+                    // that is a VTK slice set every 100 ITERATIONS, matching `panorama_print`,
+                    // and it cuts the disk 5x: a 600-iteration arm wrote 93 slices / 6.1 GB at
+                    // stride 1. Every CSV diagnostic stays on `checkpoint` and is unaffected.
+                    // ⚠ the cadence is checkpoint x stride, so it is 100 iterations only while
+                    // `checkpoint` is 20.
                     const char* e = getenv("ATM_VTK_STRIDE");
-                    const int v = e ? atoi(e) : 1; return v > 0 ? v : 1; }();
+                    const int v = e ? atoi(e) : 5; return v > 0 ? v : 5; }();
                 static int vtk_tick = 0;
                 if(vtk_tick++ % vtk_stride == 0){
                     UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
@@ -1815,10 +1821,21 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // upper branch, which is what erases the meridional cells (2026-09-09; see CLAUDE.md,
         // *The six-cell structure is being erased by the radial Shapiro filter*). Easing the single
         // global knob buys the cells at the price of the guard; easing only v and w does not.
+        // DEFAULT 0.0 SINCE 2026-09-12 (was: inherit ATM_RADIAL_SHAPIRO_STRENGTH). Flipped on
+        // the measurement that this filter is a continuous KE sink removing HALF the model's
+        // kinetic energy, and that with it off the atmosphere CONVERGES for the first time --
+        // `converged` = 1 from iteration ~225 in both `_VW=0` arms and in none of six `_VW=0.25`
+        // ones, across both buoyancy branches and both pressure ceilings (CLAUDE.md, *THE
+        // ATMOSPHERE CONVERGES WITH `_VW=0`*). `=0.25` or `=1.0` restores the old behaviour.
+        //
+        // ⚠ CONSEQUENCE: ATM_RADIAL_SHAPIRO_STRENGTH NO LONGER REACHES v/w. It used to be
+        // inherited here, so the global knob moved all three components; it now governs `u`
+        // alone, which is the component the CFL guard is actually for. Set _VW explicitly to
+        // filter v/w. Every `ATM_RADIAL_SHAPIRO_STRENGTH` sweep recorded in CLAUDE.md was taken
+        // under the INHERITING behaviour and its v/w half is not reproducible without _VW set.
         static const double radial_shapiro_strength_vw = [](){
             const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH_VW");
-            if(e) return atof(e);
-            const char* g = getenv("ATM_RADIAL_SHAPIRO_STRENGTH"); return g ? atof(g) : 1.0; }();
+            return e ? atof(e) : 0.0; }();
         AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2, radial_shapiro_strength);
         AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
         AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
@@ -1827,8 +1844,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             write_w_momentum_budget(iter_n, wb_dyn, wb_polar, wb_orog, wb_radial);
         }
 
-        // RE-IMPOSE THE COLUMN MASS-FLUX CONSTRAINT (ATM_V_MASSBAL_STRIDE=<N>, default 0 = off
-        // and byte-identical). The setup call at line ~584 removes 94.8 % of Psi(ground) once;
+        // RE-IMPOSE THE COLUMN MASS-FLUX CONSTRAINT (ATM_V_MASSBAL_STRIDE=<N>, DEFAULT 1 SINCE
+        // 2026-09-12; `=0` is off and restores the pre-flip branch byte-identically). The setup call at line ~584 removes 94.8 % of Psi(ground) once;
         // the model's own v-momentum budget says the tendency that puts it back is dominated by
         // its COLUMN MEAN (mean/rms 2.6-8.2 at every latitude carrying a cell), which is exactly
         // the mode that routine removes. Placed AFTER the budget writes deliberately, so the
