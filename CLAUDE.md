@@ -1017,6 +1017,59 @@ averaging** — the definition, since each column's integral carries a bottom ha
 ground: **every band to 0.0000**. Written as an ADDITIONAL column `psi_fixdiv_kg_per_s`, so no
 recorded `Psi` number changes meaning.
 
+**⚠ AND `plot_streamfn.py` WENT ON PLOTTING THE BROKEN COLUMN FOR AS LONG AS THE FIXED ONE HAS
+EXISTED — FIXED 2026-09-12.** Adding the repair as an ADDITIONAL column is what kept every
+recorded number meaningful, and it is also what left `plot_streamfn.py:18` reading
+`values="psi_kg_per_s"`. **So the cells look OPEN in every plot of a run whose cells are closed**,
+and the two columns disagree by a factor of **50 to 500** on closure. `output_pdc600`, the same
+file, the same iteration:
+
+| \|`Psi`(gnd)\|/cell | 75N | 45N | 15N | 15S | 45S | **75S** |
+|---|---|---|---|---|---|---|
+| **plotted** (`psi_kg_per_s`), iter 20 | 0.0992 | 0.1375 | 0.0507 | 0.0754 | 0.0075 | **0.4729** |
+| **plotted**, iter 200 | 0.0954 | 0.1348 | 0.0486 | 0.0739 | 0.0075 | **0.4621** |
+| **real** (`psi_fixdiv`), iter 20 | 0.0007 | 0.0004 | 0.0041 | 0.0051 | 0.0004 | 0.0052 |
+| **real**, iter 200 | **0.0004** | **0.0008** | **0.0001** | **0.0009** | **0.0004** | **0.0048** |
+
+**THE TELL IS THAT THE PLOTTED NON-CLOSURE IS ALREADY AT FULL STRENGTH AT ITERATION 20 AND DOES
+NOT GROW** — it slightly IMPROVES to 200, while `max|p_dyn|` grows three orders over the same
+window (7.9e-04 -> ~1.3). **So a plot showing stretched, unclosed cells at iteration 200 is not
+showing a pressure effect**, and on the correct column the cells close BETTER at 200 than at 20 in
+four of six bands. The two columns give the same `peak|Psi|` and the same overturning depth to the
+digit; they differ only in the ground offset, which is what a per-level divisor error does.
+The script now defaults to `psi_fixdiv_kg_per_s`, takes `<outdir> <it1> <it2> [--col=fixed|old|both]`
+instead of needing to be edited, and prints the closure of BOTH columns on every run so this
+cannot recur silently. *Same shape as `u-v-Cell` versus `uv_plot`: the repaired quantity sat beside
+the broken one and the tool kept reading the broken one. Thirteenth "the answer was in output
+nobody opened", and the second instrument left half-switched by a deliberately additive repair.*
+
+**AND THE VERTICAL STRETCH IS `ATM_TROPO_INDEX_FIX`, IN THE INITIAL CONDITION, NOT THE PRESSURE.**
+The knob's recorded cost — *"the deeper span spreading the same prescribed `Psi` over nearly the
+whole shell"* — is this, measured per band at iteration 20 as the `Psi` peak height and the highest
+level carrying 10 % of the cell amplitude (`output_ms600on` `=0` against `output_tr600d` `=1`, one
+variable, both 600 from scratch):
+
+| iter 20, peak z / cell top, m | 75N | 45N | 15N | 15S | 45S | 75S |
+|---|---|---|---|---|---|---|
+| `TROPO_INDEX_FIX=0` | 1068 / 2413 | 2686 / 5513 | 4075 / 9923 | 4075 / 9923 | 2163 / 5513 | 1211 / 7412 |
+| **`=1`** | **3316 / 7412** | **4510 / 9923** | 4510 / 10927 | 4988 / 10927 | **4075 / 9923** | **4988 / 8173** |
+| deepening | **3.1x** | **1.8x** | 1.1x | 1.1x | **1.8x** | 1.1x |
+
+**The extratropical cells are 1.8-3.1x deeper before a single time step**, and with the fix on the
+mid-latitude bands no longer reverse sign above the peak inside the shell where at `=0` they
+reversed at 6719-7412 m. A vertically stretched cell with no visible return branch is exactly what
+the knob buys, and it is the initial condition. **`ATM_TROPO_INDEX_FIX` is default 0** and is set
+explicitly in `tr600d`, `pdc600`, `bcs0` and `vw0`.
+
+**THE PRESSURE IS EXONERATED AT ITERATION 200 TWO INDEPENDENT WAYS.** `output_pdc600`
+(`ATM_PDYN_CEILING=50`) against `output_tr600d` (shipped): `Psi_max` **95.75 at 4510 m** and
+`Psi_min` **-97.36** in BOTH, to every printed digit. And `output_bcs0` (`BUOY_CONSISTENT=0`)
+against `tr600d` (`=1`): closure 0.0004 / 0.0008 / 0.0001 / 0.0009 / 0.0004 / 0.0047 against
+0.0004 / 0.0008 / 0.0001 / 0.0009 / 0.0004 / 0.0048, and cell amplitudes agreeing to four figures
+in all six bands — **while `max|u|` differs 12x, 0.505 against 0.041.** `Psi` is built from the
+zonal-mean `v` ALONE and is blind to `u` by construction, so the radial runaway does not enter this
+diagnostic at all: read it on `ATM_CELL_ROT_DIAG`, never on `Psi`.
+
 ### `ATM_CELLS_FROM_PSI`: build `v` from `Psi` instead of `Psi` from `v`
 
 `Psi(phi,z) = A(phi)*S(zeta)` per column, `zeta` measured from that column's own ground to the
