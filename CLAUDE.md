@@ -1157,12 +1157,38 @@ window. At 58.60 it is **59 % of the +-100 clamp**, and on that envelope it reac
 **iteration 2580**. The plateau at 600 that looked like equilibration (41.1 -> 40.8 -> 40.6) was
 one tread of the staircase.
 
-**IT IS A LID MODE, WHICH IS WHY THE FILTER MATTERED THERE.** The extremum sits at **16 023 m — the
-model lid — at 24-25N, 43-46E**, in this arm and in `vw0pdc` and `pdc600` before it. `BC_Atm` pins
-the RADIAL component at both walls (`u.x[im-1] = 0`, `u.x[0] = 0`, recorded as the cure for +-100
-m/s coastal blow-ups) and **the ZONAL component at the lid is not pinned at all**; with `_VW=0`
-nothing damps it. *So the radial Shapiro filter was doing a real job at the top boundary, and
-easing it on `v`/`w` buys the cells and the convergence at the price of an unconstrained lid.*
+**⚠ `w_u` IS NOT THE ZONAL WIND — IT IS THE UPDRAFT'S ZONAL VELOCITY, AND THE FIRST WRITE-UP OF
+THIS ARM GOT THAT WRONG.** `MoistConvection.h:534` sets `m.w_u = vel * m.w` and `:1086-1099` builds
+it from a mass-flux-weighted recurrence up the column, so **`max w_u` is a CONVECTION-SCHEME
+quantity**, not a resolved wind. (`cAtmosphereModel.h:1020` calls it *"u-velocity component in the
+updraft"*, which is wrong too: it is the `w` component; `u_u` and `v_u` are the other two.) The
+extremum does sit at **16 023 m, the model lid, at 24-25N 43-46E** — but that is the top of the
+updraft recurrence, not an unconstrained boundary wind. **The zonal-mean `w` momentum budget is
+EXACTLY 0.000e+00 at the lid and in every tendency there**, which is what exposed the error: a
+resolved lid jet cannot be invisible to its own budget.
+*The retracted claims are "it is a lid-trapped ZONAL mode", "the zonal component at the lid is not
+pinned", "the filter was doing a real job at the top boundary" and the recommendation that followed
+them — a lid sponge on the zonal wind. None of that is supported.*
+
+**AND THE RESOLVED WINDS ARE THE OPPOSITE STORY — THE ZONAL WIND IS FROZEN, WHICH IS `_VW=0`
+WORKING.** `max|w|`, the actual zonal wind, runs **26.601 (init) -> 26.484 (600) -> 26.374
+(1200)**: **-0.85 % over 1200 iterations**, monotone and flat. That is the jet result reproduced on
+the zonal wind over twice the length — at filter strength 0 the jet does not decay, it freezes —
+and it is the strongest form of that claim recorded. `max|v|` is 2.52 -> 2.84, also stable.
+
+| `max\|...\|` m/s | init | 600 | 1200 | change |
+|---|---|---|---|---|
+| **`w` (ZONAL WIND)** | 26.601 | 26.484 | **26.374** | **-0.85 %** |
+| `v` (meridional) | 3.021 | 2.523 | 2.841 | — |
+| `u` (radial) | 1.752 | 2.397 | **2.939** | +23 %, **flattening** |
+| **`w_u` (updraft zonal)** | 29.808 | 40.600 | **58.599** | **+44 %** |
+
+**AND THE RADIAL RUNAWAY SATURATES, WHICH IS NEW.** `max|u|` goes 2.633 / 2.787 / 2.880 / 2.929 /
+2.945 / **2.939** over iterations 700-1200 — decelerating and slightly FALLING at the end, settling
+near **2.94 m/s**. The 51x growth recorded at iteration 620 is a transient of the first few hundred
+iterations, not an unbounded runaway. *An earlier version of this section said "+80 %", which
+compared the positive `max` at 600 with the positive `max` at 1200 and is not the magnitude; by
+`max|u|` it is +23 %.*
 
 **AND THE CONVERGENCE MONITOR CANNOT SEE IT, WHICH RETIRES `converged` = 1 AS EVIDENCE OF A STEADY
 STATE.** Mean KE is **36.434 -> 36.329, FALLING 0.29 %**, `drift_KE` 0.044-0.058 %, and the flag
@@ -1178,11 +1204,14 @@ iteration 600*). So that drift is **not** the radial filter; removing the filter
 untouched. `max|u|` goes **1.2965 -> 2.3378, +80 %**, the radial runaway continuing exactly as
 `ATM_BUOY_CONSISTENT` predicts and `_VW` does not touch.
 
-**WHAT THIS MEANS FOR THE FLIP.** `_VW=0` still does what it was flipped for — the cells keep their
-amplitude and their form, and the KE stops draining — but **"the atmosphere converges" must now be
-read as "the volume-mean KE and T converge", not as a steady state.** The honest next instrument is
-a lid-pinned or lid-sponged zonal wind, not a filter setting: **the mode is at a boundary the model
-does not constrain.** Defaults are NOT reverted; what is added is the caveat and the trajectory.
+**WHAT THIS MEANS FOR THE FLIP.** `_VW=0` does what it was flipped for and more than was claimed:
+the cells keep their amplitude and their form, the KE stops draining, AND the resolved zonal wind
+is frozen to -0.85 % over 1200 iterations. But **"the atmosphere converges" must be read as "the
+volume-mean KE and T converge", not as a steady state** — a convection-scheme variable grows 44 %
+underneath a flag reading 1. Defaults are NOT reverted. **The open item is `w_u` in
+`MoistConvection`, not a boundary condition**: what governs it is the updraft mass-flux recurrence
+at the top of the column, and whether 58.6 m/s there is a hazard or a harmless diagnostic has not
+been established — `MCv_max` = 0.01 clamps the convective momentum TENDENCY, not `w_u` itself.
 
 **And one print was lying.** `Results_Atm.cpp:276` read
 `searchMinMax_3D(" max w_d ", " min w_u ", ...)` — the min label was a copy-paste from the `w_u`
