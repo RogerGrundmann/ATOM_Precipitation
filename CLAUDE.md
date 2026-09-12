@@ -1070,6 +1070,28 @@ in all six bands — **while `max|u|` differs 12x, 0.505 against 0.041.** `Psi` 
 zonal-mean `v` ALONE and is blind to `u` by construction, so the radial runaway does not enter this
 diagnostic at all: read it on `ATM_CELL_ROT_DIAG`, never on `Psi`.
 
+**AND A SHARED LINEAR COLOUR SCALE CANNOT RENDER THIS MODEL'S POLAR CELLS AT ALL** (2026-09-12,
+asked as *"is it correct that I can't see closed equatorial and polar Hadley cells anymore"* —
+the answer is yes for the polar pair, no for the tropical one, and neither is physics). The
+six-cell structure spans a factor of **13 in amplitude**, and with 21 levels over +-108.9 the
+contour interval is **10.89e9 kg/s**:
+
+| \|latitude\| | 85 | **75** | 65 | 55 | 45 | 35 | 25 | **15** |
+|---|---|---|---|---|---|---|---|---|
+| cell amplitude, 1e9 kg/s | 2.3 | **11.5** | 8.6 | 18.3 | 35.6 | 17.6 | 46.9 | **97.4** |
+| **contour intervals spanned** | 0.21 | **1.06** | 0.79 | 1.68 | 3.27 | 4.30 | 4.30 | **8.94** |
+
+**The 75S cell spans 0.69 of one interval, so not a single contour line is drawn for it**; 75N gets
+one and 85 deg gets a fifth of one. **The cells are there and they are closed** — signed `Psi` at
+z ~ 4510 m reverses at **-61/-60, -30/-29, 0/1, 29/30, 60/61**, and at 2163 m and 9007 m at the
+same latitudes, i.e. six cells with boundaries at 0, +-30, +-60, closed laterally, closed at the
+lid by construction and closed at the ground to 0.0001-0.005. Only the plot could not resolve
+them. The script now defaults to SYMMETRIC-LOG levels, which render all six in one panel, and
+draws the `Psi` = 0 contour heavier — that contour IS the cell boundary, which is what "closed"
+refers to visually. `--levels=lin` restores the old spacing. *On the OLD divisor column the two
+effects compound at the poles: `Psi`(ground) is 46 % of the cell amplitude at 75S, so those
+contours run into the ground as well as being sub-resolution.*
+
 ### `ATM_CELLS_FROM_PSI`: build `v` from `Psi` instead of `Psi` from `v`
 
 `Psi(phi,z) = A(phi)*S(zeta)` per column, `zeta` measured from that column's own ground to the

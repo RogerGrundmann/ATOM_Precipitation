@@ -17,18 +17,30 @@
 # kept reading the broken one. DEFAULT IS NOW THE FIXED COLUMN, and the closure of BOTH is
 # printed every run so this cannot recur silently.
 #
-# usage: python3 plot_streamfn.py [outdir] [it1] [it2] [--col=fixed|old|both]
+# ⚠ WHICH SCALE. A SHARED LINEAR scale cannot show this model's weak cells at all. The six-cell
+# structure spans a factor of 13 in amplitude -- at iteration 200 of output_pdc600 the Hadley
+# cells are 97e9 kg/s and the polar ones 11.5e9 (75N) and 7.5e9 (75S) -- so with 21 levels over
+# +-109 the contour interval is 10.9e9 and the polar cells span 1.06 and 0.69 INTERVALS: 75S gets
+# not a single contour line drawn, and 85 deg spans 0.1-0.2. The cells are there and closed (sign
+# reversals at 0, +-30, +-60 at every height; closure 0.0001-0.005 on psi_fixdiv); the plot simply
+# could not resolve them. DEFAULT IS NOW SYMMETRIC-LOG levels, which render all six, and the
+# Psi = 0 contour -- the cell BOUNDARY, i.e. what "closed" means visually -- is drawn heavier.
+# --levels=lin restores the old linear spacing.
+#
+# usage: python3 plot_streamfn.py [outdir] [it1] [it2] [--col=fixed|old|both] [--levels=symlog|lin]
 import sys
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import SymLogNorm, Normalize
 
 COL_FIXED, COL_OLD = "psi_fixdiv_kg_per_s", "psi_kg_per_s"
 argv  = [a for a in sys.argv[1:] if not a.startswith("--")]
 opts  = [a for a in sys.argv[1:] if a.startswith("--")]
 which = next((o.split("=", 1)[1] for o in opts if o.startswith("--col=")), "fixed")
+scale = next((o.split("=", 1)[1] for o in opts if o.startswith("--levels=")), "symlog")
 
 OUT   = argv[0] if argv else "output_0Ma"
 iters = [int(a) for a in argv[1:3]] if len(argv) >= 3 else [20, 100]
@@ -79,12 +91,22 @@ for it, (lat, z, P) in zip(iters, data):
         print(f"  iter {it:<4} {c:<20} " + "  ".join(f"{v:7.4f}" for v in closure(lat, P[c])) + mark)
 
 for col in plot_cols:
-    vmax   = max(np.nanmax(np.abs(P[col])) for _, _, P in data)
-    levels = np.linspace(-vmax, vmax, 21)
+    vmax = max(np.nanmax(np.abs(P[col])) for _, _, P in data)
+    if scale == "lin":
+        levels, norm = np.linspace(-vmax, vmax, 21), Normalize(-vmax, vmax)
+    else:
+        # geometric spacing from lt to vmax: resolves a 13x amplitude range in one panel
+        lt  = max(vmax / 300.0, 0.2)
+        pos = np.geomspace(lt, vmax, 9)
+        levels = np.concatenate([-pos[::-1], [0.0], pos])
+        norm   = SymLogNorm(linthresh=lt, vmin=-vmax, vmax=vmax, base=10)
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.2), sharey=True)
     for ax, it, (lat, z, P) in zip(axes, iters, data):
-        cf = ax.contourf(lat, z / 1000.0, P[col], levels=levels, cmap="RdBu_r", extend="both")
+        cf = ax.contourf(lat, z / 1000.0, P[col], levels=levels, norm=norm,
+                         cmap="RdBu_r", extend="both")
         ax.contour(lat, z / 1000.0, P[col], levels=levels, colors="k", linewidths=0.3, alpha=0.5)
+        # Psi = 0 is the CELL BOUNDARY -- the thing "closed cells" refers to.
+        ax.contour(lat, z / 1000.0, P[col], levels=[0.0], colors="k", linewidths=1.3)
         ax.set_title(f"iter {it}")
         ax.set_xlabel("latitude [deg N]")
         ax.set_xlim(-90, 90)
@@ -93,9 +115,10 @@ for col in plot_cols:
     axes[0].set_ylabel("height [km]")
     cb = fig.colorbar(cf, ax=axes, shrink=0.9, pad=0.02)
     cb.set_label(r"$\Psi$  [$10^{9}$ kg s$^{-1}$]")
-    tag = "fixed divisor" if col == COL_FIXED else "OLD per-level divisor -- does NOT close"
+    tag = ("fixed divisor" if col == COL_FIXED else "OLD per-level divisor -- does NOT close") \
+          + (", symlog" if scale != "lin" else ", linear")
     fig.suptitle(f"Meridional mass streamfunction  Psi(lat, z)  -  {OUT}  [{tag}]", y=0.98)
-    sfx = "" if col == COL_FIXED else "_olddiv"
+    sfx = ("" if col == COL_FIXED else "_olddiv") + ("" if scale != "lin" else "_lin")
     out = f"{OUT}/streamfn_lat_z_iter{iters[0]}_vs_{iters[1]}{sfx}.png"
     fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)
