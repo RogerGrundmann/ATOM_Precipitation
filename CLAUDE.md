@@ -3085,12 +3085,55 @@ far too short for a 0.796 -> 0.709 change in the net to show in an integrated ve
 Precipitation is 953.1-953.4 mm/a in all four and `Psi` is identical to four figures at every
 checkpoint: null, as every dynamical arm in this tree is.
 
-**NOTHING IS FLIPPED.** `ATM_PDYN_CEILING` stays at its shipped phase-dependent value. What is
-settled is that the ceiling is NOT latent under the current defaults, that releasing it is stable
-over 80 iterations at 2.3x the shipped value, and that the amplitude measurement it was
-contaminating has to be retaken. What is NOT settled is whether a released ceiling is stable over a
-600-iteration from-scratch run — the value was lowered 10.0 -> 3.0 for the iteration-483 runaway,
-and no arm here goes near that — nor whether the cancellation keeps climbing past 0.29.
+**THE 600-ITERATION FROM-SCRATCH ARM IS RUN, THE RELEASED CEILING IS STABLE, AND IT BUYS NO
+CIRCULATION** (2026-09-12, `output_pdc600` against `output_tr600d`, `ATM_PDYN_CEILING=50` the ONE
+variable, both `nm` = 600 from scratch, 24 threads, 63 min). Exit 0, **zero NaN, ZERO ceiling-
+binding events in all 600 iterations**, straight through **155, 357 and 483** — the three
+documented failure points, and 483 is the runaway the ceiling was lowered 10.0 -> 3.0 for:
+
+| iteration 600 | `tr600d` ceiling 3.0 | **`pdc600` ceiling 50** |
+|---|---|---|
+| `max\|p_dyn\|` | **3.076, pegged** | **5.413** (+76 %) |
+| cells clipped | **128 644 = 4.80 %** | **0 = 0.0000 %** |
+| **rms `p_dyn`** | **1.045** | **1.248 (+19 %)** |
+| cancellation(pgf, buoy) | ~0.204 | **0.2348**, still climbing |
+| rms NET `rhs_u` / larger | ~0.796 | **0.7650** |
+| **`div(u)` rms** | 9.014e-02 | **8.921e-02 (-1.0 %)** |
+| **`max\|u\|`** | **1.296572** | **1.296571** |
+| `max w_u` | 23.294676 | 23.294667 |
+| **mean KE m2/s2** | **19.4008** | **19.3992** |
+| mean T | 249.115 | 249.115 |
+| Precip / `r` | 953.0 / +0.459 | 953.3 / +0.460 |
+
+**SO THE CLAMP TRUNCATES 4.8 % OF THE GRID AND THE MODEL IS INDIFFERENT TO IT.** The pressure field
+plainly changes — +76 % on the maximum, **+19 % on the global rms**, 128 644 cells no longer
+truncated — the buoyancy balance improves, `div(u)` falls 1 %, and **the global kinetic energy is
+identical to 0.008 % and every printed prognostic to five or six figures.** `max|u|` agreeing to
+seven digits is not a coincidence of a single cell either: mean KE is a cos-lat volume mean and it
+does not move.
+
+**AND THE CANCELLATION QUESTION IS ANSWERED: IT KEEPS CLIMBING AND HAS NOT CONVERGED AT 600.**
+From scratch, monotone: **0.0234 / 0.0497 / 0.0716 / 0.0906 / 0.1077 / 0.1353 / 0.1645 / 0.1903 /
+0.2136 / 0.2348**, with `corr(pgf, buoy)` -0.41 -> **-0.76** over the same window. The reason is
+visible in the two rms columns: **`rms buoy` SATURATES at 3.89 by iteration ~360 and `rms pgf` is
+still rising at 1.32** — the cancellation improves because the pressure is still catching up, not
+because the buoyancy is shrinking. The 80-iteration restart arm cross-checks it: `pdc_pw` read
+0.2285 at iteration 680 against this run's 0.2348 at ~560.
+
+**WHAT THE CLAMP WAS AND WAS NOT.** It was BINDING, contrary to what this file said; releasing it
+is SAFE over a full run at 17x the shipped value; it was contaminating the amplitude measurement,
+which is why yesterday's "the amplitude barely moves" conclusion had to be withdrawn. It was
+**not load-bearing in either direction** — neither holding the model together nor holding the
+circulation back. *Which is this tree's dominant pattern arriving at the pressure clamp: the model
+does not respond to a better pressure, for the same reason the meridional `pgf` is 2.5e-05 of
+Coriolis and four other measurements say the pressure cannot answer a body force.*
+
+**NOTHING IS FLIPPED.** `ATM_PDYN_CEILING` stays at its shipped phase-dependent value: 600
+iterations is 120 s of physical time, the arm carries `ATM_CELLS_FROM_PSI=1`, `_VW=0.25` and
+`ATM_TROPO_INDEX_FIX=1` — none of them defaults — and a knob that changes no prognostic is not a
+reason to move a stabiliser that was installed against a NaN. What it IS is a clearance: the
+release can be used as an instrument without fear, and any future repair that needs a real pressure
+field will not be silently truncated by it.
 
 ### And the glyphs: plot `uv_plot`, never `u-v-Cell`
 
