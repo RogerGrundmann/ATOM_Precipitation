@@ -1382,11 +1382,14 @@ void findCloudBaseLFS() {
                                     return e && atoi(e) != 0; }();
         long n_fluid = 0;
         long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
+        long nt_x2 = 0, nt_x10 = 0, nt_x100 = 0;
+        long nq_x2 = 0, nq_x10 = 0, nq_x100 = 0;
         long nv_x2 = 0, nv_x10 = 0, nv_x100 = 0;
         long nw_x2 = 0, nw_x10 = 0, nw_x100 = 0;
 
         #pragma omp parallel for collapse(2) \
             reduction(+:n_fluid,nt_cap,nq_cap,nv_cap,nw_cap, \
+                        nt_x2,nt_x10,nt_x100,nq_x2,nq_x10,nq_x100, \
                         nv_x2,nv_x10,nv_x100,nw_x2,nw_x10,nw_x100)
         for(int j = 0; j < m.jm; j++){
             for(int k = 0; k < m.km; k++){
@@ -1456,9 +1459,8 @@ void findCloudBaseLFS() {
                             if(r > 10.0)  n10++;
                             if(r > 100.0) n100++;
                         };
-                        long dummy2 = 0, dummy10 = 0, dummy100 = 0;
-                        band(raw_t, MCt_max, nt_cap, dummy2, dummy10, dummy100);
-                        band(raw_q, MCq_max, nq_cap, dummy2, dummy10, dummy100);
+                        band(raw_t, MCt_max, nt_cap, nt_x2, nt_x10, nt_x100);
+                        band(raw_q, MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
                         band(raw_v, MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
                         band(raw_w, MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
                     }
@@ -1469,18 +1471,18 @@ void findCloudBaseLFS() {
         if(cap_diag && n_fluid > 0){
             auto pc = [&](long n){ return 100.0 * (double)n / (double)n_fluid; };
             std::cout << "[MC CAP DIAG] iter " << m.iter_n << "  fluid cells " << n_fluid
-                      << "   MCv_max=" << MCv_max << " m/s2" << std::endl;
-            std::cout << "    MC_v truncated " << nv_cap << " (" << pc(nv_cap) << " %)"
-                      << "   >2x " << nv_x2 << " (" << pc(nv_x2) << " %)"
-                      << "   >10x " << nv_x10 << " (" << pc(nv_x10) << " %)"
-                      << "   >100x " << nv_x100 << " (" << pc(nv_x100) << " %)" << std::endl;
-            std::cout << "    MC_t truncated " << nt_cap << " (" << pc(nt_cap) << " %)"
-                      << "      MC_q truncated " << nq_cap << " (" << pc(nq_cap) << " %)"
                       << std::endl;
-            std::cout << "    MC_w truncated " << nw_cap << " (" << pc(nw_cap) << " %)"
-                      << "   >2x " << nw_x2 << " (" << pc(nw_x2) << " %)"
-                      << "   >10x " << nw_x10 << " (" << pc(nw_x10) << " %)"
-                      << "   >100x " << nw_x100 << " (" << pc(nw_x100) << " %)" << std::endl;
+            auto row = [&](const char* name, double cap, long n1, long n2, long n10, long n100){
+                std::cout << "    " << name << " cap=" << cap
+                          << "  truncated " << n1 << " (" << pc(n1) << " %)"
+                          << "   >2x " << n2 << " (" << pc(n2) << " %)"
+                          << "   >10x " << n10 << " (" << pc(n10) << " %)"
+                          << "   >100x " << n100 << " (" << pc(n100) << " %)" << std::endl;
+            };
+            row("MC_t", MCt_max, nt_cap, nt_x2, nt_x10, nt_x100);
+            row("MC_q", MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
+            row("MC_v", MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
+            row("MC_w", MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
         }
     }
 /*

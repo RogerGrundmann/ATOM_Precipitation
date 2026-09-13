@@ -1362,36 +1362,63 @@ about the model: *the only velocity-proportional momentum sink in the atmosphere
 factor of 400 000*, which is worth having beside *the jet freezes at `_VW=0`* and *there is no
 thermal wind*. **Nothing is written and nothing is flipped.**
 
-### The cap census: `MCv_max` truncates 0.9 % of cells, and `MCt_max` truncates 16 %
+### The cap census: `MCv_max` truncates 0.9 % of cells and `MCt_max` exceeds its cap 100-FOLD in a tenth of the atmosphere
 
 **`ATM_MC_CAP_DIAG=1`, new, print-only, default off.** Counts only — no sums of doubles — so it is
-deterministic under OpenMP. Same run, per call, 2 354 866 fluid cells, steady from iteration 1202
-to 1260:
+deterministic under OpenMP. Same run, per call, 2 354 859 fluid cells, steady from iteration 1202
+to 1260 (`output_dm2`, 23 threads; `output_dm1260` at 24 threads agrees to 4 significant figures
+on every row):
 
-| | truncated | >2x the cap | >10x | >100x |
-|---|---|---|---|---|
-| **`MC_t`** (`MCt_max`) | **370 043 = 15.71 %** | | | |
-| **`MC_q`** (`MCq_max`) | **153 324 = 6.51 %** | | | |
-| **`MC_w`** (`MCv_max`) | **21 990 = 0.93 %** | 14 890 = 0.63 % | 908 = 0.039 % | **0** |
-| `MC_v` (`MCv_max`) | 239 = 0.010 % | 0 | 0 | 0 |
+| | cap | truncated | >2x | >10x | **>100x** |
+|---|---|---|---|---|---|
+| **`MC_t`** | 0.01 K/s | **15.71 %** | **15.59 %** | **14.76 %** | **10.17 %** |
+| `MC_q` | 2.0e-5 (kg/kg)/s | 6.51 % | 4.28 % | 0.196 % | **0** |
+| `MC_w` | 0.01 m/s2 | 0.93 % | 0.63 % | 0.039 % | **0** |
+| `MC_v` | 0.01 m/s2 | 0.010 % | 0 | 0 | 0 |
 
-**SO `max|MC_w|` = `MCv_max` EXACTLY IS ONE CELL IN A HUNDRED, NOT THE FIELD.** The cap is a
-stabiliser doing its job at a small minority of cells — nothing exceeds it by 100x and the
-excess is under 10x in 96 % of the truncated cells — which is the opposite of `P_max_flux`
-setting ThreeCat's precipitation. **The seventh clamp-residual claim is withdrawn for `MC_w`.**
-What the `drag_conv` row above says instead is that the convective momentum transport is
-**Coriolis-sized where it acts (1.27x) and acts in a quarter of the cells**, which is a
-statement about the convection, not about the cap.
+**THE MOMENTUM CAPS ARE STABILISERS AND THE HEATING CAP IS NOT.** `max|MC_w|` = `MCv_max` exactly
+is **one cell in a hundred**, nothing exceeds it by 10x in more than 0.04 % of cells and nothing
+by 100x at all — a guard catching outliers. **The seventh clamp-residual claim is therefore
+WITHDRAWN FOR `MC_w`**, and what the `drag_conv` row above says instead is that the convective
+momentum transport is **Coriolis-sized where it acts (1.27x) and acts in a quarter of the cells**,
+which is a statement about the convection rather than about the cap.
 
-**AND THE CENSUS FOUND A LARGER CAP THAN THE ONE IT WAS POINTED AT.** `MCt_max` truncates the
-convective HEATING in **15.7 %** of all fluid cells and `MCq_max` the convective MOISTENING in
-**6.5 %** — an eighth and a fifteenth of the atmosphere, against `MCv_max`'s hundredth. Both were
-tuned down for the 2026-06 SaturationAdjustment limit cycle (`MCq_max` 2.0e-4 -> 2.0e-5, a 10x
-cut, with the comment recording it as throttling the fuel). **UNMEASURED: the >2x/>10x/>100x bands
-are not collected for `t` and `q`** — the instrument passes dummies there — so whether those
-370 043 cells are 1.1x or 1e4x over is the open question, and it is one build away. `P_conv` is
-0.0196 mm/a in the 1000-iteration run recorded above, so a heating cap binding on an eighth of the
-grid is not obviously a small thing.
+**IT IS TRUE OF `MC_t` INSTEAD, AND FAR MORE STRONGLY THAN IT WAS EVER CLAIMED OF `MC_w`.**
+`MCt_max` = 0.01 K/s is **864 K/day**, already an enormous heating rate, and **10.17 % of every
+fluid cell in the model demands more than 100 TIMES it** — over 1 K/s, 86 400 K/day. 94 % of the
+truncated cells are over the cap by more than 10x. So in a tenth of the atmosphere the convective
+temperature tendency is not being trimmed, it is being REPLACED: what `rhs_t` receives there is
+`MCt_max` and the sign of the raw value, and nothing else. **Seventh occurrence of the
+clamp-residual pattern, and the same shape as ThreeCat's `P_max_flux`** — a cap containing a term
+that is unphysical by orders of magnitude rather than one that is merely large.
+
+**`MC_q` IS THE MIDDLE CASE AND THAT IS THE USEFUL CONTROL.** Same construction, same
+`inv_step_rh`, same mass-flux divergence — truncated in 6.5 % of cells, over 10x in 0.20 %, over
+100x in **none**. So the 100x band is not a property of the flux-divergence form itself; it is
+specific to what `MC_t` adds on top of it, which is the LATENT term
+`(L/cp)*(c_u - e_d - e_l - e_p)*t_0`. That is where to look, and it has NOT been looked at.
+
+**WHAT THIS DOES AND DOES NOT SAY.** It does NOT say the model's temperature is wrong by that
+factor — the cap is applied before `rhs_t` ever sees the value, so the field is the CAPPED one and
+has been all along. It says the convective heating in a tenth of the grid is set by a constant
+rather than by the scheme, exactly as ThreeCat's precipitation was, so **no `MCt_max` value is a
+lever and tuning it would move the answer without meaning anything.** `MCt_max` was cut for the
+2026-06 SaturationAdjustment limit cycle, `MCq_max` 2.0e-4 -> 2.0e-5 with it; that history reads
+differently now — it was containing a defect, not choosing a strength.
+
+**AND THE CENSUS FOUND A DATA RACE IN THE LAND MASK, BY BEING AN INTEGER THAT SHOULD NOT HAVE
+MOVED.** The fluid-cell count is `SUM(j,k) max(0, im-1-i_topography[j][k])` — a pure function of
+the mask, no state and no floating point in it — and it read 2 354 866 at 24 threads against
+2 354 859 at 23. Probed across six thread counts on the shipped binary it takes **four different
+values**:
+
+| threads | 1 | 3 | 7 | 16 | 23 | 24 |
+|---|---|---|---|---|---|---|
+| **before** | 2 354 864 | 2 354 864 | 2 354 864 | **2 354 865** | **2 354 859** | **2 354 866** |
+| **after** | 2 354 864 | 2 354 864 | 2 354 864 | 2 354 864 | 2 354 864 | 2 354 864 |
+
+See *The land mask depended on the thread count* below.
+
 
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
@@ -6073,6 +6100,44 @@ line is.
   not a missing term. **Note what caught the first one: byte-identity ALONE would have passed the
   bad guard silently, because a no-op guard produces identical output. When a "fix" is a guard,
   verify that it FIRES, not just that nothing changed.**
+
+## The land mask depended on the thread count: TWO races in `init_topography`
+
+**FOUND 2026-09-13 BY AN INTEGER COUNTER THAT SHOULD NOT HAVE MOVED, AND BOTH ARE FIXED.**
+`ATM_MC_CAP_DIAG`'s fluid-cell total is a pure function of `i_topography` — no state, no
+floating point — and it took FOUR distinct values over six thread counts (table above). Two
+separate defects in `FileIO_Atm.cpp`, each with an EXACT-serial repair, so neither is a choice
+about the physics:
+
+1. **`:500`, a WRITE race.** `#pragma omp parallel for collapse(2)` over `(i, k)` while every
+   assignment in the body — `i_topography[j][k]`, `i_landscape[j][k]`, `Landscape.y[j][k]` — is
+   indexed by `(j, k)` ALONE. A column with more than one land->air transition (an air pocket
+   under land, which the peak-smoothing and slope-cap passes above can create) is written by
+   several `i` iterations owned by DIFFERENT threads. Serially the last write wins, i.e. the
+   HIGHEST transition; in parallel it is whichever thread finished last. **Repair**: own each
+   column with one thread and walk `i` innermost — same "highest wins", no shared write.
+2. **`:459`, a READ-WRITE race, found in the same sweep and a different defect.** The needle
+   smoothing rewrites `h` IN PLACE and its second test reads `h.x[i][j][k-1]` and
+   `h.x[i][j][k+1]`, which under `collapse(2)` over `(i, k)` belong to other threads that may be
+   zeroing them at that moment — so which needles survive depended on the schedule. **Repair**:
+   parallelise over `i` ALONE. The stencil never crosses `i`, so a thread owning a whole `i`-slice
+   reproduces serial execution bit-for-bit. Do not restore the collapse for speed; this runs once.
+
+**A SCAN OF BOTH MODELS AND `lib/` FOR THE SAME SHAPE RETURNS NO OTHER SITE** — parallel loop whose
+index set includes `i` writing a per-column `[j][k]` array.
+
+**THE CONSEQUENCE, AND IT IS NARROW BUT REAL.** Every byte check in this tree is run at 1 THREAD
+and every science run at 24, and **the land mask differed between them**. It is a handful of
+columns out of 65 341, and `i_topography` gates the sub-terrain microphysics guards, the radiation
+column under `ATM_RAD_TOPO`, `BC_Atm`'s Pass 3 and every budget zonal mean. Nothing is retracted —
+the effect is far below the documented fixed-thread-count non-determinism it would have been read
+as — but *"the 24-thread arms ran the configuration the 1-thread check verified"* was not strictly
+true before this fix, and now is. Third init-path race in the family, after `resetArrays` and the
+`init_tropopause_layers`/`init_layer_heights` ordering hazard.
+
+**VERIFIED BOTH WAYS**: constant at 1/3/7/16/23/24 threads and equal to the serial value; and
+1 thread, `nm` = 20 from scratch, pre-fix binary against post-fix, **13 of 14 written files
+byte-identical** with `RUN_CONFIG.txt` identical once the output path is normalised.
 
 ## Handing `cli/atm` a hydrosphere config ran the COMPILED DEFAULTS and said nothing
 

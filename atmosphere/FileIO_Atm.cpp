@@ -456,7 +456,15 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
     }
 
 //  reduction and smoothing of peaks and needles in the topography
-    #pragma omp parallel for collapse(2) schedule(static)
+    // ⚠ NOT `collapse(2)` — A READ-WRITE RACE, found in the same 2026-09-13 sweep as the
+    // i_topography one below. This smooths `h` IN PLACE and its second test reads
+    // h.x[i][j][k-1] and h.x[i][j][k+1], which under collapse(2) over (i,k) belong to OTHER
+    // threads that may be zeroing them at that moment — so which needles survive depended on
+    // the schedule. Parallelising over `i` ALONE fixes it exactly: the stencil never crosses
+    // `i` (every read is at the same i as the write), so one thread owns a whole i-slice and
+    // the result is bit-identical to serial execution at any thread count. Do not "restore"
+    // the collapse for speed; this runs once, at setup.
+    #pragma omp parallel for schedule(static)
     for(int i = 0; i < im; i++){
         for(int k = 1; k < km-1; k++){
             for(int j = 1; j < jm-1; j++){
@@ -497,10 +505,28 @@ void cAtmosphereModel::init_topography(const string &topo_filename){
         }
     }
 
+    // ⚠ THIS LOOP USED TO PARALLELISE OVER `i` AND WRITE PER-COLUMN ARRAYS — A WRITE RACE ON THE
+    // LAND MASK (found 2026-09-13). It was `collapse(2)` over (i, k) while every assignment below
+    // is indexed by (j, k) ALONE, so a column with more than one land->air transition — an air
+    // pocket under land, which the peak-smoothing and slope-cap passes above can create — was
+    // written by several `i` iterations owned by DIFFERENT THREADS. Serially the last write wins,
+    // i.e. the HIGHEST transition; in parallel it is whichever thread finished last.
+    //
+    // MEASURED, not inferred: ATM_MC_CAP_DIAG's fluid-cell count is
+    // SUM(j,k) max(0, im-1-i_topography[j][k]) — a pure function of the mask, no state and no
+    // floating point in it — and it read 2 354 866 at 24 threads against 2 354 859 at 23 on the
+    // same config. Seven columns of LAND MASK depended on the thread count, and everything keyed
+    // on i_topography (the sub-terrain guards, the radiation column with ATM_RAD_TOPO, the
+    // budget zonal means, BC_Atm's Pass 3) inherited it.
+    //
+    // The repair is to give each COLUMN to one thread and walk `i` innermost, which reproduces
+    // the serial "highest transition wins" exactly — so this is bit-identical at 1 thread, and at
+    // any thread count it now equals the 1-thread answer. Same family as the resetArrays init
+    // race ([[project_hydro_resetarrays_race]]): multi-thread-only, invisible to ASan.
     #pragma omp parallel for collapse(2) schedule(static)
-    for(int i = 1; i < im; i++){
-        for(int k = 0; k < km; k++){
-            for(int j = 0; j < jm; j++){
+    for(int k = 0; k < km; k++){
+        for(int j = 0; j < jm; j++){
+            for(int i = 1; i < im; i++){
                 if((is_air(h, i, j, k))&&(is_land(h, i-1, j, k))){
                     i_topography[j][k] = i;
                     i_landscape[j][k] = get_layer_height(i);
