@@ -970,7 +970,8 @@ public:
     Array vbud_advv;                                                    // vertical advection  -u·∂v/∂r
     Array vbud_advh;                                                    // horizontal advection -(v/rm)∂v/∂θ -(w/rmsinθ)∂v/∂φ
     Array vbud_diff;                                                    // diffusion (molecular + turbulent, + metric terms)
-    Array vbud_other;                                                   // surface drag + moist-convection momentum
+    Array vbud_other;                                                   // moist-convection momentum transport (coeff_MC_vel*MC_v) ONLY
+    Array vbud_drag;                                                    // near-surface Rayleigh drag (-surf_drag*v); split off vbud_other 2026-09-13
     // Zonal-mean w (zonal-wind / trade) momentum-budget term capture — mirror of vbud_*,
     // stored when wbudget_capture is set so write_w_momentum_budget can attribute the
     // trade-easterly spin-down to a specific rhs_w term.
@@ -979,7 +980,8 @@ public:
     Array wbud_advv;                                                    // vertical advection  -u·∂w/∂r
     Array wbud_advh;                                                    // horizontal advection -(v/rm)∂w/∂θ -(w/rmsinθ)∂w/∂φ
     Array wbud_diff;                                                    // diffusion (molecular + turbulent, + metric terms)
-    Array wbud_other;                                                   // surface drag + moist-convection momentum
+    Array wbud_other;                                                   // moist-convection momentum transport (coeff_MC_vel*MC_w) ONLY
+    Array wbud_drag;                                                    // near-surface Rayleigh drag (-surf_drag*w); split off wbud_other 2026-09-13
     Array epsilon;                                                      // emissivity/ absorptivity
     Array radiation;                                                    // radiation
     Array P_rain;                                                       // rain precipitation mass rate

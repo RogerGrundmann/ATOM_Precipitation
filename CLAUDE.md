@@ -1268,15 +1268,130 @@ lid temperature, `ATM_SR_DIAG`'s ground bucket, the two pressure clamps, and `mi
 | `pgf` | 2.97e-09 | 0.0015 |
 | `dw_radial` | **exactly 0** | `_VW=0` confirmed in the budget |
 
-**A term pegged at its cap is ~74 % of Coriolis where it acts.** Seventh occurrence of the
-clamp-residual pattern. ⚠ **`drag_mc` BUNDLES `coeff_MC_vel*MC_w` WITH THE SURFACE RAYLEIGH DRAG**,
-so the split is not measured — above 3 km the surface drag should be small but that has NOT been
-checked. And `coeff_MC_vel = ndimLength()/u_0^2` carries the `ATM_LENGTH_NDIM` 40x defect whose own
-comment names `coeff_MC_*` among the terms left behind, so this saturated term is 40x weaker than
-its own convention intends.
+**A term pegged at its cap is ~74 % of Coriolis where it acts.** ⚠ **THAT SENTENCE IS TWO CLAIMS
+AND BOTH ARE CORRECTED BELOW** (2026-09-13): the bundle is entirely convective, and `MC_w` is
+truncated in **0.93 %** of cells, so it is pegged at its MAXIMUM and is not a clamp residual at its
+median. The magnitudes in the table stand.
 
-**NEXT INSTRUMENT, NOT WRITTEN: one print splitting `drag_mc` into its two halves and counting the
-cells `MCv_max` truncates.** Not a repair to `w_u`.
+### The split, measured: `drag_mc` is 100 % convective, and the surface drag is a millionth of Coriolis IN ITS OWN LAYER
+
+**`vbud_other`/`wbud_other` NOW CARRY `coeff_MC_vel*MC_{v,w}` ALONE AND TWO NEW ARRAYS CARRY THE
+SURFACE RAYLEIGH DRAG** (2026-09-13). The momentum-budget CSVs gain a `drag_sfc` column and the
+bundled `drag_mc` column is **RENAMED `drag_conv`** — renamed rather than reused, so a stale reader
+fails instead of silently getting the convective half under the bundled name. Nothing the model
+integrates reads either array; `dyn_sum` sums both and stays an identity.
+
+`output_dm1260`, a 1200 -> 1260 continuation of `output_vw1200` on that arm's own branch
+(`ATM_PDYN_CEILING=50`, everything else now a default), 24 threads, exit 0, zero NaN. Same window
+as the table above — 20-70 deg, above 3 km, n = 1734 — with the median taken over NON-ZERO cells,
+which is what the earlier row reported:
+
+| term | median (non-zero) | vs `coriolis` | non-zero % |
+|---|---|---|---|
+| `adv_vert` | 1.709e-05 | 9.61 | 88.6 |
+| **`drag_conv`** | **2.258e-06** | **1.27** | **25.7** |
+| `coriolis` | 2.050e-06 | 1.00 | 94.1 |
+| `diffusion` | 4.333e-07 | 0.24 | 94.1 |
+| `adv_horiz` | 4.979e-08 | 0.028 | 94.1 |
+| `pgf` | 3.080e-09 | 0.002 | 94.1 |
+| **`drag_sfc`** | **2.528e-13** | **1.2e-07** | 14.8 |
+
+**THE CONVECTIVE HALF IS THE WHOLE OF IT**, as predicted before the run: the drag ramps to zero
+over `drag_n_layers` = 5 cells above the LOCAL ground and over ocean level 5 is 236 m, so aloft it
+survives only over the Andes, Tibet and the Antarctic rim. Its largest zonal-mean value anywhere
+above 3 km is **7.6e-12 against `drag_conv`'s 1.5e-05** — seven orders.
+
+**AND THE OTHER HALF OF THE SPLIT IS THE FINDING. INSIDE THE DRAG LAYER THE DRAG IS STILL A
+MILLIONTH OF CORIOLIS**, same run, 20-70 deg, BELOW 300 m (n = 714):
+
+| term | median (non-zero) | vs `coriolis` |
+|---|---|---|
+| `coriolis` | 6.972e-06 | 1.00 |
+| `diffusion` | 2.863e-06 | 0.41 |
+| `adv_vert` | 1.634e-06 | 0.23 |
+| `pgf` | 3.494e-08 | 0.005 |
+| **`drag_sfc`** | **8.530e-12** | **1.2e-06** |
+| `drag_conv` | **exactly 0** | convection does not reach the surface layer |
+
+### `surf_drag` IS THE LAST EXTRA-`dt` TERM, IT IS 4.0e5 TOO WEAK, AND A COMMENT SAYS IT WAS REPAIRED
+
+Arithmetic, no run required. `RHS_Atm_Turb.cpp:1337` is
+
+    surf_drag = (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile;
+
+and `RungeKutta_Atm_Turb.cpp` integrates `v += (k1+2k2+2k3+k4)*dt/6`, so `rhs_v` is a TENDENCY and
+**the `* dt` inside the coefficient is a second, spurious one**. `ndimLength()` returns `L_atm` =
+400 m unless `ATM_LENGTH_NDIM` is set, where the Coriolis coefficient beside it uses
+`metricShellLength()` = 16 024 m. Two factors, one term:
+
+| | value |
+|---|---|
+| shipped `kf*L_atm/u_0*dt` | 5.787e-08 |
+| consistent `kf*metricShellLength()/u_0` | **2.318e-02** |
+| **ratio** | **4.006e+05** = `dt` x 1e4 times the metric's 40 |
+| `force_nd` = `omega*metricShellLength()/u_0` | 1.461e-01 |
+| intended `drag/force_nd` = `kf/omega` | **0.159** |
+| shipped `drag/force_nd` | **3.96e-07** |
+
+**The field confirms the arithmetic**: the measured `drag_sfc`/`coriolis` of 1.2e-06 sits within a
+factor of 3 of the coefficient ratio 4.0e-07, the difference being that the drag goes as `w` and
+`coriolis_phi` as `v`, and `max|w|` is 26 m/s against `max|v|` 2.8.
+
+**SO THIS MODEL'S ONLY MOMENTUM SINK IS EFFECTIVELY ABSENT**, which is the same shape as
+`ATM_BUOY_CONSISTENT` (5.0e5 on a body force), the ocean's `buoy_nd` (~1e-7) and ATHAD's items
+34/42 — and it is the term that section names: `RHS_Atm_Turb.cpp:1259` calls the buoyancy *"item
+34's second extra-`*dt` term, **the half the surf_drag repair did not touch**"*, i.e. it asserts
+the surf_drag half WAS repaired. The `* dt` is still on the line. **Sixth instance in this tree of
+a comment describing code that does not run**, and the standing note 900 lines above it
+(*"STILL ON L_atm, and therefore still 40x too weak: ... the Rayleigh surface drag
+(rayleigh_kf*L_atm/u_0)"*) states the coefficient WITHOUT the `dt`, so the recorded error is 40x
+where the real one is 400 000x.
+
+**AND THE CALIBRATION STORY REFERS TO A DELETED FILE.** `rayleigh_kf` carries a tuning record —
+1/8640 -> 1/86400 because *"baseline 1/day gave ~34 m/s eastward `w` off W-coast S-America; 10x cut
+the surface to ~28 m/s"* — and the scaling comment says it is *"scaled in advective time ... to
+match the laminar `RHS_Atm.cpp`"*. **`atmosphere/RHS_Atm.cpp` does not exist**, and `rayleigh_kf`
+appears in exactly one file. A 10x change to a coefficient that is 4.0e5 too small cannot have
+moved a surface wind by 6 m/s; whatever did, it was not this term on this branch.
+
+**WHAT A REPAIR WOULD AND WOULD NOT BUY, BEFORE ANYONE WRITES IT.** At the consistent coefficient
+the drag's e-folding is `1/kf` = one day = **4.31e+05 iterations**, against 1.73e+11 shipped. So
+the repair is correct and **cannot change a run this tree can afford** — the same wall as
+`ATM_HYDRO_PGF`'s `1/f`, `HYD_BAROCLINIC_PGF` and `HYD_SFC_FLUX`. What changes is a statement
+about the model: *the only velocity-proportional momentum sink in the atmosphere is absent by a
+factor of 400 000*, which is worth having beside *the jet freezes at `_VW=0`* and *there is no
+thermal wind*. **Nothing is written and nothing is flipped.**
+
+### The cap census: `MCv_max` truncates 0.9 % of cells, and `MCt_max` truncates 16 %
+
+**`ATM_MC_CAP_DIAG=1`, new, print-only, default off.** Counts only — no sums of doubles — so it is
+deterministic under OpenMP. Same run, per call, 2 354 866 fluid cells, steady from iteration 1202
+to 1260:
+
+| | truncated | >2x the cap | >10x | >100x |
+|---|---|---|---|---|
+| **`MC_t`** (`MCt_max`) | **370 043 = 15.71 %** | | | |
+| **`MC_q`** (`MCq_max`) | **153 324 = 6.51 %** | | | |
+| **`MC_w`** (`MCv_max`) | **21 990 = 0.93 %** | 14 890 = 0.63 % | 908 = 0.039 % | **0** |
+| `MC_v` (`MCv_max`) | 239 = 0.010 % | 0 | 0 | 0 |
+
+**SO `max|MC_w|` = `MCv_max` EXACTLY IS ONE CELL IN A HUNDRED, NOT THE FIELD.** The cap is a
+stabiliser doing its job at a small minority of cells — nothing exceeds it by 100x and the
+excess is under 10x in 96 % of the truncated cells — which is the opposite of `P_max_flux`
+setting ThreeCat's precipitation. **The seventh clamp-residual claim is withdrawn for `MC_w`.**
+What the `drag_conv` row above says instead is that the convective momentum transport is
+**Coriolis-sized where it acts (1.27x) and acts in a quarter of the cells**, which is a
+statement about the convection, not about the cap.
+
+**AND THE CENSUS FOUND A LARGER CAP THAN THE ONE IT WAS POINTED AT.** `MCt_max` truncates the
+convective HEATING in **15.7 %** of all fluid cells and `MCq_max` the convective MOISTENING in
+**6.5 %** — an eighth and a fifteenth of the atmosphere, against `MCv_max`'s hundredth. Both were
+tuned down for the 2026-06 SaturationAdjustment limit cycle (`MCq_max` 2.0e-4 -> 2.0e-5, a 10x
+cut, with the comment recording it as throttling the fuel). **UNMEASURED: the >2x/>10x/>100x bands
+are not collected for `t` and `q`** — the instrument passes dummies there — so whether those
+370 043 cells are 1.1x or 1e4x over is the open question, and it is one build away. `P_conv` is
+0.0196 mm/a in the 1000-iteration run recorded above, so a heating cap binding on an eighth of the
+grid is not obviously a small thing.
 
 ### 2. The polar cells were never cells, in any commit this repository has ever had
 
@@ -5958,6 +6073,30 @@ line is.
   not a missing term. **Note what caught the first one: byte-identity ALONE would have passed the
   bad guard silently, because a no-op guard produces identical output. When a "fix" is a guard,
   verify that it FIRES, not just that nothing changed.**
+
+## Handing `cli/atm` a hydrosphere config ran the COMPILED DEFAULTS and said nothing
+
+**FIXED 2026-09-13, AFTER IT COST 70 MINUTES.** `cAtmosphereModel::LoadConfig` looked up
+`<atom>`, `<common>` and `<atmosphere>` and **`return`ed silently** if any was missing. A
+hydrosphere config parses fine, has `<atom>` and `<common>`, and has no `<atmosphere>` — so an
+off-branch byte check built on `config_bz0.xml` (a `HYD_A_H_BIHARM` arm) applied **nothing**:
+both arms took `nm` = 400 instead of 20, ignored `output_path` and wrote into
+`output_ATOM_Precipitation/`, and printed a full, plausible `[RUN CONFIG]` banner in which every
+value happened to be a default. Nothing warned, exit status would have been 0.
+
+**`cHydrosphereModel::LoadConfig` ALREADY THREW** on all three — the silent return was the
+atmosphere's alone, so the two models disagreed about whether an unusable config is an error.
+The atmosphere now throws too, naming the file and the missing section
+(*"no `<atmosphere>` section (is this a hydrosphere config?) -- nothing would be applied"*).
+It cannot change a valid run: it is reached only where the old code returned without applying
+anything.
+
+*Same family as the `nm` asymmetry recorded above* — in the atmosphere `nm` is the TOTAL count so
+a restart at 600 with `nm` = 100 runs zero iterations, exits 0 and prints a full set of
+diagnostics from the setup state. **Both failures look like a completed run, and the tell is the
+same one in both cases: read the `[RUN CONFIG]` banner, whose `nm` and output path are printed
+precisely so this is visible.** Byte-check configs should be derived from a known-good ATMOSPHERE
+config (`config_va_old.xml` is the one `run_verify.sh` uses), never from an arbitrary sibling.
 
 ## The build hazard, because it produced a crash that looked like a success
 

@@ -630,9 +630,10 @@ void cAtmosphereModel::write_v_momentum_budget(int iter,
             }
     };
     std::vector<std::vector<double> > t_pgf(im, std::vector<double>(jm,0.0)), t_cor=t_pgf,
-        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf;
+        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf, t_drag=t_pgf;
     zmean(vbud_pgf, t_pgf);   zmean(vbud_cor, t_cor);     zmean(vbud_advv, t_advv);
     zmean(vbud_advh, t_advh); zmean(vbud_diff, t_diff);   zmean(vbud_other, t_other);
+    zmean(vbud_drag, t_drag);
 
     // long-format CSV: lat × height × per-step contributions + RK4 term-split (m/s per iter)
     ostringstream fname;
@@ -640,19 +641,20 @@ void cAtmosphereModel::write_v_momentum_budget(int iter,
     ofstream f(fname.str().c_str());
     if(f.is_open()){
         f << "lat_deg,height_m,vbar_mps,dv_dyn,dv_polar,dv_orog,dv_radial,dv_net,"
-          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_mc,dyn_sum\n";
+          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_conv,drag_sfc,dyn_sum\n";
         for(int j = 0; j < jm; j++){
             const double lat = lat_of(j);
             for(int i = 0; i < im; i++){
                 const double net = dv_dyn[i][j] + dv_polar[i][j] + dv_orog[i][j] + dv_radial[i][j];
                 const double dyn_sum = t_pgf[i][j] + t_cor[i][j] + t_advv[i][j]
-                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j];
+                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j]
+                                     + t_drag[i][j];
                 f << lat << "," << get_layer_height(i) << "," << vbar[i][j] << ","
                   << dv_dyn[i][j] << "," << dv_polar[i][j] << "," << dv_orog[i][j] << ","
                   << dv_radial[i][j] << "," << net << ","
                   << t_pgf[i][j] << "," << t_cor[i][j] << "," << t_advv[i][j] << ","
                   << t_advh[i][j] << "," << t_diff[i][j] << "," << t_other[i][j] << ","
-                  << dyn_sum << "\n";
+                  << t_drag[i][j] << "," << dyn_sum << "\n";
             }
         }
         f.close();
@@ -670,7 +672,8 @@ void cAtmosphereModel::write_v_momentum_budget(int iter,
          << "  | dv_dyn=" << dv_dyn[ip][jp] << " (radial=" << dv_radial[ip][jp] << ")"
          << "  || split: pgf=" << t_pgf[ip][jp] << " cor=" << t_cor[ip][jp]
          << " advV=" << t_advv[ip][jp] << " advH=" << t_advh[ip][jp]
-         << " diff=" << t_diff[ip][jp] << " drag/mc=" << t_other[ip][jp]
+         << " diff=" << t_diff[ip][jp] << " mc=" << t_other[ip][jp]
+         << " dragSfc=" << t_drag[ip][jp]
          << "   -> " << fname.str() << endl;
 }
 
@@ -727,28 +730,30 @@ void cAtmosphereModel::write_w_momentum_budget(int iter,
             }
     };
     std::vector<std::vector<double> > t_pgf(im, std::vector<double>(jm,0.0)), t_cor=t_pgf,
-        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf;
+        t_advv=t_pgf, t_advh=t_pgf, t_diff=t_pgf, t_other=t_pgf, t_drag=t_pgf;
     zmean(wbud_pgf, t_pgf);   zmean(wbud_cor, t_cor);     zmean(wbud_advv, t_advv);
     zmean(wbud_advh, t_advh); zmean(wbud_diff, t_diff);   zmean(wbud_other, t_other);
+    zmean(wbud_drag, t_drag);
 
     ostringstream fname;
     fname << output_path << "w_momentum_budget_" << iter << ".csv";
     ofstream f(fname.str().c_str());
     if(f.is_open()){
         f << "lat_deg,height_m,wbar_mps,dw_dyn,dw_polar,dw_orog,dw_radial,dw_net,"
-          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_mc,dyn_sum\n";
+          << "pgf,coriolis,adv_vert,adv_horiz,diffusion,drag_conv,drag_sfc,dyn_sum\n";
         for(int j = 0; j < jm; j++){
             const double lat = lat_of(j);
             for(int i = 0; i < im; i++){
                 const double net = dw_dyn[i][j] + dw_polar[i][j] + dw_orog[i][j] + dw_radial[i][j];
                 const double dyn_sum = t_pgf[i][j] + t_cor[i][j] + t_advv[i][j]
-                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j];
+                                     + t_advh[i][j] + t_diff[i][j] + t_other[i][j]
+                                     + t_drag[i][j];
                 f << lat << "," << get_layer_height(i) << "," << wbar[i][j] << ","
                   << dw_dyn[i][j] << "," << dw_polar[i][j] << "," << dw_orog[i][j] << ","
                   << dw_radial[i][j] << "," << net << ","
                   << t_pgf[i][j] << "," << t_cor[i][j] << "," << t_advv[i][j] << ","
                   << t_advh[i][j] << "," << t_diff[i][j] << "," << t_other[i][j] << ","
-                  << dyn_sum << "\n";
+                  << t_drag[i][j] << "," << dyn_sum << "\n";
             }
         }
         f.close();
@@ -766,7 +771,8 @@ void cAtmosphereModel::write_w_momentum_budget(int iter,
          << " polar=" << dw_polar[ip][jp] << ")"
          << "  || split: pgf=" << t_pgf[ip][jp] << " cor=" << t_cor[ip][jp]
          << " advV=" << t_advv[ip][jp] << " advH=" << t_advh[ip][jp]
-         << " diff=" << t_diff[ip][jp] << " drag/mc=" << t_other[ip][jp]
+         << " diff=" << t_diff[ip][jp] << " mc=" << t_other[ip][jp]
+         << " dragSfc=" << t_drag[ip][jp]
          << "   -> " << fname.str() << endl;
 }
 

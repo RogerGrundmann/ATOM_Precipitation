@@ -1365,7 +1365,29 @@ void findCloudBaseLFS() {
             }
         }
 
-        #pragma omp parallel for collapse(2)
+// ==================== ATM_MC_CAP_DIAG: how hard the four caps are binding ====================
+        // ATM_MC_CAP_DIAG=1 -- print-only, default off, no field is written and the capped
+        // values are unchanged either way.
+        //
+        // WHY. `max|MC_w|` reads EXACTLY 1.0000e-02 = MCv_max at every checkpoint of every run
+        // from iteration 0 to 1200 (2026-09-12 trace), so the convective momentum transport is a
+        // CLAMP RESIDUAL wherever it saturates -- the seventh in this tree. A maximum cannot say
+        // whether that is one cell or a third of the grid, nor whether the raw value is 1.1x the
+        // cap or 1e4x it, and those are different defects: the first is a stabiliser doing its
+        // job at a few cells, the second is a cap SETTING the answer the way P_max_flux sets
+        // ThreeCat's precipitation. This counts the cells and bands the excess.
+        //
+        // Counts only -- no sums of doubles -- so the numbers are deterministic under OpenMP.
+        const bool cap_diag = [](){ const char* e = getenv("ATM_MC_CAP_DIAG");
+                                    return e && atoi(e) != 0; }();
+        long n_fluid = 0;
+        long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
+        long nv_x2 = 0, nv_x10 = 0, nv_x100 = 0;
+        long nw_x2 = 0, nw_x10 = 0, nw_x100 = 0;
+
+        #pragma omp parallel for collapse(2) \
+            reduction(+:n_fluid,nt_cap,nq_cap,nv_cap,nw_cap, \
+                        nv_x2,nv_x10,nv_x100,nw_x2,nw_x10,nw_x100)
         for(int j = 0; j < m.jm; j++){
             for(int k = 0; k < m.km; k++){
                 for(int i = 0; i < m.im - 1; i++){
@@ -1384,9 +1406,9 @@ void findCloudBaseLFS() {
                     double conv_src = m.c_u.x[i][j][k] - m.e_d.x[i][j][k]                               // (kg/kg)/s
                                   - m.e_l.x[i][j][k] - m.e_p.x[i][j][k];
 
-                    m.MC_t.x[i][j][k] = safe_cap(
-                        -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0                                  // K/s
-                        + (L_latent / m.cp_l) * conv_src* m.t_0, MCt_max);                              // K/s
+                    double raw_t = -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0                    // K/s
+                        + (L_latent / m.cp_l) * conv_src * m.t_0;                                       // K/s
+                    m.MC_t.x[i][j][k] = safe_cap(raw_t, MCt_max);
 
 
 
@@ -1395,9 +1417,9 @@ void findCloudBaseLFS() {
                     double flux_q_i   = m.M_u.x[i][j][k] * (m.q_v_u.x[i][j][k] - m.c.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.q_v_d.x[i][j][k] - m.c.x[i][j][k]);
 
-                    m.MC_q.x[i][j][k] = safe_cap(
-                                        - (flux_q_ip1 - flux_q_i) * inv_step_rh                         // (kg/kg)/s
-                                        - conv_src, MCq_max);                                           // (kg/kg)/s
+                    double raw_q = -(flux_q_ip1 - flux_q_i) * inv_step_rh                            // (kg/kg)/s
+                                   - conv_src;                                                          // (kg/kg)/s
+                    m.MC_q.x[i][j][k] = safe_cap(raw_q, MCq_max);
 
 
 
@@ -1407,8 +1429,8 @@ void findCloudBaseLFS() {
                     double flux_v_i   = m.M_u.x[i][j][k] * (m.v_u.x[i][j][k] - m.v.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.v_d.x[i][j][k] - m.v.x[i][j][k]);
 
-                    m.MC_v.x[i][j][k] = safe_cap(
-                        -(flux_v_ip1 - flux_v_i) * inv_step_rh * m.u_0, MCv_max);                       // (m/s)(1/s)
+                    double raw_v = -(flux_v_ip1 - flux_v_i) * inv_step_rh * m.u_0;                  // (m/s)(1/s)
+                    m.MC_v.x[i][j][k] = safe_cap(raw_v, MCv_max);
 
 
 
@@ -1417,10 +1439,48 @@ void findCloudBaseLFS() {
                     double flux_w_i   = m.M_u.x[i][j][k] * (m.w_u.x[i][j][k] - m.w.x[i][j][k])
                                     + m.M_d.x[i][j][k] * (m.w_d.x[i][j][k] - m.w.x[i][j][k]);
 
-                    m.MC_w.x[i][j][k] = safe_cap(
-                        -(flux_w_ip1 - flux_w_i) * inv_step_rh * m.u_0, MCv_max);                       // (m/s)(1/s)
+                    double raw_w = -(flux_w_ip1 - flux_w_i) * inv_step_rh * m.u_0;                  // (m/s)(1/s)
+                    m.MC_w.x[i][j][k] = safe_cap(raw_w, MCv_max);
+
+                    if(cap_diag && i >= m.i_topography[j][k]){
+                        n_fluid++;
+                        // A cell whose raw value is non-finite is RESET to 0 by safe_cap rather
+                        // than truncated; charge it to the cap anyway, and never to a band.
+                        auto band = [](double raw, double cap, long& n1, long& n2,
+                                       long& n10, long& n100){
+                            if(!AtomUtils::is_finite_safe(raw)){ n1++; return; }
+                            double r = std::fabs(raw) / cap;
+                            if(r <= 1.0) return;
+                            n1++;
+                            if(r > 2.0)   n2++;
+                            if(r > 10.0)  n10++;
+                            if(r > 100.0) n100++;
+                        };
+                        long dummy2 = 0, dummy10 = 0, dummy100 = 0;
+                        band(raw_t, MCt_max, nt_cap, dummy2, dummy10, dummy100);
+                        band(raw_q, MCq_max, nq_cap, dummy2, dummy10, dummy100);
+                        band(raw_v, MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
+                        band(raw_w, MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
+                    }
                 }
             }
+        }
+
+        if(cap_diag && n_fluid > 0){
+            auto pc = [&](long n){ return 100.0 * (double)n / (double)n_fluid; };
+            std::cout << "[MC CAP DIAG] iter " << m.iter_n << "  fluid cells " << n_fluid
+                      << "   MCv_max=" << MCv_max << " m/s2" << std::endl;
+            std::cout << "    MC_v truncated " << nv_cap << " (" << pc(nv_cap) << " %)"
+                      << "   >2x " << nv_x2 << " (" << pc(nv_x2) << " %)"
+                      << "   >10x " << nv_x10 << " (" << pc(nv_x10) << " %)"
+                      << "   >100x " << nv_x100 << " (" << pc(nv_x100) << " %)" << std::endl;
+            std::cout << "    MC_t truncated " << nt_cap << " (" << pc(nt_cap) << " %)"
+                      << "      MC_q truncated " << nq_cap << " (" << pc(nq_cap) << " %)"
+                      << std::endl;
+            std::cout << "    MC_w truncated " << nw_cap << " (" << pc(nw_cap) << " %)"
+                      << "   >2x " << nw_x2 << " (" << pc(nw_x2) << " %)"
+                      << "   >10x " << nw_x10 << " (" << pc(nw_x10) << " %)"
+                      << "   >100x " << nw_x100 << " (" << pc(nw_x100) << " %)" << std::endl;
         }
     }
 /*

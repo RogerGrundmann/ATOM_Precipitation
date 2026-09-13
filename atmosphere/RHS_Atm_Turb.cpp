@@ -1355,7 +1355,13 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         vbud_advv.x[i][j][k]  = -(u_exp * dvdr_adv);
         vbud_advh.x[i][j][k]  = -(v_invrm * dvdthe_adv + w_invrs * dvdphi_adv);
         vbud_diff.x[i][j][k]  =  diffusion_v;
-        vbud_other.x[i][j][k] =  coeff_MC_vel * MC_v.x[i][j][k] - surf_drag * v_ijk;
+        // SPLIT 2026-09-13. These two were bundled into one `drag_mc` column, and the w-side
+        // bundle measured 74 % of Coriolis above 3 km with MC_w pegged at MCv_max -- so which
+        // half that was could not be read off the budget. The surface Rayleigh drag ramps to
+        // zero over drag_n_layers = 5 cells above the LOCAL ground, so above ~400 m it should
+        // be identically zero except over high terrain; that is now measured, not assumed.
+        vbud_other.x[i][j][k] =  coeff_MC_vel * MC_v.x[i][j][k];
+        vbud_drag.x[i][j][k]  = -surf_drag * v_ijk;
     }
 
     rhs_w.x[i][j][k] = -dpdphi_invrs - hydro_phi - transport_w + diffusion_w
@@ -1374,7 +1380,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         wbud_advv.x[i][j][k]  = -(u_exp * dwdr_adv);
         wbud_advh.x[i][j][k]  = -(v_invrm * dwdthe_adv + w_invrs * dwdphi_adv);
         wbud_diff.x[i][j][k]  =  diffusion_w;
-        wbud_other.x[i][j][k] =  coeff_MC_vel * MC_w.x[i][j][k] - surf_drag * w_ijk;
+        wbud_other.x[i][j][k] =  coeff_MC_vel * MC_w.x[i][j][k];   // see the vbud split note above
+        wbud_drag.x[i][j][k]  = -surf_drag * w_ijk;
     }
 
     // ==================================================================

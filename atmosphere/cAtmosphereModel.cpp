@@ -103,18 +103,27 @@ void cAtmosphereModel::LoadConfig(const char *filename){
         doc.PrintError();
         throw std::invalid_argument("   couldn't load config file inside cAtmosphereModel");
     }
+    // A MISSING SECTION USED TO `return` SILENTLY, AND THAT RUNS THE COMPILED DEFAULTS UNDER THE
+    // NAME OF YOUR CONFIG (2026-09-13). Handing `cli/atm` a HYDROSPHERE config -- which parses
+    // fine, has <atom> and <common>, and simply has no <atmosphere> -- applied NOTHING: the run
+    // took nm = 400 instead of 20, ignored output_path and wrote into output_ATOM_Precipitation/,
+    // and printed a full, plausible [RUN CONFIG] banner in which every value happened to be a
+    // default. It cost 70 minutes before the banner was read. Same shape as the atmosphere/
+    // hydrosphere `nm` asymmetry recorded in CLAUDE.md, where a restart with the wrong `nm`
+    // exits 0 having run zero iterations. Throw instead: a config that cannot be applied is an
+    // error, not a default.
     XMLElement *atom = doc.FirstChildElement("atom");
-    if(!atom){
-        return;
-    }
-    XMLElement* elem_common = doc.FirstChildElement("atom")->FirstChildElement("common");
-    if(!elem_common){
-        return;
-    }
-    XMLElement* elem_atmosphere = doc.FirstChildElement("atom")->FirstChildElement("atmosphere");
-    if(!elem_atmosphere){
-        return;
-    }
+    if(!atom)
+        throw std::invalid_argument(std::string("config ") + filename
+            + ": no <atom> root element -- nothing would be applied");
+    XMLElement* elem_common = atom->FirstChildElement("common");
+    if(!elem_common)
+        throw std::invalid_argument(std::string("config ") + filename
+            + ": no <common> section -- nothing would be applied");
+    XMLElement* elem_atmosphere = atom->FirstChildElement("atmosphere");
+    if(!elem_atmosphere)
+        throw std::invalid_argument(std::string("config ") + filename
+            + ": no <atmosphere> section (is this a hydrosphere config?) -- nothing would be applied");
 #include "AtmosphereLoadConfig.cpp.inc"
 }
 /*
