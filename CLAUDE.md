@@ -1362,6 +1362,86 @@ about the model: *the only velocity-proportional momentum sink in the atmosphere
 factor of 400 000*, which is worth having beside *the jet freezes at `_VW=0`* and *there is no
 thermal wind*. **Nothing is written and nothing is flipped.**
 
+### `ATM_MC_T_NDIM`: the latent half of `MC_t` carries a spare `t_0`, and removing it is a null
+
+**THE DEFECT IS ARITHMETIC BEFORE IT IS A MEASUREMENT** (2026-09-13). `MC_t` is assembled as
+
+    raw_t = -(d flux_s) * inv_step_rh * t_0  +  (L/cp_l) * conv_src * t_0
+
+and `coeff_MC_t = ndimLength()/(u_0*t_0)` (`RHS_Atm_Turb.cpp:375`) says `MC_t` must be in K/s.
+**`s` IS NON-DIMENSIONAL** — `MoistConvection.h:321` sets `s = cp_l*T/s_0` and
+`cAtmosphereDefaults.cpp.inc:101` gives `s_0 = 274515.75`, which is `cp_l*t_0 = 1005 x 273.15`
+**exactly** — so `s = T/t_0`, the flux divergence comes out in nondim-`s` per second and `* t_0`
+is its CORRECT conversion. The latent term is `(L/cp_l)*conv_src` with `conv_src` in (kg/kg)/s
+and `L/cp_l` in K per (kg/kg): **it is already K/s.** The nondim-consistent form is
+`(L/s_0)*conv_src`, and `(L/s_0)*t_0 == L/cp_l`. **So the `* t_0` applied to the SUM inflates the
+latent half by `t_0` = 273.15** — a half-applied non-dimensionalisation, applied to a sum where
+only one addend needed it. Fourth of that shape found in this tree in one day, after
+`ATM_BUOY_CONSISTENT` (5.0e5), `ATM_MICRO_NDIM` (2783x) and `surf_drag` (4.0e5).
+
+**THE HALF-SPLIT CENSUS ISOLATES IT, AND THE LAST ROW IS THE TEST** — the same field with only
+the disputed factor removed. Fractions of all 2 354 864 fluid cells, iteration 1260:
+
+| of `raw_t` | over `MCt_max` | >10x | **>100x** |
+|---|---|---|---|
+| flux half alone | 2.64 % | 1.32 % | **0.0000 %** |
+| **latent half alone** | 14.67 % | 14.09 % | **10.19 %** |
+| **latent half / `t_0`** | 8.54 % | 4.29 % | **0.024 %** |
+| *(whole `MC_t`)* | *15.71 %* | *14.77 %* | *10.17 %* |
+
+The latent half carries the ENTIRE >100x band and dividing it by `t_0` removes it; the flux half
+never reaches 100x at all.
+
+**`ATM_MC_T_NDIM=<strength>`, DEFAULT 0.0 = SHIPPED and BYTE-IDENTICAL.** A strength rather than a
+flag, like `ATM_MICRO_NDIM`, because the endpoint is a factor of 273 on a term feeding `rhs_t`;
+the off branch is the original expression VERBATIM rather than a hoisted coefficient, for the
+reason `ATM_BUOY_CONSISTENT`'s off branch records (`*` is left-associative and floating-point
+multiplication is not). Verified 1 thread, `nm` = 20 from scratch against the pre-knob binary:
+**13 of 14 written files byte-identical**, `RUN_CONFIG.txt` differing only by the output path and
+the two new banner entries. *(`ATM_MICRO_NDIM` had been a live knob since 2026-09-07 and had never
+appeared in the banner; it does now.)*
+
+**AND IT DOES WHAT THE DIAGNOSTIC PREDICTED, TO THE DIGIT.** 1200 -> 1260 from
+`output_vw1200`'s checkpoint, **both arms 22 threads, one binary** (`output_mt0` / `output_mt1`),
+exit 0, zero NaN:
+
+| | `=0` (shipped) | **`=1.0`** | |
+|---|---|---|---|
+| `MC_t` truncated | 15.71 % | **10.21 %** | -35 % |
+| **`MC_t` >100x the cap** | **10.17 %** | **0.020 %** | **-99.8 %** |
+| Precip mm/a | 1132.2 | 1130.5 | **-0.15 %** |
+| pattern `r` | +0.450 | +0.449 | |
+| centred RMS | 1592.6 | 1590.4 | -0.14 % |
+| sigma | 2.57 | 2.57 | |
+| 0-15 / 15-35 / 35-65 / 65-90 | 3681.0 / 498.3 / 155.2 / 8.5 | 3675.5 / 497.2 / **155.2** / **8.5** | |
+| land / ocean | 914.6 / 1218.3 | 911.9 / 1217.0 | |
+| **`max\|u\|`** | **2.404855** | **2.404855** | **identical to 7 figures** |
+| `max w_u` | 28.848426 | 28.848422 | |
+| precipitable water | 30.2 | 30.2 mm | |
+
+The knob's >100x figure lands on the control's own `latent / t_0` row — **0.0204 % against
+0.0236 %** — which is the cross-check: the census predicted the number before the knob existed.
+
+**THE CLIMATE IS A NULL AND THE DIRECTION IS THE RIGHT WAY ROUND.** Correcting the term makes the
+convective heating SMALLER, so the cells that stop being capped heat less and the model rains
+**0.15 % less**; the two starved bands do not move at all and the velocities are identical to
+seven figures. Same shape as `ATM_MICRO_NDIM`, where a 2783x coefficient correction moved
+precipitation 0.5 %. **60 iterations is 12 s of physical time**, so this is a local thermodynamic
+response and not a climate one.
+
+**DEFAULT STAYS 0.0**, for the reason this tree always gives: what has been measured is 12 seconds.
+What IS settled is that the convective heating in a tenth of the grid was set by `MCt_max` and a
+unit error rather than by the scheme.
+
+**AND THE CAP STILL BINDS WHEN CORRECTED, WHICH IS THE NEXT QUESTION AND A DIFFERENT ONE.** At
+`=1.0` the truncation is still **10.21 %**, of which the flux half accounts for 2.64 % and the
+corrected latent half for 8.53 %. `MCt_max` = 0.01 K/s is **864 K/day**, so 8.5 % of the
+atmosphere still demands more latent heating than that. **That is a question about `conv_src`'s own
+magnitude — `c_u - e_d - e_l - e_p` — and this knob does not touch it.** Note also that
+`coeff_MC_t = ndimLength()/(u_0*t_0)` carries the same `ATM_LENGTH_NDIM` 40x defect as
+`coeff_MC_vel`, so the whole convective heating term is 40x weaker than its own convention
+intends, independently of this.
+
 ### The cap census: `MCv_max` truncates 0.9 % of cells and `MCt_max` exceeds its cap 100-FOLD in a tenth of the atmosphere
 
 **`ATM_MC_CAP_DIAG=1`, new, print-only, default off.** Counts only — no sums of doubles — so it is

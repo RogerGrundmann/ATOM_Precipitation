@@ -1380,9 +1380,59 @@ void findCloudBaseLFS() {
         // Counts only -- no sums of doubles -- so the numbers are deterministic under OpenMP.
         const bool cap_diag = [](){ const char* e = getenv("ATM_MC_CAP_DIAG");
                                     return e && atoi(e) != 0; }();
+
+// ==================== ATM_MC_T_NDIM: the latent half of MC_t carries a spare t_0 ============
+        // ATM_MC_T_NDIM=<strength>, DEFAULT 0.0 = SHIPPED and BIT-IDENTICAL -- at 0 the branch
+        // below is the original expression verbatim, not a hoisted coefficient, because `*` is
+        // left-associative and floating-point multiplication is not: (L/cp * conv)*t_0 and
+        // (L/cp * (t_0 + 0*(1-t_0)))*conv need not be the same double. Same reasoning, and the
+        // same shape, as ATM_BUOY_CONSISTENT's off branch.
+        //
+        // THE DEFECT, AND IT IS ARITHMETIC BEFORE IT IS A MEASUREMENT. `MC_t` is assembled as
+        //
+        //     raw_t = -(d flux_s) * inv_step_rh * t_0  +  (L/cp_l) * conv_src * t_0
+        //
+        // and `coeff_MC_t = ndimLength()/(u_0*t_0)` at RHS_Atm_Turb.cpp:375 says `MC_t` must be
+        // in K/s. `s` is NON-DIMENSIONAL -- :321 sets s = cp_l*T/s_0 and s_0 = 274515.75 =
+        // cp_l*t_0 EXACTLY (cAtmosphereDefaults.cpp.inc:101), so s = T/t_0 -- hence the flux
+        // divergence comes out in nondim-s per second and `* t_0` is its CORRECT conversion.
+        // The latent term is (L/cp_l)*conv_src with conv_src in (kg/kg)/s and L/cp_l in K per
+        // (kg/kg): it is ALREADY K/s. The nondim-consistent form is (L/s_0)*conv_src, and
+        // (L/s_0)*t_0 == L/cp_l -- so the `* t_0` applied to the SUM inflates the latent half
+        // by t_0 = 273.15. A half-applied non-dimensionalisation, applied to a sum where only
+        // one addend needed it.
+        //
+        // MEASURED with ATM_MC_CAP_DIAG's half-split, 2 354 864 fluid cells, iteration 1200 of
+        // output_vw1200, as a fraction of ALL fluid cells:
+        //
+        //     flux half alone     over MCt_max  1.16 %   >10x 0.62 %   >100x  0.0000 %
+        //     latent half alone                12.01 %   >10x 11.18 %  >100x  8.74 %
+        //     latent half / t_0                 7.93 %   >10x 1.81 %   >100x  0.0000 %
+        //     (whole MC_t)                     12.68 %   >10x 11.31 %  >100x  8.74 %
+        //
+        // The latent half carries the ENTIRE >100x band and dividing it by t_0 removes that band
+        // completely, which is the test: same field, only the disputed factor taken out.
+        //
+        // ⚠ WHAT THIS IS NOT. It is NOT a claim that the model's temperature was wrong by 273x:
+        // the cap is applied before rhs_t ever sees the value, so the field has always been the
+        // capped one. It is a claim that MCt_max, not the scheme, has been setting the convective
+        // heating in a tenth of the grid, and that the reason is a unit error rather than
+        // vigorous convection. ⚠ AND THE CAP STILL BINDS WHEN CORRECTED -- 7.93 % of cells over
+        // 0.01 K/s = 864 K/day, 1.81 % over 10x it -- which is a SECOND question, about
+        // conv_src's own magnitude, that this knob does not touch.
+        //
+        // A STRENGTH rather than a flag, like ATM_MICRO_NDIM, because the endpoint is a factor
+        // of 273 on a term that feeds rhs_t: 1.0 is the consistent value, 0.0 the shipped one,
+        // and the blend is linear in the coefficient.
+        const double mc_t_ndim = [](){ const char* e = getenv("ATM_MC_T_NDIM");
+                                       return e ? atof(e) : 0.0; }();
+        const double mc_t_lat_scale = m.t_0 + mc_t_ndim * (1.0 - m.t_0);
         long n_fluid = 0;
         long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
         long nt_x2 = 0, nt_x10 = 0, nt_x100 = 0;
+        long nf_cap = 0, nf_x10 = 0, nf_x100 = 0;     // the flux half of raw_t, alone
+        long nl_cap = 0, nl_x10 = 0, nl_x100 = 0;     // the latent half of raw_t, alone
+        long nl_cap_nd = 0, nl_x10_nd = 0, nl_x100_nd = 0;   // ... and the same half without *t_0
         long nq_x2 = 0, nq_x10 = 0, nq_x100 = 0;
         long nv_x2 = 0, nv_x10 = 0, nv_x100 = 0;
         long nw_x2 = 0, nw_x10 = 0, nw_x100 = 0;
@@ -1390,6 +1440,8 @@ void findCloudBaseLFS() {
         #pragma omp parallel for collapse(2) \
             reduction(+:n_fluid,nt_cap,nq_cap,nv_cap,nw_cap, \
                         nt_x2,nt_x10,nt_x100,nq_x2,nq_x10,nq_x100, \
+                        nf_cap,nf_x10,nf_x100,nl_cap,nl_x10,nl_x100, \
+                        nl_cap_nd,nl_x10_nd,nl_x100_nd, \
                         nv_x2,nv_x10,nv_x100,nw_x2,nw_x10,nw_x100)
         for(int j = 0; j < m.jm; j++){
             for(int k = 0; k < m.km; k++){
@@ -1409,8 +1461,20 @@ void findCloudBaseLFS() {
                     double conv_src = m.c_u.x[i][j][k] - m.e_d.x[i][j][k]                               // (kg/kg)/s
                                   - m.e_l.x[i][j][k] - m.e_p.x[i][j][k];
 
-                    double raw_t = -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0                    // K/s
-                        + (L_latent / m.cp_l) * conv_src * m.t_0;                                       // K/s
+                    // ⚠ THE `* m.t_0` BELONGS TO THE FIRST HALF ONLY -- see the ATM_MC_CAP_DIAG
+                    // note above and the census it prints. `s` is NON-DIMENSIONAL,
+                    // s = cp_l*T/s_0 with s_0 = 274515.75 = cp_l*t_0 exactly, so s = T/t_0 and
+                    // the flux divergence comes out in nondim-s per second: `* t_0` is its
+                    // correct conversion to K/s. The latent term is (L/cp_l)*conv_src with
+                    // conv_src in (kg/kg)/s, which is ALREADY K/s -- the nondim-consistent form
+                    // is (L/s_0)*conv_src, and (L/s_0)*t_0 == L/cp_l. So multiplying the SUM by
+                    // t_0 inflates the latent half by t_0 = 273.15. Kept as-is here and measured
+                    // by the census rather than repaired in place: it is not a knob yet.
+                    double raw_t_flux   = -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0;               // K/s
+                    double raw_t_latent = (mc_t_ndim == 0.0)
+                        ? (L_latent / m.cp_l) * conv_src * m.t_0                  // SHIPPED, verbatim
+                        : (L_latent / m.cp_l) * conv_src * mc_t_lat_scale;        // 1.0 -> K/s
+                    double raw_t = raw_t_flux + raw_t_latent;
                     m.MC_t.x[i][j][k] = safe_cap(raw_t, MCt_max);
 
 
@@ -1460,6 +1524,10 @@ void findCloudBaseLFS() {
                             if(r > 100.0) n100++;
                         };
                         band(raw_t, MCt_max, nt_cap, nt_x2, nt_x10, nt_x100);
+                        long d2 = 0;
+                        band(raw_t_flux,          MCt_max, nf_cap, d2, nf_x10, nf_x100);
+                        band(raw_t_latent,        MCt_max, nl_cap, d2, nl_x10, nl_x100);
+                        band(raw_t_latent/m.t_0,  MCt_max, nl_cap_nd, d2, nl_x10_nd, nl_x100_nd);
                         band(raw_q, MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
                         band(raw_v, MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
                         band(raw_w, MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
@@ -1480,6 +1548,15 @@ void findCloudBaseLFS() {
                           << "   >100x " << n100 << " (" << pc(n100) << " %)" << std::endl;
             };
             row("MC_t", MCt_max, nt_cap, nt_x2, nt_x10, nt_x100);
+            std::cout << "      of which  flux half alone: over cap " << nf_cap
+                      << " (" << pc(nf_cap) << " %)  >10x " << pc(nf_x10)
+                      << " %  >100x " << pc(nf_x100) << " %" << std::endl;
+            std::cout << "                latent half     : over cap " << nl_cap
+                      << " (" << pc(nl_cap) << " %)  >10x " << pc(nl_x10)
+                      << " %  >100x " << pc(nl_x100) << " %" << std::endl;
+            std::cout << "                latent / t_0    : over cap " << nl_cap_nd
+                      << " (" << pc(nl_cap_nd) << " %)  >10x " << pc(nl_x10_nd)
+                      << " %  >100x " << pc(nl_x100_nd) << " %" << std::endl;
             row("MC_q", MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
             row("MC_v", MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
             row("MC_w", MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
