@@ -646,9 +646,22 @@ follow-on if the question is pursued.
 
 The Boussinesq buoyancy divides its temperature anomaly by `t_0` = 273.15 K, the
 **non-dimensionalisation constant**, where the physical reference temperature belongs.
-`ATM_BUOY_TREF` divides by `t_ref_level[i]` instead. Here that is a **~5 %** correction
-(`T_ref/t_0` = 1.055 at 288 K); in ATHAD it runs 5.49x at the surface and 0.96x at the top, so
-there it is a height-dependent distortion rather than a rescaling.
+`ATM_BUOY_TREF` divides by `t_ref_level[i]` instead. **This was described here and in CLAUDE.md
+as a "~5 % correction", which is its SURFACE value and the wrong shape.** The multiplier is
+`t_0/T_ref(i)`, and `t_0` = 273.15 K sits just under this planet's surface temperature, so it
+crosses 1 in mid-troposphere: **0.955 at the ground, 1.005 at 3.3 km, 1.097 at 7.4 km, 1.260 at
+the lid — a 32 % height-dependent distortion that changes sign at 3.3 km.** Same shape as ATHAD's
+5.49x surface / 0.96x top, opposite in sign, because there `t_0` is far below the surface
+temperature and here it is just under it.
+
+**MEASURED 2026-09-14, and it is connected and null.** Two pairs off one checkpoint, a restart at
+full `buoyancy_ramp` and a from-scratch trajectory: rms `ubud_buoy` **+1.03 %** and **+1.04 %**
+(the ratio is ramp-invariant, so the two agree across a 6x difference in ramp), against **+1.25 %**
+predicted from the rms-weighted multiplier over the model's own temperature field. Everything else
+is identical to the printed digits -- `max|u|` to 6 figures at every checkpoint, all six cell
+amplitudes to **1.00000000**, precipitation, pattern r, sigma and both starved bands. The reason is
+that the buoyancy is **2.7 % of the pressure gradient by rms**, so a 1 % correction to it moves
+`rhs_u` by 0.03 %. **Correct physics, no consequence, default OFF.**
 
 `ATM_BUOY_CONSISTENT` additionally removes the second of item 34's extra `*dt` factors,
 `g*dt/u_0 -> g*L_atm/u_0^2`. **That is a factor of 5.0e5 on a body force in this tree**, and it

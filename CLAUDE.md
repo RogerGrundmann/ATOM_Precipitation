@@ -61,7 +61,7 @@ times out of four.**
 |---|---|---|
 | `ATM_PROJ_SWEEPS` | **inert**: -0.04 % at 10x, -0.07 % at 100x, cost 8x and 96x | -52.5 % |
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
-| `ATM_BUOY_TREF` / `_CONSISTENT` | **`_CONSISTENT` WAS THE DEFAULT 2026-09-09 TO 2026-09-14 AND IS OFF AGAIN** — a factor of 5.0e5 on the body force; `ubud_buoy` x400 000, band p05 ageostrophic residual 0.996 -> 0.336, and a **390x RADIAL VELOCITY** it was never scored against. `_TREF` is off and is REACHABLE again | 5.49x at the surface |
+| `ATM_BUOY_TREF` / `_CONSISTENT` | **`_CONSISTENT` WAS THE DEFAULT 2026-09-09 TO 2026-09-14 AND IS OFF AGAIN** — a factor of 5.0e5 on the body force; `ubud_buoy` x400 000, band p05 ageostrophic residual 0.996 -> 0.336, and a **390x RADIAL VELOCITY** it was never scored against. `_TREF` is off, was REACHABLE again on 2026-09-14, and is **MEASURED: +1.0 % on `ubud_buoy` and a null on everything else** | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
 | `ATM_RAD_TOPO` | **NEW HERE, AND STILL DEFAULT OFF** — this tree's defect, not ATHAD's. The two "flipped on" claims below are WRONG, corrected 2026-09-02: `MultiLayerRadiation.h:293` is `e && atoi(e) != 0`, and every run's own `[RUN CONFIG]` banner prints `RAD_TOPO=0*` | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
@@ -222,8 +222,8 @@ what *no dynamical change can move a precipitation band in this tree* requires o
 **AND IT FLIPS `ATM_BUOY_TREF`'s REPAIR ON WITH IT, BY CONSTRUCTION.** The consistent branch
 divides by `t_buoy_ref` as well, because fixing the `dt` without the reference temperature just
 rescales an incorrect force — so `ATM_BUOY_TREF=1` is now the unreachable middle arm rather than a
-separate option — *and `ATM_BUOY_TREF` is REACHABLE AGAIN since the 2026-09-14 revert, as the
-middle arm nobody has run.* **`ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly**, and
+separate option — *and `ATM_BUOY_TREF` became REACHABLE AGAIN with the 2026-09-14 revert and was
+run the same day; see the subsection below.* **`ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly**, and
 since 2026-09-14 that is the default: the `[RUN CONFIG]` banner prints `BUOY_CONSISTENT=0*`.
 
 **`ATM_BUOY_MOIST`, and why it needs the row above.** The shipped buoyancy is
@@ -243,6 +243,99 @@ not acting cannot show anything*, and that is the whole content of the first mea
 revert of `ATM_BUOY_CONSISTENT`, `ATM_BUOY_MOIST` is back to being a null in the 10th digit unless
 BOTH are set. It stays default OFF, its +4.9 % was measured on a restart arm, and it was never
 re-measured during the fifteen days in which it could have acted.
+
+### `ATM_BUOY_TREF`: the middle arm, run at last — connected, 1.0 % on the term, null on the model
+
+**AND IT IS NOT A "~5 % CORRECTION". THAT IS ITS SURFACE VALUE.** (2026-09-14; this file and the
+README both carried the 5 % framing and both were wrong about its shape.) The knob multiplies the
+buoyancy by `1/t_ref_level[i]` = `t_0/T_ref(i)`, and `t_0` = 273.15 K sits near this planet's
+SURFACE temperature, so the factor crosses 1 in the middle of the troposphere:
+
+| z | 0 m | 1368 | **3316** | 4988 | 7412 | 16023 m |
+|---|---|---|---|---|---|---|
+| `T_ref` | 285.9 K | 281.8 | 271.8 | 262.6 | 248.9 | 216.8 |
+| **multiplier** | **0.955** | 0.969 | **1.005** | 1.040 | 1.097 | **1.260** |
+
+**A 32 % HEIGHT-DEPENDENT DISTORTION THAT CHANGES SIGN AT 3.3 km** — weaker below, up to +26 %
+stronger at the lid. Same shape as ATHAD's 5.49x-surface / 0.96x-top and opposite in sign, for the
+stated reason: there `t_0` is far BELOW the surface temperature, here it is just under it.
+
+**TWO PAIRS, ONE BINARY, 12 THREADS EACH AND BOTH ARMS OF A PAIR RUN CONCURRENTLY** — a restart
+pair at FULL ramp and a from-scratch pair for the trajectory, because `buoyancy_ramp` =
+`min(1, iter/300)` is the reason the first 4-iteration A/B of this knob measured nothing (ramp
+0.013 there). Seeded from `output_vw0/atm_restart_0Ma_600.bin` (md5 `b0b7f85f`), a 600-from-scratch
+run whose banner matches the post-revert defaults on every knob. All four arms exit 0, zero NaN.
+
+| | restart 600 -> 700, **ramp 1.0** | from scratch 0 -> 100, ramp 0 -> 0.33 |
+|---|---|---|
+| **rms `ubud_buoy`, control** | 7.6830e-06 | 2.3050e-06 |
+| **rms `ubud_buoy`, `_TREF=1`** | **7.7620e-06 (+1.03 %)** | **2.3290e-06 (+1.04 %)** |
+| rms `ubud_pgf` | 2.8930e-04 both | 1.0190e-04 both |
+| corr(pgf, buoy) | -0.4468 / -0.4400 | -0.2430 / -0.2338 |
+| rms NET `rhs_u` | 2.8630e-04 both | 1.0220e-04 both |
+| `max\|u\|`, every checkpoint | **identical to 6 digits** | **identical to 6 digits** |
+| Precip / `r` / cRMS / sigma | 953.3 / +0.459 / 1417.6 / 2.31, both | 929.8 / +0.456 / 1379.6 / 2.25, both |
+| 35-65 / 65-90 | 159.8 / 10.1 both | 160.3 / 10.2 both |
+| **six cell amplitudes at iter 100** | — | **ratio 1.00000000 at ALL SIX latitudes** |
+
+**THE +1.0 % IS PREDICTED BY THE FIELD, WHICH IS WHAT MAKES THIS A CONNECTION TEST RATHER THAN A
+SWEEP.** The rms-weighted mean of the multiplier over the model's own temperature field gives
+**+1.25 %** against a measured **+1.03 %**, on a one-longitude proxy for a global mean.
+**AND THE PREDICTION'S SIGN WAS WRONG BEFORE IT WAS CHECKED**, recorded because this file records
+those: the expectation written into `run_btref.sh` was that the term would go DOWN, on the
+assumption that the temperature anomaly is largest near the ground. **46 % of the anomaly variance
+sits ABOVE 3.3 km**, where the multiplier exceeds 1 — the rms anomaly peaks at 0.083 at 5 km, set
+by the mid-tropospheric meridional gradient, against 0.097 in the single surface level. The
+weighting lands on the half of the column the knob strengthens.
+
+**THE RATIO IS RAMP-INVARIANT, WHICH IS WHY THE TWO PAIRS AGREE TO 0.01 POINTS** across a 6x
+difference in `buoyancy_ramp`: the ramp multiplies both arms of a pair equally and cancels. So the
+from-scratch pair is NOT under-powered for the ratio — only for the question of whether the larger
+force changes the dynamics, and the restart pair answers that at full strength, with a null.
+
+**WHAT IT MEANS. THIS IS THE CORRECT PHYSICS AND IT DOES NOT MATTER**, for the reason everything
+else in this tree does not matter: the force is inert. The buoyancy is **2.7 % of the pressure
+gradient by rms** on this branch, so a 1 % correction to it moves `rhs_u` by 0.03 %, and nothing
+downstream moves at all. `ATM_BUOY_TREF` is verified connected, correctly sized, byte-clean and
+stable; it stays **default OFF**, and flipping it would be a correctness change with a measured
+null — the `ATM_METRIC_SIN_FLOOR` situation, which this tree did flip, on instruction.
+
+**AND TWO STANDING FIGURES IN THIS FILE NEEDED CORRECTING TO GET HERE.**
+1. **`ubud_buoy` is 2.7 % of `ubud_pgf`, not 0.03 %.** The 0.03 % (2.46e-05 against 8.23e-02,
+   *"a factor of 3346"*, in *There is no thermal wind*) is a ratio of MAXIMA on `output_pmf_ctl`,
+   a different configuration. By rms on the current default it is ninety times larger a fraction.
+   Both are true of different statistics; quote which.
+2. **`corr(pgf, buoy)` on the `=0` branch is NOT degenerate.** *The mechanism: the pressure opposes
+   only 24 %* marks corr, slope and cancellation as meaningless there because they divide by the
+   variance of a 7.7e-06 field. That rms is reproduced here exactly — good cross-validation — but a
+   CORRELATION is scale-invariant, and over ~2.35e+06 cells it reads **-0.4468**, a real number:
+   the pressure anti-correlates with the buoyancy on the shipped branch too, it is just opposing a
+   force 37x smaller than itself. **Only the SLOPE is scale-sensitive.** The retracted word is
+   "degenerate" as applied to `corr`.
+
+### The revert is confirmed from scratch: `u` DECAYS and the cells are untouched
+
+**THE QUESTION WAS PUT BY THE USER — *run it from scratch so I can see whether `u` is still growing
+and disturbing the cells*. It is not, on either count** (2026-09-14, `output_bs_ctl`, the control
+arm of the pair above, `nm` = 100 from scratch on the post-revert default, `checkpoint` = 10):
+
+| iteration | 10 | 20 | 40 | 60 | 80 | **100** |
+|---|---|---|---|---|---|---|
+| **`max u-component`** | 0.1033 | 0.0748 | 0.0595 | 0.0544 | 0.0502 | **0.0466** |
+
+**MONOTONE DECAY, HALVED OVER NINETY ITERATIONS**, against the `=1` branch's +2.79e-03 per
+iteration. That is the 2026-09-11 `=0` trajectory (0.0595 -> 0.0253 over iterations 60-620)
+reproduced from scratch on the current defaults.
+
+**AND THE CELLS ARE NOT BEING DISTURBED, BY THREE INDEPENDENT READS.** (i) `ATM_CELL_ROT_DIAG`
+prints the polar ascent/descent boundary at **every** checkpoint, stable at **76.6 N / 76.8 S**,
+with **ZERO** occurrences of *"zonal-mean u does not change sign between 60 and 90 deg"* — the
+message that appeared 56 times in a 600-iteration run under the runaway. (ii) The cell amplitudes
+move -0.3 % (Hadley), -2.0 / +0.2 % (Ferrel) and -4.4 / -8.0 % (polar) over iterations 20 -> 100.
+(iii) **The `Psi` peak height is IDENTICAL at every latitude at 20 and at 100** — 3316 / 4510 /
+4988 / 4988 / 4075 / 4988 m — so there is none of the downward migration the runaway produced.
+Closure is 0.0003 to 0.0048 throughout. **So the vertical structure the runaway destroyed by
+iteration ~60 is intact at 100.**
 
 **AND SURFACE EVAPORATION THEREFORE CANNOT DRIVE CONVECTION.** It moistens levels 0-3 and reaches
 the momentum equation through nothing on the shipped branch. It also **never writes `t`**, so it
