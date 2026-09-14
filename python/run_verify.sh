@@ -10,20 +10,24 @@
 # tell a null flip from the threads.
 #   A: new binary CLEAN     == old binary with the four SET      (the flip is what was measured)
 #   B: new binary with four SET BACK == old binary CLEAN         (the revert restores the branch)
+#   C: old+SET vs old+CLEAN -- the control; these MUST differ or A and B prove nothing.
+#
+# PARALLEL SINCE 2026-09-14. The four arms are independent 1-thread processes writing to four
+# separate directories, so concurrency cannot change a byte and takes the wall clock from ~4T to
+# ~T. See verify_lib.sh. DO NOT RE-SERIALISE.
 set -u
 cd "$(dirname "$0")"
-export OMP_NUM_THREADS=1
+. ./verify_lib.sh
 NEW=../cli/atm; OLD=../cli/atm_preflip
 ON="ATM_CELLS_FROM_PSI=1 ATM_TROPO_INDEX_FIX=1 ATM_RADIAL_SHAPIRO_STRENGTH_VW=0 ATM_V_MASSBAL_STRIDE=1"
 OFF="ATM_CELLS_FROM_PSI=0 ATM_TROPO_INDEX_FIX=0 ATM_RADIAL_SHAPIRO_STRENGTH_VW=1.0 ATM_V_MASSBAL_STRIDE=0 ATM_VTK_STRIDE=1"
-echo "=== A: old+SET  $(date +%H:%M:%S)"; env $ON  $OLD config_va_old.xml > va_old.log 2>&1; echo "  exit $?"
-echo "=== A: new+clean $(date +%H:%M:%S)"; env      $NEW config_va_new.xml > va_new.log 2>&1; echo "  exit $?"
-echo "=== B: old+clean $(date +%H:%M:%S)"; env      $OLD config_vb_old.xml > vb_old.log 2>&1; echo "  exit $?"
-echo "=== B: new+SETBACK $(date +%H:%M:%S)"; env $OFF $NEW config_vb_new.xml > vb_new.log 2>&1; echo "  exit $?"
-for pair in "va_old va_new A(flip)" "vb_old vb_new B(revert)"; do
-  set -- $pair; ok=0; bad=0
-  for f in output_$1/*; do b="output_$2/$(basename "$f")"
-    if cmp -s "$f" "$b"; then ok=$((ok+1)); else echo "  DIFFERS: $(basename "$f")"; bad=$((bad+1)); fi; done
-  echo "$3: identical $ok / differing $bad"
-done
+echo "=== launching 4 arms in parallel $(date +%H:%M:%S)"
+arm va_old "$OLD" config_va_old.xml $ON
+arm va_new "$NEW" config_va_new.xml
+arm vb_old "$OLD" config_vb_old.xml
+arm vb_new "$NEW" config_vb_new.xml $OFF
+wait_arms
+cmp_dirs    va_old va_new "A(flip)  new CLEAN == old+SET"
+cmp_dirs    vb_old vb_new "B(revert) new+SETBACK == old CLEAN"
+want_differ va_old vb_old "C(control) old+SET vs old CLEAN"
 echo "=== verify done $(date +%H:%M:%S)"

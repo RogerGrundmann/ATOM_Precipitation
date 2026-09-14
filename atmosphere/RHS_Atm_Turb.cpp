@@ -1236,10 +1236,20 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // drive a polar vertical runaway — see the force_nd note above. Using g*dt/u_0 (and
     // force_nd on Coriolis) makes the whole RHS share the laminar scaling.
     // ATM_BUOY_TREF and ATM_BUOY_CONSISTENT (ported from ATHAD, README item 50).
-    // ATM_BUOY_CONSISTENT IS THE DEFAULT SINCE 2026-09-09, at the user's instruction --
-    // `ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly, and ATM_BUOY_TREF still
-    // defaults OFF (it is implied by the consistent branch anyway). With both unset the
-    // OFF branch below was BIT-IDENTICAL to what this line had always computed --
+    // *** ATM_BUOY_CONSISTENT WAS THE DEFAULT FROM 2026-09-09 TO 2026-09-14 AND IS DEFAULT
+    // OFF AGAIN, at the user's instruction, ON THE RADIAL VELOCITY. *** The flip's benefit is
+    // real and is recorded below (band p05 ageostrophic residual 0.996 -> 0.336); its COST was
+    // never measured, because the acceptance was judged on `max w_u`, which is a different
+    // component and, as it later turned out, not a resolved wind at all. On the `=1` branch
+    // the RADIAL velocity runs away: rms `u` on the 87E section is 0.0073 m/s at iteration 20,
+    // 0.1436 at 200 and 0.5843 at 600, against 0.0075 -> 0.0039 -> 0.0015 on this branch, and
+    // point extrema reach -2.9 m/s. The model's OWN meridional streamfunction requires
+    // 1.19 mm/s rms and 5.3 mm/s peak (w = -(1/(2*pi*a^2*cos(phi)*rho)) dPsi/dphi), which the
+    // OFF branch reproduces to ~20 % and the ON branch exceeds by ~390x. See CLAUDE.md,
+    // *The radial velocity runs away*. `ATM_BUOY_CONSISTENT=1` restores the flipped branch.
+    // ATM_BUOY_TREF still defaults OFF, and is REACHABLE AGAIN as a separate arm now that the
+    // consistent branch (which implies it) is off. With all three unset the OFF branch below
+    // is BIT-IDENTICAL to what this line had always computed --
     // and the OFF branch below is the original expression verbatim rather than a hoisted
     // coefficient, because `*` and `/` are left-associative and floating-point multiplication
     // is not: ((A*g)*dt)/u_0 and A*((g*dt)/u_0) are not the same double. -ffast-math may
@@ -1263,17 +1273,24 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //     61.29 against a shipped 1.226e-4. EXPECT IT TO BE UNSTABLE. If it is, that is a
     //     Boussinesq result and not a bug in this line -- do not "fix" it by tuning the
     //     coefficient back down, which is how the 336 got here.
-    //     *** THE INSTABILITY PREDICTION IS REFUTED, MEASURED. *** 600 iterations from the
-    //     iteration-600 checkpoint at full strength: exit 0, zero NaN, `max w_u` 30.804076 --
-    //     the same value the control prints, i.e. the CFL guard is nowhere near touched. What
-    //     it buys is BALANCE, not velocity: the extratropical band p05 ageostrophic residual
-    //     goes 0.996 -> 0.437 at 100 iterations and 0.336 at 600, because the force reaches
-    //     momentum through the model's own elliptic pressure. See CLAUDE.md.
+    //     *** THE INSTABILITY PREDICTION IS REFUTED, MEASURED -- AND THE WITNESS THAT
+    //     REFUTED IT WAS THE WRONG ONE. *** 600 iterations from the iteration-600 checkpoint
+    //     at full strength: exit 0, zero NaN, `max w_u` 30.804076 -- the same value the
+    //     control prints. But `max w_u` is the UPDRAFT's zonal velocity out of
+    //     MoistConvection's mass-flux recurrence, not a resolved wind, and it reaches momentum
+    //     only through `MC_w`, which is pegged at `MCv_max`. The component that DOES move is
+    //     `max u-component`, the radial one, and it grows 51x by iteration 620 and saturates
+    //     near 2.94 m/s. So the term is not UNSTABLE in the CFL sense and it is not
+    //     PHYSICAL either. What it buys is BALANCE, not velocity: the extratropical band p05
+    //     ageostrophic residual goes 0.996 -> 0.437 at 100 iterations and 0.336 at 600,
+    //     because the force reaches momentum through the model's own elliptic pressure --
+    //     and the pressure answers only 24 % of it (corr -0.75, slope -0.24), which is why
+    //     the other 76 % integrates into `u`. See CLAUDE.md.
     static const bool buoy_tref = [](){
         const char* e = getenv("ATM_BUOY_TREF"); return e && atoi(e) != 0; }();
     static const bool buoy_consistent = [](){
         const char* e = getenv("ATM_BUOY_CONSISTENT");
-        return e ? (atoi(e) != 0) : true;                 // DEFAULT ON since 2026-09-09
+        return e && atoi(e) != 0;                         // DEFAULT OFF AGAIN since 2026-09-14
     }();
 
     double buoyancy_term;

@@ -61,7 +61,7 @@ times out of four.**
 |---|---|---|
 | `ATM_PROJ_SWEEPS` | **inert**: -0.04 % at 10x, -0.07 % at 100x, cost 8x and 96x | -52.5 % |
 | `ATM_METRIC_EXACT` | null on every INTEGRATED quantity — but see below | 2.8x worse |
-| `ATM_BUOY_TREF` / `_CONSISTENT` | **`_CONSISTENT` IS THE DEFAULT SINCE 2026-09-09** — a factor of 5.0e5 on the body force; `ubud_buoy` x400 000, band p05 ageostrophic residual 0.996 -> 0.336. `_TREF` alone stays off (the consistent branch implies it) | 5.49x at the surface |
+| `ATM_BUOY_TREF` / `_CONSISTENT` | **`_CONSISTENT` WAS THE DEFAULT 2026-09-09 TO 2026-09-14 AND IS OFF AGAIN** — a factor of 5.0e5 on the body force; `ubud_buoy` x400 000, band p05 ageostrophic residual 0.996 -> 0.336, and a **390x RADIAL VELOCITY** it was never scored against. `_TREF` is off and is REACHABLE again | 5.49x at the surface |
 | `ATM_GRID_PRESSURE` | ~1 %, and the sign is against it | +61 % on its free branch |
 | `ATM_RAD_TOPO` | **NEW HERE, AND STILL DEFAULT OFF** — this tree's defect, not ATHAD's. The two "flipped on" claims below are WRONG, corrected 2026-09-02: `MultiLayerRadiation.h:293` is `e && atoi(e) != 0`, and every run's own `[RUN CONFIG]` banner prints `RAD_TOPO=0*` | inapplicable — no topography |
 | `ATM_RHIE_CHOW` | **null on `Psi(ground)`, +0.005 %** — see below | -2.55x on the zonal Nyquist |
@@ -124,10 +124,76 @@ worth it" WAS WRONG ON ITS SECOND HALF** (2026-08-27). Measured: `ubud_buoy` **0
 extra-`dt` defect (its items 34/42) is confirmed here at the same order of magnitude. What is
 still true is that it does not move `Psi`: that force is RADIAL and `Psi` is meridional.
 
-**FLIPPED ON BY DEFAULT 2026-09-09, AT THE USER'S INSTRUCTION, AND THE INSTABILITY THIS FILE
-PREDICTED IS REFUTED.** The code comment beside it said **EXPECT IT TO BE UNSTABLE** — the largest
-coefficient ever run on this term in the family was an intermediate 336, which drove a polar
-vertical runaway, and the consistent value is **61.29 against a shipped 1.226e-4**. It is not
+**⚠ REVERTED TO DEFAULT OFF ON 2026-09-14, AT THE USER'S INSTRUCTION, ON THE RADIAL VELOCITY —
+READ THE REST OF THIS SUBSECTION AS THE RECORD OF THE FLIP, NOT AS THE CURRENT DEFAULT.** Nothing
+in it is retracted: the balance gain is real and was measured. What was never measured is the
+COST, because the acceptance below is judged on `max w_u`, precipitation, pattern `r` and the
+ageostrophic residual, and **`max u-component` — the RADIAL velocity, the one component this term
+accelerates — is not among them**. It runs away: see *The radial velocity runs away* below for the
+51x, and *the vertical velocity is 390x what this model's own cells require* immediately after
+this paragraph for the physical yardstick. `ATM_BUOY_CONSISTENT=1` restores the flipped branch and
+the banner now prints `BUOY_CONSISTENT=0*`.
+
+**AND THE PHYSICAL YARDSTICK, WHICH IS WHAT DECIDED IT** (2026-09-14, from output already on disk;
+no run was made). Invert the model's OWN meridional streamfunction,
+`w = -(1/(2*pi*a^2*cos(phi)*rho)) dPsi/dphi`, over `output_mt0/meridional_streamfunction_1220.csv`:
+
+| z | 819 m | 2163 | **4988** | 7412 | 10927 m |
+|---|---|---|---|---|---|
+| **implied w, mm/s** | ±1.0 | ±2.7 | **±5.0** | ±5.3 | ±2.9 |
+
+**1.19 mm/s rms, 5.3 mm/s peak, peaking in the MID-TROPOSPHERE** — which is the observed large
+scale (ITCZ ascent 3-10 mm/s at ω ~ 20-60 hPa/day, subtropical subsidence 2-5). The `u` ARRAY of
+that same file carries **0.58-0.84 m/s rms at every level, -2.07 m/s peak, bottom-heavy**, with the
+extrema in near-surface coastal cells (78S 77W, 44N 124W, 21N 53E at 38-128 m). So the model is
+internally inconsistent by ~500x: **the `Psi` is right and the `u` is not.** One variable, matched
+iterations, rms `u` on the 87E section:
+
+| 600 from scratch | iter 20 | iter 200 | **iter 600** |
+|---|---|---|---|
+| `bcs0` / `vw0`, **`=0`** | 0.0075 | 0.0039 | **0.0015 m/s** |
+| `tr600d` / `pdc600`, `=1` | 0.0073 | 0.1436 | **0.5843 m/s** |
+
+**The OFF branch DECAYS to 1.5 mm/s rms and 6.4 mm/s peak — the `Psi`-implied value to ~20 % — and
+the ON branch grows 390x.** That is the runaway confirmed against a PHYSICAL requirement rather
+than against its own earlier value, and it is why the revert is a measurement and not a
+preference. 1-2 m/s occurs only inside deep-convective updraft cores a few km wide; a 1-degree cell
+is 111 km, so even a grid-box mean over convection at 1-5 % area fraction is 2-10 cm/s.
+*It is not a CFL hazard and never was* — 2 m/s across the 38.9 m bottom layer at `dt` = 0.2 s is a
+Courant number of 0.01, which is why every one of these runs exits 0 with zero NaN.
+
+**BOTH DIRECTIONS VERIFIED**, 1 thread, `nm` = 20 from scratch, `cli/atm` against
+`cli/atm_bcflip_pre` (`python/run_verify_buoy.sh`): new binary CLEAN against old with
+`ATM_BUOY_CONSISTENT=0`, and new binary with `=1` against old CLEAN.
+
+**WHAT THE REVERT GIVES UP, STATED PLAINLY.** The band p05 ageostrophic residual goes back to
+**0.996** — this model has no geostrophic balance again, and `ATM_BUOY_CONSISTENT` was the only one
+of the three thermal-wind routes that reached momentum through the model's own elliptic pressure.
+That is a real loss and it is the reason the flip was made. It is outweighed here because the
+balance **bought no climate** (precipitation -0.3 %, every shape metric inside the parity noise,
+the 35-65 deg band unmoved) while the cost is a prognostic field wrong by 390x — and because the
+pressure answers only **24 %** of the force anyway, so 76 % of it was never producing balance at
+all, it was accelerating `u`. **The right repair is a pressure that can answer a body force, not a
+body force scaled to what the pressure can answer** — which is the standing item four independent
+measurements now point at (*There is no thermal wind*, *The projection's shortfall is ADJOINTNESS*,
+the cell budget's `pgf` = -2.4e-09 against `coriolis` = -4.2e-05, and the 24 % itself).
+
+**CONSEQUENCE FOR THE ARMS OF 2026-09-09 TO 2026-09-14, AND IT IS NARROWER THAN IT LOOKS.** Every
+from-scratch run in that window carried the runaway, so `output_tr600d`, `output_pdc600`,
+`output_vw1200`, `output_dm1260`, `output_mt0` / `mt1` and their relatives hold a radial velocity
+two to three orders too large past iteration ~60. **Nothing measured on them is retracted**: each
+is a comparison at a fixed iteration count against a control at the same count on the same branch,
+which is what makes those arms valid, and the quantities they report — `drag_conv` against
+Coriolis, the `MC_t` cap census, the KE convergence, the cell decay — are not read off `u`. What
+must NOT be quoted from them is anything about the VERTICAL velocity or its structure, including
+`ATM_CELL_ROT_DIAG`'s rotation sense past iteration ~60. The `_VW=0` convergence result survives
+independently, having been measured on BOTH branches (`output_vw0` at `=0` and `output_vw0pdc` at
+`=1`, mean KE 36.369 against 36.434, `converged` = 1 in both).
+
+**THE RECORD OF THE FLIP FOLLOWS. FLIPPED ON BY DEFAULT 2026-09-09, AT THE USER'S INSTRUCTION, AND
+THE INSTABILITY THIS FILE PREDICTED IS REFUTED.** The code comment beside it said **EXPECT IT TO
+BE UNSTABLE** — the largest coefficient ever run on this term in the family was an intermediate
+336, which drove a polar vertical runaway, and the consistent value is **61.29 against a shipped 1.226e-4**. It is not
 unstable. 600 iterations from `output_twctl/atm_restart_0Ma_600.bin` at full strength, 24 threads,
 against its own control over the same window (`output_bconL` / `output_bctlL`, both exit 0, zero
 NaN):
@@ -156,8 +222,9 @@ what *no dynamical change can move a precipitation band in this tree* requires o
 **AND IT FLIPS `ATM_BUOY_TREF`'s REPAIR ON WITH IT, BY CONSTRUCTION.** The consistent branch
 divides by `t_buoy_ref` as well, because fixing the `dt` without the reference temperature just
 rescales an incorrect force — so `ATM_BUOY_TREF=1` is now the unreachable middle arm rather than a
-separate option. **`ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly**, and the
-`[RUN CONFIG]` banner prints `BUOY_CONSISTENT=1*`.
+separate option — *and `ATM_BUOY_TREF` is REACHABLE AGAIN since the 2026-09-14 revert, as the
+middle arm nobody has run.* **`ATM_BUOY_CONSISTENT=0` restores the shipped branch exactly**, and
+since 2026-09-14 that is the default: the `[RUN CONFIG]` banner prints `BUOY_CONSISTENT=0*`.
 
 **`ATM_BUOY_MOIST`, and why it needs the row above.** The shipped buoyancy is
 `(t - t_ref_level[i])`, TEMPERATURE ONLY. Water vapour is lighter than dry air, and the model
@@ -172,10 +239,10 @@ would have added a uniform updraft rather than a buoyancy.
 **On the shipped branch it is a null in the 10th digit — because the buoyancy itself is inert.**
 With `ATM_BUOY_CONSISTENT=1` it is **+4.9 %** on `ubud_buoy`. *Adding moisture to a force that is
 not acting cannot show anything*, and that is the whole content of the first measurement.
-**AND SINCE 2026-09-09 THAT CONDITION IS MET BY DEFAULT**: `ATM_BUOY_CONSISTENT` is now on, so
-`ATM_BUOY_MOIST` is for the first time a knob that can act on the shipped configuration. It stays
-default OFF and its +4.9 % was measured on a restart arm; it has not been re-measured since the
-flip.
+**THAT CONDITION WAS MET BY DEFAULT FROM 2026-09-09 AND IS NOT MET AGAIN**: with the 2026-09-14
+revert of `ATM_BUOY_CONSISTENT`, `ATM_BUOY_MOIST` is back to being a null in the 10th digit unless
+BOTH are set. It stays default OFF, its +4.9 % was measured on a restart arm, and it was never
+re-measured during the fifteen days in which it could have acted.
 
 **AND SURFACE EVAPORATION THEREFORE CANNOT DRIVE CONVECTION.** It moistens levels 0-3 and reaches
 the momentum equation through nothing on the shipped branch. It also **never writes `t`**, so it
@@ -2020,13 +2087,13 @@ its own arm.
 re-derived 2026-09-06 under the reference density; they read 87 and 131 while this file used
 43.7). A geostrophically balanced mid-latitude pressure field in these units is `p_dyn` ~ **40** —
 **13x above the ceiling**, so the conclusion is unchanged and its margin is smaller.
-**⚠ "NEITHER BINDS TODAY" WAS TRUE OF THE PRE-FLIP BRANCH AND IS FALSE UNDER THE CURRENT
-DEFAULTS — CORRECTED 2026-09-12.** The 0.017 quoted here, 176x below the ceiling, is an
-`ATM_BUOY_CONSISTENT=0` number. With the 2026-09-09 default flip `max|p_dyn|` grows monotonically
-to the ceiling, first clips at iteration **~400** of a 600-iteration from-scratch run, and
-truncates **4.8-7.6 %** of all cells thereafter. So the ceiling is a PRESENT cause, not a latent
-barrier, and the pressure-amplitude measurements taken past iteration 400 were taken through it —
-see *And the 24 % was measured through a CLAMP* below. But any repair that
+**⚠ "NEITHER BINDS TODAY" WAS FALSE FROM 2026-09-09 TO 2026-09-13 AND IS TRUE AGAIN —
+CORRECTED 2026-09-12, RE-CORRECTED 2026-09-14.** The 0.017 quoted here, 176x below the ceiling, is
+an `ATM_BUOY_CONSISTENT=0` number, which is the default once more. Under the 2026-09-09 flip
+`max|p_dyn|` grew monotonically to the ceiling, first clipped at iteration **~400** of a
+600-iteration from-scratch run, and truncated **4.8-7.6 %** of all cells thereafter, so every
+pressure-amplitude measurement dated in that window was taken through it — see *And the 24 % was
+measured through a CLAMP* below. On the reverted default it is a latent barrier again. But any repair that
 gives this model a real thermal pressure field will hit them before it works, and re-sizing them
 is part of that repair rather than a follow-up. *Sixth instrument-shaped defect in this tree,
 after `Psi`'s constant density, `Q_Sensible`, `brunt_N2`'s terrain extrema, the "OLR" that was the
@@ -2288,8 +2355,9 @@ MEASURED, AND NOT ONE MOVES A PRECIPITATION BAND.** `ATM_HYDRO_PGF` (force side,
 ageostrophic residual 0.9999 -> 0.2498); `ATM_BUOY_CONSISTENT` (the buoyancy's missing factor of
 5.0e5, reaching momentum through the model's own elliptic pressure, band p05 residual 0.996 ->
 0.437 at 100 iterations and 0.336 at 600 — and it did NOT turn out to be unstable, as this file
-expected); and `ATM_TW_BALANCE`, the balanced initial state in the manner of ATHAD's
-`initBalancedState`, which is the only one that moves a VELOCITY — a 71 % stronger jet, relocated
+expected, *though it did turn out to accelerate the radial velocity 390x past what continuity
+allows, which is why it was default ON for five days and is off again*); and `ATM_TW_BALANCE`,
+the balanced initial state in the manner of ATHAD's `initBalancedState`, which is the only one that moves a VELOCITY — a 71 % stronger jet, relocated
 into the storm-track band — and moves the 35-65 deg precipitation by **0.013 %**. The subsection
 above says why, and the reason is not a property of any of the three.
 And one more caveat with teeth: **one iteration is 0.2 s, so 1/f at 31 deg is 13 315 s = 66 500
@@ -3380,7 +3448,7 @@ its own history and is pinned to zero at both radial walls. Off-branch verified 
 300 -> 320, 15 of 15 written files byte-identical. **Default stays 0.0**: what is measured is 200
 iterations, and the value that acts is not a physical one.
 
-## The radial velocity runs away, and it is `ATM_BUOY_CONSISTENT=1`
+## The radial velocity runs away, and it is `ATM_BUOY_CONSISTENT=1` — REVERTED 2026-09-14
 
 **`max u-component` GROWS NEAR-LINEARLY IN EVERY LONG RUN IN THIS TREE** — 0.088 m/s at iteration
 120 to **1.296 at 620** — and it is identical in `output_ms600on`, `output_ms600ctl` and
@@ -3393,7 +3461,7 @@ only the `=0` arm had to be run — 62 min, not two hours; both exit 0, zero NaN
 
 | iter | 60 | 140 | 260 | 380 | 500 | **620** |
 |---|---|---|---|---|---|---|
-| `ATM_BUOY_CONSISTENT=1` (default) | 0.0648 | 0.1044 | 0.3017 | 0.6367 | 0.9842 | **1.2966** |
+| `ATM_BUOY_CONSISTENT=1` (default then; NOT now) | 0.0648 | 0.1044 | 0.3017 | 0.6367 | 0.9842 | **1.2966** |
 | **`=0`** | 0.0595 | 0.0439 | 0.0340 | 0.0312 | 0.0282 | **0.0253** |
 
 Growth over iterations 320->620: **`=1` gives +2.79e-03 m/s per iteration, `=0` gives -2.47e-05.**
@@ -3411,8 +3479,12 @@ pattern `r` and the band p05 ageostrophic residual. **`max u-component` — the 
 component that runs away — was not among them**, and `max w_u` is a different component which
 genuinely did not move. The flip's benefit (residual 0.996 -> 0.336, the force reaching momentum
 through the model's own elliptic pressure) is real and is not in question. Its cost was never
-measured. **THE DEFAULT IS NOT CHANGED HERE** — this is a measurement that puts the flip back on
-the table, and this tree flips on measurements, in both directions.
+measured. **THE DEFAULT WAS NOT CHANGED HERE, AND IT WAS CHANGED THREE DAYS LATER** — on
+2026-09-14, at the user's instruction, after the same field was scored against what the model's own
+`Psi` requires: 1.19 mm/s rms against the `u` array's 0.58-0.84, a factor of ~500, with the `=0`
+branch landing on the requirement to 20 %. See the yardstick table under
+*The ported A/B knobs* above. **`ATM_BUOY_CONSISTENT=1` restores the flipped branch.** This tree
+flips on measurements, in both directions, and this is the first default it has flipped back.
 
 **CONSEQUENCE FOR EVERY LONG RUN: the runaway destroys the cells' VERTICAL structure by iteration
 ~60.** `ATM_CELL_ROT_DIAG`'s polar ascent/descent boundary prints four times in a 600-iteration run
@@ -3472,7 +3544,10 @@ and the first where the output was a warning the previous session had asked for.
 | `max\|p_dyn\|` pre-clip | 7.9e-04 | 1.8e-02 | 1.1e-01 | 1.8e-01 | **pegs at 3.0** | **3.076** |
 | cells clipped | 0 | 0 | 0 | 0 | 132 -> | **128 644 = 4.80 %** |
 
-**IT BINDS IF AND ONLY IF `ATM_BUOY_CONSISTENT=1`.** At 600 from scratch, `max|p_dyn|` is
+**IT BINDS IF AND ONLY IF `ATM_BUOY_CONSISTENT=1` — SO SINCE THE 2026-09-14 REVERT IT DOES NOT
+BIND AGAIN, AND "neither clamp binds today" IS TRUE ONCE MORE.** Read every pressure-amplitude
+measurement dated 2026-09-09 to 2026-09-13 as taken through a clamp; on the current default they
+are not. At 600 from scratch, `max|p_dyn|` is
 **4.3e-03** (`output_vw0`), **4.2e-02** (`output_bcs0`) and **1.7e-02** (`output_sp600ctl`) — all
 three `=0` arms, never one clipped cell, and the 1.7e-02 is exactly the 0.017 this file quotes as
 "176x below the ceiling". With `=1` it is **3.076, pegged**, and `output_bc0` (a `=0` restart FROM

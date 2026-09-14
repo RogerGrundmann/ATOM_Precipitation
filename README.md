@@ -642,7 +642,7 @@ Forty iterations being a spin-up is a second reason and now the smaller one — 
 above is the Psi(ground) RMS computed from the CSV. Porting that print is the obvious
 follow-on if the question is pursued.
 
-### `ATM_BUOY_TREF`, `ATM_BUOY_CONSISTENT` — implemented, UNMEASURED in this tree
+### `ATM_BUOY_TREF`, `ATM_BUOY_CONSISTENT` — measured, flipped ON 2026-09-09, REVERTED 2026-09-14
 
 The Boussinesq buoyancy divides its temperature anomaly by `t_0` = 273.15 K, the
 **non-dimensionalisation constant**, where the physical reference temperature belongs.
@@ -651,20 +651,35 @@ The Boussinesq buoyancy divides its temperature anomaly by `t_0` = 273.15 K, the
 there it is a height-dependent distortion rather than a rescaling.
 
 `ATM_BUOY_CONSISTENT` additionally removes the second of item 34's extra `*dt` factors,
-`g*dt/u_0 -> g*L_atm/u_0^2`. **That is a factor of 5.0e5 on a body force in this tree.** The
-largest coefficient ever run on this term in the family was an intermediate 336, which drove a
-polar vertical runaway; expect instability, and if it appears, that is a Boussinesq result
-rather than a fault in that line — do not tune the coefficient back down, which is how the 336
-arrived.
+`g*dt/u_0 -> g*L_atm/u_0^2`. **That is a factor of 5.0e5 on a body force in this tree**, and it
+implies `ATM_BUOY_TREF` by construction (fixing the `dt` without the reference temperature just
+rescales an incorrect force), so `_TREF` alone is the middle arm.
 
-**Why no measurement yet, stated so it is not mistaken for a null.** A 4-iteration A/B shows
-`ATM_BUOY_TREF` changing nothing, and that test is under-powered rather than informative:
-`buoyancy_ramp` is **0.013** at iteration 4 (it reaches 1 at `buoyancy_ramp_iters` ~ 300), so
-the whole term is suppressed ~100x during the window measured. A real test needs ~300+
-iterations per arm, and the *better* instrument is a radial momentum budget — ATHAD's `ubud_*`,
-which exists in neither tree until it is ported — because it answers the prior question of how
-large this term is at all. ATHAD measured its own as ~1e-6 against a pressure gradient of 1.15,
-i.e. effectively absent, on the same shipped coefficient this tree uses.
+**MEASURED, AND THE INSTABILITY THIS FILE PREDICTED DID NOT HAPPEN.** `ubud_buoy` goes
+**0.000003 -> 1.208688**, a factor of 400 000, which puts it ninety-fold above `ubud_pgf`. At full
+strength for 600 iterations: exit 0, zero NaN. What it buys is BALANCE — the extratropical band
+p05 ageostrophic residual **0.996 -> 0.336** — because it is the only one of the three
+thermal-wind routes that reaches momentum through the model's own elliptic pressure. It moves
+precipitation -0.3 % and every shape metric by less than the parity noise.
+
+**AND IT WAS REVERTED, ON A COMPONENT THE ACCEPTANCE NEVER SCORED.** The flip was judged on
+`max w_u`, precipitation, pattern `r` and the residual. `max u-component` — the RADIAL velocity,
+the one component a radial body force accelerates — was not among them, and it runs away: rms `u`
+on the 87E section goes 0.0073 -> 0.1436 -> 0.5843 m/s over iterations 20/200/600 where the off
+branch DECAYS 0.0075 -> 0.0039 -> 0.0015, with point extrema reaching -2.9 m/s. The model's own
+meridional streamfunction requires **1.19 mm/s rms and 5.3 mm/s peak**
+(`w = -(1/(2*pi*a^2*cos(phi)*rho)) dPsi/dphi`), which the off branch reproduces to ~20 % and the
+on branch exceeds by **390x**. It is not a CFL hazard — Courant 0.01 across the 38.9 m bottom
+layer — it is simply not a physical vertical velocity. **Default 0 again since 2026-09-14;
+`ATM_BUOY_CONSISTENT=1` restores the flipped branch.** Full record in CLAUDE.md.
+
+*The original "why no measurement yet" note is kept here because its reasoning was right and is
+reusable*: a 4-iteration A/B of `ATM_BUOY_TREF` showed nothing because `buoyancy_ramp` is **0.013**
+at iteration 4 (reaching 1 at `buoyancy_ramp_iters` ~ 300), so the term was suppressed ~100x
+during the window measured. The instrument that settled it was the radial momentum budget
+`ubud_*`, ported from ATHAD, because it answers the prior question of how large the term is at
+all — and the instrument that settled the REVERT was not a budget at all but the model's own
+streamfunction, read as a physical requirement on `u`.
 
 ## Atmosphere diagnostics and A/B knobs
 
