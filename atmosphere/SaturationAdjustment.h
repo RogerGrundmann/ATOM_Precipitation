@@ -103,6 +103,93 @@ public:
                                   }();
         return v;
     }
+    // ==================================================================
+    // ATM_SATADJ_FADE=<0|1|2> -- what clampAndFade's cold fade does with the liquid it takes.
+    // DEFAULT 0 = SHIPPED and bit-identical: mode 0 executes `cloud_row[k] *= alpha;` verbatim.
+    //
+    // THE DEFECT. With ATM_SATADJ_PHASE default ON since 2026-09-09, this fade is the ONLY
+    // remaining non-conservation in the routine -- ATM_SATADJ_DIAG on the current default reads
+    // neg_clip 0, supersat 0, cap 0, fade -4.3075e-04 mm/call, unattributed 0.0000, i.e. 100.0 %
+    // of it -- and ColumnWaterBudget's SaturationAdjust row (-3.3e+04 mm/a) agrees independently.
+    // That is **36x the model's own precipitation**. The liquid is not moved anywhere: it is
+    // deleted.
+    //
+    // AND IT IS NOT A COLD-CLOUD DEVICE, WHICH IS THE PART THAT DECIDES THE REPAIR (2026-09-20,
+    // measured on output_mn_ctl's own zonal slice at iteration 520, no run). alpha is a SIGMOID
+    // centred on t_00 with a 5 K half-width, so it bites far above the homogeneous-freezing
+    // point. Share of the removal by temperature:
+    //
+    //     below t_00   7.5 % | t_00..+5K  7.6 % | +5..+10K 17.1 %
+    //     -27..-17C   38.4 % | -17..0C   26.8 % | above 0C  2.6 %
+    //
+    // **92.5 % of it happens ABOVE t_00, where supercooled liquid is entirely ordinary, and
+    // 2.6 % happens above 0 C, where it is not even supercooled** -- because the sigmoid never
+    // reaches 1 (at 0 C alpha = 0.99939, so it removes 0.06 % of the cloud EVERY call, at every
+    // temperature, for ever). It is a global exponential decay on cloud water wearing a
+    // phase-transition's name. Below t_00 it has almost nothing left to act on anyway:
+    // adjustSaturation's `if (T < t_00)` block has already frozen that cloud to ice under
+    // ATM_ICE_COLD, and only 0.05 % of the slice's cloud sits there.
+    //
+    // THE PHASE PARTITION IS ALREADY DONE ELSEWHERE, so this is a SECOND and redundant phase
+    // device on top of a correct one: adjustSaturation's CND/DEP split ramps over
+    // `(T - t_00) * t_range_inv`, i.e. across the whole mixed-phase range t_0..t_00.
+    //
+    // MODE 1 -- FREEZE IT. Same cells, same alpha, but the liquid goes to ice instead of nowhere,
+    //   with the latent heat of fusion released ((ls - lv)/cp_l = 308.5 K per kg/kg). Conserves
+    //   mass. Still puts ice at -10 C and above, which is wrong in the warm tail -- it is the
+    //   MINIMAL-DIFF arm, there to separate "conserve the mass" from "remove the device".
+    // MODE 2 -- DO NOT FADE. Conserves mass AND phase. Safe because the hard freeze below t_00
+    //   already exists; this removes only the sigmoid's tail, which is the 92.5 % above it.
+    //
+    // WHY THE FADE EXISTED AND WHY THAT REASON IS SPENT: it was the containment for the NZ
+    // Southern Alps cold-zone supersaturation runaway, and the always-on supersaturation removal
+    // above this line is that defect's ROOT FIX -- its own comment says it acts "for EVERY cell,
+    // independent of the alpha fade". The fade was then narrowed to the liquid by ATM_ICE_COLD
+    // and never removed. On the current default the supersat bucket reads exactly 0.
+    //
+    // The legacy !ColdCloud branch is untouched by this knob; it is already a known-bad branch.
+    // Default 0. Nothing is flipped on an argument in this tree.
+    // ==================================================================
+    static int fadeMode(){
+        static const int v = [](){ const char* e = getenv("ATM_SATADJ_FADE");
+                                   return e ? atoi(e) : 0; }();
+        return v;
+    }
+    // ==================================================================
+    // ATM_SATADJ_FREEZE_LATENT=<0|1> -- release the latent heat of FUSION when adjustSaturation's
+    // hard cold freeze turns liquid into ice. DEFAULT 0 = SHIPPED and bit-identical.
+    //
+    // THE DEFECT (2026-09-20). Under ATM_ICE_COLD -- which is the DEFAULT -- the `if (T < t_00)`
+    // block below the Newton write-back does `ice += cloud; cloud = 0;` and never touches
+    // `t_row[k]`. That is a phase change with no energy attached: freezing liquid releases
+    // (ls - lv)/cp_l = 308.5 K per kg/kg and the cell does not warm by it.
+    //
+    // IT IS NOT A DOUBLE COUNT, and that had to be checked before it could be called a defect.
+    // The Newton loop charges `T -= lv_over_cp*d_cnd + ls_over_cp*d_dep`, i.e. lv for
+    // vapour<->LIQUID and ls for vapour<->ICE. Liquid -> ice appears in neither. Below t_00 the
+    // CND/DEP split already sends all fresh condensation straight to ice at ls, so what this
+    // block freezes is PRE-EXISTING liquid -- advected in, or left from an earlier state -- which
+    // was charged lv when it formed. lv + lf = ls closes the cycle exactly.
+    //
+    // SEPARATE FROM ATM_SATADJ_FADE ON PURPOSE. That knob's mode 1 releases the same lf at the
+    // OTHER freezing site, in clampAndFade. Two sites, two knobs, so each is measurable alone --
+    // and they are different in kind: this one is a pure ENERGY repair that moves no mass and is
+    // therefore invisible to ColumnWaterBudget and to ATM_SATADJ_DIAG, whose buckets are water.
+    //
+    // MAGNITUDE, BEFORE ANY RUN: 0.3085 K per g/kg of frozen liquid, so a typical cold cell
+    // carrying ~0.01 g/kg warms ~0.003 K and a cell at the 0.05 kg/kg condensate cap would warm
+    // 15 K. Expect a small, local, cirrus-zone warming -- and expect it to feed back, because a
+    // warmer cell has a larger q_sat.
+    //
+    // The legacy !ColdCloud branch is deliberately untouched: it DELETES both species, so there
+    // is no conserved mass to attach an energy release to.
+    // Default 0. Nothing is flipped on an argument in this tree.
+    // ==================================================================
+    static bool freezeLatent(){
+        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_FREEZE_LATENT");
+                                    return e && atoi(e) != 0; }();
+        return v;
+    }
     static bool diagOn(){
         static const bool v = [](){ const char* e = getenv("ATM_SATADJ_DIAG");
                                     return e && atoi(e) != 0; }();
@@ -163,6 +250,7 @@ private:
         const double inv_t_0      = 1.0 / m.t_0;
         const double t_range_inv  = 1.0 / (m.t_0 - m.t_00);
         const double lv_over_cp   = m.lv / m.cp_l;
+        const double lf_over_cp   = (m.ls - m.lv) / m.cp_l;  // fusion; ATM_SATADJ_FREEZE_LATENT
         const double ls_over_cp   = m.ls / m.cp_l;
 
         // Surface row is skipped below, but its condensation source must still be
@@ -377,8 +465,18 @@ private:
                             // exist -- but ice must, and this is where cirrus lives. Freeze it
                             // instead of deleting it. Default off, shipped branch unchanged.
                             if (ColdCloud::enabled()) {
-                                ice_row[k]  += cloud_row[k];
+                                const double frozen = cloud_row[k];
+                                ice_row[k]  += frozen;
                                 cloud_row[k] = 0.0;
+                                // ATM_SATADJ_FREEZE_LATENT=1 -- the energy follows the mass.
+                                // Applied to t_row[k], which the write-back above has already
+                                // set, rather than to the local T: T is not read again, and the
+                                // field is what the rest of the model sees.
+                                if (freezeLatent() && frozen > 0.0) {
+                                    double T_frz = t_row[k] * m.t_0 + lf_over_cp * frozen;
+                                    if (T_frz > T_max) T_frz = T_max;
+                                    t_row[k] = T_frz * inv_t_0;
+                                }
                             } else {
                             cloud_row[k] = 0.0;
                             ice_row[k]   = 0.0;
@@ -423,6 +521,7 @@ private:
         const double inv_t_0    = 1.0 / m.t_0;
         const double lv_over_cp = m.lv / m.cp_l;
         const double ls_over_cp = m.ls / m.cp_l;
+        const double lf_over_cp = (m.ls - m.lv) / m.cp_l;   // latent heat of FUSION, ATM_SATADJ_FADE=1
         // Defensive physical bounds. T_max mirrors the Magnus-validity cap used in
         // adjustSaturation; cloud_cap is ~50× the largest physical cloud/ice mixing
         // ratio (a few g/kg), so it never clips a real cloud — it only stops a runaway.
@@ -510,7 +609,29 @@ private:
                     // and fading the ice is what forbids cirrus.
                     const double alpha = 1.0 / (1.0 + std::exp(-(T_dim - m.t_00) / fade_K));
                     if (ColdCloud::enabled()) {
-                        cloud_row[k] *= alpha;
+                        const int fade_mode = fadeMode();
+                        if (fade_mode == 0) {
+                        cloud_row[k] *= alpha;              // SHIPPED: deleted, not moved
+                        } else if (fade_mode == 1) {
+                            // ATM_SATADJ_FADE=1 -- freeze it instead of deleting it. The latent
+                            // heat of fusion follows the mass, as it must: ice at T is not the
+                            // same energy as liquid at T. alpha is taken at the PRE-freezing
+                            // temperature deliberately -- the released heat would raise alpha and
+                            // iterating it is not worth a second exp() for a term whose typical
+                            // release is ~0.03 K.
+                            const double frozen = cloud_row[k] * (1.0 - alpha);
+                            cloud_row[k] -= frozen;
+                            ice_row[k]   += frozen;
+                            T_dim        += lf_over_cp * frozen;
+                            if (T_dim > T_max) T_dim = T_max;
+                            t_row_nd[k]   = T_dim * inv_t_0;
+                            // deliberately NOT re-capped at cloud_cap: the cap ran above and both
+                            // species were already under it, so ice <= 2*cloud_cap here, still
+                            // ~100x any physical value -- and clipping it would put back exactly
+                            // the deletion this mode exists to remove.
+                        }
+                        // fade_mode == 2: no fade at all. Below t_00 adjustSaturation has already
+                        // frozen the liquid, so what this drops is the sigmoid's warm tail.
                     } else {
                     c_row[k]     *= alpha;
                     cloud_row[k] *= alpha;

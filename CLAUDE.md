@@ -4389,6 +4389,147 @@ same run and this file's rule picks the shape. The land/ocean split moves the WR
 and is recorded here rather than left out. And the residual non-conservation in this routine is
 now ONE named sink, `clampAndFade`'s `cloud *= alpha` below `t_00`, at **-3.98e+04 mm/a**.
 
+### ★ THE COLD FADE, CLOSED: `SaturationAdjustment` CONSERVES MASS EXACTLY, AND IT BUYS NOTHING
+
+**AND THE ONE-LINE DESCRIPTION OF THE DEFECT ABOVE IS WRONG — IT IS NOT "BELOW `t_00`"**
+(2026-09-20). `alpha = 1/(1 + exp(-(T - t_00)/fade_K))` is a SIGMOID with a 5 K half-width, not a
+step, so it bites far above the homogeneous-freezing point. Share of the removal by temperature,
+measured on `output_mn_ctl`'s own 87E slice at iteration 520 — no run:
+
+| band | below `t_00` | `t_00`..+5K | +5..+10K | **-27..-17 C** | **-17..0 C** | **above 0 C** |
+|---|---|---|---|---|---|---|
+| share | 7.5 % | 7.6 % | 17.1 % | **38.4 %** | **26.8 %** | **2.6 %** |
+
+**92.5 % OF IT HAPPENS ABOVE `t_00`, WHERE SUPERCOOLED LIQUID IS ENTIRELY ORDINARY, AND 2.6 %
+HAPPENS ABOVE 0 C, WHERE IT IS NOT EVEN SUPERCOOLED** — because the sigmoid never reaches 1 (at
+0 C `alpha` = 0.99939, so it deletes 0.06 % of the cloud EVERY call at EVERY temperature, for
+ever). **It is a global exponential decay on cloud water wearing a phase transition's name**, and
+it is a SECOND, redundant phase device on top of a correct one: `adjustSaturation`'s CND/DEP split
+already ramps over `(T - t_00)*t_range_inv`, the whole mixed-phase range. Below `t_00` it has
+almost nothing left to act on — that routine's hard freeze has already moved the cloud to ice, and
+in a spun-up field the ice/liquid ratio there is **84:1**.
+*Its original purpose is spent: it was the containment for the NZ Alps cold-zone supersaturation
+runaway, and the always-on supersaturation removal beside it is that defect's ROOT FIX — its own
+comment says it acts "for EVERY cell, independent of the alpha fade". On the current default the
+`supersat` bucket reads exactly 0.*
+
+**`ATM_SATADJ_FADE=<0|1|2>`, DEFAULT 0 = SHIPPED and byte-identical** (13 of 14 files against the
+pre-knob binary at 1 thread; the 14th is `RUN_CONFIG.txt`, differing by the new banner token
+alone). **1** = freeze it — same cells, same `alpha`, liquid -> ice with the latent heat of fusion
+following the mass ((`ls`-`lv`)/`cp_l` = 308.5 K per kg/kg); conserves MASS only. **2** = do not
+fade; conserves mass AND phase. **Both `want_differ` controls PASS at `nm` = 20** (13 files differ
+each), so the off-branch pass is not a no-op.
+
+**THREE ARMS, 600 FROM SCRATCH, ONE PINNED BINARY `cli/atm_sf`, 8 threads each and all three
+concurrent** (`output_sf_ctl` / `sf_frz` / `sf_off`, 2 h 26 min; all exit 0, **zero NaN** through
+155/357/483, `converged` = 1 in all three). Two repair modes rather than one because `frz - ctl`
+is the MASS and `off - frz` is the PHASE; reading only `off - ctl` would charge the whole
+difference to conservation.
+
+**THE BUDGET NOW SHUTS COMPLETELY**, `ATM_SATADJ_DIAG` at call 301:
+
+| | `fade` per call | cumulative, 301 calls |
+|---|---|---|
+| **shipped** | **-4.2147e-04 mm** | **-0.1263 mm** |
+| **`=1` freeze** | -3.2e-18 | +8.5e-17 |
+| **`=2` no fade** | **+0.000000e+00 exactly** | +9.9e-26 |
+
+Every bucket in the routine — `entry_clip`, `phase_split`, `cold_delete`, `neg_clip`, `supersat`,
+`cap`, `fade` — is now zero with `unattributed` zero. **`SaturationAdjustment` conserves total
+water exactly, for the first time.**
+
+**AND THE CLIMATE IS A NULL.**
+
+| iteration 600 | `sf_ctl` | `sf_frz` | `sf_off` | NASA |
+|---|---|---|---|---|
+| Precip mm/a | 950.64 | 950.25 | 950.09 | 978.3 |
+| pattern r / sigma | +0.459 / 2.29 | +0.458 / 2.30 | +0.460 / 2.30 | |
+| 0-15 / 15-35 | 3254.2 / 256.6 | 3256.5 / 252.5 | 3251.5 / 256.5 | 1487.0 / 761.4 |
+| **35-65 / 65-90** | **159.9 / 10.1** | **160.7 / 10.3** | **160.3 / 10.3** | 981.1 / 364.2 |
+| precipitable water | 30.24 | 30.24 | 30.24 mm | |
+| **`max u` / `max w`** | **0.025303 / 26.479355** | **identical** | **identical** | |
+
+Precipitation moves **0.06 %** — at the documented fixed-thread-count non-determinism — and the
+velocity extrema are identical to every digit in all three arms.
+
+**THE CONDENSATE DOES RESPOND, EXACTLY AS EACH MODE IS BUILT TO**, which is what separates a null
+from a dead knob. In the cold zone (T < -17 C) of the 87E slice:
+
+| | `sf_ctl` | `sf_frz` | `sf_off` |
+|---|---|---|---|
+| cloud **liquid** | 1.30465 | 1.30833 (+0.3 %) | **1.39902 (+7.2 %)** |
+| cloud **ice** | 4.14835 | **4.25000 (+2.4 %)** | 4.15937 (+0.3 %) |
+
+**Mode 1 puts the water in ice and mode 2 leaves it liquid**, and globally mode 1 raises `CloudIce`
+**+2.1 %** against mode 2's **+0.19 %** — an 11x difference. That is the pre-registered
+discriminator and it argues **for mode 2**: mode 1 manufactures ice at -10 to -25 C, which is the
+band `ATM_RH_CRIT_ICE` was calibrated in.
+
+**★ AND THE COMPARISON WITH B+1 IS THE FINDING, BECAUSE IT IS COUNTERINTUITIVE.**
+
+| | term corrected | rate | 35-65 deg |
+|---|---|---|---|
+| **B+1** `ATM_MICRO_NDIM` | microphysics source coefficient | 1712 mm/a | **+14.6 %** |
+| **B+2** the cold fade | a water sink | **3.3e+04 mm/a, 20x larger** | +0.5 %, nothing |
+
+**SIZE IN THE WATER BUDGET DOES NOT PREDICT IMPACT.** B+1's term scales `S_v`/`S_c`/`S_i`/`S_g` —
+the rates that feed autoconversion AND the ground flux, i.e. the PRECIPITATION-FORMING pathway.
+The fade acts on cloud water where condensation replaces it within the call: it is **0.6 % of the
+~5e+06 mm/a condensation/evaporation cycle that buffers the condensate**. That distinction, not
+magnitude, is what separated them.
+*⚠ And the "36x the precipitation" framing this file reached for first is the less explanatory
+one. It is true as a RATE; integrated over the run the fade removes **0.1263 mm** against a
+30.2 mm reservoir — **0.42 %**, continuously resupplied. The second number is the one that
+predicts the null.*
+
+**THREE OF THE FOUR PRE-REGISTERED EXPECTATIONS WERE WRONG**, recorded because this file records
+them: (1) "both repairs raise the cloud water" — mode 1 LOWERS it (-0.14 %), because it converts
+liquid rather than adding condensate; (2) the IWP discriminator was right and fired; (3)
+"precipitation rises in both" — both FELL, by 0.04 % and 0.06 %, noise either way; (4) stability,
+right.
+
+**DEFAULT STAYS 0.** The defect is real and is now closed behind a knob; what is measured is that
+closing it costs nothing and buys nothing at 600 iterations. **If it is ever flipped it should be
+MODE 2**, on the ice argument above, and it carries the same `ATM_RH_MIN_PTOP` coupling every
+precipitation-moving flip in this tree carries — though at 0.06 % that coupling is currently moot.
+
+### `ATM_SATADJ_FREEZE_LATENT`: the other freezing site had no energy, and there is nothing left to freeze
+
+**`adjustSaturation`'s hard cold freeze releases NO LATENT HEAT** (2026-09-20). Under
+`ATM_ICE_COLD` — the DEFAULT — the `if (T < t_00)` block sits AFTER the Newton write-back and does
+`ice += cloud; cloud = 0;` without ever touching `t_row[k]`. A phase change with no energy
+attached.
+
+**IT IS NOT A DOUBLE COUNT, AND THAT HAD TO BE CHECKED BEFORE IT COULD BE CALLED A DEFECT.** The
+Newton loop charges `T -= lv_over_cp*d_cnd + ls_over_cp*d_dep` — `lv` for vapour<->LIQUID, `ls` for
+vapour<->ICE. Liquid -> ice appears in neither. Below `t_00` the CND/DEP split already sends all
+FRESH condensation straight to ice at `ls`, so what this block freezes is PRE-EXISTING liquid,
+charged `lv` when it formed. `lv + lf = ls` closes the cycle exactly.
+
+**`ATM_SATADJ_FREEZE_LATENT=<0|1>`, DEFAULT 0 = SHIPPED and byte-identical** (13 of 14 at 1 thread
+against `cli/atm_sf`; the 14th is the banner token alone). **The `want_differ` control PASSES** —
+6 of 14 files differ at `nm` = 20 from scratch, including BOTH momentum budgets, so a pure
+thermodynamic repair at the cirrus level reaches the dynamics through buoyancy inside 4 s of
+physical time. That control mattered: this knob could easily have touched nothing.
+
+**AND ON A SPUN-UP FIELD IT IS A NULL, FOR A REASON THAT IS ARITHMETIC** (`output_fl_ctl` /
+`fl_on`, 600 -> 700 from `output_mn_ctl/atm_restart_0Ma_600.bin` md5 `082f884e`, 12 threads each,
+both exit 0 with zero NaN). Every printed metric is **identical to the digit** — Precip 959.8,
+`r` +0.460, cRMS 1419.0, sigma 2.32, all four bands — and the only slice array that differs is
+`PsiMerid`, by 1.5e-05 on values of ~1e+08, a relative **1e-13**.
+
+**THE POPULATION IT CAN ACT ON HOLDS 0.050 % OF THE CLOUD.** On the spun-up 87E slice, 1618 cells
+sit below `t_00` and carry **0.019 of 38.19** units of cloud liquid, against 1.59 of ice there — a
+ratio of **84:1**, because `adjustSaturation`'s own freeze has already done the work and what is
+left is the tail. If ALL of it froze the warming would be **0.0036 mK per cold cell**, four orders
+below anything the model prints.
+
+**SO THE KNOB IS CORRECT, CONNECTED AND NEGLIGIBLE, AND THE THREE CLAIMS ARE INDEPENDENT.**
+Connectivity is established at 1 THREAD, where this model IS reproducible and the off-branch check
+is bit-exact; the null is established at 12 threads on a spun-up field, where the difference sits
+below the documented non-determinism. **Do not read the 12-thread null as evidence the knob does
+nothing** — the 1-thread control says otherwise. **Default stays 0.**
+
 ### The knob is written and swept: `ATM_MICRO_NDIM`, a 2783x coefficient correction that moves the precipitation 0.5 %
 
 **`ATM_MICRO_NDIM=<strength>`, default 0.0 = shipped, off-branch BYTE-IDENTICAL over 20 of 20
