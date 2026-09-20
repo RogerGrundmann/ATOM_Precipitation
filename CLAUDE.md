@@ -4493,6 +4493,106 @@ closing it costs nothing and buys nothing at 600 iterations. **If it is ever fli
 MODE 2**, on the ice argument above, and it carries the same `ATM_RH_MIN_PTOP` coupling every
 precipitation-moving flip in this tree carries — though at 0.06 % that coupling is currently moot.
 
+
+### ★ B+3 MEASURED: the injection and the removal were a CANCELLING PAIR, and the model barely notices
+
+**`ATM_EVAP_FLUX=<0|1>`, DEFAULT 0 = SHIPPED and byte-identical.** The off-branch check is a CHAIN
+check against `cli/atm_sf`, two binary generations back, so it clears `ATM_SATADJ_FREEZE_LATENT`
+and `ATM_EVAP_FLUX` at once: **13 of 14 files identical**, the 14th differing by exactly the two
+new banner tokens. The `want_differ` control passes (12 files differ).
+
+**THE DEFECT.** `waterVapourEvaporation` computes a real bulk evaporation -- Dalton, Meyer or
+Rohwer, in mm/d, into `m.Evaporation.y` -- and **does not use it**: that array reaches the print,
+the VTK, and nothing that drives the model. What moistens the air is `c_eq`, the humidity at which
+evaporation would BALANCE precipitation, as a relaxation at `i` = 0 and an ABSOLUTE ADDITION at
+`i` = 1..3. **A humidity PRESCRIPTION wearing a flux's name.** `ColumnWaterBudget` charges the
+stage **+5.4454e+06 mm/a**, 100 % of it in the surface band, against the active model's own E of
+**502.9 mm/a** -- a factor of **~10 800** -- and **30.8 % of ocean cells sit ON the `c_sat_i` cap**,
+which is the `ATM_EVAP_SPREAD` note's "ratchets to saturation rather than reaching an equilibrium"
+measured rather than argued.
+
+**IT IS THE MOISTURE TWIN OF `omega_teq`, AND WORSE.** That relaxation is 0.20 per ITERATION
+against a 3293 s surface flux -- 3290x too fast, "by construction rather than by tuning". Here
+`w_norm` = 0.6439 per iteration is an e-folding of **0.97 iterations = 0.194 s**, against a bulk
+flux needing ~1e5 iterations to move the bottom layer's humidity by O(1).
+
+**LEVEL 0 IS DELIBERATELY NOT TOUCHED**, applying the 2026-09-06 decision: level 0 is a PRESCRIBED
+SKIN, a surface flux belongs at the first AIR level, and level 0 is not RK4-integrated
+(`i` = 1..im-2) so removing its relaxation would leave it unconstrained rather than physical. Same
+choice as `ATM_SFC_FLUX` for sensible heat and `HYD_SFC_FLUX` in the ocean.
+
+**PAIR, 600 FROM SCRATCH, ONE PINNED BINARY `cli/atm_ef`, 12 threads each and concurrent**
+(`output_ef_ctl` / `ef_on`, 100 min; both exit 0, **zero NaN** through 155/357/483).
+
+**THE KNOB ENGAGES EXACTLY AS DESIGNED, AND THAT IS INDEPENDENT OF THE CLIMATE RESULT:**
+
+| per call, ocean | `ef_ctl` | `ef_on` |
+|---|---|---|
+| injected into levels 1..3 | 1.246e-01 mm | **2.232e-06 mm** (55 800x smaller) |
+| cells on the `c_sat` cap | **30.78 %** | **0.00 %** |
+
+**★ AND THE COLUMN WATER BUDGET SHOWS WHY THE MODEL DOES NOT CARE.**
+
+| CWB, mm/a | `ef_ctl` | `ef_on` |
+|---|---|---|
+| **evaporation** | **+5.4454e+06** | **-7.3712e+04** (74x smaller AND sign-flipped) |
+| **RungeKutta** | **-7.7134e+06** | **-2.1868e+06** (3.5x smaller) |
+| damp_wiggles(q) | +2.5245e+06 | +2.4754e+06 |
+| **NET** | **+1.6160e+05** | **+1.5622e+05 (-3.3 %)** |
+
+**THE 5.4e+06 INJECTION AND THE 7.7e+06 REMOVAL WERE A NEAR-CANCELLING PAIR.** Delete the
+injection and the removal shrinks by almost as much, leaving the NET -- the model's actual water --
+**3.3 %** lower. This is the B+4 finding *"the whole column water is the 2 % residue of two
+~5e+06 terms"* demonstrated by deleting one of the two, rather than inferred from their sizes.
+
+**THE CLIMATE IS ESSENTIALLY A NULL, AND MY PRE-REGISTERED "LARGE DRYING" WAS WRONG.**
+
+| iteration 600 | `ef_ctl` | `ef_on` | NASA |
+|---|---|---|---|
+| **Precip mm/a**, high parity | 947.7 | **940.2 (-0.8 %)** | 978.3 |
+| Precip, low parity | 900.5 | 887.7 (-1.4 %) | |
+| pattern r / sigma | +0.458 / 2.29 | +0.458 / 2.29 | |
+| centred RMS | 1406.2 | 1402.1 | |
+| 0-15 / 15-35 | 3244.1 / 255.3 | 3227.1 / 251.1 | 1487.0 / 761.4 |
+| **35-65 / 65-90** | **159.9 / 10.1** | **154.9 (-3.1 %) / 7.8 (-23 %)** | 981.1 / 364.2 |
+| land / ocean | 755.0 / 1024.0 | 754.0 / 1013.9 | 782.3 / 1055.8 |
+| precipitable water | 30.2 | 30.2 mm | |
+| **E (active, Meyer)** | **502.9** | **707.0 (+40.6 %)** | |
+| **P - E** | **421.3** | **206.6 (-51 %)** | 0 |
+
+Removing a moisture source **10 800x** the flux costs **0.8 %** of the precipitation. The whole
+column dries only **2.2-2.7 % at every level**, uniformly, and precipitable water does not move at
+all.
+
+**AND IT MOVES THE STARVED BANDS THE WRONG WAY**, which is the sharpest contrast with B+1: 35-65
+deg **-3.1 %** and 65-90 deg **-23 %**, where `ATM_MICRO_NDIM` gave +14.6 % and +101 %. Two
+water-budget repairs of comparable size, opposite signs on the bands.
+
+**`P - E` HALVES, AND THAT IS NOT THE IMPROVEMENT IT LOOKS LIKE.** 421.3 -> 206.6 mm/a, because E
+rises 40.6 %. But B+3 is the item that established `P - E` compares a FLUX with a DIAGNOSTIC that
+drives nothing -- so a knob that changes the diagnostic moves the gap without closing a budget.
+
+**WHY E RISES IS ONLY PARTLY ACCOUNTED FOR, AND THE FIRST EXPLANATION WAS MEASURED AND REFUTED.**
+Both formulas rise ~40 % (Dalton 528.0 -> 737.4, Meyer 502.9 -> 707.0), so the common factor --
+the saturation deficit -- is what moved. Measured over the 43 602 OCEAN cells at level 0: surface
+RH **87.43 % -> 85.34 %** and the mean deficit **3.7826 -> 4.2399 hPa, +12.1 %**, against
+**+14.9 %** predicted from the 2.15 % humidity fall at that RH -- so the deficit mechanism is
+confirmed in direction and size. **But +12.1 % is a third of the +40.6 % in E, and the remainder
+is NOT explained.** It is not the wind: `max u`, `max v` and `max w` are identical to six digits.
+Part of the gap is a timing mismatch in the comparison -- the slice is iteration 520 and the E
+print is iteration 600 -- and the rest is open.
+*The first attempt at this used a one-longitude land+ocean RH of 51.5 %, which predicts +2.3 % and
+looked like a refutation of the mechanism. It was the wrong statistic, not the wrong mechanism.*
+
+**DEFAULT STAYS 0**, and here the reason is not caution. The repair is correct -- a computed flux
+should drive the model rather than be discarded -- but at this integration length a physical
+evaporation is ~1e5 iterations from acting, so `ATM_EVAP_FLUX=1` does not give the model a working
+surface moisture flux: **it removes the prescription and puts almost nothing in its place**, and
+the near-surface humidity is then held up by transport and by the level-0 skin alone. That is the
+same wall as `ATM_HYDRO_PGF`'s `1/f`, `HYD_SFC_FLUX` and `surf_drag`. What is settled is the
+SIZE of the prescription (10 800x), that it is a near-cancelling pair with the RK4 removal, and
+that the model's precipitation barely rests on it.
+
 ### `ATM_SATADJ_FREEZE_LATENT`: the other freezing site had no energy, and there is nothing left to freeze
 
 **`adjustSaturation`'s hard cold freeze releases NO LATENT HEAT** (2026-09-20). Under

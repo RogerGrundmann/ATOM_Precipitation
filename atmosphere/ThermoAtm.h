@@ -153,6 +153,57 @@ public:
         static const int evap_spread = [](){
             const char* e = getenv("ATM_EVAP_SPREAD"); return e ? atoi(e) : 0; }();
 
+        // ==================================================================
+        // ATM_EVAP_FLUX=<0|1> -- make the surface evaporation a FLUX instead of a prescription.
+        // DEFAULT 0 = SHIPPED and bit-identical.
+        //
+        // THE DEFECT (register item B+3). This routine computes a real bulk evaporation --
+        // Dalton, Meyer or Rohwer, in mm/d, into `m.Evaporation.y` -- and then **does not use
+        // it**. That array is read by the print, by the VTK, and by nothing that drives the
+        // model. What actually moistens the air is `c_eq`, the humidity at which evaporation
+        // would BALANCE precipitation, applied as a relaxation at i = 0 and as an ABSOLUTE
+        // ADDITION at i = 1..n_spread. So the model has a humidity PRESCRIPTION wearing a
+        // flux's name.
+        //
+        // THE SIZE OF IT, FROM TWO INSTRUMENTS ALREADY IN THE TREE (600 from scratch, current
+        // defaults, output_sf_ctl): ColumnWaterBudget charges this stage **+5.4459e+06 mm/a,
+        // 100 % of it in the surface band**, while the active model's own E is **500.4 mm/a**.
+        // **A factor of ~10 900.** And 30.7 % of ocean cells sit ON the c_sat_i cap, which is
+        // the "it ratchets to saturation rather than reaching an equilibrium" prediction in the
+        // ATM_EVAP_SPREAD note above, measured.
+        //
+        // IT IS THE MOISTURE TWIN OF `omega_teq`, AND WORSE. That relaxation is 0.20 per
+        // ITERATION against a 3293 s surface flux -- 3290x too fast, "by construction rather
+        // than by tuning", as this tree already records. Here `w_norm` = 0.6439 per iteration is
+        // an e-folding of **0.97 iterations = 0.194 s**, against a bulk flux that needs ~1e5
+        // iterations to change the bottom layer's humidity by O(1). Same shape, ~1e5 instead of
+        // 3.3e3.
+        //
+        // WHAT MODE 1 DOES, AND WHAT IT DELIBERATELY DOES NOT. Levels 1..n_spread receive the
+        // ACTIVE MODEL'S OWN E, converted to a tendency:
+        //     dc_i = (E [mm/d] / 8.64e4) * weight_i / (rho_i * dz_i) * seconds_per_iteration
+        // i.e. kg/(m2 s) delivered into a layer of mass rho*dz [kg/m2]. **Level 0 is NOT
+        // touched**: this tree decided on 2026-09-06 that level 0 is a PRESCRIBED SKIN and that
+        // a surface flux belongs at the first AIR level -- the same choice `ATM_SFC_FLUX` makes
+        // for sensible heat and `HYD_SFC_FLUX` makes in the ocean, which puts its flux into
+        // `im-2` rather than the pinned skin. Level 0 is not RK4-integrated (`i = 1..im-2`), so
+        // removing its relaxation would leave it unconstrained rather than physical.
+        //
+        // EXPECT A LARGE DRYING, NOT A NULL. Per iteration the shipped increment is
+        // `c_eq*weight` ~ 2.4e-03 kg/kg and the flux is ~1.6e-08, so mode 1 removes the model's
+        // dominant near-surface moisture source and leaves levels 1..3 to transport and to
+        // diffusion from the skin. That is the cancelling-pair shape this file has recorded
+        // seven times, and the measurement is how much of this model's precipitation rests on
+        // the injection.
+        //
+        // NOT IN SCOPE, AND STILL OPEN: evaporation removes no latent heat from the surface and
+        // never writes `t`. That is the structural surface-energy item, not this one.
+        // Default 0. Nothing is flipped on an argument in this tree.
+        // ==================================================================
+        static const bool evap_flux = [](){
+            const char* e = getenv("ATM_EVAP_FLUX"); return e && atoi(e) != 0; }();
+        const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0;
+
         // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how
         // many of those cells are sitting ON the c_sat_i cap -- the direct test of "it ratchets
         // to saturation" rather than "it reaches an equilibrium".
@@ -276,6 +327,19 @@ public:
 
                         const double c_before = m.c.x[i][j][k];
                         double incr;
+                        if (evap_flux) {
+                            // ATM_EVAP_FLUX=1 -- the ACTIVE MODEL'S OWN E, as a tendency.
+                            // E [mm/d] = kg/(m2 d); /8.64e4 -> kg/(m2 s); / (rho*dz) [kg/m2]
+                            // -> (kg/kg)/s; * seconds per iteration -> the increment.
+                            double rho_f = m.r_humid.x[i][j][k];
+                            if (!AtomUtils::is_finite_safe(rho_f) || rho_f <= 0.0) rho_f = m.r_air;
+                            const double dz_f = 0.5 * (m.get_layer_height(i+1)
+                                                     - m.get_layer_height(i-1));
+                            incr = (dz_f > 0.0)
+                                 ? (m.Evaporation.y[j][k] / 8.64e4) * weight
+                                   / (rho_f * dz_f) * sec_per_iter
+                                 : 0.0;
+                        } else
                         switch (evap_spread) {
                             case 1:  incr = (c_eq - m.c_fix.y[j][k]) * weight; break;  // deficit
                             case 2:  incr = (c_eq - c_before)        * weight; break;  // relaxation
