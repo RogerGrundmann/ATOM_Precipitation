@@ -4468,6 +4468,107 @@ long run is not what its sign over four seconds is. **And it does NOT close the 
 (461.3 -> 462.9 mm/a), which is correct and expected: the section above establishes that `P - E`
 is not a budget statement in this model.
 
+#### ★ 600 FROM SCRATCH: THE STORM-TRACK BAND MOVES 14.6 %, WHICH NOTHING DYNAMICAL HAS EVER DONE
+
+**THE 20-ITERATION ARM ABOVE WAS A RESTART FROM A CHECKPOINT WHOSE CONFIGURATION IS NO LONGER THE
+DEFAULT** (`output_twctl`, 2026-09-03 — before the four defaults flipped on 2026-09-12 and before
+the 2026-09-14 `ATM_BUOY_CONSISTENT` revert), and its own write-up said the sign over a long run
+was unknown. Run properly (2026-09-20, `output_mn_ctl` / `output_mn_on`, `config_accept.xml`
+defaults, `nm` = 600 **from scratch**, moist physics from iteration 0, ONE pinned binary
+`cli/atm_mn`, 12 threads each and both arms concurrent, 102 min; `ATM_CWB_DIAG=1` on both). Both
+exit 0 with **zero NaN**, straight through **155, 357 and 483**, and `converged` = 1 in both.
+The two `[RUN CONFIG]` banners differ in `MICRO_NDIM` and the output path and **nothing else**.
+
+**THE CONTROL IS ALSO THE OFF-BRANCH CHECK AND IT REPRODUCES `output_sp600on` TO THREE FIGURES** —
+Precip **947.7** against the recorded 947.3, `r` **+0.458** against +0.459, sigma **2.29** both,
+35-65 deg **159.9** against 159.9 — on a binary that has since gained the `ATM_BUOY_CONSISTENT`
+revert, `ATM_BUOY_TREF` and `ATM_MC_T_NDIM`.
+
+| iteration 600 | control | **`ATM_MICRO_NDIM=1.0`** | NASA |
+|---|---|---|---|
+| **Precip mm/a**, high parity | 947.7 | **986.9 (+4.1 %)** | 978.3 |
+| Precip, low parity | 895.6 | 936.6 (+4.6 %) | |
+| bias vs NASA | -3.1 % | **+0.9 %** | |
+| **pattern r** | +0.458 | **+0.455** | |
+| centred RMS | 1406.2 | 1407.2 | |
+| **sigma** | **2.29** | **2.29** | 1.00 |
+| 0-15 deg | 3244.1 | **3267.5 (+0.7 %)** | 1487.0 |
+| **15-35 deg** | 255.3 | **333.0 (+30.4 %)** | 761.4 |
+| **35-65 deg** | **159.9** | **183.2 (+14.6 %)** | **981.1** |
+| **65-90 deg** | **10.1** | **20.3 (+101 %)** | **364.2** |
+| land / ocean | 755.0 / 1024.0 | 757.5 / **1077.7** | 782.3 / 1055.8 |
+| precipitable water | 30.2 | 30.2 mm | |
+| **`max u-component`** | **0.025767** | **0.025767** | identical, same cell |
+| `max v` / `max w` | 2.279598 / 26.483400 | 2.279457 / **26.483400** | |
+| max temperature | 34.674515 | 34.674485 | 7th digit |
+| mean KE / `converged` | 36.4 / **1** | 36.4 / **1** | |
+
+**THE INSTRUMENT CONFIRMS THE ENDPOINT EXACTLY**, which is what makes this a connection test and
+not a sweep: `ATM_CWB_DIAG`'s microphysics row goes *as RK4 applies them* **0.62 -> 1712.05 mm/a**
+and lands on its own independent *the same rates at `L/u_0`* reference row of **1712.0**, to the
+digit. The conservation check stays at **sum 0.00** and `unattributed` at **exactly 0.0000** in
+both arms, so correcting the coefficient does not break the schemes' mass balance — it scales
+every rate together.
+
+**★ THE 35-65 DEGREE BAND MOVES, AND IT SATURATES RATHER THAN DRIFTING.** Over iterations 20 ->
+600 the control runs **159.0 / 160.4 / 160.0 / 159.9** — the frozen number this file has now
+recorded six times — and the knob runs **159.0 -> 183.6 by iteration ~450, then flat to 183.2**.
+65-90 deg does the same: **8.2 -> 20.2 by ~500, then flat.** That is an equilibrated response at
+a new value, not a trajectory still in motion, and it is the opposite shape from the global mean,
+which is **still climbing at 600** (+1.0 % at iteration 120, +2.0 % at 300, +3.0 % at 450,
++4.1 % at 600).
+
+**AND THE CIRCULATION IS NOT INVOLVED, WHICH IS THE POINT.** `max u-component` is **identical to
+six figures at the same cell**, `max w` identical, `max v` and max temperature agree to six and
+seven digits, `HumidityRel` and `WaterVapour` move **0.07 % and 0.01 %** in the slice mean, and
+the total column water path is **30.6645 against 30.6649 mm**. So a precipitation band moved
+14.6 % with the velocity, temperature and vapour fields standing still.
+**THIS IS THE COMPLEMENT OF *no dynamical change can move a precipitation band in this tree*, NOT
+A CONTRADICTION OF IT.** That rule is about ADVECTIVE displacement — 600 iterations is 120 s and a
+parcel moves 36 m — and it has always been a statement about what *dynamics* can reach in an
+affordable run. A local rate law does not need to move a parcel. **Score dynamics knobs on
+circulation quantities and microphysics knobs on precipitation**; the two halves of that rule are
+now both measured.
+
+**TWO REPAIRS HAVE EVER MOVED THE STORM-TRACK BAND AND BOTH ARE WATER-CONSERVATION REPAIRS.**
+`ATM_SATADJ_PHASE` took it 156.6 -> 159.9 (**+2.1 %**) and this takes it 159.9 -> 183.2
+(**+14.6 %**, seven times larger), and they COMPOSE — the control here already carries
+`SATADJ_PHASE=1` as a default. Against the dynamical arms in this file — `ATM_TW_BALANCE`'s
+71 %-stronger jet relocated INTO the band moved it **0.013 %**, the Shapiro strength sweep gave
+156.6 in both arms, 600 iterations of free drift gave -0.1 % — that is a different class of lever
+and it is the class this tree had concluded was exhausted.
+
+**⚠ AND IT CORRECTS THIS FILE'S OWN STANDING ATTRIBUTION.** *The moisture transport, measured*
+concludes: *"it is not reachable by a microphysics constant — that work is done, and it is what
+made the land/ocean partition right"*. The 7 %-of-requirement moisture SUPPLY at 35-65 deg is
+measured and stands; what does not stand is the inference that the band is therefore closed to
+microphysics. **It is not the supply that was limiting what falls out of the column.**
+
+**WHAT IT DOES NOT DO, AND THE LIMITS ARE THE USUAL ONES.** `r` moves **-0.003** and sigma not at
+all, because both are dominated by the tropical spike (3267 against 1487) which is unchanged; the
+band gains are real and small in absolute terms — +23 mm/a against a 821 mm/a shortfall, i.e.
+**2.8 % of the gap closed**. The ocean overshoots (1024 -> 1077.7 against NASA 1055.8) while land
+barely moves. 600 iterations is **120 s** and the mean has not equilibrated. And the reservoir
+cannot drain on any affordable run — 1712 mm/a on 30.7 mm is 2.5e+06 iterations — so what is
+measured is the fast LOCAL response, as it was at 20 iterations.
+
+**⚠ A "FACTOR OF 5" IN THE CLOUD WATER IS ONE CELL, AND THE FIELD MOVES 6 %.** The printed
+`max cloud water` goes **0.169157 -> 0.851894 g/kg** at 24N 74W, 0 m — a coastal surface cell, this
+tree's known pathology locus. On the 87E zonal slice at iteration 520 the MEANS are
+`CloudWater` **+5.8 %**, `CloudIce` **-1.2 %**, `CloudGraupel` **0.0 %**. *The max is one cell, and
+this file's own rule — read `Psi(ground)` as an rms and never as a max — applies to condensate
+too; the 5x was read as a field change here before the slice was opened.*
+
+**DEFAULT STAYS 0.0 AND THE FLIP IS A DECISION, NOT A MEASUREMENT GAP.** What is settled: correct
+physics derived rather than quoted, connected, endpoint-verified by an independent instrument,
+stable from scratch through all three failure points, byte-identical off, and the largest movement
+of the starved bands this tree has produced. What argues against flipping today is the same thing
+that held `ATM_SATADJ_PHASE` back for a day: **`ATM_RH_MIN_PTOP` = 475 was fitted to land on NASA
+on the branch that does NOT carry this correction**, and this moves the mean from -3.1 % to
++0.9 % of NASA, so a flip implies re-sweeping it — and the sweep must be judged on `sigma` and the
+bands, because that knob buys the mean back by adding tropical LIQUID and hands the shape gain
+away. Same pair-flip logic as `ATM_ICE_LIMIT_ARRIVING` + `ATM_RAIN_AREA`.
+
 ## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
 
 **THE REPAIR FOR "THE SOLVER HAS NO FIXED POINT" HAS NOW BEEN RUN IN THE FULL MODEL, WHICH IT
