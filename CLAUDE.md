@@ -2870,6 +2870,10 @@ from the metric error**, and that is also why the repaired arm's KE drift is wor
 1.29 % — **but see the restart-ramp contamination flagged two subsections down; both figures need
 re-measuring**).
 
+**⚠ SUPERSEDED 2026-09-21: THE NOISE AND THE OUTLIER ARE BOTH CURED by a DERIVED biharmonic
+strength (B = 3.0e18, chosen to reach 4dx rather than 2dx), and what remains is the PROFILE
+alone. See the ladder subsection below.** The paragraph as written stands as the state of the
+evidence on 2026-09-04.
 **SO `HYD_METRIC_RADIUS` TRADES A SPURIOUS VERTICAL MODE FOR HORIZONTAL NOISE, AND IS NOT USABLE
 UNTIL A REAL HORIZONTAL VISCOSITY EXISTS.** The radial-velocity collapse (2065x) is real and so is
 the noise; both are consequences of removing a 2e4 error that two different defects were leaning on.
@@ -2943,6 +2947,126 @@ repaired ocean has no mechanism to build vertical shear at all.** That is a THIR
 `HYD_METRIC_RADIUS` alongside the grid-scale noise, and it points at the same missing physics
 `HYD_PHYDRO_SALT` + `HYD_BAROCLINIC_PGF` were written for. Default stays 0.
 
+### ★ THE FOUR-STEP LADDER, FROM SCRATCH: two of the three counts are CURED, the profile is not
+
+**EVERY PREVIOUS METRIC ARM WAS A RESTART FROM `hyd_restart_0Ma_300.bin`, AND THAT CHECKPOINT
+PREDATES `HYD_SSS_FILL`** (default ON since 2026-09-08). `load_state` overwrites `c`, so all of
+them — `r0`/`r1`/`r2`, `m0`, `w0`/`w1`/`w2`, `kr0`/`kr1`, `va0`/`va1`/`va2`, `f0`/`f1`/`s1`/`s2`,
+`von`/`voff` — ran on the SSS-sentinel ocean: 13.73 % of fluid cells below 5 psu, mean salinity
+28.6 psu against Earth's 34.7. And `HYD_PHYDRO_SALT` could not have worked there anyway, because
+its plausibility floor was rejecting 12.35 % of cells and falling back to `r_water`, which
+MANUFACTURES the very horizontal density gradient the field is being repaired to provide.
+**So the metric fix had never been run on a correct ocean.** Run 2026-09-21 as a ladder, one
+change per rung, `nm` = 1000 **from scratch**, 4 x 6 threads concurrent, one pinned binary
+`cli/hyd_oc`, forcing `output_twctl/..._Transfer_Atm_600.vwtp` in every arm; all four exit 0 with
+**ZERO NaN**, past the documented from-scratch barotropic CFL hazard at iterations 65-69:
+
+| arm | adds |
+|---|---|
+| `oc_ctl` | shipped |
+| `oc_met` | `HYD_METRIC_RADIUS=6370 HYD_RUN_NEUMANN=1` |
+| `oc_vis` | `+ HYD_A_H_BIHARM=3.0e18` |
+| `oc_full` | `+ HYD_PHYDRO_SALT=1 HYD_BAROCLINIC_PGF=1.0` |
+
+**THE BIHARMONIC STRENGTH WAS DERIVED, NOT REUSED, AND IT IS WHY TWO COUNTS FELL.** The measured
+2026-09-05 arm used B = 1.882e+17 (2dx e-folding 100 iterations) and cut the noise **9.0 %**,
+because that index is not a pure 2dx mode — which is exactly why the Laplacian got 28.7 % at equal
+nominal strength, by also damping 3dx and 4dx where `k^4` has fallen off 5x and 16x. Reaching 4dx
+needs ~16x, and the biharmonic can afford it: 6313 days of domain-scale e-folding becomes ~396.
+The model's own `[SCALES]` print confirms the arithmetic — **2dx e-folding 6.27 iterations,
+domain-scale 396.06 d** against a pre-registered 6.3 and 396.
+
+**★ COUNT 1, THE GRID-SCALE NOISE: CURED.**
+
+| noise index | iter 100 | iter 300 | **iter 1000** |
+|---|---|---|---|
+| `oc_ctl` | 0.6975 | 0.7225 | **0.5495** |
+| `oc_met` | 0.6736 | 0.8794 | **1.6863 (3.07x)** |
+| **`oc_vis` / `oc_full`** | — | 0.6258 | **0.5120 — BELOW the control** |
+
+**★ COUNT 2, THE OUTLIER: CURED AND ATTRIBUTED.** Surface speed over the fixed column set, cm/s:
+
+| arm | p50 | p90 | p99 | **max** |
+|---|---|---|---|---|
+| `oc_ctl` | 0.982 | 4.277 | 11.679 | **37.27** |
+| **`oc_met`** | 0.946 | 4.034 | 11.833 | **99.60** |
+| **`oc_vis`** | 0.951 | 3.967 | **10.465** | **38.65** |
+
+The recorded 112 cm/s reproduces at **99.60** — *and only in the arm with no viscosity.* This was
+PRE-REGISTERED as the discriminator ("it appears in `met` and not in `vis`") and it fired. **The
+outlier is a missing-viscosity defect, not a metric defect**, and the biharmonic also gives the
+lowest p99 of the four.
+
+**⚠ COUNT 3, THE VELOCITY PROFILE: STANDS, AND IS WORSE AT 1000.** Horizontal speed rms, cm/s,
+over 39 689 FIXED full-depth columns so every level scores the same cells:
+
+| depth | `oc_ctl` | `oc_met` | `oc_vis` | `oc_full` |
+|---|---|---|---|---|
+| 0 m | 2.956 | 3.340 | 2.732 | 2.733 |
+| -64.8 m | 1.334 | 1.466 | 1.434 | 1.434 |
+| -117.4 m | 1.134 | **1.386** | **1.345** | 1.345 |
+| **-200 m** | **1.040** | **2.152** | **2.047** | 2.047 |
+| | **2.84x DECAY** | **+55 % RISE** | **+52 % RISE** | +52 % |
+
+It grew from +22-28 % at iteration 300, and **`oc_met`'s 2.152 reproduces the recorded 2.155 to
+three digits** — from scratch, on a corrected salinity field, with a working viscosity. **So the
+bottom intensification is neither the SSS sentinel nor the missing viscosity.** Neither
+prerequisite touches it.
+
+**AND THE ONE WRITTEN REPAIR FOR IT IS INERT, FOR A REASON THAT IS ARITHMETIC RATHER THAN A
+FAILURE.** `oc_full` equals `oc_vis` to four digits at every level and to SIX on `rms|u|`
+(9.788611e-06 against 9.788713e-06). The pair IS engaged — per-array rms relative difference
+`p_hydro` **2.64 %** (record: 2.29-2.30 %), `v` **8.4e-04**, `w` **1.35e-04**, which reproduce the
+recorded 20-iteration figures 8.6e-04 and 1.3e-04 almost exactly. So `HYD_BAROCLINIC_PGF` is
+connected and correctly sized and moves the velocity **0.08 %**, because geostrophic adjustment is
+`1/f` = 2.7e4 s = **324 000 iterations** and 1000 is **0.31 % of one**. **The shear mechanism is
+therefore UNTESTED, NOT REFUTED** — the pre-registered inference "if the profile is still inverted
+with a working baroclinic PGF, that mechanism is wrong" does NOT hold, and the per-array
+diagnostic is what separates "too weak" from "wrong". *Recorded because the profile table alone
+would have produced the wrong conclusion.*
+
+**★ AND THE CONTAMINATED KE-DRIFT FIGURES ARE RE-MEASURED AT LAST — THE CONCLUSION SURVIVES.**
+
+| arm | mean KE | vs ctl | **drift_KE %** | `converged` |
+|---|---|---|---|---|
+| `oc_ctl` | 1.2326e-04 | — | **1.101** | 0 |
+| `oc_met` | 1.4949e-04 | **+21.3 %** | **1.996** | 0 |
+| `oc_vis` | 1.4186e-04 | +15.1 % | 1.630 | 0 |
+
+The recorded **1.29 % / 2.08 %** carried the warning *"contaminated by the barotropic ramp
+re-firing on every restart, re-measure before quoting"*. From scratch it is **1.10 % / 2.00 %** —
+the artefact inflated both and **the ordering and the verdict survive**; the recorded **+21 %** KE
+gain is reproduced exactly. The biharmonic cuts the repaired drift 2.00 -> 1.63 and does NOT bring
+it below the control. **Nothing converged, and the CONTROL has the lowest drift** — so this is not
+the ocean's `_VW=0` moment, and that hope is refuted rather than deferred.
+
+**THE VERDICT, AND IT IS A NARROWING RATHER THAN A FLIP.** `HYD_METRIC_RADIUS` **stays 0**. But
+the case against it has collapsed from three counts to one, and that one is now sharply isolated:
+**not salinity, not viscosity, and not reachable by `HYD_BAROCLINIC_PGF` at any length this tree
+can afford.** Meanwhile its benefit is unchanged and the control's defect is still GROWING —
+`rms|u|` 6.4e-03 -> 1.6e-02 -> **2.4e-02** over iterations 100/300/1000, with `|u|/|horiz|` at
+**0.365, i.e. 200x the 1.8e-3 a 200 m deep 111 km wide cell can support**, while the repaired arms
+sit flat at 1.4e-04. **The open question is what builds vertical shear in this ocean**, and it is
+now the only thing between the correct metric and a usable one.
+
+**AND THE VERTICAL VELOCITY IS PHYSICAL ON THE REPAIRED BRANCH AND WAS NOT ON THE SHIPPED ONE**,
+which needed dimensions rather than a ratio to see: rms `|u_radial|` is **1.548e-03 m/s =
+48 758 m/yr** in the control against **2.152e-06 m/s = 68 m/yr** repaired — a 200 m column
+overturning in **1.5 days** against 1076. Earth's Ekman pumping is ~30-50 m/yr. *The shipped
+ocean's radial velocity is not a vertical velocity, it is a continuity violation*, and that is the
+same thing the bottom-intensified profile reports from the other side: it was the spurious `u`
+doing the column's vertical momentum transport. **⚠ The PATTERN is not established on either
+branch** — the repaired field's `u` noise index is 2.57 at its peak level, two zonal bands have
+the wrong Ekman sign, and a four-of-four eastern-boundary upwelling result collapses once it is
+noticed that **68 % of the ocean is upwelling at that level anyway**. Ekman pumping needs ~1/f to
+establish, so no run of this length can settle it.
+
+**FOUR BY-PRODUCTS**: `output_oc_{ctl,met,vis,full}/hyd_restart_0Ma_1000.bin` are this tree's
+**first ocean checkpoints from scratch on a correct salinity field**, and supersede
+`hyd_restart_0Ma_300.bin`, which every ocean arm since 2026-09-04 has restarted from and which
+carries the sentinel. The instrument is `python/ocprofile.py`, kept because the profile is the
+score that matters here and `max` is the one that misleads.
+
 ### The 1000-iteration pair: the repair holds, and the control is still spreading
 
 **1000 ITERATIONS = 83 s OF PHYSICAL TIME, 24 THREADS, BOTH EXIT 0 WITH ZERO NaN.** Run as a
@@ -2988,7 +3112,9 @@ against 2.08 % repaired**, and `converged` is **0 for both**. So the repaired oc
 energy and is drifting FASTER in it, not settling sooner. Temperature drift is marginally better
 (0.0090 % against 0.0103 %). **Neither arm is converged and the repair does not make the ocean
 converge**; it removes a spurious vertical mode, which is a different claim.
-**⚠ BOTH DRIFT FIGURES ARE CONTAMINATED AND MUST BE RE-MEASURED BEFORE THEY ARE QUOTED AGAIN**
+**⚠ BOTH DRIFT FIGURES WERE CONTAMINATED — RE-MEASURED FROM SCRATCH 2026-09-21 AND THE VERDICT
+SURVIVES: 1.10 % control against 2.00 % repaired (1.63 % with the biharmonic), none converged,
+and the +21 % KE gain reproduces exactly. See the ladder subsection above.**
 (2026-09-07). These arms were RESTARTS, and the barotropic cold-start ramp re-fired on every
 restart — on a 300 -> 500 restart it accounts for **nine tenths** of the apparent KE growth. See
 *The ocean's KE ramp was ~90 % a cold-start ramp re-firing on every restart* below. The
