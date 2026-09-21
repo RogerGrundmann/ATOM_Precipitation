@@ -3197,11 +3197,11 @@ call site is `c43*A - c13*B` evaluated in double, where `int` 1 and 0 promote to
 0.0. Verified that no call site uses either constant in an integer context.
 
 **THE SAME DECLARATION IS AT `atmosphere/cAtmosphereModel.h:91`, AND `ATM_BC_SECOND_ORDER` WAS
-FLIPPED ON BY DEFAULT 2026-09-21** — at the user's instruction, on correctness, with the
-both-directions byte check passing and **no climate measurement**. See the subsection above.
-It moves every atmosphere boundary condition at once (29 sites), which is why the 600-iteration
-from-scratch arm is owed. **The OCEAN's `HYD_BC_SECOND_ORDER` stays 0**, so the two models now
-disagree about boundary order.
+FLIPPED ON AND REVERTED ON 2026-09-21** — the 600-iteration arm it owed showed it reactivates the
+**k=1 coast-seam jet blow-up** (`max |v|` 2.28 -> 26.02 m/s, growing, at the phi seam) while every
+climate score and the convergence monitor read null. **The `int` truncation is accidentally
+damping a known seam instability**, so the accuracy repair needs the seam fixed first. Both
+models are first-order again. See the subsection in the `grad(nu)` section above.
 
 **AND THE RADIAL BC IS NOW FIRST-ORDER ON PURPOSE.** `HYD_RUN_NEUMANN` uses `p[0] = p[1]`, matching
 `project_velocity`, rather than the `(4p[1] - p[2])/3` form — because the radial grid is STRETCHED
@@ -3294,7 +3294,62 @@ stability again does not bind: `B` <= **2.3e20 m^4/s**.
    requires all five of its stencil points marked), rather than differencing against a zero that
    means "not evaluated".
 
-### ⭐ `ATM_NUE_GRAD` AND `ATM_BC_SECOND_ORDER` FLIPPED ON 2026-09-21, ON CORRECTNESS
+### ⭐ `ATM_NUE_GRAD` FLIPPED ON 2026-09-21 — AND `ATM_BC_SECOND_ORDER` FLIPPED AND REVERTED THE SAME DAY
+
+**⚠⚠ THE HEADLINE IS THE REVERT, AND IT IS THE STRONGEST ARGUMENT IN THIS FILE FOR RUNNING THE
+ARM A CORRECTNESS FLIP OWES.** `ATM_BC_SECOND_ORDER` passed its both-directions byte check, and
+at 600 iterations from scratch it passed every climate score too — precipitation **+0.58 %**,
+land +0.83 %, cloud LW forcing **-1.4 %** (toward Earth's ~25), both starved bands +0.3/+0.5 %,
+**mean KE 36.3694 -> 36.3709 and `converged` = 1 in BOTH arms**, exit 0 with zero NaN through
+155, 357 and 483. On those numbers it is a null and it would have stayed default ON.
+
+**AND IT REACTIVATES THE k=1 COAST-SEAM JET BLOW-UP, WHICH NOT ONE OF THOSE NUMBERS CAN SEE.**
+`max |v|` goes **2.279456 -> 26.016917 m/s**, and not as a spike — the extremum LEAVES its
+physical home (18S 68W at 12 029 m, the upper troposphere) for **11N 1E at 236 m** and grows
+monotonically: 3.40, 4.86, 6.61, 8.71, 11.23, 14.26, 17.91, 22.30, 25.99, 26.02 — **~1.28x per
+checkpoint** — ending as a VERTICAL GRID-SCALE DIPOLE with `min v` at exactly **-24.000000** in
+the adjacent level of the same column. **It saturates near 26 because the COASTAL SPONGE catches
+it** (`max_pre` = 3.29 nondim = 26.3 m/s, `clamped` = 6), which is containment and not stability
+— *exit 0 and zero NaN is not a stability criterion in this tree*, recorded after the `dt` ladder
+reached 8733 mm/a without ever NaN-ing.
+
+**THE MECHANISM, AND IT IS WHY THE DEFECT WAS LOAD-BEARING.** `c43`/`c13` are used in `bcPhi`,
+and **the phi boundary IS the seam**. The truncated-`int` first-order form `A[0] = A[1]` is a
+plain COPY, strongly damping there; the intended second-order `A[0] = (4A[1] - A[2])/3` is an
+EXTRAPOLATION, and is not. The coastal sponge's own locator settles it:
+
+| arm | `i5_max` | at |
+|---|---|---|
+| `bc_ctl` | 1.23 | (j=135, k=63, topo=0) — benign interior |
+| **`bc_bc` / `bc_new`** | **3.02** | **(j=80, k=0, topo=5) — the PHI SEAM, over land** |
+
+`j` = 80 is 10N, **`k` = 0 IS the seam**, and the runaway cell at 1E is `k` = 1, its neighbour.
+That is the **k=1 coast-seam jet blow-up fixed in `4273578`** (`project_seam_velocity_minmod`,
+`project_seam_damping`) coming back. **So the `int` truncation was ACCIDENTALLY HOLDING A KNOWN
+SEAM INSTABILITY TOGETHER — a LESS accurate scheme doing load-bearing work**, which is this
+tree's cancelling-pair pattern in a new place. The accuracy defect is real and remains real;
+repairing it needs the seam damped on its own terms FIRST — the minmod and the `bcPhi` Shapiro
+pass are the precedent — not a knob flip. **`ATM_BC_SECOND_ORDER` is default 0 again and the
+source carries a do-not-re-flip note.**
+
+**⚠ AND THE BYTE CHECK WAS NOT AT FAULT. IT PASSED CORRECTLY AND PROVED EXACTLY WHAT IT CAN
+PROVE.** 20 iterations is 4 s of physical time and this mode needs ~300 to leave the noise. **A
+both-directions byte check clears REVERSIBILITY; it never clears STABILITY.** That distinction is
+the lesson, and it is why the 600-iteration arm was recorded as OWED rather than waived.
+
+**`ATM_NUE_GRAD` IS KEPT AT 1.0**, and the trio separates the two cleanly: on the BC branch it
+moves `max v` by **6e-06**, precipitation **-0.08 %**, and is a null everywhere except the two
+starved bands, which it nudges **+0.5 % and +1.0 %** in the right direction.
+*⚠ The surviving default pair (`ATM_NUE_GRAD` = 1.0 with `ATM_BC_SECOND_ORDER` = 0) is a
+combination the trio did not run — `bc_ctl` was 0/0 and `bc_new` 1/1 — so it carries its own
+confirmation arm.*
+
+**AND THE TRIO'S CONTROL IS ALSO A CHAIN CHECK THAT PASSED**: `bc_ctl` reproduces `output_mn_on`
+across FOUR binary generations — 986.4 against 986.9 mm/a, `r` +0.456 against +0.455, bands
+3264/334.0/183.1/20.3 against 3268/333.0/183.2/20.3 — so nothing in `SATADJ_FADE`,
+`FREEZE_LATENT`, `EVAP_FLUX` or either flip touched the default branch unintentionally.
+
+### ⭐ THE ORIGINAL FLIP RECORD, KEPT BECAUSE IT IS WHAT THE REVERT WAS JUDGED AGAINST
 
 **AT THE USER'S INSTRUCTION, AND AS A CORRECTNESS CHANGE WITH NO CLIMATE MEASUREMENT BEHIND IT** —
 the `ATM_METRIC_SIN_FLOOR` precedent, invoked deliberately. `ATM_NUE_GRAD` 0.0 -> **1.0** supplies

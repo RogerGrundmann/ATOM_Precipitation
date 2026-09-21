@@ -1330,7 +1330,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "5*")
           << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
           << "  NUE_GRAD="      << ev("ATM_NUE_GRAD",       "1.0*")
-          << "  BC_SECOND_ORDER=" << ev("ATM_BC_SECOND_ORDER", "1*")
+          << "  BC_SECOND_ORDER=" << ev("ATM_BC_SECOND_ORDER", "0*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");
