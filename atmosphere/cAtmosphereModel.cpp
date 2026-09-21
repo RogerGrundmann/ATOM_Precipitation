@@ -1300,7 +1300,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SATADJ_PHASE=" << ev("ATM_SATADJ_PHASE", "1*")
           << "  SATADJ_FADE=" << ev("ATM_SATADJ_FADE", "0*")
           << "  SATADJ_FREEZE_LATENT=" << ev("ATM_SATADJ_FREEZE_LATENT", "0*")
-          << "  MICRO_NDIM=" << ev("ATM_MICRO_NDIM", "0.0*")
+          << "  MICRO_NDIM=" << ev("ATM_MICRO_NDIM", "1.0*")
           << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "0.0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
@@ -1329,6 +1329,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
           << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "5*")
           << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
+          << "  NUE_GRAD="      << ev("ATM_NUE_GRAD",       "1.0*")
+          << "  BC_SECOND_ORDER=" << ev("ATM_BC_SECOND_ORDER", "1*")
           << "   (* = compiled-in default, not set in the environment)\n";
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");

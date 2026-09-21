@@ -110,14 +110,22 @@ public:
     // `c43*A - c13*B` evaluated in double, where int 1 and 0 promote to the same 1.0 and 0.0.
     // Verified that no call site uses either constant in an integer context.
     //
-    // UNMEASURED HERE. In the ocean the equivalent flip was a NULL at 300 iterations (5-6
+    // FLIPPED ON 2026-09-21 WITHOUT A CLIMATE MEASUREMENT, ON CORRECTNESS, AT THE USER'S
+    // INSTRUCTION -- read the paragraph below as the risk that flip carries, not as a reason
+    // it was deferred. In the ocean the equivalent flip was a NULL at 300 iterations (5-6
     // figures identical on every field). Do not assume that carries over: this model has 41
     // levels over a 16 km shell, a moist boundary layer and a precipitation flux with its own
     // edge treatment, and IceSchemeCommon's use is on a field with sharp gradients.
     // ==================================================================================
     static bool bcSecondOrder() {
         static const bool on = [](){
-            const char* e = getenv("ATM_BC_SECOND_ORDER"); return e && atoi(e) != 0; }();
+            // *** DEFAULT 1 SINCE 2026-09-21, AT THE USER'S INSTRUCTION, ON CORRECTNESS. ***
+            // ATM_BC_SECOND_ORDER=0 restores the shipped (truncated, first-order) branch, and
+            // does so BY ARITHMETIC: c43 = 1.0 and c13 = 0.0 are the exact values the truncated
+            // ints held. The 29 call sites now run the second-order one-sided Neumann their own
+            // comments describe. The OCEAN's HYD_BC_SECOND_ORDER stays 0, so the two models now
+            // differ in boundary order -- deliberate, and it needs its own arm.
+            const char* e = getenv("ATM_BC_SECOND_ORDER"); return e ? atoi(e) != 0 : true; }();
         return on;
     }
     const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;

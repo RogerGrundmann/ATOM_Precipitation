@@ -936,8 +936,15 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // A STRENGTH rather than a flag, because the term's size against the Laplacian it joins has
     // never been measured in either model, and this tree ramps a change to shipped dynamics
     // before running it at full.
+    // *** DEFAULT 1.0 SINCE 2026-09-21, AT THE USER'S INSTRUCTION, ON CORRECTNESS. ***
+    // ATM_NUE_GRAD=0.0 restores the shipped branch exactly -- the block below is skipped and
+    // every diffusion_* adds a literal 0.0, which is bit-identical. The flip is a CORRECTNESS
+    // change, not a measured improvement: it supplies a term the operator was missing while
+    // maintaining the gradients it needs, in the manner of ATM_METRIC_SIN_FLOOR 0.55 -> 0.26.
+    // The OCEAN's HYD_NUE_GRAD is deliberately NOT flipped with it -- it inherits the broken
+    // 200-400 m horizontal metric, so its size there is a different question.
     static const double nue_grad_s = [](){ const char* e = getenv("ATM_NUE_GRAD");
-                                           return e ? atof(e) : 0.0; }();
+                                           return e ? atof(e) : 1.0; }();
     double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
            cross_tke = 0.0, cross_dis = 0.0;
     if(nue_grad_s != 0.0){
@@ -1436,10 +1443,42 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // s = 1 is exactly L/u_0; note the response is strongly non-linear in s, because
     // L/u_0 >> rho -- s = 0.001 is already 2.7x the shipped term and s = 0.01 is ~18x.
     //
-    // Default 0.0. Nothing is flipped on an argument in this tree.
+    // *** FLIPPED ON BY DEFAULT 2026-09-21, AT THE USER'S INSTRUCTION, ON A MEASUREMENT. ***
+    // ATM_MICRO_NDIM=0.0 restores the shipped branch exactly (coeff_micro = r_humid verbatim,
+    // not a hoisted blend, because `*` is left-associative and FP multiplication is not).
+    //
+    // WHAT IT BUYS, 600 from scratch on the current defaults (output_mn_ctl / mn_on, one pinned
+    // binary, both exit 0 with zero NaN through 155/357/483, converged = 1 in both):
+    // the two STARVED precipitation bands move for the first time in this tree --
+    // 35-65 deg 159.9 -> 183.2 (+14.6 %) and 65-90 deg 10.1 -> 20.3 (+101 %) -- and each
+    // SATURATES by iteration ~450 rather than drifting. The circulation is not involved:
+    // `max u-component` identical to six figures at the same cell, `max w` identical, column
+    // water path 30.6645 vs 30.6649 mm. The endpoint is confirmed by an independent instrument:
+    // ATM_CWB_DIAG's applied row 0.62 -> 1712.05 mm/a against its own L/u_0 reference 1712.0,
+    // conservation sum 0.00 and `unattributed` 0.0000 in both arms.
+    //
+    // AND THE COUPLING THAT HELD IT BACK IS MEASURED, NOT ASSUMED. `ATM_RH_MIN_PTOP` = 475 was
+    // FITTED to land on NASA on the branch WITHOUT this correction, and this moves the mean
+    // -3.1 % -> +0.9 %. Re-swept 2026-09-21 at 600 from scratch, DOWNWARD (425/450/475/500,
+    // since the mean no longer needs recovering), and the two knobs are SEPARABLE:
+    //   * 35-65 deg reads 182.1 / 182.5 / 183.2 / 184.0 -- 1.0 % across the whole sweep --
+    //     and 65-90 deg reads 20.3 in ALL FOUR arms, identical to the digit. PTOP is not a
+    //     storm-track lever in either direction, so this flip needs no re-tune.
+    //   * and sigma, which looked like the reason to go lower (2.53 -> 1.87), carries NO shape
+    //     information along that knob: sigma/sigma(500) is 0.739 / 0.818 / 0.905 against
+    //     mean/mean(500) of 0.739 / 0.820 / 0.904 -- it tracks the GLOBAL MEAN to 0.3 %, i.e.
+    //     the model dries uniformly and sigma reports that as shape. `r`, the only scale-free
+    //     metric, DEGRADES downward (0.468 / 0.465 / 0.457 / 0.443), and the land/ocean
+    //     partition -- 757.5 / 1077.7 against NASA's 782.3 / 1055.8 at 475 -- breaks at 425
+    //     (603.0 / 887.0). PTOP stays 475.
+    //
+    // WHAT IT DOES NOT CLAIM. +23 mm/a against an 821 mm/a shortfall is 2.8 % of the 35-65 gap;
+    // the ocean overshoots (1024 -> 1077.7 against NASA 1055.8); the global MEAN was still
+    // climbing at 600 where the bands were not; and 1712 mm/a on a 30.7 mm reservoir is a
+    // 5.8-day e-folding = 2.5e+06 iterations, so what is measured is the fast LOCAL response.
     // ==================================================================
     static const double micro_ndim = [](){ const char* e = getenv("ATM_MICRO_NDIM");
-                                           return e ? atof(e) : 0.0; }();
+                                           return e ? atof(e) : 1.0; }();
     double coeff_micro = r_humid.x[i][j][k];
     if(micro_ndim != 0.0){
         static const double L_over_u0 = metricShellLength() / u_0;   // fixed after init

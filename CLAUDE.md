@@ -3070,9 +3070,12 @@ it sets `c43 = 1.0` and `c13 = 0.0`, the exact values the truncated `int`s alrea
 call site is `c43*A - c13*B` evaluated in double, where `int` 1 and 0 promote to the same 1.0 and
 0.0. Verified that no call site uses either constant in an integer context.
 
-**THE SAME DECLARATION IS AT `atmosphere/cAtmosphereModel.h:91` AND IS DELIBERATELY NOT TOUCHED.**
-Flipping it would move every atmosphere boundary condition at once, in the middle of the atmosphere
-work. It needs its own arm and its own measurement.
+**THE SAME DECLARATION IS AT `atmosphere/cAtmosphereModel.h:91`, AND `ATM_BC_SECOND_ORDER` WAS
+FLIPPED ON BY DEFAULT 2026-09-21** — at the user's instruction, on correctness, with the
+both-directions byte check passing and **no climate measurement**. See the subsection above.
+It moves every atmosphere boundary condition at once (29 sites), which is why the 600-iteration
+from-scratch arm is owed. **The OCEAN's `HYD_BC_SECOND_ORDER` stays 0**, so the two models now
+disagree about boundary order.
 
 **AND THE RADIAL BC IS NOW FIRST-ORDER ON PURPOSE.** `HYD_RUN_NEUMANN` uses `p[0] = p[1]`, matching
 `project_velocity`, rather than the `(4p[1] - p[2])/3` form — because the radial grid is STRETCHED
@@ -3164,6 +3167,39 @@ stability again does not bind: `B` <= **2.3e20 m^4/s**.
    off within two cells of any coast (the inner pass marks where it ran and the outer pass
    requires all five of its stencil points marked), rather than differencing against a zero that
    means "not evaluated".
+
+### ⭐ `ATM_NUE_GRAD` AND `ATM_BC_SECOND_ORDER` FLIPPED ON 2026-09-21, ON CORRECTNESS
+
+**AT THE USER'S INSTRUCTION, AND AS A CORRECTNESS CHANGE WITH NO CLIMATE MEASUREMENT BEHIND IT** —
+the `ATM_METRIC_SIN_FLOOR` precedent, invoked deliberately. `ATM_NUE_GRAD` 0.0 -> **1.0** supplies
+the `grad(nu).grad(phi)` half of `div(nu grad phi)` this model was dropping while maintaining the
+gradients it needs; `ATM_BC_SECOND_ORDER` 0 -> **1** makes the 29 atmosphere call sites run the
+second-order one-sided Neumann their own comments describe. **Setting either variable back to 0
+restores the shipped branch**, and the banner now prints `NUE_GRAD=1.0*  BC_SECOND_ORDER=1*` —
+neither was in it before, and a compiled-in default that no run records is the defect this tree
+keeps rediscovering.
+
+**BOTH DIRECTIONS VERIFIED, 1 thread, `nm` = 20 from scratch, four arms** (`cli/atm_preng`, md5
+`1b775b8e`, as the pre-flip binary): new binary with both SET BACK against pre-flip clean, and
+pre-flip with both SET against new binary clean — **13 of 14 written files byte-identical each
+way**, the 14th being `RUN_CONFIG.txt` differing only by the output path and the two new banner
+tokens. The `want_differ` control **passes with 13 of 14 differing**, so the flip fires at 20
+iterations and the two passes are not vacuous.
+
+**⚠ THE TWO ARE NOT IN THE SAME EVIDENTIAL STATE, AND THE FILE SHOULD NOT PRETEND THEY ARE.**
+`ATM_NUE_GRAD` was measured connected and stable at full strength on 2026-09-07. **`ATM_BC_SECOND_ORDER`
+HAS NEVER BEEN RUN PAST 20 ITERATIONS IN THIS MODEL** — its own header says so and warns that the
+ocean's 300-iteration null must not be assumed to carry over, because this model has a moist
+boundary layer and `IceSchemeCommon` uses `c43`/`c13` on the PRECIPITATION-FLUX edges, a field
+with sharp gradients. 29 sites move at once. **The 600-iteration from-scratch arm through
+155/357/483 is owed and is not yet run.**
+*One detail worth keeping from the check: the ONE file identical in the `want_differ` control is
+`convergence.csv` — the volume-mean KE and T do not move at 20 iterations while every field does.
+Same blindness as `max|w_u|` growing 44 % under `converged` = 1: passing a cos-lat volume mean is
+not evidence of a null.*
+**THE OCEAN TWINS STAY 0.** `HYD_NUE_GRAD` would inherit the broken 200-400 m horizontal metric,
+which is a different question; `HYD_BC_SECOND_ORDER` stays first-order, so **the two models now
+differ in boundary order** — deliberate, and it needs its own arm.
 
 **BOTH KNOBS ARE NOW MEASURED, AND THE OFF-BRANCH BYTE CHECK PASSED ACROSS BINARY
 GENERATIONS**: `cli/hyd_tf`, built before `HYD_A_H`, `HYD_A_H_BIHARM` and `HYD_SFC_FLUX`
@@ -4800,15 +4836,65 @@ tree's known pathology locus. On the 87E zonal slice at iteration 520 the MEANS 
 this file's own rule — read `Psi(ground)` as an rms and never as a max — applies to condensate
 too; the 5x was read as a field change here before the slice was opened.*
 
-**DEFAULT STAYS 0.0 AND THE FLIP IS A DECISION, NOT A MEASUREMENT GAP.** What is settled: correct
-physics derived rather than quoted, connected, endpoint-verified by an independent instrument,
-stable from scratch through all three failure points, byte-identical off, and the largest movement
-of the starved bands this tree has produced. What argues against flipping today is the same thing
-that held `ATM_SATADJ_PHASE` back for a day: **`ATM_RH_MIN_PTOP` = 475 was fitted to land on NASA
-on the branch that does NOT carry this correction**, and this moves the mean from -3.1 % to
-+0.9 % of NASA, so a flip implies re-sweeping it — and the sweep must be judged on `sigma` and the
-bands, because that knob buys the mean back by adding tropical LIQUID and hands the shape gain
-away. Same pair-flip logic as `ATM_ICE_LIMIT_ARRIVING` + `ATM_RAIN_AREA`.
+**FLIPPED ON BY DEFAULT 2026-09-21, AT THE USER'S INSTRUCTION, AND ALONE.** What is settled:
+correct physics derived rather than quoted, connected, endpoint-verified by an independent
+instrument, stable from scratch through all three failure points, byte-identical off, and the
+largest movement of the starved bands this tree has produced. **`ATM_MICRO_NDIM=0.0` restores the
+shipped branch exactly**, and the `[RUN CONFIG]` banner now prints `MICRO_NDIM=1.0*`.
+**⚠ THE KNOB IS READ IN THREE PLACES AND ALL THREE DEFAULTS MOVED TOGETHER** —
+`RHS_Atm_Turb.cpp:1448` (the physics) and `ColumnWaterBudget.h:281` and `:371`. Flipping only the
+physics would leave `ATM_CWB_DIAG` reporting `r_humid` while RK4 applies `L/u_0`: *an instrument
+lying about the one quantity it exists to measure*, which is this tree's most frequent defect
+class and would have been invisible to a byte check.
+
+### The `ATM_RH_MIN_PTOP` coupling is measured and the two knobs are SEPARABLE
+
+The flip was held back by one thing: **`ATM_RH_MIN_PTOP` = 475 was FITTED to land on NASA on the
+branch that does NOT carry this correction**, and `ATM_MICRO_NDIM` moves the mean -3.1 % ->
++0.9 %. Re-swept 2026-09-21, `nm` = 600 **from scratch**, four arms, one pinned binary
+(`cli/atm_mn`, so `output_mn_on` IS the 475 arm), 3 x 8 threads concurrent, all exit 0 with zero
+NaN through 155/357/483. **AND THE SWEEP RUNS DOWNWARD**, reversing 2026-09-09: with the
+correction on the mean is already +0.9 %, so nothing needs buying back, and the question is
+whether LOWERING `PTOP` — taking the RH floor off the liquid deck — cuts the tropical spike
+without giving back the bands.
+
+| `PTOP` | Precip | bias | `r` | cRMS | **sigma** | 0-15 | 15-35 | **35-65** | **65-90** | land / ocean |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **425** | 806.5 | **-17.6 %** | 0.407 | 1199 | **1.87** | 2545 | 335.4 | **182.1** | **20.3** | 603.0 / 887.0 |
+| 450 | 895.5 | -8.5 % | 0.447 | 1281 | 2.07 | 2894 | 340.2 | **182.5** | **20.3** | 687.5 / 977.9 |
+| **475** | **986.9** | **+0.9 %** | 0.455 | 1407 | 2.29 | 3268 | 333.0 | **183.2** | **20.3** | **757.5 / 1077.7** |
+| 500 | 1091.6 | +11.6 % | **0.461** | 1554 | 2.53 | 3673 | 342.1 | **184.0** | **20.3** | 839.0 / 1191.6 |
+| *NASA* | *978.3* | | | | *1.00* | *1487* | *761.4* | *981.1* | *364.2* | *782.3 / 1055.8* |
+
+(High parity. Low: 716.1 / 831.4 / 937.9 / 1032.8, sigma 1.81 / 2.05 / 2.29 / 2.52.)
+
+**★ THE BANDS ARE INVARIANT, WHICH IS THE RESULT.** 35-65 deg moves **1.0 %** across the entire
+sweep and 65-90 deg reads **20.3 in all four arms, identical to the digit** — against the
+control's 159.9 and 10.1. So `PTOP` is not a storm-track lever in either direction, B+1's gain is
+untouched by it, and **the fitted constant does not have to move.**
+
+**★★ AND SIGMA CARRIES NO SHAPE INFORMATION ALONG THIS KNOB — it is the global mean in disguise.**
+Sigma does improve downward, 2.53 -> **1.87**, the best this tree has produced. But
+`sigma/sigma(500)` reads **0.739 / 0.818 / 0.905** against `mean/mean(500)` of
+**0.739 / 0.820 / 0.904** — *the two agree to 0.3 % at every point.* The model is not
+redistributing the tropical spike, it is drying UNIFORMLY, and the normalised spike
+(0-15 / global) barely moves: 3.365 -> 3.156 against NASA's 1.520. **So along this knob "quote
+sigma, not the mean" is the same number twice**, and this file's own rule has to be read with
+that caveat: *sigma is scale-free only against changes that are not a pure scaling.*
+
+**WHAT DECIDED IT, THEREFORE, IS `r` AND THE LAND/OCEAN PARTITION — the two genuinely scale-free
+scores.** `r` by parity mean **degrades** downward (0.468 / 0.465 / 0.457 / **0.443** for
+500/475/450/425). And the partition at 475 is **757.5 / 1077.7 against NASA's 782.3 / 1055.8** —
+within 3 % and 2 %, the best this configuration has produced, on a diagnostic nothing was tuned
+against — where 425 gives 603.0 / 887.0 (**-23 % and -16 %**) and even the scale-free land/ocean
+RATIO breaks (0.680 against 0.703 for the other three; NASA 0.741). **`ATM_RH_MIN_PTOP` stays
+475.**
+
+*Two by-products.* The radiation moves WITH the drying and not independently — cloud LW forcing
+29.48 -> 28.34 toward Earth's ~25, all-sky OLR 234.5 -> 235.5 toward ~240, clear-sky flat at
+263.8-264.0 — so that gain is bought at 18 % of the precipitation and is not free. And
+**precipitable water is 30.1 / 30.2 / 30.2 / 30.3 across a 35 % range of precipitation**, so
+`PTOP` is purely a CONVERSION-EFFICIENCY lever, the same signature as the post-600 drift.
 
 ## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
 
