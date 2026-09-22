@@ -925,6 +925,9 @@ the output was a control rather than a probe.*
 | **sigma model/NASA** | — | 2.41 | 2.44 | 2.47 | 2.51 | 2.57 | **2.66** |
 | *NASA* | *978.3* | | | | | | *978.3* |
 
+*⚠ 2026-09-22: THIS DRIFT IS REMOVED BY `ATM_MC_EVAP_LIMIT=1` — it is the unbacked sub-cloud
+evaporation's moistening accumulating through `MC_q`. See ★ B.10 ATTRIBUTED.*
+
 **+18.4 % ON THE HIGH PARITY AND +15.3 % ON THE LOW ONE, MONOTONE, STILL CLIMBING AT 1200 — AND
 EVERY SHAPE METRIC DEGRADES WITH IT.** The sawtooth amplitude is roughly constant (94 -> 120), so
 this is not the 2dt alternation collapsing the way the pre-flip run's did; both parities rise
@@ -1650,8 +1653,60 @@ scratch: 13 of 14 files, `RUN_CONFIG.txt` by the path and the `MC_EVAP_LIMIT=0*`
 | `MC_t` truncated (shipped units) | 13.9 % | 3.0 % = flux half 1.2 % + the spare `t_0` |
 | `e_p` demand | 441 134 | **0** — `e_d` evaporates 99.99 % of the rain inside the cloud |
 
-**⚠ OWED BEFORE ANY DEFAULT MOVES: the 600-iteration from-scratch trio** (`python/run_el600.sh`,
-`output_el0/1/2`: control / `=1` / `=1` + `ATM_MC_T_NDIM=1`, launched 2026-09-22 15:48).
+**★ THE 600-ITERATION TRIO IS RUN, AND IT REMOVES THE PRECIPITATION DRIFT** (`python/run_el600.sh`,
+`output_el0/1/2`: control / `=1` / `=1` + `ATM_MC_T_NDIM=1`; 600 from scratch, one binary
+`cli/atm_el`, 3 x 7 threads concurrent, 15 s/iter). **All exit 0, zero NaN** through 155/357/483;
+`max v` **2.279457 at 18S 68W, 12 029 m in all three** — the seam mode that killed
+`ATM_BC_SECOND_ORDER` is not there; `max u`/`max w` identical to 5 figures; mean KE 36.369 / 36.370 /
+36.370, `converged` = 1 in all three.
+
+| iteration 600 | el0 control | **el1 `=1`** | el2 `=1` + `MC_T_NDIM` | NASA |
+|---|---|---|---|---|
+| Precip, low / high parity | 939.0 / 988.8 | **886.4 / 934.4** | 886.4 / 927.8 | 978.3 |
+| r / sigma | +0.474, +0.456 / 2.29 | +0.476, +0.457 / **2.23** | +0.476, +0.456 / 2.23 | |
+| centred RMS (high) | 1407.2 | **1370.7** | 1367.6 | |
+| 0-15 / 15-35 | 3270.6 / 335.2 | **3163.6 / 248.0** | 3140.0 / 245.8 | 1487.0 / 761.4 |
+| 35-65 / 65-90 | 184.2 / 20.5 | 184.1 / 20.5 | 184.1 / 20.5 | 981.1 / 364.2 |
+| land / ocean | 758.6 / 1079.9 | 708.0 / 1024.0 | 706.5 / 1015.4 | 782.3 / 1055.8 |
+| unbacked evaporation, mm/a | **400 869** | **0** | 0 | |
+| `MC_t` truncated | 11.1 % | 2.46 % | **1.15 %** (flux half only) | |
+| corrected latent over cap | 6.39 % | **0** | 0 | |
+
+**THE DRIFT, BY ITERATION — one parity, mm/a:**
+
+| | 100 | 200 | 300 | 400 | 500 | 600 |
+|---|---|---|---|---|---|---|
+| el0 global | 883.0 | 884.7 | 891.7 | 896.3 | 917.2 | **939.0** |
+| **el1 global** | 880.8 | 881.4 | 884.7 | 883.5 | 881.2 | **886.4** |
+| el0 15-35 | 169.2 | 175.4 | 175.0 | 179.4 | 209.5 | **258.0** |
+| **el1 15-35** | 172.3 | 171.6 | 169.9 | 172.1 | 169.5 | **170.6** |
+
+**AND THE WATER SAYS WHY** (`[PW RESTART]`, zero-iteration restarts of both runs' checkpoints):
+
+| precipitable water, mm | 100 | 200 | 300 | 400 | 500 | 600 | change |
+|---|---|---|---|---|---|---|---|
+| el0 | 30.363 | 30.433 | 30.514 | 30.605 | 30.701 | 30.802 | **+1.45 %**, steady from the start |
+| **el1** | 30.257 | 30.262 | 30.265 | 30.269 | 30.272 | 30.275 | **+0.06 %** |
+
+The control moistens steadily from the first checkpoint, all of it in 0-35 deg; 35-65 and 65-90
+are identical in both runs to four figures, because convection does not reach them. **So the
+monotone moistening this file recorded as +2.6 % over 600 -> 1200, and the precipitation drift that
+follows it, are the unbacked `e_p` moistening accumulating through `MC_q`.** With the limiter the
+column water and every band are flat to ~1 % over 600 iterations: the first run in this tree whose
+precipitation does not drift. *(That is the 600 -> 1200 section's drift explained; it was measured
+there on an older default branch, so the attribution to that exact run is by shape, not re-run.)*
+
+**WHAT IT COSTS.** The global mean at 600 is **-4.5 % of NASA** (high parity) where the drifting
+control reads +1.1 % — but at iterations 100-400 the two agree, so the control's agreement at 600 is
+the drift reaching the number. By this file's rule (`r`, sigma, bands): `r` unchanged, sigma and
+centred RMS better, 0-15 better (toward 1487), 15-35 lower than the drifting control's 335 and equal
+to its pre-drift ~175, both starved bands unchanged; land/ocean move away from NASA (708/1024 against
+782/1056). **The mean now sits below NASA on a branch that no longer drifts, which puts
+`ATM_RH_MIN_PTOP` = 475 back in question** — it was fitted on a branch carrying this manufactured
+moisture, the `ATM_SATADJ_PHASE` situation exactly. `ATM_MC_T_NDIM` on top is a climate null
+(886.4 both) that halves the remaining `MC_t` truncation to the flux half alone.
+
+**DEFAULT UNCHANGED PENDING THE USER'S DECISION.**
 
 ### The cap census: `MCv_max` truncates 0.9 % of cells and `MCt_max` exceeds its cap 100-FOLD in a tenth of the atmosphere
 
