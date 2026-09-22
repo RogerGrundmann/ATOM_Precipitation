@@ -1090,6 +1090,7 @@ public:
 
                 m.P_rain.x[0][j][k] = m.P_rain.x[i_mount][j][k];
                 m.P_snow.x[0][j][k] = m.P_snow.x[i_mount][j][k];
+                m.P_graupel.x[0][j][k] = m.P_graupel.x[i_mount][j][k];   // was missing (2026-09-22)
 
                 m.p_dyn.x[0][j][k] = m.p_dyn.x[i_mount][j][k];
             }

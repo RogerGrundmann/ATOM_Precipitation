@@ -4364,10 +4364,19 @@ and panorama VTKs (zonal already had it). Verified 1 thread against the previous
 (`nm` = 20) every physics file is byte-identical and the radial/longal VTKs differ ONLY by the new,
 all-zero `S_g` array; on ThreeCat (`nm` = 4) the same, with `S_g` non-zero. **A null on the physics,
 as it must be**: a fully buried cell has no air neighbour by definition and RK4 never integrates
-level 0, so neither edit can reach the air — it is consistency, not a repair. *Not touched either*:
-ThreeCat computes `S_g` at every level including inside rock (no sub-terrain guard, OneCat's shape
-before `bc7048b`). *Not touched*: the panorama still lacks `S_i`/`S_s`, and `bcScalarSurfSur`'s level-0
-copy handles `P_rain`/`P_snow` but not `P_graupel`.
+level 0, so neither edit can reach the air — it is consistency, not a repair. **AND THREECAT NOW HAS THE SUB-TERRAIN GUARD** TwoCat (`:273`)
+and OneCat (`bc7048b`) carry: it computed every rate, `S_g` included, inside the rock and
+integrated the flux through it down to sea level. Cells below `i_topography` now get zero fluxes
+and rates. **Its flux normalisation moved to the local ground with it** — `Rain = P_rain[i] /
+P_rain[0]` read `x[0]`, which over land was the rock-integrated flux and which the guard makes
+zero; it now reads `x[i_topography]`, the surface the comment always meant. `ATM_SS_DIAG`'s
+`i_gnd` is left as it was. Verified 1 thread, `nm` = 20 from scratch: **TwoCat byte-identical**
+(13 of 13 physics/VTK files; `RUN_CONFIG.txt` by the output path); **ThreeCat moves on land
+only** — ocean 13 497 -> 13 499 mm/a, land **39 062 -> 37 436 (-4.2 %)**, exit 0, zero NaN. Read
+the ThreeCat absolutes as the clamp residual they are; the land/ocean split is the result. The panorama now also writes `S_i`/`S_s` (it had only `S_c_c/S_v/S_c/S_r`), and
+`bcScalarSurfSur`'s level-0 copy now includes `P_graupel` beside `P_rain`/`P_snow` — consistency
+only, since every scheme's `applyTopography()` already projects its ground fluxes down through the
+rock (`IceSchemeCommon::fillTopography`) before `precipitationSum()` rebuilds `Precipitation`.
 
 ## `ATM_RK_SCALAR_SYNC`: RK4 discards the pre-RK4 physics, and the discard is LOAD-BEARING
 

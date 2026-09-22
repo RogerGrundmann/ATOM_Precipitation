@@ -338,6 +338,9 @@ private:
                 bool   pv_valid = false;
                 const int i_gnd = ssd_on
                     ? std::min(std::max(m.i_topography[j][k], 0), m.im - 1) : 0;
+                // The column's physical ground. Unconditional, unlike i_gnd above (which is the
+                // budget's and stays 0 when ATM_SS_DIAG is off, so that instrument is unchanged).
+                const int i_surf = std::min(std::max(m.i_topography[j][k], 0), m.im - 1);
 
                 for(int iter_prec = 1; iter_prec <= iter_prec_end; iter_prec++){
 
@@ -358,15 +361,40 @@ private:
 
                     for(int i = m.im - 2; i >= 0; i--){
 
+                        // Sub-terrain guard (2026-09-22), TwoCat's (:273) and OneCat's (bc7048b),
+                        // which this scheme never had: cells with i < i_topography are INSIDE the
+                        // mountain, their t/p/r_humid/cloud/ice are sub-terrain copies, and feeding
+                        // them to the rate laws integrated a flux through rock down to sea level.
+                        // S_g is cleared too -- this is the one scheme that writes it. The ground
+                        // flux still reaches level 0: applyTopography() (fillTopography on
+                        // P_rain/P_snow/P_graupel) projects it down after the column loop, before
+                        // precipitationSum() rebuilds Precipitation -- TwoCat's convention.
+                        if (i < i_surf) {
+                            m.P_rain.x[i][j][k]        = 0.0;
+                            m.P_snow.x[i][j][k]        = 0.0;
+                            m.P_graupel.x[i][j][k]     = 0.0;
+                            m.Precipitation.x[i][j][k] = 0.0;
+                            m.S_v.x[i][j][k] = 0.0;
+                            m.S_c.x[i][j][k] = 0.0;
+                            m.S_i.x[i][j][k] = 0.0;
+                            m.S_r.x[i][j][k] = 0.0;
+                            m.S_s.x[i][j][k] = 0.0;
+                            m.S_g.x[i][j][k] = 0.0;
+                            continue;
+                        }
+
                         // Normalize precipitation by the surface flux. FLOORED denominator: a
                         // tiny-but-nonzero surface flux made Snow = P_snow[i]/P_snow_0 explode,
                         // and S_s_rim ∝ Snow then amplified P_snow geometrically down the column
                         // to overflow (the ThreeCat NaN blow-up). Flooring at P_norm_floor bounds
                         // the normalized ratios; the flux cap below guarantees finiteness.
                         constexpr double P_norm_floor = 1.0e-6;      // kg/(m2*s) ~0.09 mm/d
-                        double P_rain_0    = std::max(m.P_rain.x[0][j][k],    P_norm_floor);
-                        double P_snow_0    = std::max(m.P_snow.x[0][j][k],    P_norm_floor);
-                        double P_graupel_0 = std::max(m.P_graupel.x[0][j][k], P_norm_floor);
+                        // "Surface" is the LOCAL GROUND, i_surf (2026-09-22). It read x[0], which
+                        // over land was the flux integrated through the rock; with the guard above
+                        // x[0] is zero there and every land column would sit on the floor.
+                        double P_rain_0    = std::max(m.P_rain.x[i_surf][j][k],    P_norm_floor);
+                        double P_snow_0    = std::max(m.P_snow.x[i_surf][j][k],    P_norm_floor);
+                        double P_graupel_0 = std::max(m.P_graupel.x[i_surf][j][k], P_norm_floor);
 
                         double Rain    = raw_flux ? m.P_rain.x[i][j][k]
                                                   : m.P_rain.x[i][j][k]    / P_rain_0;

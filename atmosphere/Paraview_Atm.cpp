@@ -215,6 +215,8 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("S_v", S_v, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_c", S_c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_r", S_r, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("S_i", S_i, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("S_s", S_s, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_g", S_g, 1e3, Atmosphere_panorama_vts_File);
 
     dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
