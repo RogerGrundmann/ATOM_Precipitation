@@ -885,7 +885,8 @@ a rainfall shortfall, and it is the same defect the momentum budget reports as `
 
 **AND THE SAME CONCLUSION FROM THE OTHER SIDE, IN ONE CORRELATION.** On the `nm` = 100 field,
 cos-lat weighted over the globe: **r(model P, model PW) = +0.619 against r(NASA P, model PW) =
-+0.344.** The model's rain tracks its own column water about **twice as tightly** as real rain
++0.344.** *(That PW was the frozen initial field; on the live field it is +0.608 / +0.623 / +0.667
+at iterations 100 / 600 / 1200 against +0.344-0.348 — re-checked 2026-09-22, holds.)* The model's rain tracks its own column water about **twice as tightly** as real rain
 tracks that same field — and better than it tracks the observed rainfall (r = +0.456). That is the
 signature of precipitation being DIAGNOSED locally from what is in the column instead of being
 DELIVERED where the water was carried. It is why the field comes out as a broad tropical maximum
@@ -947,7 +948,10 @@ walking AWAY from the observed distribution, not toward it — the subtropics ar
 dry, but they are gaining rain that belongs 20 degrees poleward.
 
 **AND IT IS A CONVERSION-EFFICIENCY DRIFT, NOT A MOISTENING — precipitable water is 30.27 mm at
-EVERY checkpoint**, unchanged to four figures while precipitation rises 18 %. Same signature as
+EVERY checkpoint**, unchanged to four figures while precipitation rises 18 %. *⚠ Re-checked
+2026-09-22: that 30.27 was the frozen initial value. Live, PW rises 30.84 -> 31.63 (+2.6 %) over
+this window; the conclusion survives — see the re-check table under* ⚠⚠ PRECIPITABLE WATER WAS
+COMPUTED ONCE. Same signature as
 the pre-flip 1000-iteration run recorded under `ATM_CLOUD_FRAC` below ("the precipitation is
 growing four times faster than the condensate that feeds it"), so the 2026-09-01 mass-conservation
 flip did not cure it — it deferred it past iteration 600.
@@ -2403,7 +2407,7 @@ from the two runs' own written fields at full precision (not the 1-decimal print
 | 15-35 | 273.961 | 273.142 | -0.299 % | 761.4 |
 | **35-65** | **156.628** | **156.649** | **+0.013 %** | **981.1** |
 | 65-90 | 7.481 | 7.474 | -0.088 % | 364.2 |
-| precipitable water | — | — | **+0.000 % in every band** | |
+| precipitable water | — | — | **+0.000 % in every band** *(frozen value; live: within 0.1 % in every band, re-checked 2026-09-22)* | |
 | surface temperature | — | — | **within 0.015 %** | |
 
 **156.6 FOR THE FOURTH TIME, AND IT IS NOT A PRINT-PRECISION ARTEFACT** — 0.013 % is measured off the
@@ -4344,8 +4348,35 @@ iteration 20 it reads **31.1 mm** where the frozen value printed 30.2.
 refuted, unmeasured. Among them: `ATM_TW_BALANCE`'s *"precipitable water identical to six figures in
 every band"*; the post-600 drift's *"a conversion-efficiency drift, not a moistening — PW 30.27 mm at
 EVERY checkpoint"*; `ATM_RH_MIN_PTOP`'s *"a pure CONVERSION-EFFICIENCY lever"*; and every PW row in
-the B+1/B+2/B+3 and SATADJ tables. Re-read them against `ATM_CWB_DIAG`'s *total water path* where that
-was on (it includes condensate and integrates from `i_topography`), or re-run.
+the B+1/B+2/B+3 and SATADJ tables. **RE-CHECKED 2026-09-22 — EVERY CONCLUSION SURVIVES, AND EVERY ABSOLUTE PW NUMBER WAS WRONG.**
+Instrument: `[PW RESTART]`, printed after `load_state()` (restart files do not carry
+`precipitable_water`), and one ZERO-iteration restart (`nm` = `restart_from_iter`) per saved
+checkpoint — **122 checkpoints across 23 runs**, each in a new `output_pwchk/<run>_<iter>/` with the
+original `.bin` symlinked, 12 s each (`python/run_pwchk.sh`, results `pwchk_results.txt`). Values use
+the corrected sum from `i_topography`, ~2 % below the old `i = 0` sum globally, so compare them with
+each other, not with the old prints. Cos-lat means, mm:
+
+| claim (old evidence) | live precipitable water | verdict |
+|---|---|---|
+| post-600 drift, "30.27 mm at EVERY checkpoint" (`bctlL`) | **30.84 -> 31.63 (+2.6 %)**, monotone; 0-15 +3.9 %, 15-35 +2.1 %, 35-65 and 65-90 flat to 4 figures | "unchanged" FALSE; the conclusion holds — precip +18.4 % against PW +2.6 %, and the 15-35 band gains 69 % of rain on 2.1 % of water |
+| `ATM_TW_BALANCE`, "+0.000 % in every band" (`twctl`/`tw10` @600) | 30.8366 / 30.8344; bands within **0.1 %** (35-65 -0.002 %) | holds |
+| `ATM_SATADJ_PHASE` (`sp600ctl`/`on` @600) | 30.837 / 30.803 (**-0.11 %**) | holds; precip -5 % on -0.1 % water |
+| `ATM_SATADJ_FADE`, three arms (`sf_*` @600) | 30.7862 / 30.7859 / 30.7861 | holds |
+| B+3 `ATM_EVAP_FLUX`, "does not move at all" (`ef_*` @600) | 30.787 / 30.577 (**-0.68 %**), **ocean only** — land identical to 4 figures | "at all" FALSE; small and consistent with precip -0.8 % |
+| `ATM_MICRO_NDIM`, "vapour field standing still" (`mn_*` @600) | 30.787 / 30.804 (+0.05 %); 35-65 +0.03 %, 65-90 -0.04 % | holds — the +14.6 %/+101 % band gain moved no water |
+| `ATM_RH_MIN_PTOP`, "30.1/30.2/30.2/30.3 over a 35 % precip range" (`pt*`, `mn_on` @600) | 30.687 / 30.744 / 30.804 / 30.864 (**0.6 % span**) | holds — a conversion-efficiency lever |
+| `ATM_MC_T_NDIM` (`mt0`/`mt1` @1260) | 31.6840 / 31.6839 | holds |
+| pre-flip 1000-iteration run, "30.27 unchanged" (`spin1000` @1000 only) | 31.59 against ~30.4 at iteration 100 on the successor config (**~+4 %**) | "unchanged" FALSE; precip +22 % still dwarfs it |
+| `ATM_CLOUD_FRAC` flip, "29.6 mm on a SPUN-UP field at iteration 400" | 29.6 was the INITIAL value; today's default (which contains that flip) holds **30.6 at 400** | the "caveat discharged" sentence is FALSE; the comparison with 49.6 is initial-vs-initial |
+| MFC, **r(model P, PW) = +0.619 vs r(NASA P, PW) = +0.344** (initial PW field) | live field: **+0.608 / +0.623 / +0.667** at 100 / 600 / 1200 vs +0.344-0.348; the validation `r(model P, NASA P)` = +0.461 against the printed +0.457 | holds, and TIGHTENS with time |
+
+**THE PATTERN THE CORRECTION FOUND IS THE SAME ONE EVERY PRECIPITATION SCORE FOUND: WATER MOVES
+ONLY IN THE TROPICS.** From scratch to 1200 the 35-65 band reads **13.2089 -> 13.2096 mm** and 65-90
+**1.8901 -> 1.8906** — frozen to four figures for 1200 iterations in every run — while 0-15 climbs
+52.1 -> 55.1. The extratropical column is the initial condition, which is the moisture-transport
+result (*35-65 deg convergence is 7 % of requirement*) measured on the state instead of on the flux.
+And the live bands are 53 / 40 / 13 / 1.9 mm against Earth's roughly 45 / 30 / 18 / 6: too wet in
+the tropics and subtropics, too dry poleward of 35 deg.
 **AND THE COLUMN STARTED IN THE ROCK — FIXED THE SAME DAY.** A column is fixed `(j,k)` along `i`,
 and the sum ran from `i = 0` rather than `i_topography`. It now starts at the local ground; rock
 levels get `PrecipitableWaterLocal` = 0. **It was 8.1 % of land PW, not the ~1-3 % first estimated
@@ -4862,7 +4893,8 @@ injection and the removal shrinks by almost as much, leaving the NET -- the mode
 
 Removing a moisture source **10 800x** the flux costs **0.8 %** of the precipitation. The whole
 column dries only **2.2-2.7 % at every level**, uniformly, and precipitable water does not move at
-all.
+all. *⚠ Re-checked 2026-09-22 (the printed PW was frozen): live PW moves -0.68 %, over the ocean
+only — land is identical to four figures.*
 
 **AND IT MOVES THE STARVED BANDS THE WRONG WAY**, which is the sharpest contrast with B+1: 35-65
 deg **-3.1 %** and 65-90 deg **-23 %**, where `ATM_MICRO_NDIM` gave +14.6 % and +101 %. Two
@@ -5157,7 +5189,8 @@ RATIO breaks (0.680 against 0.703 for the other three; NASA 0.741). **`ATM_RH_MI
 *Two by-products.* The radiation moves WITH the drying and not independently — cloud LW forcing
 29.48 -> 28.34 toward Earth's ~25, all-sky OLR 234.5 -> 235.5 toward ~240, clear-sky flat at
 263.8-264.0 — so that gain is bought at 18 % of the precipitation and is not free. And
-**precipitable water is 30.1 / 30.2 / 30.2 / 30.3 across a 35 % range of precipitation**, so
+**precipitable water is 30.1 / 30.2 / 30.2 / 30.3 across a 35 % range of precipitation** *(frozen
+values; live 30.69 / 30.74 / 30.80 / 30.86, a 0.6 % span — re-checked 2026-09-22, holds)*, so
 `PTOP` is purely a CONVERSION-EFFICIENCY lever, the same signature as the post-600 drift.
 
 ## The radiation scheme is a DIAGNOSTIC: `radiation_mode` 5 throws away every temperature it computes
@@ -5464,7 +5497,8 @@ and 1.7 s in the ocean.
 
   **THE CLOUD AND THE RADIATION ARE STABLE WHILE THE RAIN IS NOT**, and that is the shape of the
   problem: LWP 103.0 -> 107.5 -> 116.3 (+13 %), IWP 20.09 -> 20.30 -> 20.65 (+3 %), RH at 10.9 km
-  44.4 -> 44.4 -> 44.5 %, precipitable water 30.27 mm unchanged, clear OLR 263.40 -> 263.33,
+  44.4 -> 44.4 -> 44.5 %, precipitable water 30.27 mm unchanged *(frozen value; live ~+4 % over
+the run, re-checked 2026-09-22)*, clear OLR 263.40 -> 263.33,
   all-sky 233.23 -> 233.07 at iterations 100 / 600 / 1000. **The precipitation is growing four
   times faster than the condensate that feeds it**, so this is a conversion-efficiency drift, not
   a moistening. `P_conv` also collapses over the same stretch, 0.32 -> **0.0196 mm/a**, while
@@ -5509,7 +5543,8 @@ and 1.7 s in the ocean.
   **THE CONDENSATE AND THE HUMIDITY BOTH BECOME RIGHT AND THE MODEL STOPS RAINING.** 78.8 g/m2
   is in the observed band and 29.6 mm of precipitable water is better than the shipped 49.6, on a
   SPUN-UP field at iteration 400 -- the "`nm` = 20 is the INITIAL field" caveat above is
-  discharged. And precipitation falls by **865x**, rain by **87 500x**, convective precipitation
+  discharged. *⚠ FALSE for the PW half (re-checked 2026-09-22): the printed PW was computed once at
+  setup, so 29.6 and 49.6 are both INITIAL values. Today's default holds 30.6 mm at iteration 400.* And precipitation falls by **865x**, rain by **87 500x**, convective precipitation
   to exactly zero.
 
   **THE CAUSE IS A HARD THRESHOLD FITTED TO THE BROKEN CONDENSATE**, `TwoCatIceScheme.h:294`:

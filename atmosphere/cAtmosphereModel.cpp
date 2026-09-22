@@ -1050,6 +1050,50 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // state and resume from its total_iter_count (skips re-running the dry spin-up).
     const bool restarted = (restart_from_iter >= 0) && load_state(restart_from_iter, Ma);
 
+    // The restart file does not carry precipitable_water, so without this a restarted run
+    // reports the value of ITS OWN fresh initialisation until the first checkpoint (2026-09-22).
+    // Recompute from the loaded state and print it once, cos-lat weighted, with the land/ocean
+    // split and the four bands every precipitation score in this tree uses. A restart with
+    // nm = restart_from_iter runs zero iterations, so this line is then the saved state's
+    // precipitable water exactly -- which is how the pre-2026-09-22 PW claims were re-checked.
+    if(restarted){
+        ThermoAtm(*this).precipitableWater();
+        double s[7] = {0}, w[7] = {0};   // global, land, ocean, 0-15, 15-35, 35-65, 65-90
+        for(int j = 0; j < jm; j++){
+            const double lat = 90.0 - the.z[j] * 180.0 / M_PI;
+            const double wt  = std::max(0.0, sin(the.z[j]));
+            const double al  = std::fabs(lat);
+            const int band = (al < 15.0) ? 3 : (al < 35.0) ? 4 : (al < 65.0) ? 5 : 6;
+            for(int k = 0; k < km; k++){
+                const double pw = precipitable_water.y[j][k];
+                const int lo = AtomUtils::is_land(h, 0, j, k) ? 1 : 2;
+                for(int q : {0, lo, band}){ s[q] += wt * pw; w[q] += wt; }
+            }
+        }
+        auto mv = [&](int q){ return w[q] > 0.0 ? s[q] / w[q] : 0.0; };
+        printf("      AGCM: [PW RESTART] iter %d  precipitable water %.4f mm  land %.4f  ocean %.4f"
+               "  | 0-15 %.4f  15-35 %.4f  35-65 %.4f  65-90 %.4f\n",
+               restart_from_iter, mv(0), mv(1), mv(2), mv(3), mv(4), mv(5), mv(6));
+
+        // Pattern correlations against the SAVED ground precipitation, P_rain + P_snow at level 0
+        // (both in the restart; P_conv and P_graupel are not, and are ~0 on TwoCat). The first is
+        // the check: it must reproduce the run's own printed `pattern r` against NASA.
+        auto corr = [&](auto fa, auto fb){
+            double W = 0, A = 0, B = 0;
+            for(int j = 0; j < jm; j++){ const double wt = std::max(0.0, sin(the.z[j]));
+                for(int k = 0; k < km; k++){ W += wt; A += wt*fa(j,k); B += wt*fb(j,k); } }
+            A /= W; B /= W; double sab = 0, saa = 0, sbb = 0;
+            for(int j = 0; j < jm; j++){ const double wt = std::max(0.0, sin(the.z[j]));
+                for(int k = 0; k < km; k++){ const double a = fa(j,k)-A, b = fb(j,k)-B;
+                    sab += wt*a*b; saa += wt*a*a; sbb += wt*b*b; } }
+            return (saa > 0 && sbb > 0) ? sab / sqrt(saa*sbb) : 0.0; };
+        auto P  = [&](int j, int k){ return P_rain.x[0][j][k] + P_snow.x[0][j][k]; };
+        auto N  = [&](int j, int k){ return precipitation_NASA.y[j][k]; };
+        auto PW = [&](int j, int k){ return precipitable_water.y[j][k]; };
+        printf("      AGCM: [PW RESTART] r(model P, NASA P) = %+.3f   r(model P, PW) = %+.3f   "
+               "r(NASA P, PW) = %+.3f\n", corr(P, N), corr(P, PW), corr(N, PW));
+    }
+
     // On a successful restart, resume at the iteration AFTER the checkpointed one.
     //
     // THE +1 IS THE FIX, AND IT WAS MEASURED (2026-08-30). save_state fires at the END of the
