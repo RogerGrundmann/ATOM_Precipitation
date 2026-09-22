@@ -194,6 +194,7 @@ public:
                         m.S_i.x[i][j][k]   = 0.0;
                         m.S_r.x[i][j][k]   = 0.0;
                         m.S_s.x[i][j][k]   = 0.0;
+                        m.S_g.x[i][j][k]   = 0.0;   // was missing (2026-09-22); ThreeCat writes it
 
                         // All body forces zero inside the solid body.
                         m.BuoyancyForce.x[i][j][k]    = 0.0;
@@ -342,6 +343,7 @@ public:
                         m.S_i.x[i][j][k]   = 0.0;
                         m.S_r.x[i][j][k]   = 0.0;
                         m.S_s.x[i][j][k]   = 0.0;
+                        m.S_g.x[i][j][k]   = 0.0;   // was missing (2026-09-22); ThreeCat writes it
 
                         // All body forces zero inside the solid body.
                         m.BuoyancyForce.x[i][j][k]    = 0.0;
@@ -450,6 +452,7 @@ public:
                 m.S_i.x[0][j][k]   = m.S_i.x[i_mount][j][k];
                 m.S_r.x[0][j][k]   = m.S_r.x[i_mount][j][k];
                 m.S_s.x[0][j][k]   = m.S_s.x[i_mount][j][k];
+                m.S_g.x[0][j][k]   = m.S_g.x[i_mount][j][k];   // was missing (2026-09-22)
 
                 m.q_v_u.x[0][j][k] = m.q_v_u.x[i_mount][j][k];
                 m.q_c_u.x[0][j][k] = m.q_c_u.x[i_mount][j][k];
@@ -1083,6 +1086,7 @@ public:
                 m.S_i.x[0][j][k]   = m.S_i.x[i_mount][j][k];
                 m.S_r.x[0][j][k]   = m.S_r.x[i_mount][j][k];
                 m.S_s.x[0][j][k]   = m.S_s.x[i_mount][j][k];
+                m.S_g.x[0][j][k]   = m.S_g.x[i_mount][j][k];   // was missing (2026-09-22)
 
                 m.P_rain.x[0][j][k] = m.P_rain.x[i_mount][j][k];
                 m.P_snow.x[0][j][k] = m.P_snow.x[i_mount][j][k];

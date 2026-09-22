@@ -689,7 +689,16 @@ public:
 
                 double column_sum = 0.0;
 
-                for (int i = 0; i < m.im - 1; i++) {
+                // The column starts at the LOCAL GROUND, not at i = 0 (2026-09-22). Below
+                // i_topography the cells are rock: BC_Atm zeroes c there, EXCEPT level 0, which
+                // its Pass 3 fills with the mountain-top humidity (c.x[0] = c.x[i_mount]) for the
+                // surface-flux code -- so summing from 0 added one sub-terrain layer to every land
+                // column. Rock levels get PrecipitableWaterLocal = 0.
+                const int i_ground = m.i_topography[j][k];
+                for (int i = 0; i < i_ground && i < m.im - 1; i++)
+                    m.PrecipitableWaterLocal.x[i][j][k] = 0.0;
+
+                for (int i = i_ground; i < m.im - 1; i++) {
 
                     const double t_actual  = m.t.x[i][j][k] * m.t_0;
                     const double p_actual  = m.p_stat.x[i][j][k];

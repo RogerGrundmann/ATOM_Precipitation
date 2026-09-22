@@ -4346,9 +4346,28 @@ every band"*; the post-600 drift's *"a conversion-efficiency drift, not a moiste
 EVERY checkpoint"*; `ATM_RH_MIN_PTOP`'s *"a pure CONVERSION-EFFICIENCY lever"*; and every PW row in
 the B+1/B+2/B+3 and SATADJ tables. Re-read them against `ATM_CWB_DIAG`'s *total water path* where that
 was on (it includes condensate and integrates from `i_topography`), or re-run.
-*Known residual, not fixed*: the sum runs from `i = 0`, not `i_topography`, so over land it includes
-level 0, which `BC_Atm` Pass 3 fills with the mountain-top humidity — one ~39 m layer, ~1-3 % of a
-land column's vapour by the 2026-08-30 level-0 census.
+**AND THE COLUMN STARTED IN THE ROCK — FIXED THE SAME DAY.** A column is fixed `(j,k)` along `i`,
+and the sum ran from `i = 0` rather than `i_topography`. It now starts at the local ground; rock
+levels get `PrecipitableWaterLocal` = 0. **It was 8.1 % of land PW, not the ~1-3 % first estimated
+from level 0 alone**, because `bcSolidGround` zeroes the moisture only in FULLY BURIED rock cells
+(`BC_Atm.h:125-148`) — cliff-face rock cells, adjacent to air in `j` or `k`, keep their vapour, and
+the old sum collected all of them. Verified 1 thread, `nm` = 20 from scratch against the previous
+binary: **0 of 43 602 ocean rows changed, 21 680 of 21 739 land rows**, land mean -1.32 mm
+(-8.07 %), global 31.1 -> 30.5 mm; every non-PW file byte-identical.
+
+**AND `S_g` WAS MISSING FROM FOUR BC SITES AND TWO VTK SLICES.** Both solid-ground zeroing branches
+(`BC_Atm.h:197`, `:346`) and both level-0 copies (`:455` Pass 3, `:1089` `bcScalarSurfSur`) handled
+`S_c_c/S_v/S_c/S_i/S_r/S_s` and not `S_g`, while the generic BC lists and the restart included it —
+so under ThreeCat a stale graupel rate could sit inside rock and feed `rhs_g` and the `ls` latent
+term (`RHS_Atm_Turb.cpp:1151`). Added at all four, and `S_g` is now written to the radial, longal
+and panorama VTKs (zonal already had it). Verified 1 thread against the previous binary: on TwoCat
+(`nm` = 20) every physics file is byte-identical and the radial/longal VTKs differ ONLY by the new,
+all-zero `S_g` array; on ThreeCat (`nm` = 4) the same, with `S_g` non-zero. **A null on the physics,
+as it must be**: a fully buried cell has no air neighbour by definition and RK4 never integrates
+level 0, so neither edit can reach the air — it is consistency, not a repair. *Not touched either*:
+ThreeCat computes `S_g` at every level including inside rock (no sub-terrain guard, OneCat's shape
+before `bc7048b`). *Not touched*: the panorama still lacks `S_i`/`S_s`, and `bcScalarSurfSur`'s level-0
+copy handles `P_rain`/`P_snow` but not `P_graupel`.
 
 ## `ATM_RK_SCALAR_SYNC`: RK4 discards the pre-RK4 physics, and the discard is LOAD-BEARING
 

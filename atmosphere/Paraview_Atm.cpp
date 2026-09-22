@@ -215,6 +215,7 @@ void cAtmosphereModel::paraview_panorama_vts(string &Name_Bathymetry_File, int n
     dump_array("S_v", S_v, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_c", S_c, 1e3, Atmosphere_panorama_vts_File);
     dump_array("S_r", S_r, 1e3, Atmosphere_panorama_vts_File);
+    dump_array("S_g", S_g, 1e3, Atmosphere_panorama_vts_File);
 
     dump_array("Precipitation", Precipitation, 8.64e4, Atmosphere_panorama_vts_File);
     dump_array("PrecipitationRain", P_rain, 8.64e4, Atmosphere_panorama_vts_File);
@@ -531,6 +532,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
     dump_radial("S_i", S_i, 1e3, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("S_r", S_r, 1e3, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("S_s", S_s, 1e3, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("S_g", S_g, 1e3, i_radial, Atmosphere_vtk_radial_File);
 
     dump_radial("Precipitation", Precipitation, 8.64e4, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("PrecipitationRain", P_rain, 8.64e4, i_radial, Atmosphere_vtk_radial_File);
@@ -1008,6 +1010,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
     dump_longal("S_i", S_i, 1e3, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("S_r", S_r, 1e3, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("S_s", S_s, 1e3, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("S_g", S_g, 1e3, j_longal, Atmosphere_vtk_longal_File);
 
     dump_longal("Precipitation", Precipitation, 8.64e4, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("PrecipitationRain", P_rain, 8.64e4, j_longal, Atmosphere_vtk_longal_File);
