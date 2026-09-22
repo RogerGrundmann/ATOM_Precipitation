@@ -1606,6 +1606,53 @@ magnitude — `c_u - e_d - e_l - e_p` — and this knob does not touch it.** Not
 `coeff_MC_vel`, so the whole convective heating term is 40x weaker than its own convention
 intends, independently of this.
 
+### ★ B.10 ATTRIBUTED: the capped "convective heating" is COOLING, from 460 000 mm/a of evaporation of rain that does not exist
+
+**THE PREDICTION WAS CONDENSATION AND IT WAS WRONG** (2026-09-22). `ATM_MC_CAP_DIAG` now splits
+`conv_src = c_u - e_d - e_l - e_p` in the cells where the UNIT-CORRECTED latent half,
+`(L/cp_l)*conv_src` in K/s (what `ATM_MC_T_NDIM=1` applies), exceeds `MCt_max`. 20 iterations from
+`output_rks0/atm_restart_0Ma_600.bin` (today's defaults), 24 threads:
+
+| of the 8.69 % of fluid cells over the cap | |
+|---|---|
+| **sign** | **100 % COOLING**, 0 % heating |
+| largest term | **`e_p` 99.998 %** (sub-cloud rain evaporation), `e_d` 0.002 %, `c_u` 0, `e_l` 0 |
+| `e_p` alone over the cap / >10x | 99.7 % / 14.0 % |
+| `c_u` alone over the cap | **0** |
+| height | **99.96 % below 2 km** |
+| `\|M_u\|` | < 0.1 in 94 %, never near the 3.0 clamp |
+| **evaporation demand > rain arriving + made there** | **100 %** |
+
+**AND THE WATER BEHIND IT**, cos-lat column integrals, mm/a: convective rain generated `g_p`
+**733**; evaporation DEMAND `e_d` 19 755 + `e_p` 441 134 = **460 889**; of which backed by rain
+present **733**; **UNBACKED 460 156** — 630x the rain that exists; `P_conv` at the ground 0.056.
+
+**THE MECHANISM IS THE MANUFACTURED-WATER PATTERN, IN THE CONVECTION SCHEME.** `downdraftRecurrence`
+floors the rain flux, `P_conv[i] = max(0, P_conv[i+1] + rho*dz*(g_p - e_d - e_p))`, so a demand
+larger than the rain is silently truncated IN THE FLUX — while `rhsForcing` applies the FULL
+`e_d + e_p` to `MC_t` (cooling) and `MC_q` (moistening). The cooling of evaporating rain that was
+never there is what pegs `MCt_max` in a tenth of the atmosphere. Same shape as the 8129 mm/a
+microphysics floor before `ATM_ICE_LIMIT_ARRIVING`.
+*Not the lever on its own*: `alf_1` = 0.05 s^-1 against Tiedtke's 5.44e-4 (92x; the `1e1/alf_2` =
+200 matches his `1/alpha_2` = 196.5) — but even 92x smaller the demand would be ~6x the rain.
+
+**`ATM_MC_EVAP_LIMIT=<0|1>`, DEFAULT 0 = SHIPPED**: charge each level's `e_d + e_p` against the
+rain arriving plus the rain generated there, scaling both together; zero at `i = 0`, where the
+recurrence passes the flux through unchanged. Off-branch byte-identical, 1 thread, `nm` = 20 from
+scratch: 13 of 14 files, `RUN_CONFIG.txt` by the path and the `MC_EVAP_LIMIT=0*` token. Same
+20-iteration restart:
+
+| | shipped | `=1` |
+|---|---|---|
+| unbacked evaporation | 460 156 mm/a | **0** — the self-check |
+| corrected latent over `MCt_max` | 8.69 % | **0.00 %** |
+| `MC_q` truncated | 3.98 % | **0 %** |
+| `MC_t` truncated (shipped units) | 13.9 % | 3.0 % = flux half 1.2 % + the spare `t_0` |
+| `e_p` demand | 441 134 | **0** — `e_d` evaporates 99.99 % of the rain inside the cloud |
+
+**⚠ OWED BEFORE ANY DEFAULT MOVES: the 600-iteration from-scratch trio** (`python/run_el600.sh`,
+`output_el0/1/2`: control / `=1` / `=1` + `ATM_MC_T_NDIM=1`, launched 2026-09-22 15:48).
+
 ### The cap census: `MCv_max` truncates 0.9 % of cells and `MCt_max` exceeds its cap 100-FOLD in a tenth of the atmosphere
 
 **`ATM_MC_CAP_DIAG=1`, new, print-only, default off.** Counts only — no sums of doubles — so it is

@@ -1248,6 +1248,38 @@ void findCloudBaseLFS() {
                         m.s_d.x[i][j][k]   = 1.0; m.e_d.x[i][j][k] = 0.0; m.e_p.x[i][j][k] = 0.0;
                     }
 
+                    // ATM_MC_EVAP_LIMIT=<0|1>, DEFAULT 0 = SHIPPED and byte-identical (2026-09-22,
+                    // B.10). The recurrence below FLOORS P_conv at zero, so an evaporation demand
+                    // larger than the rain present is silently truncated in the RAIN FLUX -- while
+                    // rhsForcing applies the FULL e_d + e_p to MC_t (cooling) and MC_q
+                    // (moistening). Measured at iteration 620 of the default configuration: 733 mm/a
+                    // of convective rain generated against 460 889 mm/a of evaporation DEMAND, of
+                    // which 733 is backed and 460 156 is not; that unbacked sub-cloud e_p is 99.998 %
+                    // of the cells where the latent half of MC_t exceeds MCt_max (8.7 % of the
+                    // atmosphere), all of them COOLING. Same defect as the microphysics floor that
+                    // manufactured 8129 mm/a before ATM_ICE_LIMIT_ARRIVING, and the same repair:
+                    // charge the level's evaporation against the rain ARRIVING plus the rain MADE
+                    // there, scaling e_d and e_p together. At i = 0 the recurrence passes the flux
+                    // through unchanged, so nothing evaporated there is backed: both are zeroed.
+                    static const bool mc_evap_limit = [](){ const char* e = getenv("ATM_MC_EVAP_LIMIT");
+                                                            return e && atoi(e) != 0; }();
+                    if(mc_evap_limit){
+                        if(i == 0){
+                            m.e_d.x[i][j][k] = 0.0;
+                            m.e_p.x[i][j][k] = 0.0;
+                        }else{
+                            const double mdz    = step[i] * m.r_humid.x[i][j][k];               // kg/m2
+                            const double supply = std::max(0.0, m.P_conv.x[i+1][j][k]
+                                                              + mdz * m.g_p.x[i][j][k]);     // kg/(m2 s)
+                            const double demand = mdz * (m.e_d.x[i][j][k] + m.e_p.x[i][j][k]);
+                            if(demand > supply){
+                                const double f = (demand > 0.0) ? supply / demand : 0.0;
+                                m.e_d.x[i][j][k] *= f;
+                                m.e_p.x[i][j][k] *= f;
+                            }
+                        }
+                    }
+
                     // Precipitation from convection (skip i=0: flux arrives unchanged)
                     if(i > 0)
                         m.P_conv.x[i][j][k] = std::max(0.0, m.P_conv.x[i+1][j][k]
@@ -1434,6 +1466,21 @@ void findCloudBaseLFS() {
         long nl_cap = 0, nl_x10 = 0, nl_x100 = 0;     // the latent half of raw_t, alone
         long nl_cap_nd = 0, nl_x10_nd = 0, nl_x100_nd = 0;   // ... and the same half without *t_0
         long nq_x2 = 0, nq_x10 = 0, nq_x100 = 0;
+        // B.10 (2026-09-22): WHAT the corrected latent half is made of, in the cells where it
+        // exceeds MCt_max. `lat` = (L/cp_l)*conv_src in K/s -- the unit-consistent value, i.e.
+        // what ATM_MC_T_NDIM=1 applies -- so the split does not depend on that knob. Counts only.
+        long lx_n = 0, lx_heat = 0, lx_cool = 0;                 // latent over cap, by sign
+        long lx_dom[4] = {0,0,0,0};                             // largest |term|: c_u e_d e_l e_p
+        long lx_term_cap[4] = {0,0,0,0}, lx_term_x10[4] = {0,0,0,0};  // each term ALONE vs cap
+        long lx_mu[4] = {0,0,0,0};                              // |M_u| <0.1, 0.1-1, 1-2.99, >=2.99 (clamp 3.0)
+        long lx_z[4]  = {0,0,0,0};                              // height <2 km, 2-5, 5-10, >10 km
+        long lx_x10 = 0, lx_x100 = 0;
+        // ... and the WATER behind it: cos-lat weighted column integrals, kg/(m2 s), of the
+        // rain generated (g_p), the downdraft and sub-cloud evaporation DEMANDS (e_d, e_p), and
+        // the part of each demand that the rain actually arriving at that level could back.
+        // MC_t/MC_q apply the full demand; P_conv's recurrence floors at zero instead.
+        double wb_w = 0.0, wb_gp = 0.0, wb_ed = 0.0, wb_ep = 0.0, wb_back = 0.0, wb_pc0 = 0.0;
+        long   lx_unbacked = 0;                                  // over-cap cells, demand > supply
         long nv_x2 = 0, nv_x10 = 0, nv_x100 = 0;
         long nw_x2 = 0, nw_x10 = 0, nw_x100 = 0;
 
@@ -1442,6 +1489,9 @@ void findCloudBaseLFS() {
                         nt_x2,nt_x10,nt_x100,nq_x2,nq_x10,nq_x100, \
                         nf_cap,nf_x10,nf_x100,nl_cap,nl_x10,nl_x100, \
                         nl_cap_nd,nl_x10_nd,nl_x100_nd, \
+                        lx_n,lx_heat,lx_cool,lx_dom[:4],lx_term_cap[:4],lx_term_x10[:4], \
+                        lx_mu[:4],lx_z[:4],lx_x10,lx_x100,lx_unbacked, \
+                        wb_w,wb_gp,wb_ed,wb_ep,wb_back,wb_pc0, \
                         nv_x2,nv_x10,nv_x100,nw_x2,nw_x10,nw_x100)
         for(int j = 0; j < m.jm; j++){
             for(int k = 0; k < m.km; k++){
@@ -1531,6 +1581,40 @@ void findCloudBaseLFS() {
                         band(raw_q, MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
                         band(raw_v, MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
                         band(raw_w, MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
+
+                        const double Lc  = L_latent / m.cp_l;                       // K per (kg/kg)
+                        const double lat = Lc * conv_src;                          // K/s, corrected
+                        const double wt  = std::max(0.0, sin(m.the.z[j]));
+                        const double mdz = std::max(m.r_humid.x[i][j][k], 0.0) * step[i];   // kg/m2
+                        const double gp_ = mdz * m.g_p.x[i][j][k];
+                        const double ed_ = mdz * m.e_d.x[i][j][k];
+                        const double ep_ = mdz * m.e_p.x[i][j][k];
+                        const double sup = std::max(0.0, m.P_conv.x[i+1][j][k] + gp_);  // arriving + local
+                        const double bk  = std::min(ed_ + ep_, sup);
+                        wb_gp += wt*gp_; wb_ed += wt*ed_; wb_ep += wt*ep_; wb_back += wt*bk;
+                        if(i == m.i_topography[j][k]){ wb_w += wt; wb_pc0 += wt*m.P_conv.x[i][j][k]; }
+                        if(std::fabs(lat) > MCt_max && ed_ + ep_ > sup) lx_unbacked++;
+                        if(AtomUtils::is_finite_safe(lat) && std::fabs(lat) > MCt_max){
+                            lx_n++;
+                            if(lat > 0.0) lx_heat++; else lx_cool++;
+                            const double r = std::fabs(lat) / MCt_max;
+                            if(r > 10.0) lx_x10++;
+                            if(r > 100.0) lx_x100++;
+                            const double tv[4] = { m.c_u.x[i][j][k], m.e_d.x[i][j][k],
+                                                   m.e_l.x[i][j][k], m.e_p.x[i][j][k] };
+                            int dom = 0;
+                            for(int q = 0; q < 4; q++){
+                                if(std::fabs(tv[q]) > std::fabs(tv[dom])) dom = q;
+                                const double rq = std::fabs(Lc * tv[q]) / MCt_max;
+                                if(rq > 1.0)  lx_term_cap[q]++;
+                                if(rq > 10.0) lx_term_x10[q]++;
+                            }
+                            lx_dom[dom]++;
+                            const double mu = std::fabs(m.M_u.x[i][j][k]);
+                            lx_mu[(mu < 0.1) ? 0 : (mu < 1.0) ? 1 : (mu < 2.99) ? 2 : 3]++;
+                            const double z = m.get_layer_height(i);
+                            lx_z[(z < 2000.0) ? 0 : (z < 5000.0) ? 1 : (z < 10000.0) ? 2 : 3]++;
+                        }
                     }
                 }
             }
@@ -1557,6 +1641,34 @@ void findCloudBaseLFS() {
             std::cout << "                latent / t_0    : over cap " << nl_cap_nd
                       << " (" << pc(nl_cap_nd) << " %)  >10x " << pc(nl_x10_nd)
                       << " %  >100x " << pc(nl_x100_nd) << " %" << std::endl;
+            if(lx_n > 0){
+                auto pl = [&](long n){ return 100.0 * (double)n / (double)lx_n; };
+                std::cout << "      B.10 corrected latent (L/cp)*conv_src over cap: " << lx_n
+                          << " (" << pc(lx_n) << " % of fluid)  >10x " << pc(lx_x10)
+                          << " %  >100x " << pc(lx_x100) << " %   heating " << pl(lx_heat)
+                          << " %  cooling " << pl(lx_cool) << " %" << std::endl;
+                const char* nm[4] = {"c_u", "e_d", "e_l", "e_p"};
+                for(int q = 0; q < 4; q++)
+                    std::cout << "          " << nm[q] << ": largest term in " << pl(lx_dom[q])
+                              << " %   alone over cap " << pl(lx_term_cap[q]) << " %   alone >10x "
+                              << pl(lx_term_x10[q]) << " %" << std::endl;
+                std::cout << "          |M_u| <0.1 " << pl(lx_mu[0]) << " %   0.1-1 " << pl(lx_mu[1])
+                          << " %   1-3 " << pl(lx_mu[2]) << " %   AT CLAMP 3.0 " << pl(lx_mu[3])
+                          << " %" << std::endl;
+                std::cout << "          height <2 km " << pl(lx_z[0]) << " %   2-5 " << pl(lx_z[1])
+                          << " %   5-10 " << pl(lx_z[2]) << " %   >10 km " << pl(lx_z[3]) << " %"
+                          << std::endl;
+                std::cout << "          demand exceeds the rain arriving + generated there: "
+                          << pl(lx_unbacked) << " %" << std::endl;
+            }
+            if(wb_w > 0.0){
+                const double mmpa = 365.0 * 86400.0 / wb_w;             // kg/(m2 s) -> mm/a
+                std::cout << "      B.10 convective water, cos-lat means in mm/a:  g_p generated "
+                          << wb_gp*mmpa << "   e_d demand " << wb_ed*mmpa << "   e_p demand "
+                          << wb_ep*mmpa << "   (e_d+e_p) backed by rain " << wb_back*mmpa
+                          << "   UNBACKED " << (wb_ed + wb_ep - wb_back)*mmpa
+                          << "   P_conv(ground) " << wb_pc0*mmpa << std::endl;
+            }
             row("MC_q", MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
             row("MC_v", MCv_max, nv_cap, nv_x2, nv_x10, nv_x100);
             row("MC_w", MCv_max, nw_cap, nw_x2, nw_x10, nw_x100);
