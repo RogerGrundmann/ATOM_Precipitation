@@ -1706,7 +1706,21 @@ to its pre-drift ~175, both starved bands unchanged; land/ocean move away from N
 moisture, the `ATM_SATADJ_PHASE` situation exactly. `ATM_MC_T_NDIM` on top is a climate null
 (886.4 both) that halves the remaining `MC_t` truncation to the flux half alone.
 
-**DEFAULT UNCHANGED PENDING THE USER'S DECISION.**
+**⭐ FLIPPED ON BY DEFAULT 2026-09-22, AT THE USER'S INSTRUCTION, AS A PAIR** —
+`ATM_MC_EVAP_LIMIT` 0 -> **1** and `ATM_MC_T_NDIM` 0.0 -> **1.0**. Setting either variable back
+restores the old branch, and the `[RUN CONFIG]` banner prints `MC_EVAP_LIMIT=1*  MC_T_NDIM=1.0*`.
+**BOTH DIRECTIONS VERIFIED TWICE, 1 thread, `nm` = 20 from scratch**, against `cli/atm_el` (the
+binary with both still default off): `ATM_MC_EVAP_LIMIT` alone, then the pair — **13 of 14 files
+byte-identical each way**, the 14th `RUN_CONFIG.txt` differing only in the banner tokens, and the
+`want_differ` control firing both times (**12 of 14 differ**), so neither pass is vacuous.
+*`ATM_MC_T_NDIM` is measured twice as a climate null that removes a unit error — precip -0.15 % on
+the 1200 -> 1260 restart pair and 886.4 in BOTH trio arms — and it halves what is left of the
+`MC_t` truncation, 2.46 % -> 1.15 %, leaving the flux half alone. It is read in ONE physics site;
+the census's split deliberately uses the corrected value on both branches, so it does not move
+with the default.*
+**⚠ THE STANDING ITEM THIS FLIP CREATES: `ATM_RH_MIN_PTOP` = 475 was fitted against NASA on the
+drifting branch**, and the mean is now 4.5 % below NASA on a branch that does not drift. Re-sweeping
+it is the `ATM_SATADJ_PHASE` precedent, and it has NOT been done.
 
 ### The cap census: `MCv_max` truncates 0.9 % of cells and `MCt_max` exceeds its cap 100-FOLD in a tenth of the atmosphere
 

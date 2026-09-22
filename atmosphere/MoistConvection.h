@@ -1248,8 +1248,20 @@ void findCloudBaseLFS() {
                         m.s_d.x[i][j][k]   = 1.0; m.e_d.x[i][j][k] = 0.0; m.e_p.x[i][j][k] = 0.0;
                     }
 
-                    // ATM_MC_EVAP_LIMIT=<0|1>, DEFAULT 0 = SHIPPED and byte-identical (2026-09-22,
-                    // B.10). The recurrence below FLOORS P_conv at zero, so an evaporation demand
+                    // ATM_MC_EVAP_LIMIT=<0|1>, **DEFAULT 1 SINCE 2026-09-22, AT THE USER'S
+                    // INSTRUCTION**; `=0` restores the shipped branch exactly and the banner prints
+                    // MC_EVAP_LIMIT=1* when it is compiled in. Flipped on the 600-iteration
+                    // from-scratch trio (output_el0/1/2): it REMOVES THE PRECIPITATION DRIFT --
+                    // the control's precipitable water climbs +1.45 % monotonically, all of it in
+                    // 0-35 deg, and its 15-35 band gains 44 % after iteration 400, where this
+                    // branch is flat to ~1 % in every band over all 600; sigma 2.29 -> 2.23,
+                    // centred RMS 1407 -> 1371, `r` unchanged, both starved bands unchanged, exit 0
+                    // with zero NaN through 155/357/483 and no seam mode (max v identical). The
+                    // cost is a global mean 4.5 % BELOW NASA where the drifting control read +1.1 %
+                    // -- the two agree to iteration 400, so that agreement was the drift arriving
+                    // at the number. ⚠ ATM_RH_MIN_PTOP = 475 was fitted against NASA on the
+                    // drifting branch and is therefore back in question, exactly as after the
+                    // ATM_SATADJ_PHASE flip. (2026-09-22, B.10). The recurrence below FLOORS P_conv at zero, so an evaporation demand
                     // larger than the rain present is silently truncated in the RAIN FLUX -- while
                     // rhsForcing applies the FULL e_d + e_p to MC_t (cooling) and MC_q
                     // (moistening). Measured at iteration 620 of the default configuration: 733 mm/a
@@ -1262,7 +1274,7 @@ void findCloudBaseLFS() {
                     // there, scaling e_d and e_p together. At i = 0 the recurrence passes the flux
                     // through unchanged, so nothing evaporated there is backed: both are zeroed.
                     static const bool mc_evap_limit = [](){ const char* e = getenv("ATM_MC_EVAP_LIMIT");
-                                                            return e && atoi(e) != 0; }();
+                                                            return e ? (atoi(e) != 0) : true; }();
                     if(mc_evap_limit){
                         if(i == 0){
                             m.e_d.x[i][j][k] = 0.0;
@@ -1414,11 +1426,22 @@ void findCloudBaseLFS() {
                                     return e && atoi(e) != 0; }();
 
 // ==================== ATM_MC_T_NDIM: the latent half of MC_t carries a spare t_0 ============
-        // ATM_MC_T_NDIM=<strength>, DEFAULT 0.0 = SHIPPED and BIT-IDENTICAL -- at 0 the branch
-        // below is the original expression verbatim, not a hoisted coefficient, because `*` is
+        // ATM_MC_T_NDIM=<strength>, **DEFAULT 1.0 SINCE 2026-09-22, AT THE USER'S INSTRUCTION**,
+        // flipped together with ATM_MC_EVAP_LIMIT; `=0.0` restores the shipped branch exactly and
+        // the banner prints MC_T_NDIM=1.0* when it is compiled in. At 0 the branch below is the
+        // original expression verbatim, not a hoisted coefficient, because `*` is
         // left-associative and floating-point multiplication is not: (L/cp * conv)*t_0 and
         // (L/cp * (t_0 + 0*(1-t_0)))*conv need not be the same double. Same reasoning, and the
         // same shape, as ATM_BUOY_CONSISTENT's off branch.
+        //
+        // WHAT THE FLIP RESTS ON. Measured twice as a CLIMATE NULL that removes a unit error:
+        // 1200 -> 1260 on output_vw1200 (precip -0.15 %, `max|u|` identical to 7 figures, both
+        // starved bands unmoved, the >100x band 10.17 % -> 0.020 % landing on the census's own
+        // prediction), and again in the 600-iteration from-scratch trio of B.10, where el2 = el1
+        // to the digit on precipitation (886.4) while the `MC_t` truncation halves, 2.46 % ->
+        // 1.15 %, leaving the FLUX half alone. With ATM_MC_EVAP_LIMIT on, the corrected latent
+        // half no longer exceeds the cap anywhere, so this knob's remaining job is that the
+        // number `rhs_t` receives is the one the scheme's own convention intends.
         //
         // THE DEFECT, AND IT IS ARITHMETIC BEFORE IT IS A MEASUREMENT. `MC_t` is assembled as
         //
@@ -1457,7 +1480,7 @@ void findCloudBaseLFS() {
         // of 273 on a term that feeds rhs_t: 1.0 is the consistent value, 0.0 the shipped one,
         // and the blend is linear in the coefficient.
         const double mc_t_ndim = [](){ const char* e = getenv("ATM_MC_T_NDIM");
-                                       return e ? atof(e) : 0.0; }();
+                                       return e ? atof(e) : 1.0; }();
         const double mc_t_lat_scale = m.t_0 + mc_t_ndim * (1.0 - m.t_0);
         long n_fluid = 0;
         long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
