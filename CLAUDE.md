@@ -4327,6 +4327,61 @@ to levels 1..`n_spread` every iteration that no flux produced, bounded only by t
 That is the same shape as the microphysics floor which manufactured 8129 mm/a before 2026-09-01,
 and it is now measurable in one line of every run log rather than by instrumenting a scheme.
 
+## ⚠⚠ PRECIPITABLE WATER WAS COMPUTED ONCE, AT SETUP — every PW figure before 2026-09-22 is the initial column
+
+**`ThermoAtm::precipitableWater()` WAS CALLED ONLY AT `cAtmosphereModel.cpp:497`, BEFORE THE TIME
+LOOP.** Every "precipitable water average" printed by every run, the VTK `PrecipitableWater`, the
+`PlotData_Atm.xyz` column and the restart copy were the INITIAL field. Found by the
+`ATM_RK_SCALAR_SYNC` trio below: all three arms printed **30.24 mm, max 77.508369, to every digit**,
+while `ATM_CWB_DIAG`'s own column water path read **30.66 against 38.91**. Now recomputed per
+checkpoint, before `print_min_max_atm`. Diagnostic only — nothing integrated reads it. Verified
+1 thread, `nm` = 20 from scratch, old binary against new: 11 of 14 files byte-identical; the three
+that differ are the iteration-20 radial VTK (**only** the `PrecipitableWater` array of 66),
+`PlotData_Atm.xyz` (**only** column 9, precipitable water) and `RUN_CONFIG.txt` (output path). At
+iteration 20 it reads **31.1 mm** where the frozen value printed 30.2.
+
+**CONSEQUENCE: EVERY ARGUMENT IN THIS FILE THAT RESTS ON "PW DID NOT MOVE" IS UNSUPPORTED** — not
+refuted, unmeasured. Among them: `ATM_TW_BALANCE`'s *"precipitable water identical to six figures in
+every band"*; the post-600 drift's *"a conversion-efficiency drift, not a moistening — PW 30.27 mm at
+EVERY checkpoint"*; `ATM_RH_MIN_PTOP`'s *"a pure CONVERSION-EFFICIENCY lever"*; and every PW row in
+the B+1/B+2/B+3 and SATADJ tables. Re-read them against `ATM_CWB_DIAG`'s *total water path* where that
+was on (it includes condensate and integrates from `i_topography`), or re-run.
+*Known residual, not fixed*: the sum runs from `i = 0`, not `i_topography`, so over land it includes
+level 0, which `BC_Atm` Pass 3 fills with the mountain-top humidity — one ~39 m layer, ~1-3 % of a
+land column's vapour by the 2026-08-30 level-0 census.
+
+## `ATM_RK_SCALAR_SYNC`: RK4 discards the pre-RK4 physics, and the discard is LOAD-BEARING
+
+**THE `RungeKutta` WATER BUCKET IS 103 % `leapfrog_reset`** (`ATM_CWB_DIAG`'s split, 2026-09-22).
+RK4 integrates `c/cloud/ice/gr` from `cn/...`, which `storeIntermediateData3D` last wrote at the END
+of the previous iteration — after RK4 — so every direct write `SaturationAdjustment`, the moisture
+filters and `waterVapourEvaporation` make before RK4 is overwritten, surviving only through the
+tendencies. The pre-RK4 buckets sum to **+7.6452e+06 mm/a** against `leapfrog_reset`
+**-7.6451e+06**, an identity to five figures. **The RK4 positivity floor — my proposed defect — is
+3.60 mm/a, 2e6 times smaller**, though it clips ~18 % of cells per call (ice and cloud; vapour never).
+
+`ATM_RK_SCALAR_SYNC=<0|1|2>` (default 0, byte-identical off) copies the moisture scalars (1) or
+those and `t` (2) into the time-level-n arrays before RK4. **600 from scratch, 3 x 8 threads, one
+binary** (`output_rks0/1/2`), all exit 0, zero NaN through 155/357/483:
+
+| iteration 600 | control | `=1` | `=2` | NASA |
+|---|---|---|---|---|
+| Precip mm/a | 989.1 | **7688** | **6615** | 978.3 |
+| r / sigma | +0.457 / 2.29 | +0.003 / 8.73 | +0.010 / 7.69 | |
+| 35-65 / 65-90 | 184.1 / 20.5 | 10433 / 7246 | 8983 / 5880 | 981.1 / 364.2 |
+| CWB column water path | 30.66 mm | **38.91, still rising** | 39.54 | |
+| CWB evaporation bucket | 5.40e+06 | 7.7e+05 | 9.8e+05 | |
+| `leapfrog_reset` | -7.85e+06 | **0.0000** | **0.0000** | |
+| `max v` | 2.2795 | 2.2792 | 2.2774 | |
+| `converged` | 1 | 1 | 0 (mean T +0.8 K) | |
+
+Self-check passes (`leapfrog_reset` exactly 0 with the sync on), the control reproduces
+`output_ng600` (KE 36.3694 exact), and the velocities are identical — the seam mode is not back.
+**And the model rains seven times NASA with the pattern gone**: let the pre-RK4 moisture writes
+persist and the column gains ~8 mm in 120 s with no plateau, the per-cell cap pins from iteration
+~200. **Tenth cancelling pair**: a ~5e+06 mm/a evaporation re-pin that RK4 undoes every step. The
+repair is the re-pin (B+3), not the integrator. **Default stays 0.**
+
 ## The column water budget: `P - E` is the residue of a cycle 5000x its size, and the microphysics pays 0.69 mm/a for 984 mm/a of rain
 
 **`ATM_CWB_DIAG=1`, new 2026-09-07, print-only, default off, and the off-branch is verified

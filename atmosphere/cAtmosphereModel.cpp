@@ -1302,6 +1302,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SATADJ_FREEZE_LATENT=" << ev("ATM_SATADJ_FREEZE_LATENT", "0*")
           << "  MICRO_NDIM=" << ev("ATM_MICRO_NDIM", "1.0*")
           << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "0.0*")
+          << "  RK_SCALAR_SYNC=" << ev("ATM_RK_SCALAR_SYNC", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
@@ -1674,6 +1675,16 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // the streamfunction so both are formed from the same field at the same iteration,
                 // which is what lets the print flag a Psi/omega disagreement. Print-only.
                 report_cell_rotation(iter_n);
+                // PRECIPITABLE WATER WAS COMPUTED ONCE, AT SETUP (:497), AND NEVER AGAIN
+                // (found 2026-09-22). Every "precipitable water average" printed by every run in
+                // this tree -- and every VTK `PrecipitableWater`, and the restart copy -- has been
+                // the INITIAL column, whatever the model did afterwards. Found because the
+                // ATM_RK_SCALAR_SYNC trio printed 30.24 mm in all three arms while
+                // ATM_CWB_DIAG's own column water path read 30.66 against 38.91. Recomputed here,
+                // per checkpoint, so the min/max print, the VTK and printDataAtm's average (at
+                // most one checkpoint behind) read the live field. Diagnostic only: nothing the
+                // model integrates reads precipitable_water or PrecipitableWaterLocal.
+                ThermoAtm(*this).precipitableWater();
                 print_min_max_atm();
 
                 // ATM_VTK_STRIDE -- write the VTK SLICES only every n-th checkpoint. Default 1
@@ -1759,6 +1770,75 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // solveRungeKutta_Atmosphere / RHS_Atm.cpp path was dropped — inviscid is now an
         // independent switch (diffusion_ramp), decoupled from the turbulence selection.
         ColumnWaterBudget::tick(*this, iter_n, dt * metricShellLength() / u_0);
+
+        // ---- ATM_RK_SCALAR_SYNC ----------------------------------------------------------
+        // RK4 integrates the scalars from the TIME-LEVEL-n arrays, and storeIntermediateData3D
+        // last wrote those at the END of the previous iteration (:1940, below -- AFTER this
+        // point). So every direct write the pre-RK4 stages made into c/cloud/ice/gr this
+        // iteration -- SaturationAdjustment's condensation, ConvectiveAdjustment, the moisture
+        // de-checkerboard filters, waterVapourEvaporation's addition at levels 1..n_spread --
+        // is about to be overwritten by `x = max(0, xn + D)` and survives only through its
+        // effect on the RHS. Nothing refreshes cn in between; verified by inspection over
+        // :1480..:1762, and the only place the tree had noticed the shape is BC_Atm.h:832,
+        // which is about un/vn/wn.
+        //
+        // ATM_CWB_DIAG measures the size of that as `leapfrog_reset` and it dominates the
+        // RungeKutta bucket. WHETHER IT IS A DEFECT OR THE INTENDED STRUCTURE IS NOT SETTLED BY
+        // READING THE CONTROL FLOW -- this tree has four recorded cases of a mechanism taken
+        // that way and then contradicted by a measurement. The knob exists to make the
+        // alternative RUNNABLE instead of arguable:
+        //
+        //   0  shipped: RK4 starts from the end of the previous iteration        [DEFAULT]
+        //   1  sync the four MOISTURE scalars, so RK4 starts from what the physics produced
+        //   2  sync the moisture scalars AND t
+        //
+        // MODE 1 ALONE IS PHYSICALLY INCONSISTENT AND IS A PROBE, NOT A CANDIDATE DEFAULT.
+        // SaturationAdjustment moves mass between c and cloud/ice AND warms t by lv/cp times
+        // the same amount; syncing the mass without the heat keeps the condensate and throws
+        // away the latent heating that paid for it. Mode 1 exists to separate the two effects
+        // in the measurement, exactly as ATM_SATADJ_FADE's 1/2 separate mass from phase.
+        //
+        // NOT TOUCHED, in both modes: un/vn/wn, which BC_Atm maintains deliberately (:832) and
+        // which nothing measured implicates; and co2n/tken/disn, same argument.
+        //
+        // Solid ground needs no mask for the moisture scalars: BC_Atm zeroes c AND cn together
+        // there (BC_Atm.h:181-189), so the copy puts 0 onto 0. For t in mode 2 it does change
+        // tn inside rock, where BC_Atm writes t (copied-down surface values) but not tn; RK4
+        // integrates those cells and BC_Atm overwrites them on the next pass, so the effect is
+        // one iteration deep -- recorded here rather than masked, because masking it would be a
+        // second, unmeasured change riding along with this one.
+        static const int rk_scalar_sync = [](){ const char* e = getenv("ATM_RK_SCALAR_SYNC");
+                                                return e ? atoi(e) : 0; }();
+        if(rk_scalar_sync != 0){
+            #pragma omp parallel for collapse(2) schedule(static)
+            for(int i = 0; i < im; i++){
+                for(int j = 0; j < jm; j++){
+                    #pragma omp simd
+                    for(int k = 0; k < km; k++){
+                        cn.x[i][j][k]     = c.x[i][j][k];
+                        cloudn.x[i][j][k] = cloud.x[i][j][k];
+                        icen.x[i][j][k]   = ice.x[i][j][k];
+                        grn.x[i][j][k]    = gr.x[i][j][k];
+                    }
+                }
+            }
+            if(rk_scalar_sync >= 2){
+                #pragma omp parallel for collapse(2) schedule(static)
+                for(int i = 0; i < im; i++){
+                    for(int j = 0; j < jm; j++){
+                        #pragma omp simd
+                        for(int k = 0; k < km; k++) tn.x[i][j][k] = t.x[i][j][k];
+                    }
+                }
+            }
+        }
+
+        // INT M*(cn - c) at RK4 entry -- the pre-RK4 stage increments the integrator is about
+        // to start over the top of. Deliberately AFTER the sync above, so this term is always
+        // what RK4 ACTUALLY discards and the budget identity stays correct: with the knob on it
+        // must read ~0, which is also the knob's own confirmation that it did what it says.
+        // Read-only.
+        ColumnWaterBudget::mark_leapfrog(*this);
         solveRungeKutta_Atmosphere_Turb();
         t0_mark("RungeKutta");
         ColumnWaterBudget::mark(*this, "RungeKutta");

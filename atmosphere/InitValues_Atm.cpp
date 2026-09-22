@@ -447,7 +447,6 @@ double cAtmosphereModel::tropopause_index(double h_m){
 */
 void cAtmosphereModel::init_tropopause_layers(){                                                                                                                                                         
     cout << endl << endl << endl << "      AGCM: init_tropopause_layers" << endl;                                                                                                                        
-                                                                                                                                                                                                           
 
     int j_max = jm - 1;                                                                                                                                                                                  
     int j_half = j_max / 2;                                                                                                                                                                              

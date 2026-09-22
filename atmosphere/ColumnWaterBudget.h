@@ -73,7 +73,59 @@
  *
  * and that floor (`RungeKutta_Atm_Turb.cpp:188` and its siblings, one per stage per species) is
  * a water SOURCE of exactly the shape that manufactured 8129 mm/a in the microphysics before
- * 2026-09-01. This instrument cannot split those two, and says so rather than implying it can.
+ * 2026-09-01.
+ *
+ * ------------------------------------------------------------------------------------------
+ * SPLITTING THE RUNGEKUTTA BUCKET (2026-09-22) -- the paragraph above used to end "this
+ * instrument cannot split those two, and says so rather than implying it can." It can now.
+ *
+ * The bucket is the largest row in the table (-7.8e+06 mm/a against a NET of +1.6e+05) and was
+ * the only unattributed one, which matters because the whole column water is the ~2 % residue
+ * of it and the +5.0e+06 evaporation term: a 0.01 % asymmetry between them is 500 mm/a, the
+ * size of the P - E gap this file was written to chase. The split is
+ *
+ *     bucket = INT M*(cn - c)   [leapfrog_reset, measured at RK4 entry]
+ *            + INT M*D          [the RK4 tendency: microphysics + transport + MC_q + diffusion]
+ *            + INT M*floor      [the FINAL-stage max(0,...) clips, and only those]
+ *
+ * because RK4 writes `x = max(0, xn + D)` where `xn` is the time-level-n array.
+ *
+ * TWO THINGS IN IT ARE NOT OBVIOUS FROM THE ARITHMETIC.
+ *
+ * (1) `leapfrog_reset` is not a rounding term. `storeIntermediateData3D` writes `cn := c` at
+ * `cAtmosphereModel.cpp:1940`, which is AFTER the RK4 call at :1762 -- so during RK4 at
+ * iteration N, `cn` holds the state saved at the END of iteration N-1, while `c` also carries
+ * everything `SaturationAdjustment`, the ice scheme, `MoistConvection`, `ConvectiveAdjustment`,
+ * `waterVapourEvaporation` and `BC_Atm` wrote into it earlier in iteration N. RK4 integrates
+ * from `cn` and overwrites `c`, so those direct state writes are discarded and survive only
+ * through their effect on `rhs_*` and on the other prognostic fields. Whether that is a defect
+ * or the intended leapfrog structure is NOT decided here -- the term is named, measured and
+ * printed, and the arithmetic says how large it is. The pre-registered expectation, from the
+ * published table alone, is that it is LARGE and negative: evaporation +5.0e+06, damp_wiggles(q)
+ * +2.5e+06 and SaturationAdjust +5.5e+05 sum to ~+8.0e+06 against a bucket of -7.8e+06, and
+ * that near-cancellation is exactly what a reset of the pre-RK4 increments would produce. If it
+ * comes out SMALL instead, the reading in this paragraph is wrong and the cancellation is
+ * something else.
+ *
+ * (2) ONLY THE FINAL-STAGE CLIPS ARE IN THE IDENTITY. The k1/k2/k3 clips fire on the
+ * intermediate stage values, which the NEXT stage's RHS reads (`c.x` is the live array all four
+ * stages evaluate from), so they perturb the integrator rather than adding to the answer: their
+ * effect on the final field is not their own magnitude, and no sum of them belongs in the
+ * budget. They are printed as a reference row with their own clip counts, because "the floor is
+ * a positivity guard that fires rarely at sharp coastal gradients" is a claim
+ * `RungeKutta_Atm_Turb.cpp:185` makes and nothing has ever measured -- and in this tree that
+ * claim has been orders out three times (`P_max_flux`, the 8129 mm/a microphysics floor,
+ * `SaturationAdjustment`'s phase-split clip).
+ *
+ * `rest` is a REMAINDER and is printed with a control: transport is a divergence and integrates
+ * to zero over the sphere, so |rest| should be a small fraction of the largest named term. If
+ * it is not, the split has not accounted for the bucket and the table says so instead of
+ * leaving a large residual looking like a result.
+ *
+ * No second environment knob. The floor and the reset are part of THIS budget and are
+ * meaningless outside it, and a half-on state is the failure mode this repository keeps
+ * rediscovering (`warnIfHalfRepaired`). `ATM_CWB_DIAG=1` turns on all of it; unset, every hook
+ * is a branch on a `static const bool` and nothing is allocated.
  *
  * ------------------------------------------------------------------------------------------
  * ATM_CWB_DIAG=1 enables. Default off. It never writes a field -- every hook reads -- and the
@@ -90,6 +142,7 @@
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
@@ -120,6 +173,23 @@ public:
         if(enabled()) state().report(m, iter);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // THE RUNGEKUTTA BUCKET, SPLIT. The two hooks below exist because that bucket is the
+    // largest row in the table and was the only one this instrument could not attribute -- the
+    // header above says so in as many words. See "SPLITTING THE RUNGEKUTTA BUCKET" there.
+
+    // Called from RungeKutta_Atm_Turb.cpp at each of the 16 `std::max(0.0, ...)` clip sites,
+    // ONLY when the pre-clip value is negative. `sp` 0..3 = vapour/cloud/ice/graupel,
+    // `st` 0..3 = k1/k2/k3/final, `inj` = the (positive) mixing ratio the clip adds.
+    static void floor_hit(cAtmosphereModel& m, int sp, int st, int i, int j, int k, double inj){
+        state().floor_hit(m, sp, st, i, j, k, inj);
+    }
+    // Called immediately before solveRungeKutta_Atmosphere_Turb(). Measures INT M*(cn - c),
+    // the pre-RK4 stage increments the integrator is about to discard by starting from `cn`.
+    static void mark_leapfrog(cAtmosphereModel& m){
+        if(enabled()) state().mark_leapfrog(m);
+    }
+
 private:
     struct Impl {
         std::vector<double>      mass;      // rho*dz, frozen for the window          [kg/m2]
@@ -135,6 +205,17 @@ private:
         int    it_start = 0;
         bool   it_valid = false;
         bool   open = false;
+
+        // The RungeKutta split. `flr_buf` is indexed ((st*4 + sp)*im + i)*jm + j so that each
+        // (i,j) belongs to exactly one thread under the RK4 loop's `collapse(2)` over (i,j) --
+        // the same reason `mark()` accumulates per latitude row: a diagnostic whose claim is
+        // that a residual is zero must not depend on the thread count. Reduced serially at
+        // report time. Counts are kept separately and are exactly reproducible; the masses are
+        // sums of doubles in a fixed order and so are too.
+        std::vector<double>    flr_buf;    // injected water, per species/stage    [kg/m2 * wj]
+        std::vector<long long> flr_cnt;    // clip events,    per species/stage
+        double lf_s = 0.0, lf_a = 0.0;     // INT M*(cn - c) at RK4 entry, sfc / aloft  [mm*wj]
+        int    rk_calls = 0;               // RK4 sweeps in this window
 
         // The stages, in the order the time loop executes them, so the table reads in execution
         // order however the moist stride falls. A stage that did not run this window prints
@@ -218,6 +299,57 @@ private:
             W_start  = water_path(m);
             it_start = iter;
             open     = true;
+
+            const size_t nf = 16 * (size_t)m.im * m.jm;
+            if(flr_buf.size() != nf){ flr_buf.assign(nf, 0.0); flr_cnt.assign(16, 0); }
+            else { std::fill(flr_buf.begin(), flr_buf.end(), 0.0);
+                   std::fill(flr_cnt.begin(), flr_cnt.end(), 0LL); }
+            lf_s = lf_a = 0.0;
+            rk_calls = 0;
+        }
+
+        // ---- the RungeKutta split -------------------------------------------------------
+        size_t fidx(cAtmosphereModel& m, int sp, int st, int i, int j) const {
+            return (((size_t)st * 4 + sp) * m.im + i) * m.jm + j;
+        }
+
+        void floor_hit(cAtmosphereModel& m, int sp, int st, int i, int j, int k, double inj){
+            if(!open || mass.empty()) return;
+            const double M = lat_weight(j) * mass[idx(m, i, j, k)];   // 0 in rock, by construction
+            if(M == 0.0) return;
+            flr_buf[fidx(m, sp, st, i, j)] += M * inj;
+            #pragma omp atomic
+            flr_cnt[st * 4 + sp] += 1;
+        }
+
+        // INT M*(cn - c) at RK4 entry. RK4 integrates from `cn`, which `storeIntermediateData3D`
+        // last wrote at the END of the previous iteration (cAtmosphereModel.cpp:1940, i.e. AFTER
+        // this call site), so everything the pre-RK4 stages wrote into `c` this iteration is
+        // about to be overwritten. Whether that is a defect or the intended leapfrog structure
+        // is NOT decided here: the term is measured, named and printed, and the table says which
+        // of the two the arithmetic supports. Read from `cn`/`c` directly rather than from
+        // `q_prev` so the number is exact whatever happened since the last mark.
+        void mark_leapfrog(cAtmosphereModel& m){
+            if(!open || mass.empty()) return;
+            rk_calls++;
+            std::vector<double> row_s(m.jm, 0.0), row_a(m.jm, 0.0);
+            #pragma omp parallel for schedule(static)
+            for(int j = 0; j < m.jm; j++){
+                double ss = 0.0, sa = 0.0;
+                const double wj = lat_weight(j);
+                for(int k = 0; k < m.km; k++){
+                    const int i0 = m.i_topography[j][k];
+                    for(int i = i0; i < m.im - 1; i++){
+                        const double qn = m.cn.x[i][j][k] + m.cloudn.x[i][j][k]
+                                        + m.icen.x[i][j][k] + m.grn.x[i][j][k];
+                        const double d  = wj * mass[idx(m, i, j, k)] * (qn - q_total(m, i, j, k));
+                        if(i <= i0 + 3) ss += d; else sa += d;
+                    }
+                }
+                row_s[j] = ss;
+                row_a[j] = sa;
+            }
+            for(int j = 0; j < m.jm; j++){ lf_s += row_s[j]; lf_a += row_a[j]; }
         }
 
         void mark(cAtmosphereModel& m, const char* stage){
@@ -383,6 +515,85 @@ private:
             cout << "      AGCM: [CWB]     the same rates at L/u_0:          vap+cld+ice+grp "
                  << setprecision(1) << Sq_nd * per_year << "   rain+snow " << Sp_nd * per_year
                  << "   sum " << (Sq_nd + Sp_nd) * per_year << endl;
+
+            // ---- THE RUNGEKUTTA BUCKET, SPLIT -------------------------------------------
+            // bucket = INT M*[ max(0, cn + D) - c_at_previous_mark ]
+            //        = INT M*(cn - c)            <- leapfrog_reset, measured at RK4 entry
+            //        + INT M*D                   <- the RK4 tendency: microphysics + the rest
+            //        + INT M*(floor, FINAL stage) <- the only clip that writes the field mark() sees
+            //
+            // The k1/k2/k3 clips are NOT in that identity and are printed as a reference row.
+            // They fire on the INTERMEDIATE stage values, which the next stage's RHS reads, so
+            // they perturb the integrator rather than adding to the answer: their effect on the
+            // final field is not their own magnitude and this instrument cannot price it.
+            if(rk_calls > 0 && !flr_buf.empty()){
+                const char* spn[4] = {"vapour", "cloud", "ice", "graupel"};
+                const char* stn[4] = {"k1", "k2", "k3", "final"};
+                double fs[4][4];
+                for(int st = 0; st < 4; st++)
+                    for(int sp = 0; sp < 4; sp++){
+                        double acc = 0.0;
+                        for(int i = 0; i < m.im; i++)
+                            for(int j = 0; j < m.jm; j++)
+                                acc += flr_buf[fidx(m, sp, st, i, j)];
+                        fs[st][sp] = acc * inv_w * per_year;
+                    }
+
+                double f_fin = 0.0, f_int = 0.0;
+                long long n_fin = 0, n_int = 0;
+                for(int sp = 0; sp < 4; sp++){
+                    f_fin += fs[3][sp];              n_fin += flr_cnt[3*4 + sp];
+                    for(int st = 0; st < 3; st++){ f_int += fs[st][sp]; n_int += flr_cnt[st*4 + sp]; }
+                }
+
+                size_t rk = 0;
+                while(rk < names.size() && names[rk] != "RungeKutta") rk++;
+                const double bucket = (rk < names.size())
+                                    ? (sums[2*rk] + sums[2*rk + 1]) * inv_w * per_year : 0.0;
+                const double lf    = (lf_s + lf_a) * inv_w * per_year;
+                const double micro = Sq_mm * per_year;
+                const double rest  = bucket - lf - micro - f_fin;
+
+                cout << "      AGCM: [CWB] RK4 positivity floor -- water INJECTED by"
+                     << " max(0,...) [mm/a], " << rk_calls << " RK4 sweeps:" << endl;
+                cout << "      AGCM: [CWB]     " << left << setw(10) << "stage" << right;
+                for(int sp = 0; sp < 4; sp++) cout << setw(14) << spn[sp];
+                cout << setw(14) << "TOTAL" << setw(14) << "clips/call" << endl;
+                for(int st = 0; st < 4; st++){
+                    double tot = 0.0; long long cn_ = 0;
+                    for(int sp = 0; sp < 4; sp++){ tot += fs[st][sp]; cn_ += flr_cnt[st*4 + sp]; }
+                    cout << "      AGCM: [CWB]     " << left << setw(10) << stn[st] << right
+                         << scientific << setprecision(4);
+                    for(int sp = 0; sp < 4; sp++) cout << setw(14) << fs[st][sp];
+                    cout << setw(14) << tot << fixed << setprecision(1)
+                         << setw(14) << (double)cn_ / rk_calls << endl;
+                }
+                cout << "      AGCM: [CWB]     k1+k2+k3 (NOT part of the identity -- they"
+                     << " perturb the integrator, not the answer): " << scientific
+                     << setprecision(4) << f_int << " mm/a, " << fixed << setprecision(1)
+                     << (double)n_int / rk_calls << " clips/call" << endl;
+
+                cout << "      AGCM: [CWB] RungeKutta bucket " << scientific << setprecision(4)
+                     << bucket << " = leapfrog_reset " << lf << " + microphysics " << micro
+                     << " + floor(final) " << f_fin << " + rest " << rest << " mm/a" << endl;
+                cout << "      AGCM: [CWB]     leapfrog_reset = INT M*(cn - c) at RK4 entry: the"
+                     << " pre-RK4 stage increments the integrator starts over the top of."
+                     << "  rest = transport + MC_q + diffusion, a divergence-dominated term"
+                     << " whose global mean should be SMALL against the others." << endl;
+                // `rest` is a REMAINDER, not a measurement, so it needs a control. Transport
+                // is a divergence and integrates to zero over the sphere; MC_q and diffusion
+                // are small. So a `rest` that is COMPARABLE to the named terms means either the
+                // transport is not conservative or one of the three named terms is wrong, and a
+                // `rest` that is a rounding fraction of them means the split has accounted for
+                // the bucket. Printed as that ratio so the table says which, rather than
+                // leaving a large residual looking like a result.
+                double big = std::abs(lf);
+                if(std::abs(micro) > big) big = std::abs(micro);
+                if(std::abs(f_fin) > big) big = std::abs(f_fin);
+                cout << "      AGCM: [CWB]     |rest| / largest named term = " << fixed
+                     << setprecision(4) << ((big > 0.0) ? std::abs(rest) / big : 0.0)
+                     << "   <- small means the split accounts for the bucket" << endl;
+            }
 
             // The reservoir, and the part of its change that is density rather than water.
             const double W_now = water_path(m);

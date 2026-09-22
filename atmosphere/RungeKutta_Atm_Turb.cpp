@@ -8,6 +8,7 @@
 */
 
 #include "cAtmosphereModel.h"
+#include "ColumnWaterBudget.h"
 
 #include <cstdint>
 #include <cstring>
@@ -50,6 +51,24 @@ void cAtmosphereModel::computeLevelMeanTemperature(){
         tv_ref_level[i] = (wsum > 0.0) ? sum_v / wsum : 1.0;
     }
 }
+
+
+// THE POSITIVITY CLIPS ON THE MOISTURE SCALARS, INSTRUMENTED (see ColumnWaterBudget.h,
+// "SPLITTING THE RUNGEKUTTA BUCKET"). With ATM_CWB_DIAG unset -- the default -- this is exactly
+// `dst = std::max(0.0, expr)` plus one branch on a bool hoisted out of the loop.
+//
+// `std::max` is KEPT rather than rewritten as `if(v < 0.0) v = 0.0;`, which would read more
+// naturally: the two differ on NaN. `std::max(0.0, NaN)` returns 0.0 -- it is `a < b ? b : a`
+// and the comparison is false -- where the `if` form would leave the NaN in the field for
+// `scanForNaN` to report from somewhere downstream. A diagnostic must not move where the first
+// NaN appears.
+#define RK_CLIP(dst, sp, st, expr)                                          \
+    do {                                                                    \
+        const double v_ = (expr);                                           \
+        if(cwb_fl && v_ < 0.0)                                              \
+            ColumnWaterBudget::floor_hit(*this, (sp), (st), i, j, k, -v_);  \
+        (dst) = std::max(0.0, v_);                                          \
+    } while(0)
 
 
 void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
@@ -107,6 +126,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
         if(sinthe_tbl[j] < sin_floor) sinthe_tbl[j] = sin_floor;   // metric floor, ATM_METRIC_SIN_FLOOR, default 0.55 ~57° (was 0.4/~66°): caps the 1/sinθ amplification of the high-lat coastal pressure-gradient force that blows up at i=1
         costhe_tbl[j] = cos(the.z[j]);
     }
+
+    // Hoisted out of the loop: ColumnWaterBudget::enabled() is a function-local static and
+    // would take its thread-safe-init guard on every one of the 16 clip sites per cell.
+    const bool cwb_fl = ColumnWaterBudget::enabled();
 
     #pragma omp parallel for collapse(2) schedule(static)
     for(int i = 1; i < im-1; i++){
@@ -186,10 +209,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 // update can drive a near-zero cloud/c/ice cell slightly negative at sharp
                 // coastal gradients; clamping here guarantees the prognostic field is never
                 // negative (was previously only fixed downstream by storeIntermediateData3D).
-                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc1   * half_dt);
-                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl1  * half_dt);
-                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki1   * half_dt);
-                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg1   * half_dt);
+                RK_CLIP(c.x[i][j][k],     0, 0, cn_ijk   + kc1   * half_dt);
+                RK_CLIP(cloud.x[i][j][k], 1, 0, cldn_ijk + kcl1  * half_dt);
+                RK_CLIP(ice.x[i][j][k],   2, 0, icen_ijk + ki1   * half_dt);
+                RK_CLIP(gr.x[i][j][k],    3, 0, grn_ijk  + kg1   * half_dt);
                 co2.x[i][j][k]   = co2n_ijk + kco1  * half_dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke1 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + kdis1 * half_dt);
@@ -213,10 +236,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + ku2   * half_dt;
                 v.x[i][j][k]     = vn_ijk   + kv2   * half_dt;
                 w.x[i][j][k]     = wn_ijk   + kw2   * half_dt;
-                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc2   * half_dt);
-                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl2  * half_dt);
-                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki2   * half_dt);
-                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg2   * half_dt);
+                RK_CLIP(c.x[i][j][k],     0, 1, cn_ijk   + kc2   * half_dt);
+                RK_CLIP(cloud.x[i][j][k], 1, 1, cldn_ijk + kcl2  * half_dt);
+                RK_CLIP(ice.x[i][j][k],   2, 1, icen_ijk + ki2   * half_dt);
+                RK_CLIP(gr.x[i][j][k],    3, 1, grn_ijk  + kg2   * half_dt);
                 co2.x[i][j][k]   = co2n_ijk + kco2  * half_dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke2 * half_dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis2 * half_dt);
@@ -240,10 +263,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + ku3   * dt;
                 v.x[i][j][k]     = vn_ijk   + kv3   * dt;
                 w.x[i][j][k]     = wn_ijk   + kw3   * dt;
-                c.x[i][j][k]     = std::max(0.0, cn_ijk   + kc3   * dt);
-                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + kcl3  * dt);
-                ice.x[i][j][k]   = std::max(0.0, icen_ijk + ki3   * dt);
-                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + kg3   * dt);
+                RK_CLIP(c.x[i][j][k],     0, 2, cn_ijk   + kc3   * dt);
+                RK_CLIP(cloud.x[i][j][k], 1, 2, cldn_ijk + kcl3  * dt);
+                RK_CLIP(ice.x[i][j][k],   2, 2, icen_ijk + ki3   * dt);
+                RK_CLIP(gr.x[i][j][k],    3, 2, grn_ijk  + kg3   * dt);
                 co2.x[i][j][k]   = co2n_ijk + kco3  * dt;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + ktke3 * dt, 0.0,     tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis3 * dt);
@@ -267,10 +290,10 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 u.x[i][j][k]     = un_ijk   + (ku1   + 2.0*ku2   + 2.0*ku3   + ku4)   * dt_sixth;
                 v.x[i][j][k]     = vn_ijk   + (kv1   + 2.0*kv2   + 2.0*kv3   + kv4)   * dt_sixth;
                 w.x[i][j][k]     = wn_ijk   + (kw1   + 2.0*kw2   + 2.0*kw3   + kw4)   * dt_sixth;
-                c.x[i][j][k]     = std::max(0.0, cn_ijk   + (kc1   + 2.0*kc2   + 2.0*kc3   + kc4)   * dt_sixth);
-                cloud.x[i][j][k] = std::max(0.0, cldn_ijk + (kcl1  + 2.0*kcl2  + 2.0*kcl3  + kcl4)  * dt_sixth);
-                ice.x[i][j][k]   = std::max(0.0, icen_ijk + (ki1   + 2.0*ki2   + 2.0*ki3   + ki4)   * dt_sixth);
-                gr.x[i][j][k]    = std::max(0.0, grn_ijk  + (kg1   + 2.0*kg2   + 2.0*kg3   + kg4)   * dt_sixth);
+                RK_CLIP(c.x[i][j][k],     0, 3, cn_ijk   + (kc1   + 2.0*kc2   + 2.0*kc3   + kc4)   * dt_sixth);
+                RK_CLIP(cloud.x[i][j][k], 1, 3, cldn_ijk + (kcl1  + 2.0*kcl2  + 2.0*kcl3  + kcl4)  * dt_sixth);
+                RK_CLIP(ice.x[i][j][k],   2, 3, icen_ijk + (ki1   + 2.0*ki2   + 2.0*ki3   + ki4)   * dt_sixth);
+                RK_CLIP(gr.x[i][j][k],    3, 3, grn_ijk  + (kg1   + 2.0*kg2   + 2.0*kg3   + kg4)   * dt_sixth);
                 co2.x[i][j][k]   = co2n_ijk + (kco1  + 2.0*kco2  + 2.0*kco3  + kco4)  * dt_sixth;
                 tke.x[i][j][k]   = safe_clamp(tken_ijk + (ktke1 + 2.0*ktke2 + 2.0*ktke3 + ktke4) * dt_sixth, 0.0, tke_max_nd);
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + (kdis1 + 2.0*kdis2 + 2.0*kdis3 + kdis4) * dt_sixth);
@@ -284,3 +307,5 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
 
     cout << "      solveRungeKutta_Atmosphere_Turb end" << endl;
 }
+
+#undef RK_CLIP
