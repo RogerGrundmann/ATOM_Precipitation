@@ -14,6 +14,7 @@
 #include <cstdlib>   // getenv/atof for the remaining A/B knobs
 #include "cAtmosphereModel.h"
 #include "Utils.h"
+#include "AtmHydroSplit.h"
 
 using namespace std;
 using namespace AtomUtils;
@@ -1132,6 +1133,26 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         if(!AtomUtils::is_finite_safe(hydro_phi)) hydro_phi = 0.0;
     }
 
+    // ATM_HYDRO_SPLIT: the horizontal gradient of the HYDROSTATIC pressure p_hb, built from the
+    // buoyancy by a column integral (AtmHydroSplit.h). Added to hydro_the/hydro_phi so that the
+    // budget's `pgf` bucket and `aux_v`/`aux_w` carry it -- the Poisson solve then sees its
+    // divergence and supplies only the non-hydrostatic remainder. Air neighbours only: p_hb is
+    // constant through rock and would fake a gradient at every plateau edge.
+    const bool hydro_split = AtmHydroSplit::enabled();
+    if(hydro_split && !land_ijk){
+        auto dh = [&](int jm1, int km1, int jp1, int kp1, double inv2d) -> double {
+            const bool a_m = AtomUtils::is_air(h, i, jm1, km1);
+            const bool a_p = AtomUtils::is_air(h, i, jp1, kp1);
+            const double pc = AtmHydroSplit::at(i, j, k);
+            if(a_m && a_p) return (AtmHydroSplit::at(i, jp1, kp1) - AtmHydroSplit::at(i, jm1, km1)) * inv2d;
+            if(a_p)        return (AtmHydroSplit::at(i, jp1, kp1) - pc) * 2.0 * inv2d;
+            if(a_m)        return (pc - AtmHydroSplit::at(i, jm1, km1)) * 2.0 * inv2d;
+            return 0.0;
+        };
+        hydro_the += dh(j-1, k, j+1, k, inv_2dthe) * inv_rm;
+        hydro_phi += dh(j, k-1, j, k+1, inv_2dphi) * inv_rmsinthe;
+    }
+
     // Latent heating: signed microphysical mass-exchange × specific latent heat ×
     // density.  S_c+S_r (vapour↔liquid, factor lv), S_i+S_s+S_g (vapour↔ice/solid,
     // factor ls).  The laminar path (RHS_Atm.cpp) uses the same form.
@@ -1317,6 +1338,18 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
                       * (t_buoy - t_buoy_ref);
     }
 
+    // ATM_HYDRO_SPLIT: the buoyancy is balanced EXACTLY by d(p_hb)/dr, which is not formed --
+    // b - dp_hb/dr = 0 by construction -- so rhs_u carries neither, and the budget records the
+    // consistent b in `ubud_buoy` and its hydrostatic balance in `ubud_pgf` so the identity
+    // sum(ubud_*) == rhs_u still holds.
+    double buoy_hb = 0.0;
+    if(hydro_split){
+        const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+        buoy_hb = AtmHydroSplit::strength() * buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
+                * (tn.x[i][j][k] - t_ref_level[i]) / tref;
+        buoyancy_term = 0.0;
+    }
+
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
         + buoyancy_term
         + coriolis * force_nd * coriolis_rad;
@@ -1336,12 +1369,12 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //
     // The four RK4 stages overwrite the same cell; the last wins, as in the v and w blocks.
     if(ubudget_capture){
-        ubud_pgf.x[i][j][k]  = -dpdr_exp;
+        ubud_pgf.x[i][j][k]  = -dpdr_exp - buoy_hb;   // - buoy_hb = -dp_hb/dr, split only
         ubud_cor.x[i][j][k]  =  coriolis * force_nd * coriolis_rad;
         ubud_advv.x[i][j][k] = -(u_exp * dudr_adv);
         ubud_advh.x[i][j][k] = -(v_invrm * dudthe_adv + w_invrs * dudphi_adv);
         ubud_diff.x[i][j][k] =  diffusion_u;
-        ubud_buoy.x[i][j][k] =  buoyancy_term;   // exactly what rhs_u received, either branch
+        ubud_buoy.x[i][j][k] =  buoyancy_term + buoy_hb;   // what rhs_u received; the split's b when on
     }
 
     // ----- Near-surface Rayleigh (boundary-layer) drag on the horizontal wind -----

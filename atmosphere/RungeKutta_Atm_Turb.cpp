@@ -9,6 +9,7 @@
 
 #include "cAtmosphereModel.h"
 #include "ColumnWaterBudget.h"
+#include "AtmHydroSplit.h"
 
 #include <cstdint>
 #include <cstring>
@@ -53,6 +54,62 @@ void cAtmosphereModel::computeLevelMeanTemperature(){
 }
 
 
+// ATM_HYDRO_SPLIT: build the hydrostatic pressure p_hb from the buoyancy by a column integral.
+// See AtmHydroSplit.h for the whole argument. Called once per iteration, before the RK4 sweep,
+// from `tn` (constant through the sweep, so deterministic). Never called when the knob is off.
+void cAtmosphereModel::computeHydrostaticSplit(){
+    namespace HS = AtmHydroSplit;
+    const size_t n = (size_t)im * jm * km;
+    if(HS::p_hb.size() != n){ HS::p_hb.assign(n, 0.0); HS::n_i = im; HS::n_j = jm; HS::n_k = km; }
+
+    // THE INTEGRAL IS OVER PHYSICAL HEIGHT, in (g/u_0^2) per metre, NOT over rad.z with the RHS's
+    // radial operator. The horizontal gradient below is taken with inv_rm, whose length unit is
+    // metricShellLength() -- the same as Coriolis's force_nd -- so p_hb must be p'/(rho u_0^2) and
+    // its hydrostatic law is dp_nd/dz = (g/u_0^2) * dT/T_ref in METRES. The second version
+    // integrated (g*L_atm/u_0^2)*b*d(rad.z)/exp_rm instead; with the legacy exp_rm = 1/(rm+1)
+    // that is the physical integral times L_atm*(rm+1)/J, J = zeta*L_atm*exp(zeta*(rm-1)) --
+    // 1.9x weak at the ground, ~19x at 5 km, ~50x at the lid (exp_rm's 23x-spread defect again),
+    // and it measured median |pgf|/|cor| 0.158 against ATM_HYDRO_PGF's 2.2 (output_hs_1rad).
+    // rhs_u no longer contains b, so the radial cancellation holds whatever this scaling is.
+    const double coeff = HS::strength() * buoyancy_ramp * buoyancy * (g / (u_0 * u_0));   // per metre
+    std::vector<double> zh(im);
+    for(int i = 0; i < im; i++) zh[i] = get_layer_height(i);                               // metres
+
+    double pmax = 0.0;
+    #pragma omp parallel for collapse(2) schedule(static) reduction(max:pmax)
+    for(int j = 0; j < jm; j++){
+        for(int k = 0; k < km; k++){
+            auto f = [&](int i) -> double {           // (g/u_0^2) dT/T_ref per metre, zero in rock
+                if(!AtomUtils::is_air(h, i, j, k)) return 0.0;
+                const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
+                return coeff * (tn.x[i][j][k] - t_ref_level[i]) / tref;
+            };
+            // Integrated UPWARD from p_hb = 0 at i = 0, a common HEIGHT in every column. The first
+            // version anchored p_hb = 0 at the LID and measured the thermal wind upside down: the
+            // gradient at z was -INT_z^lid grad(b), largest at the ground and zero aloft, and the
+            // force had the SAME sign as Coriolis in 90 % of the 20-70 deg cells above 3 km
+            // (output_hs_1lid, iteration 620). The column constant is the barotropic mode, which
+            // a rigid-lid model sets through continuity and this one cannot; referencing the
+            // ground assumes zero surface geostrophic wind -- ATM_HYDRO_PGF's level-1 choice,
+            // which measured band p05 residual 0.079. Rock cells carry b = 0, so over terrain
+            // the column is referenced at its own ground (see the TERRAIN note in the header).
+            double p = 0.0, f_lo = f(0);
+            HS::p_hb[((size_t)0 * jm + j) * km + k] = 0.0;
+            for(int i = 1; i < im; i++){
+                const double f_hi = f(i);
+                p += 0.5 * (f_lo + f_hi) * (zh[i] - zh[i-1]);
+                HS::p_hb[((size_t)i * jm + j) * km + k] = p;
+                f_lo = f_hi;
+                if(std::fabs(p) > pmax) pmax = std::fabs(p);
+            }
+        }
+    }
+    if(checkpoint > 0 && iter_n % checkpoint == 0)
+        cout << "[HYDRO_SPLIT] s=" << HS::strength() << "  ramp=" << buoyancy_ramp
+             << "  coeff=" << coeff << "  max|p_hb| nd=" << pmax << endl;
+}
+
+
 // THE POSITIVITY CLIPS ON THE MOISTURE SCALARS, INSTRUMENTED (see ColumnWaterBudget.h,
 // "SPLITTING THE RUNGEKUTTA BUCKET"). With ATM_CWB_DIAG unset -- the default -- this is exactly
 // `dst = std::max(0.0, expr)` plus one branch on a bool hoisted out of the loop.
@@ -77,6 +134,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
     auto begin = std::chrono::high_resolution_clock::now();
 
     computeLevelMeanTemperature();   // refresh buoyancy base state t_ref_level[i]
+    if(AtmHydroSplit::enabled()) computeHydrostaticSplit();   // ATM_HYDRO_SPLIT, default off
 
     const double half_dt  = 0.5 * dt;
     const double dt_sixth = dt / 6.0;

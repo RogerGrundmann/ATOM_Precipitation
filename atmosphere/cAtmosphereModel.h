@@ -519,6 +519,7 @@ private:
     // uniform upward force everywhere instead of a buoyancy.
     std::vector<double> tv_ref_level;
     void computeLevelMeanTemperature();
+    void computeHydrostaticSplit();      // ATM_HYDRO_SPLIT (AtmHydroSplit.h), default off
 
     // Initial (non-dim) temperature at the model lid (i=im-1), snapshotted once
     // from the IC. bcRadius pins t at the lid to this so the isothermal-floor top
