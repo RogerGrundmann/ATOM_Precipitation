@@ -1318,12 +1318,18 @@ void cAtmosphereModel::initWaterWapour() {
                 // Confining the floor separates the two: the cirrus levels keep it, the liquid
                 // deck goes back to Manabe-Wetherald.
                 static const double rh_min_ptop = [](){
-                    // DEFAULT 475 hPa since 2026-08-31 -- the precipitation-optimal point,
-                    // predicted from the 450/500 bracket and confirmed at 992 mm/a vs NASA 978.
-                    // ATM_RH_MIN_PTOP=0 restores the unconfined floor.
+                    // DEFAULT 490 hPa SINCE 2026-09-23 (was 475 from 2026-08-31), at the user's
+                    // instruction, on the re-sweep after ATM_MC_EVAP_LIMIT stopped the drift
+                    // (output_pe450/490/500/525 + output_el2 as 475, 600 from scratch). On that
+                    // branch PTOP is a PURE SCALE knob: bands flat (35-65 183.5-186.0, 65-90 20.5
+                    // in all five), sigma/mean flat to 0.8 %, r 0.460-0.470 with no optimum, the
+                    // land/ocean RATIO invariant 0.689-0.696 (NASA 0.741). Only the mean moves:
+                    // parity-mean 907.1 at 475 (-7.3 % of NASA 978.3), 965.2 at 490 (-1.3 %).
+                    // A FITTED CONSTANT, like 475 was. ATM_RH_MIN_PTOP=475 restores the old
+                    // default; =0 the unconfined floor.
                     const char* e = getenv("ATM_RH_MIN_PTOP");
-                    const double v = e ? atof(e) : 475.0;
-                    return (v >= 0.0) ? v : 475.0; }();
+                    const double v = e ? atof(e) : 490.0;
+                    return (v >= 0.0) ? v : 490.0; }();
                 if (rh_min_ptop > 0.0) {
                     const double p_lo = rh_min_ptop + 200.0;          // no floor below this
                     double u = (p_lo - p_u) / (p_lo - rh_min_ptop);
