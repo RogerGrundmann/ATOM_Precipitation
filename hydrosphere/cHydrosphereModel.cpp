@@ -506,7 +506,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
              << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "0")
              << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
-             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "0")
+             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1*")
              << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
              << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")

@@ -72,7 +72,11 @@ public:
     static const double dr_stretch;                                         // sinh stretching parameter for radial coordinate (cosh(dr_stretch) = step ratio surface/bottom)
 
     // ==================================================================================
-    // HYD_BC_SECOND_ORDER -- default 0 = the SHIPPED (truncated) behaviour, bit-identical.
+    // HYD_BC_SECOND_ORDER -- *** DEFAULT 1 = SECOND ORDER SINCE 2026-09-23, AT THE USER'S
+    // INSTRUCTION. c43 = 4/3, c13 = 1/3. HYD_BC_SECOND_ORDER=0 restores the truncated branch
+    // exactly. Measured before the flip: a NULL at 300 iterations (5-6 figures on every field).
+    // The radial p_dyn BC under HYD_RUN_NEUMANN is first-order ON PURPOSE (stretched grid) and
+    // does not use these constants. ***
     //
     // THESE WERE DECLARED `const int` AND SILENTLY TRUNCATED: c43 = 4.0/3.0 -> 1 and
     // c13 = 1.0/3.0 -> 0. Every `c43*A[1] - c13*A[2]` in this model has therefore been
@@ -99,7 +103,7 @@ public:
     // ==================================================================================
     static bool bcSecondOrder() {
         static const bool on = [](){
-            const char* e = getenv("HYD_BC_SECOND_ORDER"); return e && atoi(e) != 0; }();
+            const char* e = getenv("HYD_BC_SECOND_ORDER"); return !(e && atoi(e) == 0); }();
         return on;
     }
     const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;

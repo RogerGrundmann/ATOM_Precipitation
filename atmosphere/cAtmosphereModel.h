@@ -89,9 +89,15 @@ public:
     static const double the0, phi0, r0, residuum_ref_atm;
 
     // ==================================================================================
-    // ATM_BC_SECOND_ORDER -- default 0 = the SHIPPED (truncated) behaviour, bit-identical.
+    // ATM_BC_SECOND_ORDER -- *** DEFAULT 1 = SECOND ORDER SINCE 2026-09-23, AT THE USER'S
+    // INSTRUCTION ("it needs a double type, fix this real"). c43 = 4/3 and c13 = 1/3 as the
+    // call-site comments always said. ATM_BC_SECOND_ORDER=0 restores the truncated first-order
+    // branch exactly. ⚠ The 2026-09-21 600-iteration arm of this same flip reactivated the k=1
+    // coast-seam mode (max|v| 2.28 -> 26.0 m/s at 11N 1E, 236 m, contained by the coastal
+    // sponge); see the note in bcSecondOrder(). That consequence is expected on this default
+    // until the seam is damped on its own terms. ***
     //
-    // DECLARED `const int`, SO THESE TRUNCATE: c43 = 4.0/3.0 -> 1 and c13 = 1.0/3.0 -> 0, and
+    // WAS DECLARED `const int`, SO THESE TRUNCATED: c43 = 4.0/3.0 -> 1 and c13 = 1.0/3.0 -> 0, and
     // every `c43*A[1] - c13*A[2]` in this model executes as plain `A[1]`. The intent -- and the
     // comment at every call site -- is the SECOND-ORDER one-sided Neumann condition,
     // dA/dn = 0 discretised as (-3A[0] + 4A[1] - A[2])/(2h) = 0, i.e. A[0] = (4A[1] - A[2])/3.
@@ -157,7 +163,10 @@ public:
             // to leave the noise. A both-directions byte check clears REVERSIBILITY, never
             // stability. ATM_NUE_GRAD was flipped in the same step and is KEPT: on the same
             // trio it moves `max v` by 6e-06 and is a null everywhere but the two starved bands.
-            const char* e = getenv("ATM_BC_SECOND_ORDER"); return e && atoi(e) != 0; }();
+            // *** RE-FLIPPED ON 2026-09-23 AT THE USER'S INSTRUCTION, WITH THE NOTE ABOVE IN
+            // FRONT OF IT: the seam mode is the known cost, and the fix for it is seam damping,
+            // not the truncated boundary condition. ATM_BC_SECOND_ORDER=0 restores first order.
+            const char* e = getenv("ATM_BC_SECOND_ORDER"); return !(e && atoi(e) == 0); }();
         return on;
     }
     const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
