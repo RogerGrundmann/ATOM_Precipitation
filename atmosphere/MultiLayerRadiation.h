@@ -289,8 +289,12 @@ public:
         // against ZERO such cells off-branch, and land-mean radiation falls 327.1 -> 306.4 W/m2.
         // That is the saturation pathology the de-saturation split above exists to prevent.
         // See the tau_dry mass scaling below for why, and what has to be true before it flips.
+        // DEFAULT ON SINCE 2026-09-23, at the user's instruction: the 2026-08-28 blocker (per-layer
+        // saturation from cwp_cap_col sharing a column total among thinner layers) predates
+        // ATM_CLOUD_TAU_MAX (layer bound, default on) and ATM_CWP_CAP being disabled (2026-08-31).
+        // ATM_RAD_TOPO=0 restores the sea-level column exactly. See CLAUDE.md for the arm.
         static const bool topo_rad = [](){
-            const char* e = getenv("ATM_RAD_TOPO"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_RAD_TOPO"); return e ? atoi(e) != 0 : true; }();
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         // (No `sfc_coupled` flag here: ATM_SFC_COUPLED was written, measured as a null and
         // REMOVED -- it solved the surface balance with a neutral-lapse constraint and never

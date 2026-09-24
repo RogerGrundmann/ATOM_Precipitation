@@ -1334,7 +1334,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  QC_CRIT="      << ev("ATM_QC_CRIT",      "0.05*")
           << "  ICE_COLD="     << ev("ATM_ICE_COLD",     "1*")
           << "  T_FLOOR="      << ev("ATM_T_FLOOR",      "216.65*")
-          << "  RAD_TOPO="     << ev("ATM_RAD_TOPO",     "0*")
+          << "  RAD_TOPO="     << ev("ATM_RAD_TOPO",     "1*")
           << "  RAD_EQUIL="    << ev("ATM_RAD_EQUIL",    "0*")
           << "  SW_INSOL="     << ev("ATM_SW_INSOL",     "0*")
           << "  ICE_RAW_FLUX=" << ev("ATM_ICE_RAW_FLUX", "0*")
