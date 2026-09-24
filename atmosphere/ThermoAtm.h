@@ -73,7 +73,9 @@ public:
     }
 
     // ------------------------------------------------------------------
-    void waterVapourEvaporation()
+    // calls_per: iterations between calls. The loop calls this every moist_stride (2, or 10 in the
+    // inviscid phase) iterations, so a FLUX must deliver calls_per iterations' worth each call.
+    void waterVapourEvaporation(int calls_per = 1)
     {
         using namespace std;
         cout << "\n\n\n      WaterVapourEvaporation  (model: " << m.evap_model << ")" << endl;
@@ -202,7 +204,14 @@ public:
         // ==================================================================
         static const bool evap_flux = [](){
             const char* e = getenv("ATM_EVAP_FLUX"); return e && atoi(e) != 0; }();
-        const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0;
+        // Seconds of physical time per CALL. FIXED 2026-09-24: this was per ITERATION, while the
+        // time loop calls the routine only every moist_stride = 2 iterations, so ATM_EVAP_FLUX and
+        // ATM_WATER_CLOSURE (default on since 5c7b001) delivered HALF of E. ATM_EVAP_STRIDE_FIX=0
+        // restores the half-rate branch exactly (default 1).
+        static const bool evap_stride_fix = [](){
+            const char* e = getenv("ATM_EVAP_STRIDE_FIX"); return e ? atoi(e) != 0 : true; }();
+        const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0
+                                  * (evap_stride_fix ? (double)calls_per : 1.0);
 
         // ==================================================================
         // ATM_WATER_CLOSURE=<0|1> -- the B+3 surface flux PAIRED with the RK4 scalar sync.

@@ -1351,6 +1351,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
           << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "0*")
+          << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "1*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
@@ -1735,7 +1736,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             ThermoAtm(*this).forces();
             ThermoAtm(*this).standAtm_DewPoint_HumidRel();              // International Standard Atmosphere temperature profile, dew point temperature, relative humidity profile
             ColumnWaterBudget::mark(*this, "ThermoAtm(pre)");
-            ThermoAtm(*this).waterVapourEvaporation();                  // correction of surface water vapour by evaporation
+            ThermoAtm(*this).waterVapourEvaporation(moist_stride);      // correction of surface water vapour by evaporation (flux scaled by the call interval)
             ColumnWaterBudget::mark(*this, "evaporation");
             ThermoAtm(*this).latentSensibleHeat();                      // latent and sensible heat
             ThermoAtm(*this).vegetationLand();                          // vegetation on land
