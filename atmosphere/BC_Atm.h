@@ -792,7 +792,7 @@ public:
         };
         constexpr int n_extrap = sizeof(fields_extrap) / sizeof(fields_extrap[0]);
 
-        // ATM_SEAM_PERIODIC=<0|1>, DEFAULT 0 = shipped. The seam k = 0 (== k = km-1) is not a
+        // ATM_SEAM_PERIODIC=<0|1>, DEFAULT 1 since 2026-09-24 (was 0). The seam k = 0 (== k = km-1) is not a
         // wall: it is the point BETWEEN k = km-2 and k = 1 on a periodic circle. The shipped
         // reconstruction averages two one-sided NEUMANN extrapolations, each made as if the seam
         // were a wall, using c43/c13. With the first-order constants (c43 = 1, c13 = 0 -- the
@@ -807,8 +807,12 @@ public:
         // extrapolated ones, independent of c43/c13 -- i.e. the pre-B.5 seam exactly, with
         // second order kept everywhere else. At first order (ATM_BC_SECOND_ORDER=0) it is a
         // no-op BY ARITHMETIC, which the byte check uses as its consistency test.
+        // DEFAULT ON SINCE 2026-09-24, at the user's instruction. ATM_SEAM_PERIODIC=0 restores the
+        // two-sided extrapolation. Verified: a byte-exact no-op at first order; whether it removes
+        // the k = 1 seam mode needs a ~600-iteration run (the mode takes ~300 to leave the noise),
+        // which was postponed at the flip.
         static const bool seam_periodic = [](){
-            const char* e = getenv("ATM_SEAM_PERIODIC"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_SEAM_PERIODIC"); return e ? atoi(e) != 0 : true; }();
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
