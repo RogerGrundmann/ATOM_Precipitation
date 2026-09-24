@@ -1086,7 +1086,8 @@ void findCloudBaseLFS() {
                     double dummy_vel_w_u = M_u_prev * m.w_u.x[i-1][j][k]
                         + step_prev * m.E_u.x[i-1][j][k] * m.w.x[i-1][j][k];
 
-                    // ATM_MC_S_NDIM=<0|1>, DEFAULT 0 = shipped (B.10 remainder, 2026-09-24).
+                    // ATM_MC_S_NDIM=<0|1>, DEFAULT 1 SINCE 2026-09-24 at the user's instruction (was 0;
+                    // =0 restores the double division). B.10 remainder.
                     // s and s_u are ALREADY non-dimensional (s = cp_l*T/s_0, :321), so the
                     // trailing `/ m.s_0` divides by s_0 = 274 516 a SECOND time and collapses s_u
                     // to ~0 one level above cloud base: the parcel reads ~0 K, the saturation loop
@@ -1096,7 +1097,7 @@ void findCloudBaseLFS() {
                     // |s_u - s|*t_0 > 100 K, 100 % updraft-dominated, 50 % at a mass-flux edge.
                     // A leftover of s having once been dimensional (J/kg). =1 drops the extra /s_0.
                     static const int mc_s_ndim = [](){ const char* e = getenv("ATM_MC_S_NDIM");
-                                                       return e ? atoi(e) : 0; }();
+                                                       return e ? atoi(e) : 1; }();
                     double dummy_s_u = (mc_s_ndim == 0)
                         ? (M_u_prev * m.s_u.x[i-1][j][k]
                            + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
@@ -1228,7 +1229,7 @@ void findCloudBaseLFS() {
                     // * step -> J/(m2 s)) and needs / s_0; the M_d*s_d and E_d*s, D_d*s_d terms
                     // are already non-dimensional. The shipped form divides all of them.
                     static const int mc_s_ndim_d = [](){ const char* e = getenv("ATM_MC_S_NDIM");
-                                                         return e ? atoi(e) : 0; }();
+                                                         return e ? atoi(e) : 1; }();
                     double dummy_s_d = (mc_s_ndim_d == 0)
                         ? (M_d_ip1 * m.s_d.x[i+1][j][k]
                            - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]

@@ -1350,7 +1350,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
-          << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "0*")
+          << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "1*")
           << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
