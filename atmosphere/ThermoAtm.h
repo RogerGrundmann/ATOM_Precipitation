@@ -17,6 +17,13 @@
 
 using namespace AtomUtils;
 
+// ATM_LAND_BUCKET scratch: soil water per land column [mm], jm*km. Namespace scope, NOT a model
+// member (sizeof hazard). Initialised on the first call from the NASA precipitation climatology.
+namespace LandBucket {
+    inline std::vector<double> W;
+    inline bool initialised = false;
+}
+
 // Physical constants for precipitable water column integration
 namespace PrecipWaterConstants {
     constexpr double HPA_TO_PA        = 100.0;
@@ -255,10 +262,90 @@ public:
         double inj_pw = 0.0, wsum = 0.0;      // cos-lat weighted precipitable water added [mm]
         long   n_cap = 0, n_cell = 0;
 
+        // ==================================================================
+        // ATM_LAND_BUCKET=<W_cap in mm>, DEFAULT 0 = OFF (land E = 0, shipped). Manabe (1969) bucket:
+        // each land column carries soil water W in [0, W_cap];
+        //     E_land = beta * E_pot,   beta = min(1, W / (0.75 W_cap)),
+        //     W += P - E_land (per call), runoff = max(0, W - W_cap) leaves the budget.
+        // E_pot is the ACTIVE bulk formula (Meyer by default) at the land surface: e_sat at the
+        // temperature of the first air cell above the ground (i0 = i_topography), air humidity and
+        // wind of that same cell. E_land is deposited into the first three air levels i0..i0+2
+        // (exp(-n) weights) of the ground column, into the budget's own layer mass rho*dz, and
+        // capped by the water in the bucket. Only acts on the ATM_WATER_CLOSURE branch (the flux
+        // path); with the closure off it is ignored. Evaporation writes no t, over land as over ocean.
+        // W0 = W_cap * min(1, P_NASA * 365 / 1000 mm): wet climates start full, deserts empty. The
+        // bucket's memory is weeks to months (~1e6-1e7 iterations), so on affordable runs W stays
+        // near W0 and this behaves as a beta prescribed by the observed precipitation.
+        // ==================================================================
+        static const double bucket_cap = [](){
+            const char* e = getenv("ATM_LAND_BUCKET"); return e ? atof(e) : 0.0; }();
+        const bool bucket_on = water_closure && bucket_cap > 0.0;
+        if (bucket_on && !LandBucket::initialised) {
+            LandBucket::W.assign(static_cast<size_t>(m.jm) * m.km, 0.0);
+            for (int j = 0; j < m.jm; j++)
+                for (int k = 0; k < m.km; k++)
+                    LandBucket::W[static_cast<size_t>(j) * m.km + k] =
+                        bucket_cap * std::min(1.0, std::max(0.0, m.precipitation_NASA.y[j][k]) * 365.0 / 1000.0);
+            LandBucket::initialised = true;
+        }
+        double lb_wsum = 0.0, lb_W = 0.0, lb_beta = 0.0, lb_E = 0.0, lb_P = 0.0, lb_ro = 0.0;   // cos-lat means, land
+
         #pragma omp parallel for collapse(2) schedule(static) \
-                reduction(+:inj_pw,wsum,n_cap,n_cell,wc_skin)
+                reduction(+:inj_pw,wsum,n_cap,n_cell,wc_skin,lb_wsum,lb_W,lb_beta,lb_E,lb_P,lb_ro)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
+
+                if (bucket_on && is_land(m.h, 0, j, k)) {
+                    const int i0 = m.i_topography[j][k];
+                    m.Evaporation_Dalton.y[j][k] = 0.0;
+                    m.Evaporation_Meyer.y[j][k]  = 0.0;
+                    m.Evaporation_Rohwer.y[j][k] = 0.0;
+                    m.Evaporation.y[j][k]        = 0.0;
+                    if (i0 < 0 || i0 + 3 >= m.im - 1) continue;
+                    double& W = LandBucket::W[static_cast<size_t>(j) * m.km + k];
+                    const double p_g   = m.p_stat.x[i0][j][k];                                  // [hPa]
+                    const double t_g   = std::max(180.0, m.t.x[i0][j][k] * m.t_0);              // [K]
+                    const double E_s   = (t_g >= m.t_0) ? m.hp * AtomUtils::exp_func(t_g, 17.2694, 35.86)
+                                                        : m.hp * AtomUtils::exp_func(t_g, 21.8746,  7.66);
+                    const double e_air = std::max(0.0, m.c.x[i0][j][k]) * p_g / m.ep;          // [hPa]
+                    const double sd    = std::max(0.0, E_s - e_air);
+                    const double vel   = sqrt((m.u.x[i0][j][k] * m.u.x[i0][j][k]
+                                             + m.v.x[i0][j][k] * m.v.x[i0][j][k]
+                                             + m.w.x[i0][j][k] * m.w.x[i0][j][k]) / 3.0) * m.u_0;   // [m/s]
+                    const double u_kmh = vel * ms_to_kmh;
+                    const double cD = AtomUtils::C_Dalton(i0, j, k, m.coeff_Dalton, m.u_0, m.u, m.v, m.w);
+                    const double coeff_D = std::max(0.0, cD) * 24.0;
+                    const double coeff_M = K_Meyer * hPa_to_mmHg * (1.0 + u_kmh / 16.0) / 30.0;
+                    const double coeff_R = 0.771 * (1.465 - 0.000732 * p_g * hPa_to_mmHg)
+                                         * (0.44 + 0.0733 * u_kmh) * hPa_to_mmHg;
+                    const double beta  = std::min(1.0, W / (0.75 * bucket_cap));
+                    m.Evaporation_Dalton.y[j][k] = beta * coeff_D * sd;                         // [mm/d]
+                    m.Evaporation_Meyer.y[j][k]  = beta * coeff_M * sd;
+                    m.Evaporation_Rohwer.y[j][k] = beta * coeff_R * sd;
+                    double E_md = (active == EvapModel::Meyer)  ? m.Evaporation_Meyer.y[j][k]
+                                : (active == EvapModel::Rohwer) ? m.Evaporation_Rohwer.y[j][k]
+                                :                                 m.Evaporation_Dalton.y[j][k];
+                    double E_mm = E_md / 8.64e4 * sec_per_iter;                                  // [mm] this call
+                    E_mm = std::min(E_mm, W);                                                    // cannot take what is not there
+                    m.Evaporation.y[j][k] = (sec_per_iter > 0.0) ? E_mm / sec_per_iter * 8.64e4 : 0.0;
+                    const double P_mm = std::max(0.0, m.Precipitation.x[0][j][k]) * sec_per_iter;   // [mm] this call
+                    W += P_mm - E_mm;
+                    const double ro = std::max(0.0, W - bucket_cap);
+                    W = std::min(W, bucket_cap);
+                    double wtot = 0.0;
+                    for (int n = 0; n < 3; n++) wtot += std::exp(-(double)n);
+                    for (int n = 0; n < 3; n++) {
+                        const int i = i0 + n;
+                        double rho = m.r_humid.x[i][j][k];
+                        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                        const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                        if (dz > 0.0) m.c.x[i][j][k] += E_mm * (std::exp(-(double)n) / wtot) / (rho * dz);
+                    }
+                    const double cw = sin(m.the.z[j]);
+                    lb_wsum += cw; lb_W += cw * W; lb_beta += cw * beta;
+                    lb_E += cw * E_mm; lb_P += cw * P_mm; lb_ro += cw * ro;
+                    continue;
+                }
 
                 if (is_land(m.h, 0, j, k)) {
                     m.Evaporation_Dalton.y[j][k] = 0.0;
@@ -482,6 +569,13 @@ public:
              << fixed << setprecision(2)
              << "   at the c_sat cap: " << (n_cell > 0 ? 100.0 * n_cap / n_cell : 0.0)
              << " % of " << n_cell << " ocean cells" << endl;
+        if (bucket_on && lb_wsum > 0.0) {
+            const double to_mm_a = (sec_per_iter > 0.0) ? 365.0 * 8.64e4 / sec_per_iter / lb_wsum : 0.0;
+            cout << "      ATOM: [LAND BUCKET] W_cap " << fixed << setprecision(1) << bucket_cap
+                 << " mm   mean W " << lb_W / lb_wsum << " mm   mean beta " << setprecision(3) << lb_beta / lb_wsum
+                 << "   land E " << setprecision(1) << lb_E * to_mm_a << " mm/a   land P " << lb_P * to_mm_a
+                 << " mm/a   runoff " << lb_ro * to_mm_a << " mm/a (cos-lat land means)" << endl;
+        }
         if (water_closure)
             cout << "      ATOM: [WATER CLOSURE] bulk E into levels 1.." << n_spread
                  << " (100 %, no cap); level-0 skin set to level 1, water change "
