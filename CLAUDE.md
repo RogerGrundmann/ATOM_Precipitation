@@ -48,6 +48,15 @@ not regrid this model, it would **extend the shell 5.1x** while looking like a g
 same goes for `buildReferenceColumn`: ATHAD integrates a DRY ADIABAT because its column is one
 by construction, and that law puts this tree's 16 km lid at 117 K.
 
+## ⭐ `ATM_HYDRO_SPLIT` IS DEFAULT 1.0 SINCE 2026-09-24 (B.2, at the user's instruction)
+
+600 from scratch (`output_hsf_ctl`/`hsf_on`) and the 600 -> 1200 continuation (`output_hsf1200_*`): p05
+geostrophic residual **0.055** against the control's 1.000, pressure opposing Coriolis in 96 %, and the
+jet GENERATED for the first time -- `max|w|` 27.12 -> 27.70 m/s over 600 iterations where the control decays
+26.47 -> 26.36. Climate null (1001.2 vs 1000.5 mm/a, bands identical). **Open at the flip:** non-hydrostatic
+`p_dyn` still grows (0.192 -> 0.265, slowing -35 %, 11x below the 3.0 ceiling) and the jet has not
+levelled off. Byte check both ways (13/14, banner token only). `ATM_HYDRO_SPLIT=0` restores the old branch.
+
 ## The ported A/B knobs, and what each MEASURED here
 
 All but `ATM_V_MASSBAL` default to what this tree has always done, and all are verified

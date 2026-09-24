@@ -63,8 +63,13 @@
 
 namespace AtmHydroSplit {
 
+// DEFAULT 1.0 SINCE 2026-09-24, at the user's instruction (B.2). 600 from scratch (hsf_ctl/on) and the
+// 600 -> 1200 continuation: p05 geostrophic residual 0.055 against the control's 1.000, pressure opposing
+// Coriolis in 96 %, the jet GENERATED (max|w| 27.1 -> 27.7 m/s where the control decays), climate null,
+// clean. Open at the flip: the non-hydrostatic p_dyn still grows (0.19 -> 0.27 over 600, slowing -35 %,
+// 11x below the 3.0 ceiling) and the jet has not levelled off. ATM_HYDRO_SPLIT=0 restores the old branch.
 inline double strength(){
-    static const double s = [](){ const char* e = getenv("ATM_HYDRO_SPLIT"); return e ? atof(e) : 0.0; }();
+    static const double s = [](){ const char* e = getenv("ATM_HYDRO_SPLIT"); return e ? atof(e) : 1.0; }();
     return s;
 }
 inline bool enabled(){ return strength() != 0.0; }

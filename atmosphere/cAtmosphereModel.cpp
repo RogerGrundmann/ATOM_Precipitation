@@ -1370,7 +1370,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  METRIC_SIN_FLOOR=" << ev("ATM_METRIC_SIN_FLOOR", "0.26*")
           << "  TROPO_INDEX_FIX=" << ev("ATM_TROPO_INDEX_FIX", "1*")
           << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
-          << "  HYDRO_SPLIT=" << ev("ATM_HYDRO_SPLIT", "0.0*")
+          << "  HYDRO_SPLIT=" << ev("ATM_HYDRO_SPLIT", "1.0*")
           << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
           << "  EVAP_FLUX=" << ev("ATM_EVAP_FLUX", "0*")
           << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
