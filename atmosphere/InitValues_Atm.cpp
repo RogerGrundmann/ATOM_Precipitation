@@ -1327,9 +1327,15 @@ void cAtmosphereModel::initWaterWapour() {
                     // parity-mean 907.1 at 475 (-7.3 % of NASA 978.3), 965.2 at 490 (-1.3 %).
                     // A FITTED CONSTANT, like 475 was. ATM_RH_MIN_PTOP=475 restores the old
                     // default; =0 the unconfined floor.
+                    // 490 -> 482 ON 2026-09-24, at the user's instruction, after ATM_RAD_TOPO went
+                    // on (+5.5 % precip): output_pr465/475/482/490, 600 from scratch, parity-mean
+                    // 927.4 / 953.5 / 979.4 / 1010.8 (NASA 978.3); still a pure scale knob (35-65
+                    // 205.0-205.8, 65-90 24.4, land/ocean ratio 0.766-0.773). ⚠ Fitted on the branch
+                    // WITHOUT ATM_WATER_CLOSURE (default since 5c7b001) and without the evaporation
+                    // stride fix; re-fit on the current default is owed. =490 restores.
                     const char* e = getenv("ATM_RH_MIN_PTOP");
-                    const double v = e ? atof(e) : 490.0;
-                    return (v >= 0.0) ? v : 490.0; }();
+                    const double v = e ? atof(e) : 482.0;
+                    return (v >= 0.0) ? v : 482.0; }();
                 if (rh_min_ptop > 0.0) {
                     const double p_lo = rh_min_ptop + 200.0;          // no floor below this
                     double u = (p_lo - p_u) / (p_lo - rh_min_ptop);

@@ -1325,7 +1325,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RH_CRIT="      << ev("ATM_RH_CRIT",      "0.30*")
           << "  RH_MIN="       << ev("ATM_RH_MIN",       "0.65*")
           << "  RH_MIN_LAT="   << ev("ATM_RH_MIN_LAT",   "1*")
-          << "  RH_MIN_PTOP="  << ev("ATM_RH_MIN_PTOP",  "490*")
+          << "  RH_MIN_PTOP="  << ev("ATM_RH_MIN_PTOP",  "482*")
           << "  RH_CRIT_ICE="  << ev("ATM_RH_CRIT_ICE",  "off*") << "\n";
         b << "      AGCM: [RUN CONFIG]"
           << "  CLOUD_FRAC="   << ev("ATM_CLOUD_FRAC",   "1*")
