@@ -224,6 +224,8 @@ public:
         //   * Level 0 (the prescribed skin, not RK4-integrated) is set to level 1 AFTER the flux:
         //     zero gradient, so RK4's vertical diffusion carries no second, resolved surface flux
         //     on top of E. That copy changes water in a counted layer; it is printed separately.
+        //   * It ALSO sets ATM_SATADJ_FADE=2 when that is unset (SaturationAdjustment::fadeMode):
+        //     the cold fade deletes cloud liquid (-4.8e+04 mm/a) and stops being discarded too.
         //   * It ALSO forces ATM_DAMP_Q_MASS (cAtmosphereModel.cpp): the shipped moisture filter's
         //     +2.4e+06 mm/a stops being discarded once the sync is on -- a THREE-way cancellation.
         //   * The skin copy tracks level 1, so while level 1 dries after losing the ~5e+06 mm/a
@@ -232,8 +234,10 @@ public:
         //     equals E only once level 1 has settled.
         // Land E stays zero (structural, not in scope). Evaporation still writes no t.
         // ==================================================================
+        // DEFAULT ON SINCE 2026-09-24, at the user's instruction, on 20-iteration evidence only
+        // (the 600-iteration arm was postponed). ATM_WATER_CLOSURE=0 restores all three pieces.
         static const bool water_closure = [](){
-            const char* e = getenv("ATM_WATER_CLOSURE"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_WATER_CLOSURE"); return e ? atoi(e) != 0 : true; }();
         double wc_skin = 0.0;                 // cos-lat weighted water change from the level-0 copy [mm]
 
         // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how

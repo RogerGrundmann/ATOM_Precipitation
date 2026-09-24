@@ -48,6 +48,17 @@ not regrid this model, it would **extend the shell 5.1x** while looking like a g
 same goes for `buildReferenceColumn`: ATHAD integrates a DRY ADIABAT because its column is one
 by construction, and that law puts this tree's 16 km lid at 117 K.
 
+## ⭐ `ATM_WATER_CLOSURE` IS DEFAULT ON SINCE 2026-09-24 — ON 20-ITERATION EVIDENCE ONLY
+
+At the user's instruction. One switch for a four-way cancellation in the water budget: the `c_eq` evaporation
+re-pin (~5e+06 mm/a), the RK4 discard of every pre-RK4 direct write (`leapfrog_reset`), the index-space
+moisture filter (+2.4e+06), and the cold fade (-4e+04). =1 (default) forces `ATM_RK_SCALAR_SYNC=2`,
+`ATM_DAMP_Q_MASS=1`, `ATM_SATADJ_FADE=2` (unless set), and makes E the bulk flux from the level-1 humidity into
+levels 1..3. 20-iteration restart (`ATM_CWB_DIAG`): `leapfrog_reset` 0, SaturationAdjust 2e-10, every large
+row gone; NET -1.9e+04 = orographic Shapiro -1.0e+04, the level-0 skin transient, the seam -2.5e+03.
+**Precipitation 1030 -> 931 mm/a within 4 s as the surface air dries: NOT a climate; no 600-iteration arm has
+been run.** The PTOP sweep of that day ran on the OLD default. `ATM_WATER_CLOSURE=0` restores all four pieces.
+
 ## ⭐ `ATM_HYDRO_SPLIT` IS DEFAULT 1.0 SINCE 2026-09-24 (B.2, at the user's instruction)
 
 600 from scratch (`output_hsf_ctl`/`hsf_on`) and the 600 -> 1200 continuation (`output_hsf1200_*`): p05

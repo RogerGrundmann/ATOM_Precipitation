@@ -1342,7 +1342,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
           << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
           << "  SATADJ_PHASE=" << ev("ATM_SATADJ_PHASE", "1*")
-          << "  SATADJ_FADE=" << ev("ATM_SATADJ_FADE", "0*")
+          << "  SATADJ_FADE=" << ev("ATM_SATADJ_FADE", "0*") << "(2 when WATER_CLOSURE on)"
           << "  SATADJ_FREEZE_LATENT=" << ev("ATM_SATADJ_FREEZE_LATENT", "0*")
           << "  MICRO_NDIM=" << ev("ATM_MICRO_NDIM", "1.0*")
           << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "1.0*")
@@ -1350,7 +1350,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
-          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*")
+          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "1*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
@@ -1576,8 +1576,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // NET +2.38e+06 mm/a with the sync and the shipped filter). The filter, the re-pin
                 // and the discard are a THREE-way cancellation, so the closure knob owns all three.
                 static const bool damp_q_mass = [](){
-                    const char* w = getenv("ATM_WATER_CLOSURE");
-                    if (w && atoi(w) != 0) return true;
+                    const char* w = getenv("ATM_WATER_CLOSURE");   // default ON since 2026-09-24
+                    if (!w || atoi(w) != 0) return true;
                     const char* e = getenv("ATM_DAMP_Q_MASS"); return e && atoi(e) != 0; }();
                 if(!damp_q_mass){
                     AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
@@ -1914,8 +1914,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // ~5e+06 mm/a injection and rained 7688 mm/a; replacing the re-pin without syncing
         // leaves every direct write of the pre-RK4 physics discarded.
         static const int rk_scalar_sync = [](){
-            const char* w = getenv("ATM_WATER_CLOSURE");
-            if (w && atoi(w) != 0) return 2;
+            const char* w = getenv("ATM_WATER_CLOSURE");       // default ON since 2026-09-24
+            if (!w || atoi(w) != 0) return 2;
             const char* e = getenv("ATM_RK_SCALAR_SYNC");
             return e ? atoi(e) : 0; }();
         if(rk_scalar_sync != 0){

@@ -150,9 +150,15 @@ public:
     // The legacy !ColdCloud branch is untouched by this knob; it is already a known-bad branch.
     // Default 0. Nothing is flipped on an argument in this tree.
     // ==================================================================
+    // ATM_WATER_CLOSURE (default ON since 2026-09-24) folds in mode 2 when ATM_SATADJ_FADE is
+    // not set: once the RK4 sync stops discarding this routine's direct writes, the cold fade
+    // is the largest term left in ColumnWaterBudget (-4.8e+04 mm/a, 20-iteration restart). An
+    // explicit ATM_SATADJ_FADE always wins; ATM_WATER_CLOSURE=0 restores the shipped 0.
     static int fadeMode(){
         static const int v = [](){ const char* e = getenv("ATM_SATADJ_FADE");
-                                   return e ? atoi(e) : 0; }();
+                                   if (e) return atoi(e);
+                                   const char* w = getenv("ATM_WATER_CLOSURE");
+                                   return (!w || atoi(w) != 0) ? 2 : 0; }();
         return v;
     }
     // ==================================================================
