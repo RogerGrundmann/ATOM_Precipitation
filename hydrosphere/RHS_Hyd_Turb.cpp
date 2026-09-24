@@ -1196,6 +1196,28 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         if (wbudget_capture) vbud_wind.x[i][j][k] = accel_nd * v_wind.y[j][k];
     }
 
+    // HYD_DEEP_DRAG=<tau in days>, default 0 = off (B.7). In shallow mode (L_hyd = 200 m) the
+    // column is TRUNCATED at 200 m: there is no seafloor, and the momentum a real upper ocean hands
+    // DOWN through that depth to the deep ocean (where it ends in bottom friction) has no outlet.
+    // Viscous diffusion damps gradients, not the wind-driven mean flow, so KE has nothing to lose it
+    // to. This is the missing outlet: a linear stress coupling the LOWEST PROGNOSTIC level (i = 1;
+    // i = 0 is set by the boundary condition) to a deep ocean at rest,
+    //     d(v,w)/dt = -(v,w) / tau,   nondim rate  (L_hyd / u_0) / (tau * 86400).
+    // Horizontal only; u stays Dirichlet 0 at the truncation. What sets tau physically is the
+    // deep ocean's coupling time (days to weeks) -- which is also the wall: tau = 10 days is
+    // ~1.0e7 iterations at 0.0833 s/iteration, so at a physical value it acts on no run this tree
+    // can afford (same as B.9's surf_drag and HYD_BC_DRAG). [SCALES] prints the e-folding in
+    // iterations. NB apply_barotropic_mode_split re-pins each column's depth MEAN every iteration,
+    // so this acts on the baroclinic deviation at the bottom -- which is where B.6's lower-column
+    // rise lives.
+    static const double deep_drag_tau_d = [](){
+        const char* e = getenv("HYD_DEEP_DRAG"); return e ? atof(e) : 0.0; }();
+    if (deep_drag_tau_d > 0.0 && i == 1 && is_water(h, i, j, k)) {
+        const double r_nd = (L_hyd / u_0) / (deep_drag_tau_d * 86400.0);
+        rhs_v.x[i][j][k] -= r_nd * v_ijk;
+        rhs_w.x[i][j][k] -= r_nd * w_ijk;
+    }
+
     // NB: the barotropic mode is NOT injected here as a force. The geostrophic PGF
     // f x u_bt is curl-free, so the divergence projection deletes it (verified
     // vestigial: 1.5% flow change, ACC stayed deep-westward). Instead the barotropic
