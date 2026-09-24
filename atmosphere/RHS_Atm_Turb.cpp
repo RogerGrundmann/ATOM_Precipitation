@@ -1294,7 +1294,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //
     // (a) THE NON-DIMENSIONALISATION -- ATM_BUOY_CONSISTENT, which implies (b). g*dt/u_0 ->
     //     g*L_atm/u_0^2; RK4 supplies the dt, so the shipped form carries it twice. That is
-    //     item 34's second extra-*dt term, the half the surf_drag repair did not touch.
+    //     item 34's second extra-*dt term. ("the surf_drag repair" never happened: its * dt is still on the line -- see ATM_SURF_DRAG_CONSISTENT, B.9.)
     //     HERE IT IS A FACTOR OF (L_atm/u_0)/dt = 5.0e5 ON A BODY FORCE. The largest
     //     coefficient ever run on this term in the family was an intermediate 336, which drove
     //     the polar vertical runaway the comment above records; the consistent value is
@@ -1391,7 +1391,25 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double drag_profile = 1.0 - (double)(i - i_topography[j][k]) / drag_n_layers;
     if(drag_profile < 0.0) drag_profile = 0.0;
     if(drag_profile > 1.0) drag_profile = 1.0;
-    double surf_drag = (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile;
+    // ATM_SURF_DRAG_CONSISTENT=<s>, default 0.0 = shipped (B.9). The shipped coefficient
+    // kf*L_atm/u_0*dt is wrong twice: RungeKutta_Atm_Turb already multiplies rhs_v/rhs_w by dt,
+    // so the `* dt` is a SECOND one (the extra-dt defect of ATM_BUOY_CONSISTENT and the ocean's
+    // buoy_nd -- and, contrary to the comment at the buoyancy term, NOT repaired here), and
+    // ndimLength() is L_atm = 400 m where force_nd beside it uses metricShellLength() = 16 024 m.
+    // Consistent: kf*metricShellLength()/u_0 = 2.318e-02 against the shipped 5.787e-08, a
+    // factor of 4.0e5, so drag/force_nd goes 3.96e-07 -> kf/omega = 0.159 as intended.
+    // A STRENGTH that blends the coefficient, like ATM_MICRO_NDIM: s = 1 is the consistent value.
+    // The off branch is the original expression VERBATIM, so it is byte-identical by arithmetic.
+    // What to expect: the e-folding at s = 1 is 1/kf = 1 day = ~4.3e5 iterations, so on any run
+    // this tree can afford the drag is correct and slow. It becomes the model's only
+    // velocity-proportional momentum sink that is actually present.
+    static const double surf_drag_s = [](){
+        const char* e = getenv("ATM_SURF_DRAG_CONSISTENT"); return e ? atof(e) : 0.0; }();
+    const double surf_drag_ship = rayleigh_kf * ndimLength() / u_0 * dt;
+    double surf_drag = (surf_drag_s == 0.0)
+        ? (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile
+        : (surf_drag_ship + surf_drag_s * (rayleigh_kf * metricShellLength() / u_0 - surf_drag_ship))
+          * drag_profile;
 
     rhs_v.x[i][j][k] = -dpdthe_invrm - hydro_the - transport_v + diffusion_v
         + coriolis * force_nd * coriolis_the

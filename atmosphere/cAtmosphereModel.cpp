@@ -1348,6 +1348,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "1.0*")
           << "  RK_SCALAR_SYNC=" << ev("ATM_RK_SCALAR_SYNC", "0*")
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
+          << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
@@ -1398,6 +1399,21 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                       << " per ITERATION -> e-folding " << (1.0 / omega_teq) * sec_it
                       << " s of physical time; it carries no dt, so it does not scale with the step"
                       << std::endl;
+        {   // ATM_SURF_DRAG_CONSISTENT (B.9). kf = 1/86400 must match rayleigh_kf in RHS_Atm_Turb.cpp.
+            const double kf = 1.0 / 86400.0;
+            const char* e = getenv("ATM_SURF_DRAG_CONSISTENT");
+            const double s = e ? atof(e) : 0.0;
+            const double c_ship = kf * ndimLength() / u_0 * dt_visc;
+            const double c_cons = kf * metricShellLength() / u_0;
+            const double c = c_ship + s * (c_cons - c_ship);
+            const auto fl = std::cout.flags(); const auto pr = std::cout.precision();
+            std::cout << std::scientific << std::setprecision(4)
+                      << "      AGCM: [TIMESCALES] surface drag coefficient: shipped " << c_ship
+                      << "   consistent " << c_cons << "   ratio " << c_cons / c_ship
+                      << "   in force (s = " << s << ") " << c << " -> e-folding "
+                      << (c > 0.0 ? 1.0 / (c * dt_visc) : 0.0) << " iterations" << std::endl;
+            std::cout.flags(fl); std::cout.precision(pr);
+        }
         const double cH = [](){ const char* e = getenv("ATM_SFC_FLUX"); return e ? atof(e) : 0.0; }();
         if (cH != 0.0) {
             const double dz1 = 0.5 * (get_layer_height(2) - get_layer_height(0));

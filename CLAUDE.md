@@ -1528,6 +1528,10 @@ the repair is correct and **cannot change a run this tree can afford** — the s
 about the model: *the only velocity-proportional momentum sink in the atmosphere is absent by a
 factor of 400 000*, which is worth having beside *the jet freezes at `_VW=0`* and *there is no
 thermal wind*. **Nothing is written and nothing is flipped.**
+**THE KNOB IS NOW WRITTEN (2026-09-24): `ATM_SURF_DRAG_CONSISTENT=<s>`, default 0.0 = shipped, a
+strength blending `kf*L_atm/u_0*dt` -> `kf*metricShellLength()/u_0`; `[TIMESCALES]` prints both and
+the e-folding (4.31e+05 iterations at s = 1). Off branch byte-identical, 13 of 14 at 1 thread
+(`RUN_CONFIG.txt` by the banner token). NO SCIENCE ARM, deliberately, at the user's instruction.**
 
 ### `ATM_MC_T_NDIM`: the latent half of `MC_t` carries a spare `t_0`, and removing it is a null
 
