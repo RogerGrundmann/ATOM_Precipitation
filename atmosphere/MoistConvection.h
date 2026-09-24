@@ -1086,9 +1086,24 @@ void findCloudBaseLFS() {
                     double dummy_vel_w_u = M_u_prev * m.w_u.x[i-1][j][k]
                         + step_prev * m.E_u.x[i-1][j][k] * m.w.x[i-1][j][k];
 
-                    double dummy_s_u = (M_u_prev * m.s_u.x[i-1][j][k]
-                        + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
-                        - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k])) / m.s_0;
+                    // ATM_MC_S_NDIM=<0|1>, DEFAULT 0 = shipped (B.10 remainder, 2026-09-24).
+                    // s and s_u are ALREADY non-dimensional (s = cp_l*T/s_0, :321), so the
+                    // trailing `/ m.s_0` divides by s_0 = 274 516 a SECOND time and collapses s_u
+                    // to ~0 one level above cloud base: the parcel reads ~0 K, the saturation loop
+                    // below condenses all of q_v_u and warms it to a few tens of K, and the flux
+                    // F = M_u*(s_u - s) ~ -M_u*s. MEASURED (ATM_MC_CAP_DIAG census, 20-iteration
+                    // restart): in 100 % of the cells where MC_t's flux half exceeds MCt_max,
+                    // |s_u - s|*t_0 > 100 K, 100 % updraft-dominated, 50 % at a mass-flux edge.
+                    // A leftover of s having once been dimensional (J/kg). =1 drops the extra /s_0.
+                    static const int mc_s_ndim = [](){ const char* e = getenv("ATM_MC_S_NDIM");
+                                                       return e ? atoi(e) : 0; }();
+                    double dummy_s_u = (mc_s_ndim == 0)
+                        ? (M_u_prev * m.s_u.x[i-1][j][k]
+                           + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
+                           - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k])) / m.s_0
+                        :  M_u_prev * m.s_u.x[i-1][j][k]
+                           + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
+                           - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k]);
 
                     double M_u_i = m.M_u.x[i][j][k];
                     if(fabs(M_u_i) > coeff_recurr){
@@ -1209,10 +1224,20 @@ void findCloudBaseLFS() {
                         - step_ip1 * (m.E_d.x[i+1][j][k] * m.w.x[i+1][j][k]
                         - m.D_d.x[i+1][j][k] * m.w_d.x[i+1][j][k]);
 
-                    double dummy_s_d = (M_d_ip1 * m.s_d.x[i+1][j][k]
-                        - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
-                        - m.D_d.x[i+1][j][k] * m.s_d.x[i+1][j][k]
-                        - L_latent * r_h_ip1 * m.e_d.x[i+1][j][k])) / m.s_0;
+                    // ATM_MC_S_NDIM=1: only the LATENT term is dimensional (L [J/kg] * r_h * e_d
+                    // * step -> J/(m2 s)) and needs / s_0; the M_d*s_d and E_d*s, D_d*s_d terms
+                    // are already non-dimensional. The shipped form divides all of them.
+                    static const int mc_s_ndim_d = [](){ const char* e = getenv("ATM_MC_S_NDIM");
+                                                         return e ? atoi(e) : 0; }();
+                    double dummy_s_d = (mc_s_ndim_d == 0)
+                        ? (M_d_ip1 * m.s_d.x[i+1][j][k]
+                           - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
+                           - m.D_d.x[i+1][j][k] * m.s_d.x[i+1][j][k]
+                           - L_latent * r_h_ip1 * m.e_d.x[i+1][j][k])) / m.s_0
+                        :  M_d_ip1 * m.s_d.x[i+1][j][k]
+                           - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
+                           - m.D_d.x[i+1][j][k] * m.s_d.x[i+1][j][k]
+                           - L_latent * r_h_ip1 * m.e_d.x[i+1][j][k] / m.s_0);
 
                     double M_d_i = m.M_d.x[i][j][k];
                     if(fabs(M_d_i) > coeff_recurr){
@@ -1498,6 +1523,17 @@ void findCloudBaseLFS() {
         long lx_mu[4] = {0,0,0,0};                              // |M_u| <0.1, 0.1-1, 1-2.99, >=2.99 (clamp 3.0)
         long lx_z[4]  = {0,0,0,0};                              // height <2 km, 2-5, 5-10, >10 km
         long lx_x10 = 0, lx_x100 = 0;
+        // B.10 remainder (2026-09-24): WHAT the flux half is made of, in the cells where it alone
+        // exceeds MCt_max. Counts only. Updraft part M_u*(s_u-s) vs downdraft part M_d*(s_d-s)
+        // (dominant contribution to the divergence); height bin; whether the cell sits at a
+        // mass-flux EDGE (M_u or M_d zero at exactly one of i, i+1 -- cloud base/top, LFS, ground);
+        // whether it is the first air cell (i == i_topography); and the layer thickness step[i].
+        long fx_n = 0, fx_up = 0, fx_dn = 0, fx_edge = 0, fx_gnd = 0;
+        long fx_z[4] = {0,0,0,0};                               // <2 km, 2-5, 5-10, >10 km
+        long fx_dz[3] = {0,0,0};                                // step <100 m, 100-500, >500 m
+        long fx_mu[4] = {0,0,0,0};                              // max|M_u| of i,i+1: <0.1, 0.1-1, 1-2.99, >=2.99 (clamp 3.0)
+        long fx_ds[4] = {0,0,0,0};                              // max|s_u-s|*t_0 of i,i+1 [K]: <1, 1-3, 3-10, >10
+        long fx_neg = 0, fx_100 = 0;                            // s_u < s (parcel COLDER) at i; |s_u-s|*t_0 > 100 K
         // ... and the WATER behind it: cos-lat weighted column integrals, kg/(m2 s), of the
         // rain generated (g_p), the downdraft and sub-cloud evaporation DEMANDS (e_d, e_p), and
         // the part of each demand that the rain actually arriving at that level could back.
@@ -1514,6 +1550,7 @@ void findCloudBaseLFS() {
                         nl_cap_nd,nl_x10_nd,nl_x100_nd, \
                         lx_n,lx_heat,lx_cool,lx_dom[:4],lx_term_cap[:4],lx_term_x10[:4], \
                         lx_mu[:4],lx_z[:4],lx_x10,lx_x100,lx_unbacked, \
+                        fx_n,fx_up,fx_dn,fx_edge,fx_gnd,fx_z[:4],fx_dz[:3],fx_mu[:4],fx_ds[:4],fx_neg,fx_100, \
                         wb_w,wb_gp,wb_ed,wb_ep,wb_back,wb_pc0, \
                         nv_x2,nv_x10,nv_x100,nw_x2,nw_x10,nw_x100)
         for(int j = 0; j < m.jm; j++){
@@ -1599,6 +1636,28 @@ void findCloudBaseLFS() {
                         band(raw_t, MCt_max, nt_cap, nt_x2, nt_x10, nt_x100);
                         long d2 = 0;
                         band(raw_t_flux,          MCt_max, nf_cap, d2, nf_x10, nf_x100);
+                        if(AtomUtils::is_finite_safe(raw_t_flux) && std::fabs(raw_t_flux) > MCt_max){
+                            fx_n++;
+                            const double up = -(m.M_u.x[i+1][j][k] * (m.s_u.x[i+1][j][k] - m.s.x[i+1][j][k])
+                                              - m.M_u.x[i][j][k] * (m.s_u.x[i][j][k] - m.s.x[i][j][k]));
+                            const double dn = -(m.M_d.x[i+1][j][k] * (m.s_d.x[i+1][j][k] - m.s.x[i+1][j][k])
+                                              - m.M_d.x[i][j][k] * (m.s_d.x[i][j][k] - m.s.x[i][j][k]));
+                            if(std::fabs(up) >= std::fabs(dn)) fx_up++; else fx_dn++;
+                            const bool eu = (m.M_u.x[i][j][k] == 0.0) != (m.M_u.x[i+1][j][k] == 0.0);
+                            const bool ed = (m.M_d.x[i][j][k] == 0.0) != (m.M_d.x[i+1][j][k] == 0.0);
+                            if(eu || ed) fx_edge++;
+                            if(i == m.i_topography[j][k]) fx_gnd++;
+                            const double z = m.get_layer_height(i);
+                            fx_z[(z < 2000.0) ? 0 : (z < 5000.0) ? 1 : (z < 10000.0) ? 2 : 3]++;
+                            fx_dz[(step[i] < 100.0) ? 0 : (step[i] < 500.0) ? 1 : 2]++;
+                            const double mu = std::max(std::fabs(m.M_u.x[i][j][k]), std::fabs(m.M_u.x[i+1][j][k]));
+                            fx_mu[(mu < 0.1) ? 0 : (mu < 1.0) ? 1 : (mu < 2.99) ? 2 : 3]++;
+                            const double ds = m.t_0 * std::max(std::fabs(m.s_u.x[i][j][k] - m.s.x[i][j][k]),
+                                                               std::fabs(m.s_u.x[i+1][j][k] - m.s.x[i+1][j][k]));
+                            fx_ds[(ds < 1.0) ? 0 : (ds < 3.0) ? 1 : (ds < 10.0) ? 2 : 3]++;
+                            if(m.s_u.x[i][j][k] < m.s.x[i][j][k]) fx_neg++;
+                            if(ds > 100.0) fx_100++;
+                        }
                         band(raw_t_latent,        MCt_max, nl_cap, d2, nl_x10, nl_x100);
                         band(raw_t_latent/m.t_0,  MCt_max, nl_cap_nd, d2, nl_x10_nd, nl_x100_nd);
                         band(raw_q, MCq_max, nq_cap, nq_x2, nq_x10, nq_x100);
@@ -1658,6 +1717,21 @@ void findCloudBaseLFS() {
             std::cout << "      of which  flux half alone: over cap " << nf_cap
                       << " (" << pc(nf_cap) << " %)  >10x " << pc(nf_x10)
                       << " %  >100x " << pc(nf_x100) << " %" << std::endl;
+            if(fx_n > 0){
+                auto pf = [&](long x){ return 100.0 * (double)x / (double)fx_n; };
+                std::cout << "      flux half over cap, " << fx_n << " cells:  updraft-dominated " << pf(fx_up)
+                          << " %  downdraft " << pf(fx_dn) << " %   at a mass-flux EDGE " << pf(fx_edge)
+                          << " %   first air cell " << pf(fx_gnd) << " %" << std::endl
+                          << "          height <2 km " << pf(fx_z[0]) << " %  2-5 " << pf(fx_z[1])
+                          << " %  5-10 " << pf(fx_z[2]) << " %  >10 km " << pf(fx_z[3])
+                          << " %    layer step <100 m " << pf(fx_dz[0]) << " %  100-500 " << pf(fx_dz[1])
+                          << " %  >500 " << pf(fx_dz[2]) << " %" << std::endl
+                          << "          max|M_u| kg/(m2 s) <0.1 " << pf(fx_mu[0]) << " %  0.1-1 " << pf(fx_mu[1])
+                          << " %  1-2.99 " << pf(fx_mu[2]) << " %  at the 3.0 clamp " << pf(fx_mu[3])
+                          << " %    |s_u-s| in K <1 " << pf(fx_ds[0]) << " %  1-3 " << pf(fx_ds[1])
+                          << " %  3-10 " << pf(fx_ds[2]) << " %  >10 " << pf(fx_ds[3]) << " %  >100 " << pf(fx_100)
+                          << " %    parcel COLDER than environment (s_u < s) " << pf(fx_neg) << " %" << std::endl;
+            }
             std::cout << "                latent half     : over cap " << nl_cap
                       << " (" << pc(nl_cap) << " %)  >10x " << pc(nl_x10)
                       << " %  >100x " << pc(nl_x100) << " %" << std::endl;

@@ -1350,6 +1350,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
+          << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "0*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "1*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
