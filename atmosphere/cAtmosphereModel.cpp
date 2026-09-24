@@ -1349,6 +1349,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RK_SCALAR_SYNC=" << ev("ATM_RK_SCALAR_SYNC", "0*")
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
+          << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
+          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*")
+          << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
@@ -1560,9 +1563,46 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // treatment on t to close the asymmetry. See [[project_upper_velocity_secular_growth]].
                 AtomUtils::damp_wiggles(t,     &i_topography, true, true, true);
                 t0_mark("damp_wiggles(t)");
-                AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
-                AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
-                AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
+                // ATM_DAMP_Q_MASS=<0|1>, default 0 = shipped (B+4). The shipped filter conserves
+                // q in INDEX space and so creates water where neighbouring cells differ in mass
+                // (ColumnWaterBudget: +2.5e+06 mm/a). =1 uses the flux-form mass-weighted variant
+                // (AtomUtils::damp_wiggles_mass) with the budget's OWN mass,
+                //   m = cos-lat weight * r_humid * (h(i+1) - h(i)),  i_topography <= i <= im-2,
+                // so SUM(m*q) -- what ColumnWaterBudget measures -- is conserved to round-off.
+                // The lid level (im-1) and rock are excluded: the budget does not count them.
+                // Scratch is a function-local static, not a class member (sizeof hazard).
+                // ATM_WATER_CLOSURE=1 forces it: with the RK4 sync on, the shipped filter's
+                // +2.4e+06 mm/a is no longer discarded (measured 2026-09-24, 20-iteration restart:
+                // NET +2.38e+06 mm/a with the sync and the shipped filter). The filter, the re-pin
+                // and the discard are a THREE-way cancellation, so the closure knob owns all three.
+                static const bool damp_q_mass = [](){
+                    const char* w = getenv("ATM_WATER_CLOSURE");
+                    if (w && atoi(w) != 0) return true;
+                    const char* e = getenv("ATM_DAMP_Q_MASS"); return e && atoi(e) != 0; }();
+                if(!damp_q_mass){
+                    AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
+                    AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
+                    AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
+                }else{
+                    static std::vector<double> q_mass;
+                    q_mass.assign(static_cast<std::size_t>(im) * jm * km, 0.0);
+                    #pragma omp parallel for collapse(2) schedule(static)
+                    for(int j = 0; j < jm; j++){
+                        for(int k = 0; k < km; k++){
+                            const double wj = (j <= 90) ? cos((90 - j) * M_PI / 180.0)
+                                                        : cos((j - 90) * M_PI / 180.0);
+                            for(int i = i_topography[j][k]; i < im - 1; i++){
+                                double rho = r_humid.x[i][j][k];
+                                if(!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
+                                q_mass[(static_cast<std::size_t>(i) * jm + j) * km + k] =
+                                    wj * rho * (get_layer_height(i+1) - get_layer_height(i));
+                            }
+                        }
+                    }
+                    AtomUtils::damp_wiggles_mass(ice,   q_mass, true, true, true);
+                    AtomUtils::damp_wiggles_mass(c,     q_mass, true, true, true);
+                    AtomUtils::damp_wiggles_mass(cloud, q_mass, true, true, true);
+                }
                 ColumnWaterBudget::mark(*this, "damp_wiggles(q)");
 
                 switch(CategoryIceScheme){                              // rain, snow graupel and precipitation production and reduction
@@ -1869,8 +1909,15 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // integrates those cells and BC_Atm overwrites them on the next pass, so the effect is
         // one iteration deep -- recorded here rather than masked, because masking it would be a
         // second, unmeasured change riding along with this one.
-        static const int rk_scalar_sync = [](){ const char* e = getenv("ATM_RK_SCALAR_SYNC");
-                                                return e ? atoi(e) : 0; }();
+        // ATM_WATER_CLOSURE=1 forces mode 2 (moisture AND t): the pair with the B+3 flux. See
+        // ThermoAtm::waterVapourEvaporation. Syncing without replacing the re-pin kept the
+        // ~5e+06 mm/a injection and rained 7688 mm/a; replacing the re-pin without syncing
+        // leaves every direct write of the pre-RK4 physics discarded.
+        static const int rk_scalar_sync = [](){
+            const char* w = getenv("ATM_WATER_CLOSURE");
+            if (w && atoi(w) != 0) return 2;
+            const char* e = getenv("ATM_RK_SCALAR_SYNC");
+            return e ? atoi(e) : 0; }();
         if(rk_scalar_sync != 0){
             #pragma omp parallel for collapse(2) schedule(static)
             for(int i = 0; i < im; i++){

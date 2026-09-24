@@ -541,6 +541,77 @@ void AtomUtils::damp_wiggles(Array& field,
 
 
 // ============================================================================
+// Mass-conserving Shapiro filter -- see the header (ATM_DAMP_Q_MASS).
+// ============================================================================
+void AtomUtils::damp_wiggles_mass(Array& field, const std::vector<double>& mass,
+                                  bool along_i, bool along_j, bool along_k,
+                                  double strength, int passes)
+{
+    const int im = field.im, jm = field.jm, km = field.km;
+    const double coeff = strength * 0.25;
+    auto idx = [&](int i, int j, int k) -> std::size_t {
+        return (static_cast<std::size_t>(i) * jm + j) * km + k; };
+    std::vector<double> tmp(static_cast<std::size_t>(im) * jm * km);
+    auto snapshot = [&](){
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < im; ++i)
+            for (int j = 0; j < jm; ++j)
+                for (int k = 0; k < km; ++k) tmp[idx(i,j,k)] = field.x[i][j][k];
+    };
+    // the change at cell a from its two neighbours b1, b2 along one axis (-1 = no neighbour)
+    auto step = [&](std::size_t a, long b1, long b2) -> double {
+        const double ma = mass[a], fa = tmp[a];
+        double d = 0.0;
+        for (long b : {b1, b2}) {
+            if (b < 0) continue;
+            const double mb = mass[static_cast<std::size_t>(b)];
+            if (mb <= 0.0) continue;
+            const double mh = 2.0 * ma * mb / (ma + mb);
+            d += coeff * mh * (tmp[static_cast<std::size_t>(b)] - fa);
+        }
+        return d / ma;
+    };
+    for (int pass = 0; pass < passes; ++pass) {
+        if (along_k) {
+            snapshot();
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int i = 0; i < im; ++i)
+                for (int j = 0; j < jm; ++j)
+                    for (int k = 0; k < km; ++k) {
+                        const std::size_t a = idx(i,j,k);
+                        if (mass[a] <= 0.0) continue;
+                        field.x[i][j][k] = tmp[a] + step(a, (long)idx(i,j,(k-1+km)%km),
+                                                            (long)idx(i,j,(k+1)%km));
+                    }
+        }
+        if (along_j) {
+            snapshot();
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int i = 0; i < im; ++i)
+                for (int j = 0; j < jm; ++j)
+                    for (int k = 0; k < km; ++k) {
+                        const std::size_t a = idx(i,j,k);
+                        if (mass[a] <= 0.0) continue;
+                        field.x[i][j][k] = tmp[a] + step(a, j > 0    ? (long)idx(i,j-1,k) : -1L,
+                                                            j < jm-1 ? (long)idx(i,j+1,k) : -1L);
+                    }
+        }
+        if (along_i) {
+            snapshot();
+            #pragma omp parallel for collapse(2) schedule(static)
+            for (int i = 0; i < im; ++i)
+                for (int j = 0; j < jm; ++j)
+                    for (int k = 0; k < km; ++k) {
+                        const std::size_t a = idx(i,j,k);
+                        if (mass[a] <= 0.0) continue;
+                        field.x[i][j][k] = tmp[a] + step(a, i > 0    ? (long)idx(i-1,j,k) : -1L,
+                                                            i < im-1 ? (long)idx(i+1,j,k) : -1L);
+                    }
+        }
+    }
+}
+
+// ============================================================================
 // Latitude-dependent zonal (φ) "polar filter"
 // ============================================================================
 // Periodic 1-2-1 Shapiro step along k only, with a per-row pass count that grows

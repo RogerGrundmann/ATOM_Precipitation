@@ -204,6 +204,38 @@ public:
             const char* e = getenv("ATM_EVAP_FLUX"); return e && atoi(e) != 0; }();
         const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0;
 
+        // ==================================================================
+        // ATM_WATER_CLOSURE=<0|1> -- the B+3 surface flux PAIRED with the RK4 scalar sync.
+        // DEFAULT 0 = shipped. ONE knob for both halves, because they are a cancelling pair:
+        // the c_eq re-pin injects ~5e+06 mm/a that RK4 then discards (ATM_CWB_DIAG's
+        // `leapfrog_reset`), and ATM_RK_SCALAR_SYNC alone took precipitation 989 -> 7688 mm/a
+        // (2026-09-22) because it kept the injection. With =1 (see also cAtmosphereModel.cpp,
+        // where the same knob forces ATM_RK_SCALAR_SYNC mode 2 = moisture AND t):
+        //   * E is the ACTIVE formula's bulk flux with the air humidity taken from LEVEL 1, the
+        //     prognostic first air level -- not from level 0, which the shipped code relaxes onto
+        //     c_eq, the humidity at which E would equal the LOCAL precipitation (the E ~ P
+        //     prescription, r(E,P) = 0.968). E_sat is still at the skin temperature t.x[0].
+        //   * ALL of E enters levels 1..n_spread, weights exp(-i) renormalised over those
+        //     levels (ATM_EVAP_FLUX delivers only their 35.6 % share -- the level-0 share was
+        //     never applied), into the budget's own layer mass rho*(h(i+1)-h(i)), and WITHOUT
+        //     the c_sat cap, which deletes water; SaturationAdjustment condenses any excess.
+        //   * Calm cells use the same flux (Meyer/Rohwer keep their still-air terms); no
+        //     relaxation of level 0 toward c_sat.
+        //   * Level 0 (the prescribed skin, not RK4-integrated) is set to level 1 AFTER the flux:
+        //     zero gradient, so RK4's vertical diffusion carries no second, resolved surface flux
+        //     on top of E. That copy changes water in a counted layer; it is printed separately.
+        //   * It ALSO forces ATM_DAMP_Q_MASS (cAtmosphereModel.cpp): the shipped moisture filter's
+        //     +2.4e+06 mm/a stops being discarded once the sync is on -- a THREE-way cancellation.
+        //   * The skin copy tracks level 1, so while level 1 dries after losing the ~5e+06 mm/a
+        //     prescription the copy removes water from level 0 (measured: -6e-03 -> -3e-03 mm per
+        //     call, decaying over 20 iterations). ColumnWaterBudget's `evaporation` row therefore
+        //     equals E only once level 1 has settled.
+        // Land E stays zero (structural, not in scope). Evaporation still writes no t.
+        // ==================================================================
+        static const bool water_closure = [](){
+            const char* e = getenv("ATM_WATER_CLOSURE"); return e && atoi(e) != 0; }();
+        double wc_skin = 0.0;                 // cos-lat weighted water change from the level-0 copy [mm]
+
         // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how
         // many of those cells are sitting ON the c_sat_i cap -- the direct test of "it ratchets
         // to saturation" rather than "it reaches an equilibrium".
@@ -211,7 +243,7 @@ public:
         long   n_cap = 0, n_cell = 0;
 
         #pragma omp parallel for collapse(2) schedule(static) \
-                reduction(+:inj_pw,wsum,n_cap,n_cell)
+                reduction(+:inj_pw,wsum,n_cap,n_cell,wc_skin)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
@@ -252,6 +284,41 @@ public:
                 double coeff_M = K_Meyer * hPa_to_mmHg * (1.0 + u_kmh / 16.0) / 30.0;
                 double coeff_R = 0.771 * (1.465 - 0.000732 * p_mmHg)
                                * (0.44  + 0.0733   * u_kmh) * hPa_to_mmHg;
+
+                if (water_closure) {
+                    const double e_air = std::max(0.0, m.c.x[1][j][k]) * p_stat_0jk / m.ep;  // [hPa] level 1
+                    const double sd    = std::max(0.0, E_sat - e_air);                      // [hPa]
+                    m.Evaporation_Dalton.y[j][k] = (c_Dalton > 0.0) ? coeff_D * sd : 0.0;   // [mm/d]
+                    m.Evaporation_Meyer.y[j][k]  = coeff_M * sd;
+                    m.Evaporation_Rohwer.y[j][k] = coeff_R * sd;
+                    m.Evaporation.y[j][k] = (active == EvapModel::Meyer)  ? m.Evaporation_Meyer.y[j][k]
+                                          : (active == EvapModel::Rohwer) ? m.Evaporation_Rohwer.y[j][k]
+                                          :                                 m.Evaporation_Dalton.y[j][k];
+                    m.c_fix.y[j][k] = m.c.x[0][j][k];
+                    double wtot = 0.0;
+                    for (int i = 1; i <= n_spread; i++) wtot += std::pow(r, i);
+                    const double cw = sin(m.the.z[j]);            // cos(latitude)
+                    for (int i = 1; i <= n_spread; i++) {
+                        double rho = m.r_humid.x[i][j][k];
+                        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                        const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                        if (dz <= 0.0) continue;
+                        const double incr = (m.Evaporation.y[j][k] / 8.64e4) * (std::pow(r, i) / wtot)
+                                          / (rho * dz) * sec_per_iter;
+                        m.c.x[i][j][k] += incr;
+                        inj_pw += cw * incr * rho * dz;
+                        wsum   += cw;
+                        n_cell++;
+                    }
+                    {   // the skin copy, and its water change in the budget's own layer mass
+                        double rho0 = m.r_humid.x[0][j][k];
+                        if (!AtomUtils::is_finite_safe(rho0) || rho0 <= 0.0) rho0 = m.r_air;
+                        const double dz0 = m.get_layer_height(1) - m.get_layer_height(0);
+                        wc_skin += cw * (m.c.x[1][j][k] - m.c.x[0][j][k]) * rho0 * dz0;
+                        m.c.x[0][j][k] = m.c.x[1][j][k];
+                    }
+                    continue;
+                }
 
                 // Calm conditions (zero wind): skip c update, Dalton = 0.
                 // Meyer and Rohwer retain their still-air (u=0) terms.
@@ -402,6 +469,11 @@ public:
              << fixed << setprecision(2)
              << "   at the c_sat cap: " << (n_cell > 0 ? 100.0 * n_cap / n_cell : 0.0)
              << " % of " << n_cell << " ocean cells" << endl;
+        if (water_closure)
+            cout << "      ATOM: [WATER CLOSURE] bulk E into levels 1.." << n_spread
+                 << " (100 %, no cap); level-0 skin set to level 1, water change "
+                 << scientific << setprecision(3) << (wsum > 0.0 ? wc_skin / wsum * (double)n_spread : 0.0)
+                 << " mm (cos-lat mean per call)" << fixed << setprecision(2) << endl;
 
         auto end     = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);

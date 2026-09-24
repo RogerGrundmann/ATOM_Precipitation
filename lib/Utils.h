@@ -263,6 +263,27 @@ namespace AtomUtils{
                       double strength = 1.0,
                       int passes = 1);
 
+    // MASS-CONSERVING variant of damp_wiggles (ATM_DAMP_Q_MASS, 2026-09-24).
+    //
+    // damp_wiggles' 1-2-1 update conserves SUM(f) in INDEX space only: every neighbour
+    // exchange adds and subtracts the same delta-f. When the cells carry different MASS --
+    // layer thickness varies 23x on the stretched radial grid, cell area goes as cos(lat),
+    // density varies -- equal delta-q are unequal amounts of water, so the filter creates or
+    // destroys it (ColumnWaterBudget charges damp_wiggles(q) +2.5e+06 mm/a, B+4).
+    //
+    // Here each neighbour pair (a,b) exchanges the FLUX
+    //     F_ab = coeff * m_h * (f_b - f_a),   m_h = 2 m_a m_b / (m_a + m_b)   (harmonic mean)
+    // applied as  f_a += F_ab / m_a,  f_b -= F_ab / m_b,  so SUM(m*f) is conserved to
+    // round-off whatever the masses. For EQUAL masses it reduces exactly to the 1-2-1 step.
+    // Bounded: m_h/m_a <= 2, so the sum of a cell's coefficients stays <= 4*coeff = strength.
+    //
+    // mass: im*jm*km, index i*jm*km + j*km + k; cells with mass <= 0 are EXCLUDED -- neither
+    // updated nor exchanged with (rock, and whatever the caller chooses to leave out).
+    // Axes as damp_wiggles: k periodic, j and i no-flux at the ends and at excluded cells.
+    void damp_wiggles_mass(Array& field, const std::vector<double>& mass,
+                           bool along_i, bool along_j, bool along_k,
+                           double strength = 1.0, int passes = 1);
+
     // Latitude-dependent zonal (φ) Shapiro filter — the classic lat-lon "polar
     // filter".  On a lat-lon grid the zonal cell width rm·sinθ·dφ shrinks toward
     // the poles, so the explicit zonal CFL number ~ |w|/(rm·sinθ·dφ) diverges and

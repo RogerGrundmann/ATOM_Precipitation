@@ -792,21 +792,41 @@ public:
         };
         constexpr int n_extrap = sizeof(fields_extrap) / sizeof(fields_extrap[0]);
 
+        // ATM_SEAM_PERIODIC=<0|1>, DEFAULT 0 = shipped. The seam k = 0 (== k = km-1) is not a
+        // wall: it is the point BETWEEN k = km-2 and k = 1 on a periodic circle. The shipped
+        // reconstruction averages two one-sided NEUMANN extrapolations, each made as if the seam
+        // were a wall, using c43/c13. With the first-order constants (c43 = 1, c13 = 0 -- the
+        // accidental `int` values until 0571bc1) that reduces EXACTLY to 0.5*(x[1] + x[km-2]),
+        // the centred average of the two real neighbours, which for a periodic direction is the
+        // correct second-order interpolation. With the second-order constants it becomes
+        //     0.5*((4 x[1] - x[2])/3 + (4 x[km-2] - x[km-3])/3),
+        // an EXTRAPOLATION from both sides with no damping -- and that is the k = 1 seam mode
+        // B.5 re-exposed (2026-09-21 / hsf_ctl: max|v| 2.28 -> 26 m/s at 11N 1E, 236 m, held
+        // only by the coastal sponge). So B.5 made the seam LESS correct, not more.
+        // =1 uses the centred average for the averaged fields and a plain copy for the
+        // extrapolated ones, independent of c43/c13 -- i.e. the pre-B.5 seam exactly, with
+        // second order kept everywhere else. At first order (ATM_BC_SECOND_ORDER=0) it is a
+        // no-op BY ARITHMETIC, which the byte check uses as its consistency test.
+        static const bool seam_periodic = [](){
+            const char* e = getenv("ATM_SEAM_PERIODIC"); return e && atoi(e) != 0; }();
+        const double s43 = seam_periodic ? 1.0 : m.c43;
+        const double s13 = seam_periodic ? 0.0 : m.c13;
+
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
 
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
-                    double v0   = m.c43 * xij[j][1]      - m.c13 * xij[j][2];
-                    double vend = m.c43 * xij[j][m.km-2] - m.c13 * xij[j][m.km-3];
+                    double v0   = s43 * xij[j][1]      - s13 * xij[j][2];
+                    double vend = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
                     xij[j][0] = xij[j][m.km-1] = (v0 + vend) * 0.5;
                 }
 
                 for (int f = 0; f < n_extrap; f++) {
                     double** xij = fields_extrap[f]->x[i];
-                    xij[j][0]      = m.c43 * xij[j][1]      - m.c13 * xij[j][2];
-                    xij[j][m.km-1] = m.c43 * xij[j][m.km-2] - m.c13 * xij[j][m.km-3];
+                    xij[j][0]      = s43 * xij[j][1]      - s13 * xij[j][2];
+                    xij[j][m.km-1] = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
                 }
             }
         }
