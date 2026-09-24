@@ -5,6 +5,7 @@
 
 #include "cHydrosphereModel.h"
 #include "HydHorizViscosity.h"
+#include "HydBuoyancy.h"
 
 #include <cstdint>
 #include <cstring>
@@ -127,6 +128,25 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
                     HydHorizVisc::ok[p] = 1;
                 }
             }
+        }
+    }
+
+    // HYD_BUOY_CONSISTENT -- the per-level reference density, over WATER cells, from the
+    // time-level-n fields. See HydBuoyancy.h. One thread per level, so it is deterministic.
+    if (HydBuoy::strength() != 0.0) {
+        HydBuoy::rho_ref.assign(im, 0.0);
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < im; i++) {
+            double sum = 0.0, wsum = 0.0;
+            for (int j = 1; j < jm-1; j++) {
+                const double wgt = sin(the.z[j]);
+                for (int k = 0; k < km; k++) {
+                    if (AtomUtils::is_land(h, i, j, k)) continue;
+                    sum  += wgt * HydBuoy::rho_eos(tn.x[i][j][k] * t_0 - t_0, cn.x[i][j][k] * c_35);
+                    wsum += wgt;
+                }
+            }
+            HydBuoy::rho_ref[i] = wsum > 0.0 ? sum / wsum : 0.0;
         }
     }
 

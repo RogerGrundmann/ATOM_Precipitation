@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include "cHydrosphereModel.h"
 #include "HydHorizViscosity.h"
+#include "HydBuoyancy.h"
 #include "Utils.h"
 
 using namespace std;
@@ -1114,8 +1115,16 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // vertical buoyancy has nothing to balance it (no baroclinic/hydrostatic PGF in
     // the momentum eq). Left at the stable (barotropic) scaling; a real baroclinic
     // ocean needs the horizontal grad(p_hydro) in rhs_v/rhs_w, not just this term.
-    const double buoy_nd = buoyancy * g * dt / u_0
-        * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0));
+    // HYD_BUOY_CONSISTENT=<s> (default 0.0): the consistent coefficient g*L_hyd/u_0^2 on the
+    // model's own density anomaly against the per-level water mean. See HydBuoyancy.h. The
+    // off branch is the original expression VERBATIM, so it is byte-identical by arithmetic.
+    const double buoy_s  = HydBuoy::strength();
+    const double buoy_nd = (buoy_s == 0.0)
+        ? buoyancy * g * dt / u_0
+            * ((t.x[i][j][k] - 1.0) - alpha_S * (c.x[i][j][k] - 1.0))
+        : -buoy_s * buoyancy * g * L_hyd / (u_0 * u_0)
+            * (HydBuoy::rho_eos(t.x[i][j][k] * t_0 - t_0, c.x[i][j][k] * c_35)
+               - HydBuoy::rho_ref[i]) / r_0_water;
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
         + buoy_nd
         + Coriolis * Coriolis_rad + centrifugal * centrifugal_rad;

@@ -506,7 +506,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
              << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "0")
              << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
-             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1*")
+             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1")
+             << "  BUOY_CONSISTENT="                           << ev("HYD_BUOY_CONSISTENT", "0.0")
              << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
              << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")
@@ -518,6 +519,11 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
              << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "
              << dt * L_hyd / u_0 << " s" << endl;
+        // HYD_BUOY_CONSISTENT: the consistent buoyancy coefficient against the shipped one.
+        // The shipped term carries a spurious dt; the ratio is the size of that defect.
+        cout << "      OGCM: [SCALES] buoyancy coefficient: shipped g*dt/u_0 = " << g * dt / u_0
+             << "   consistent g*L_hyd/u_0^2 = " << g * L_hyd / (u_0 * u_0)
+             << "   ratio = " << (L_hyd / (u_0 * dt)) << endl;
 
         // Horizontal-mixing scales, printed unconditionally because every argument about
         // HYD_METRIC_RADIUS and HYD_A_H has had to re-derive them. dx is the equatorial
