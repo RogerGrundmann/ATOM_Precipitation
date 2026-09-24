@@ -508,6 +508,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
              << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1")
              << "  BUOY_CONSISTENT="                           << ev("HYD_BUOY_CONSISTENT", "0.0")
+             << "  VW_BOTTOM_ZG="                              << ev("HYD_VW_BOTTOM_ZG", "0")
              << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
              << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")

@@ -110,6 +110,23 @@ public:
                 // (boundary horizontal currents are real; the instability is radial only).
                 m.u.x[0][j][k]   = 0.0;
                 m.u.x[iml][j][k] = 0.0;
+
+                // HYD_VW_BOTTOM_ZG=<0|1>, default 0 = shipped (the cubic above stands).
+                // In shallow mode (L_hyd = 200 m, the default) i = 0 is NOT a seafloor, it is
+                // the TRUNCATION of the column at 200 m, and the cubic extrapolation above is
+                // the only thing setting the horizontal current there. It amplifies the trend
+                // of the three levels above it: on the metric-fixed ladder seeds (2026-09-21,
+                // iteration 1000) the rms horizontal speed is 1.558 cm/s at i = 1 and 2.047 at
+                // i = 0 -- the recorded "+52 % bottom intensification" was read off that
+                // extrapolated value. Zero-gradient v[0] = v[1], w[0] = w[1] is the neutral
+                // truncation condition: no shear across the cut, no extrapolated trend. The
+                // surface (i = im-1) is untouched. u stays Dirichlet 0 either way.
+                static const bool vw_bottom_zg = [](){
+                    const char* e = getenv("HYD_VW_BOTTOM_ZG"); return e && atoi(e) != 0; }();
+                if (vw_bottom_zg) {
+                    m.v.x[0][j][k] = m.v.x[1][j][k];
+                    m.w.x[0][j][k] = m.w.x[1][j][k];
+                }
             }
         }
     }

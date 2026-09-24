@@ -1,11 +1,13 @@
 #!/bin/bash
 # HYD_BUOY_CONSISTENT -- the B.6 arm. 1000 -> 1600 RESTARTS from the 2026-09-21 from-scratch ladder
-# seeds (correct salinity), binary cli/hyd_buoy, 4 arms x 6 threads concurrent (~15 s/iter, ~2.5 h).
+# seeds (correct salinity), binary cli/hyd_zg (38fccc9a), 5 arms x 5/5/5/5/4 threads (~18 s/iter, ~3 h).
 #   bn_ctl  metric branch (METRIC_RADIUS=6370 RUN_NEUMANN=1 A_H_BIHARM=3e18), knob 0   seed oc_vis
 #   bn_1    metric branch + HYD_BUOY_CONSISTENT=1.0                                   seed oc_vis
 #   bn_01   metric branch + HYD_BUOY_CONSISTENT=0.1  (strength fallback)              seed oc_vis
 #   bn_sh1  SHIPPED metric + HYD_BUOY_CONSISTENT=1.0 -- re-test of the 2026-07-14 blow-up
 #           (0.04 -> 19.5 m/s radial in 30 iters) on today's model                    seed oc_ctl
+#   bn_zg   metric branch + HYD_VW_BOTTOM_ZG=1: v/w ZERO-GRADIENT at the 200 m truncation instead
+#           of cubic extrapolation. ONE variable against bn_ctl.                      seed oc_vis
 # NOT combined with HYD_PHYDRO_SALT/HYD_BAROCLINIC_PGF: with a consistent buoyancy the projection
 # pressure p_dyn carries the hydrostatic anomaly and its horizontal gradient itself, so adding the
 # p_hydro PGF would count the same force twice.
@@ -21,19 +23,25 @@
 #   2. profile (fixed full-depth column set, 1600, i = 1 / i = 12): the +17 % rise in bn_ctl shrinks
 #      or reverses in bn_1. No change = the buoyancy is not what the lower column lacks.
 #   3. radial velocity physical: rms|u| within ~10x of bn_ctl (68 m/yr), not the shipped 48 758 m/yr.
+#   5. bn_zg: the i = 0 value drops to ~ the i = 1 value by construction (NOT a result). The test is
+#      i = 1 / i = 12: if the +17 % rise below 100 m is the cubic feeding back through vertical
+#      diffusion/advection, it shrinks in bn_zg; if it stays, the truncation BC is exonerated.
 #   4. mean T and KE: no runaway; KE drift reported but not judged (1/f = 324 000 iterations).
 set -u; cd "$(dirname "$0")"; rm -f BN600_DONE
-until [ -f PR600_DONE ] && [ -f BUOYND_VERIFY_DONE ]; do sleep 60; done
+until [ -f PR600_DONE ] && [ -f BUOYND_VERIFY_DONE ] && [ -f ZG_VERIFY_DONE ]; do sleep 60; done
+if [ "$(grep -c 'PASS' run_verify_zg.out)" -lt 3 ]; then
+    echo "hyd_zg byte check did not pass -- arm NOT started"; cat run_verify_zg.out; touch BN600_DONE; exit 1; fi
 if ! grep -q "OFF-BRANCH.*PASS" run_verify_buoynd.out; then
     echo "byte check did not pass -- arm NOT started"; cat run_verify_buoynd.out; touch BN600_DONE; exit 1; fi
 VIS="HYD_METRIC_RADIUS=6370 HYD_RUN_NEUMANN=1 HYD_A_H_BIHARM=3.0e18"
 echo "start $(date +%H:%M)"
-run(){ ( env OMP_NUM_THREADS=6 $2 ../cli/hyd_buoy config_$1.xml > $1.log 2>&1
+run(){ ( env OMP_NUM_THREADS=$3 $2 ../cli/hyd_zg config_$1.xml > $1.log 2>&1
          echo "$1 exit $?  NaN $(grep -c 'NaN/Inf DETECTED' $1.log)  $(date +%H:%M)" ) & }
-run bn_ctl "$VIS"
-run bn_1   "$VIS HYD_BUOY_CONSISTENT=1.0"
-run bn_01  "$VIS HYD_BUOY_CONSISTENT=0.1"
-run bn_sh1 "HYD_BUOY_CONSISTENT=1.0"
+run bn_ctl "$VIS" 5
+run bn_1   "$VIS HYD_BUOY_CONSISTENT=1.0" 5
+run bn_01  "$VIS HYD_BUOY_CONSISTENT=0.1" 5
+run bn_sh1 "HYD_BUOY_CONSISTENT=1.0" 4
+run bn_zg  "$VIS HYD_VW_BOTTOM_ZG=1" 5
 wait
 python3 ocprofile_levels.py > bn600_profile.txt 2>&1
 touch BN600_DONE

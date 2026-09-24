@@ -4,7 +4,7 @@
 # NOT a prognostic level -- read the profile on i >= 1.
 import numpy as np, sys
 sys.argv = ['x']; exec(open('ocprofile.py').read().split("def analyse")[0])
-runs = [('ctl','output_bn_ctl'),('b1','output_bn_1'),('b01','output_bn_01'),('sh1','output_bn_sh1')]
+runs = [('ctl','output_bn_ctl'),('b1','output_bn_1'),('b01','output_bn_01'),('sh1','output_bn_sh1'),('zg','output_bn_zg')]
 res, col = {}, None
 for tag, d in runs:
     try: it, a = load(f'{d}/hyd_restart_0Ma_1600.bin')
