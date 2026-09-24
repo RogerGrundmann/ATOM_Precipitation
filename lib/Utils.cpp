@@ -1097,6 +1097,57 @@ void AtomUtils::orographic_radial_shapiro_filter(Array& field,
 
 
 // ============================================================================
+// Mass-conserving orographic radial filter -- see the header (ATM_OROG_Q_MASS).
+// ============================================================================
+void AtomUtils::orographic_radial_shapiro_filter_mass(Array& field, const std::vector<double>& mass,
+                                                      const std::vector<std::vector<int>>& i_surface,
+                                                      int steep_threshold, int n_layers_above,
+                                                      int passes, double strength)
+{
+    const int im = field.im, jm = field.jm, km = field.km;
+    if (passes <= 0 || strength <= 0.0 || im < 3) return;
+    const double coeff = 0.25 * strength;
+    auto mi = [&](int i, int j, int k) -> double {
+        return mass[(static_cast<std::size_t>(i) * jm + j) * km + k]; };
+
+    for (int pass = 0; pass < passes; ++pass) {
+        #pragma omp parallel for collapse(2) schedule(static)
+        for (int j = 0; j < jm; ++j) {
+            for (int k = 0; k < km; ++k) {
+                // the same steep-column test as the shipped filter
+                const int s   = std::max(i_surface[j][k], 0);
+                const int jm1 = (j > 0) ? j - 1 : 0, jp1 = (j < jm - 1) ? j + 1 : jm - 1;
+                const int km1 = (k - 1 + km) % km,  kp1 = (k + 1) % km;
+                int d = std::abs(s - std::max(i_surface[jm1][k], 0));
+                d = std::max(d, std::abs(s - std::max(i_surface[jp1][k], 0)));
+                d = std::max(d, std::abs(s - std::max(i_surface[j][km1], 0)));
+                d = std::max(d, std::abs(s - std::max(i_surface[j][kp1], 0)));
+                if (d < steep_threshold) continue;
+
+                std::vector<double> col(im), del(im, 0.0);
+                for (int i = 0; i < im; ++i) col[i] = field.x[i][j][k];
+                const int i_hi = std::min(im - 1, s + n_layers_above);
+                for (int i = std::max(1, s); i < i_hi; ++i) {
+                    const double ma = mi(i, j, k);
+                    if (ma <= 0.0) continue;
+                    const double c  = col[i];
+                    const bool fm = (i - 1 >= s) && mi(i-1, j, k) > 0.0;
+                    const bool fp = (i + 1 <= im - 1) && mi(i+1, j, k) > 0.0;
+                    const double vm = fm ? col[i-1] : c;
+                    const double vp = fp ? col[i+1] : c;
+                    if (!((vm - c) * (vp - c) > 0.0)) continue;   // extremum gate, on the snapshot
+                    if (fm) { const double mb = mi(i-1, j, k), mh = 2.0*ma*mb/(ma+mb);
+                              const double F = coeff * mh * (vm - c); del[i] += F/ma; del[i-1] -= F/mb; }
+                    if (fp) { const double mb = mi(i+1, j, k), mh = 2.0*ma*mb/(ma+mb);
+                              const double F = coeff * mh * (vp - c); del[i] += F/ma; del[i+1] -= F/mb; }
+                }
+                for (int i = 0; i < im; ++i) if (del[i] != 0.0) field.x[i][j][k] = col[i] + del[i];
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Near-surface coastal Rayleigh sponge
 // ============================================================================
 // Soft cap for the dry-seeded coastal velocity runaway (Gulf-of-Alaska mode).

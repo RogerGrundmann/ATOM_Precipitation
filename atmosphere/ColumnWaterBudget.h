@@ -225,7 +225,8 @@ private:
             static const std::vector<std::string> v = {
                 "pressure+project", "SaturationAdjust", "damp_wiggles(q)", "IceScheme",
                 "MoistConvection", "cap_S+clamp", "ConvectiveAdjust", "ThermoAtm(pre)",
-                "evaporation", "ThermoAtm(rest)", "BC_Atm", "RungeKutta",
+                "evaporation", "ThermoAtm(rest)", "BC:radius", "BC:theta", "BC:phi(seam)",
+                "BC:scalarSurfSur", "BC:solidGround", "RungeKutta",
                 "orographic_shapiro", "radiation/teq", "unattributed" };
             return v;
         }

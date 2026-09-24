@@ -1351,6 +1351,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
           << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "0*")
+          << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "1*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
@@ -1759,15 +1760,22 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         }  // iter_n % moist_stride == 0
 
         if(iter_n % momentum_stride == 0){
+            // ColumnWaterBudget marks after EACH pass (2026-09-24, B+4): the BC_Atm row was a sum
+            // of five different operations and could not be attributed. Print-only; no-ops unless
+            // ATM_CWB_DIAG is set.
             BC_Atm(*this).bcRadius();                                   // extrapolation in i-direction alomg grid boundaries
             if(turb_model != "laminar") TurbulenceAtm(*this).apply_wall_bc();  // reassert ω_wall at i=0 after bcRadius cubic extrapolation
+            ColumnWaterBudget::mark(*this, "BC:radius");
             BC_Atm(*this).bcTheta();                                    // extrapolation in j-direction alomg grid boundaries
+            ColumnWaterBudget::mark(*this, "BC:theta");
             BC_Atm(*this).bcPhi();                                      // extrapolation in k-direction alomg grid boundaries
+            ColumnWaterBudget::mark(*this, "BC:phi(seam)");
 
             BC_Atm(*this).bcScalarSurfSur();                            // scalar variable at surfaces extrapolated by von Neumann
+            ColumnWaterBudget::mark(*this, "BC:scalarSurfSur");
             BC_Atm(*this).bcSolidGround();                              // values inside mountains
             t0_mark("BC_Atm");
-            ColumnWaterBudget::mark(*this, "BC_Atm");
+            ColumnWaterBudget::mark(*this, "BC:solidGround");
 
             if(iter_n % checkpoint == 0){
                 // Psi is FILLED here and READ by print_min_max_atm, so the fill goes first.
@@ -2069,9 +2077,35 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // field bit-unchanged — avoiding the global perturbation that reverted the 2026-06-08
         // horizontal scalar filter. n_layers_above=10 reaches the surf+7 mode at NZ (surf=6).
         AtomUtils::orographic_radial_shapiro_filter(t,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-        AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-        AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-        AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        // ATM_OROG_Q_MASS=<0|1>, default 0 = shipped (B+4, 2026-09-24): the moisture fields get the
+        // flux-form, mass-weighted variant (same gate). The shipped filter moves only the extremum
+        // cell -- not conservative even in index space; -1.0e+04 mm/a with the closure on, the
+        // largest leak left. The mass is ColumnWaterBudget's (r_humid*dz; the cos-lat weight
+        // cancels within a column); t keeps the shipped filter.
+        static const bool orog_q_mass = [](){
+            const char* e = getenv("ATM_OROG_Q_MASS"); return e && atoi(e) != 0; }();
+        if(!orog_q_mass){
+            AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+            AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+            AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
+        }else{
+            static std::vector<double> o_mass;
+            o_mass.assign(static_cast<std::size_t>(im) * jm * km, 0.0);
+            #pragma omp parallel for collapse(2) schedule(static)
+            for(int j = 0; j < jm; j++){
+                for(int k = 0; k < km; k++){
+                    for(int i = i_topography[j][k]; i < im - 1; i++){
+                        double rho = r_humid.x[i][j][k];
+                        if(!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
+                        o_mass[(static_cast<std::size_t>(i) * jm + j) * km + k] =
+                            rho * (get_layer_height(i+1) - get_layer_height(i));
+                    }
+                }
+            }
+            AtomUtils::orographic_radial_shapiro_filter_mass(c,     o_mass, i_topography, 2, 10, 2);
+            AtomUtils::orographic_radial_shapiro_filter_mass(cloud, o_mass, i_topography, 2, 10, 2);
+            AtomUtils::orographic_radial_shapiro_filter_mass(ice,   o_mass, i_topography, 2, 10, 2);
+        }
         t0_mark("orographic_shapiro");
         ColumnWaterBudget::mark(*this, "orographic_shapiro");
         // ==============================================================================================

@@ -385,6 +385,22 @@ namespace AtomUtils{
                                           int    passes          = 2,
                                           double strength        = 1.0);
 
+    // MASS-CONSERVING variant of orographic_radial_shapiro_filter (ATM_OROG_Q_MASS, 2026-09-24, B+4).
+    // The shipped filter updates ONLY the extremum cell and leaves its neighbours untouched, so it
+    // is not conservative even in index space (ColumnWaterBudget: -1.0e+04 mm/a with the water
+    // closure on -- the largest leak left). Same gate (steep column, first n_layers_above fluid
+    // cells, vertical local extremum on the snapshot); the extremum cell a exchanges with each
+    // vertical fluid neighbour b the flux F = coeff * m_h * (f_b - f_a), m_h the harmonic mean
+    // mass, f_a += F/m_a and f_b -= F/m_b, so SUM(m*f) is conserved to round-off. Columns are
+    // independent, so the loop is parallel over (j,k) and serial in i: no shared writes.
+    // mass: im*jm*km, index (i*jm + j)*km + k; cells with mass <= 0 are excluded.
+    void orographic_radial_shapiro_filter_mass(Array& field, const std::vector<double>& mass,
+                                               const std::vector<std::vector<int>>& i_surface,
+                                               int    steep_threshold = 2,
+                                               int    n_layers_above  = 10,
+                                               int    passes          = 2,
+                                               double strength        = 1.0);
+
     // Soft steep-massif field smoothing — gentle horizontal (k then j) 1-2-1 Shapiro applied
     // to a field (u,v,w,p_dyn) ONLY over HIGH+STEEP contour columns (same mask as the init-
     // time terrain massif smoothing: i_surface ≥ high_thresh AND |Δi_surface|≥steep_thresh),
