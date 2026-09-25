@@ -26,6 +26,8 @@ for l in L[ib+1:]:
     g = glob.get(name)
     if g is not None:
         scale = max(abs(g), 1e-6 * max(abs(x) for x in v + [1.0]))
-        worst = max(worst, abs(rec - g) / max(abs(g), 1.0))
+        # denominator: the largest band term -- a near-zero total that cancels between bands is
+        # only as precise as its terms (4 printed digits), so scaling by |global| overstates it.
+        worst = max(worst, abs(rec - g) / max(abs(g), max(abs(x) for x in v), 1.0))
     print(f'{name:22s} {g if g is not None else float("nan"):12.4e} {rec:12.4e}   ' + ' / '.join(f'{x:.3e}' for x in v))
-print(f'worst relative mismatch (vs |global|, floor 1 mm/a): {worst:.2e}   -> {"PASS" if worst < 1e-3 else "FAIL"}  (print precision 4 digits)')
+print(f'worst relative mismatch (vs max(|global|, largest |band|), floor 1 mm/a): {worst:.2e}   -> {"PASS" if worst < 1e-3 else "FAIL"}  (print precision 4 digits)')
