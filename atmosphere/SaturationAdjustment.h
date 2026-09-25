@@ -158,7 +158,7 @@ public:
         static const int v = [](){ const char* e = getenv("ATM_SATADJ_FADE");
                                    if (e) return atoi(e);
                                    const char* w = getenv("ATM_WATER_CLOSURE");
-                                   return (!w || atoi(w) != 0) ? 2 : 0; }();
+                                   return (w && atoi(w) != 0) ? 2 : 0; }();   // WATER_CLOSURE default OFF again since 2026-09-25 (runaway, bisected)
         return v;
     }
     // ==================================================================

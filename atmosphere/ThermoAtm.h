@@ -253,7 +253,14 @@ public:
         // DEFAULT ON SINCE 2026-09-24, at the user's instruction, on 20-iteration evidence only
         // (the 600-iteration arm was postponed). ATM_WATER_CLOSURE=0 restores all three pieces.
         static const bool water_closure = [](){
-            const char* e = getenv("ATM_WATER_CLOSURE"); return e ? atoi(e) != 0 : true; }();
+            // ATM_WATER_CLOSURE: default ON 2026-09-24 (5c7b001), OFF AGAIN 2026-09-25. The 600 from scratch
+            // on the combined defaults (python/output_def600) ran away: precip 860 -> 3295 mm/a and still
+            // climbing at 600, 65-90 deg 1871 mm/a, r 0.20, the evaporation stage a net SINK (-2.3e4 mm/a),
+            // convection dead. Bisected (python/run_bisect2.sh, 100 from scratch, one flip reverted per arm):
+            // this knob alone removes the climb (11.87 -> 3.58 mm/a per iteration over 40-100; bands
+            // 3383/217/192/16 against 3711/1488/411/350); the other 09-24 flips are identical to control.
+            // The 20-iteration evidence it was flipped on saw only the initial dip. =1 restores it.
+            const char* e = getenv("ATM_WATER_CLOSURE"); return e && atoi(e) != 0; }();
         double wc_skin = 0.0;                 // cos-lat weighted water change from the level-0 copy [mm]
 
         // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how
