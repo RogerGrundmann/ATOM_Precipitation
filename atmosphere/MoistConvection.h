@@ -159,6 +159,23 @@ private:
     static int mcSgz() { static const int v = [](){ const char* e = std::getenv("ATM_MC_SGZ");
                                                     return e ? std::atoi(e) : 0; }(); return v; }
     double gz(int i) const { return m.g * height_table[i] / m.s_0; }
+
+    // ATM_MC_QVD=<0|1|2>, default 0 = shipped (2026-09-25). The downdraft humidity that e_d and e_p
+    // evaluate against is set to 0.5*(cloud + 0.98*q_sat): half the CLOUD-WATER array plus half
+    // saturation, i.e. ~50 % RH whatever has evaporated. With the parcel repaired (ATM_MC_SGZ +
+    // ATM_MC_ENTR + ATM_MC_BASE_SAT) the updraft generates ~1.05e+04 mm/a of rain and e_d takes 100 %
+    // of it (bst_sgeb, iter ~120), P_conv 0.00. The shape is Tiedtke's LFS mix of equal parts cloud
+    // air (saturated) and ENVIRONMENT air, whose humidity is c, not cloud water (initial commit, no
+    // history). =1 uses 0.5*(c + 0.98*q_sat); =2 a saturated downdraft 0.98*q_sat (Tiedtke 1989).
+    static int mcQvd() { static const int v = [](){ const char* e = std::getenv("ATM_MC_QVD");
+                                                   return e ? std::atoi(e) : 0; }(); return v; }
+    double qvDown(int i, int j, int k, double q_sat) const {
+        switch (mcQvd()) {
+            case 1:  return 0.5 * (m.c.x[i][j][k] + AtomMoistConvection::scale * q_sat);
+            case 2:  return AtomMoistConvection::scale * q_sat;
+            default: return 0.5 * (cloud.x[i][j][k] + AtomMoistConvection::scale * q_sat);
+        }
+    }
     std::vector<double> step;
     std::vector<int8_t> land_surf;
     std::vector<int8_t> air_surf;
@@ -991,7 +1008,7 @@ void findCloudBaseLFS() {
                 double E_sat = m.hp * AtomUtils::exp_func(t_u, 17.2694, 35.86);
                 double q_sat = safe_q_sat(m.ep, E_sat, p_u);
 
-                m.q_v_d.x[i_lfs][j][k] = 0.5 * (cloud.x[i_lfs][j][k] + scale * q_sat);
+                m.q_v_d.x[i_lfs][j][k] = qvDown(i_lfs, j, k, q_sat);
 
                 double r_humid_lfs = 1e2 * p_u
                     / (m.R_Air * (1.0 + (R_W_R_A - 1.0) * m.c.x[i_lfs][j][k]) * t_u);
@@ -1029,7 +1046,7 @@ void findCloudBaseLFS() {
                     double E_sat = m.hp * AtomUtils::exp_func(t_u, 17.2694, 35.86);
                     double q_sat = safe_q_sat(m.ep, E_sat, p_u);
 
-                    m.q_v_d.x[i][j][k] = 0.5 * (cloud.x[i][j][k] + scale * q_sat);
+                    m.q_v_d.x[i][j][k] = qvDown(i, j, k, q_sat);
 
                     m.E_d.x[i][j][k] = eps_d * fabs(m.M_d.x[i][j][k]);
                     m.D_d.x[i][j][k] = del_d * fabs(m.M_d.x[i][j][k]);

@@ -1354,6 +1354,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_SGZ=" << ev("ATM_MC_SGZ", "0*")
           << "  MC_ENTR=" << ev("ATM_MC_ENTR", "2.0e-3*")
           << "  MC_BASE_SAT=" << ev("ATM_MC_BASE_SAT", "0*")
+          << "  MC_QVD=" << ev("ATM_MC_QVD", "0*")
           << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
