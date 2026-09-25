@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <cstdint>
 
 using namespace AtomUtils;
@@ -27,7 +28,13 @@ namespace AtomMoistConvection {
     constexpr double alf_2 = 0.05;                                      // evaporation rate coefficient [1/s]
     constexpr double bet_p = 2.0e-3;                                    // in [1/s]
     constexpr double R_cloud = 100.0;                                   // cloud radius in [m] by ECMWF
-    double eps_u = 0.2 / R_cloud;                                       // in [1/m] by ECMWF
+    // ATM_MC_ENTR=<eps in 1/m>, default 0 = shipped 0.2/R_cloud = 2.0e-3 /m (2026-09-25, B.10b).
+    // Tiedtke (1989) uses 1.0e-4 for deep convection; at 2e-3 the per-level mixing fraction
+    // D_u*dz/M_u is 0.66-1.67 (MEASURED, def600 iter 120, 87E), so the "updraft" is the
+    // environment one level below and never carries its own buoyancy. Sets eps_u = del_u.
+    double eps_u = [](){ const char* e = std::getenv("ATM_MC_ENTR");
+                         const double v = e ? std::atof(e) : 0.0;
+                         return (v > 0.0) ? v : 0.2 / R_cloud; }();         // in [1/m]
     double del_u = eps_u;                                               // in [1/m] by ECMWF
 //    double eps_u = 1.0e-4;                                              // in [1/m] by COSMO for penetrative (deep) and midlevel clouds
 //    double del_u = eps_u;                                               // in [1/m] by COSMO for penetrative (deep) and midlevel clouds
@@ -138,6 +145,20 @@ private:
 
     // Precomputed data
     std::vector<double> height_table;
+
+    // ATM_MC_SGZ=<0|1>, default 0 = shipped (2026-09-25, B.10b). s is meant to be the DRY STATIC
+    // ENERGY cp*T + g*z (Tiedtke 1989); the shipped s = cp_l*T/s_0 has no g*z, so the updraft
+    // recurrence conserves cp*T and a rising parcel gets no dry-adiabatic cooling. =1 adds
+    // g*z/s_0 at every site that forms s, s_u or s_d from a temperature and removes it where the
+    // parcel temperature is recovered. z = height_table[i], the same at level i in every column,
+    // so g*z cancels in every same-level difference (the flux M*(s_x - s)) and only the
+    // level-to-level recurrences see it. Off branch: the original expressions, verbatim.
+    // MUST NOT be used alone at the shipped entrainment: a parcel remixed to the environment of
+    // the level below then has s_u - s = cp*dz*(Gamma_env - Gamma_d) < 0 and the flux flips sign.
+    // Pair it with ATM_MC_ENTR.
+    static int mcSgz() { static const int v = [](){ const char* e = std::getenv("ATM_MC_SGZ");
+                                                    return e ? std::atoi(e) : 0; }(); return v; }
+    double gz(int i) const { return m.g * height_table[i] / m.s_0; }
     std::vector<double> step;
     std::vector<int8_t> land_surf;
     std::vector<int8_t> air_surf;
@@ -318,7 +339,8 @@ private:
                     // Scalar fields driven by s = cp_l*T/s_0.
                     // s must be computed from current t before any other function reads it;
                     // if left stale, downdraftRecurrence propagates the error downward.
-                    m.s.x[i][j][k]      = m.cp_l * m.t.x[i][j][k] * m.t_0 / m.s_0;
+                    m.s.x[i][j][k]      = mcSgz() ? m.cp_l * m.t.x[i][j][k] * m.t_0 / m.s_0 + gz(i)
+                                                  : m.cp_l * m.t.x[i][j][k] * m.t_0 / m.s_0;
 
                     // Mass-flux fields — reset so cells outside the active [i_base..i_lfs]
                     // range cannot contribute to rhsForcing flux divergences.
@@ -526,8 +548,8 @@ private:
                     m.M_u.x[i][j][k] = clamp_M(m.M_u.x[i-1][j][k] + d_Mu * step[i]);// in [kg/(m³s)]
                     if(is_land(m.h, i, j, k)) m.M_u.x[i][j][k] = 0.0;
 
-                    m.s.x[i][j][k]   = m.cp_l * t_u / m.s_0;
-                    m.s_u.x[i][j][k] = m.cp_l * t_u_add / m.s_0;
+                    m.s.x[i][j][k]   = mcSgz() ? m.cp_l * t_u / m.s_0 + gz(i) : m.cp_l * t_u / m.s_0;
+                    m.s_u.x[i][j][k] = mcSgz() ? m.cp_l * t_u_add / m.s_0 + gz(i) : m.cp_l * t_u_add / m.s_0;
 
                     m.u_u.x[i][j][k] = vel * m.u.x[i][j][k];
                     m.v_u.x[i][j][k] = vel * m.v.x[i][j][k];
@@ -553,8 +575,8 @@ private:
 
                     if(i == local_i_end+1)  m.M_u.x[i-1][j][k] = m.M_u.x[local_i_beg][j][k];
 
-                    m.s.x[i][j][k]   = m.cp_l * t_u / m.s_0;
-                    m.s_u.x[i][j][k] = m.cp_l * t_u / m.s_0;
+                    m.s.x[i][j][k]   = mcSgz() ? m.cp_l * t_u / m.s_0 + gz(i) : m.cp_l * t_u / m.s_0;
+                    m.s_u.x[i][j][k] = mcSgz() ? m.cp_l * t_u / m.s_0 + gz(i) : m.cp_l * t_u / m.s_0;
 
                     m.q_v_u.x[i][j][k]     = m.c.x[i][j][k] + q_pert;
                     if(m.q_v_u.x[i][j][k] >= scale * q_sat_add && t_u_add >= t_00)
@@ -839,7 +861,8 @@ void findCloudBaseLFS() {
                     const double t_base = m.t.x[i_base][j][k] * m.t_0;
                     const double t_pert = delta_T_sfp[j][k];
                     const double q_pert = delta_q_sfp[j][k];
-                    m.s_u.x[i_base][j][k]   = m.cp_l * (t_base + t_pert) / m.s_0;
+                    m.s_u.x[i_base][j][k]   = mcSgz() ? m.cp_l * (t_base + t_pert) / m.s_0 + gz(i_base)
+                                                      : m.cp_l * (t_base + t_pert) / m.s_0;
                     m.q_v_u.x[i_base][j][k] = std::max(m.c.x[i_base][j][k] + q_pert, 0.0);
                 }
 
@@ -984,7 +1007,7 @@ void findCloudBaseLFS() {
 
                     double r_h_i = m.r_humid.x[i][j][k];
 
-                    m.s_d.x[i][j][k] = m.cp_l * t_u / m.s_0;
+                    m.s_d.x[i][j][k] = mcSgz() ? m.cp_l * t_u / m.s_0 + gz(i) : m.cp_l * t_u / m.s_0;
 
                     double E_sat = m.hp * AtomUtils::exp_func(t_u, 17.2694, 35.86);
                     double q_sat = safe_q_sat(m.ep, E_sat, p_u);
@@ -1138,7 +1161,8 @@ void findCloudBaseLFS() {
                     // gain L/cp·dq_sat/dT) stops the warm-cell overshoot (cf. SaturationAdjustment).
                     m.c_u.x[i][j][k] = 0.0;
                     if(fabs(m.M_u.x[i][j][k]) > coeff_recurr){
-                        double T_u       = m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
+                        double T_u       = mcSgz() ? (m.s_u.x[i][j][k] - gz(i)) * m.s_0 / m.cp_l
+                                                   : m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
                         const double p_u = m.p_stat.x[i][j][k];
                         double dcond_tot = 0.0;
                         for(int it = 0; it < 2; ++it){
@@ -1156,7 +1180,7 @@ void findCloudBaseLFS() {
                             T_u                += (L_u / m.cp_l) * dcond;       // latent heating (sole source)
                             dcond_tot          += dcond;
                         }
-                        m.s_u.x[i][j][k] = m.cp_l * T_u / m.s_0;
+                        m.s_u.x[i][j][k] = mcSgz() ? m.cp_l * T_u / m.s_0 + gz(i) : m.cp_l * T_u / m.s_0;
                         // c_u = the ACTUAL condensation rate [(kg/kg)/s] (was the circular
                         // q_c_u·M_u/(r_h·step)); feeds only the environment forcing conv_src
                         // (MC_t heating / MC_q drying) in rhsForcing — no longer the s_u/q_v_u budgets.
