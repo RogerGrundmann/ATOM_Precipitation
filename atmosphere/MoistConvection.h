@@ -864,6 +864,23 @@ void findCloudBaseLFS() {
                     m.s_u.x[i_base][j][k]   = mcSgz() ? m.cp_l * (t_base + t_pert) / m.s_0 + gz(i_base)
                                                       : m.cp_l * (t_base + t_pert) / m.s_0;
                     m.q_v_u.x[i_base][j][k] = std::max(m.c.x[i_base][j][k] + q_pert, 0.0);
+                    // ATM_MC_BASE_SAT=<0|1>, default 0 = shipped (2026-09-25, B.10c). Under ATM_CLOUD_FRAC
+                    // the base is the first level with stratiform cloud fraction f > 0 (grid RH > H_crit,
+                    // ~70 %), and the parcel was seeded with the grid-mean humidity, so it starts
+                    // BELOW its own condensation level. With ATM_MC_SGZ it then rises dry for ~0.9 km
+                    // and arrives 4.4 K cold (sgzb_sge, 87E, iter 120). =1 seeds it saturated at its own
+                    // temperature and pressure -- the in-cloud part of a cloudy base IS saturated --
+                    // never below the shipped value. Same saturation formula as the parcel
+                    // condensation step in updraftRecurrence, so the first level does not condense
+                    // an artefact of a formula mismatch.
+                    static const int mc_base_sat = [](){ const char* e = std::getenv("ATM_MC_BASE_SAT");
+                                                         return e ? std::atoi(e) : 0; }();
+                    if (mc_base_sat) {
+                        const double T_b  = t_base + t_pert;
+                        const double E_sb = m.hp * AtomUtils::exp_func(T_b, 17.2694, 35.86);
+                        const double q_sb = safe_q_sat(m.ep, E_sb, m.p_stat.x[i_base][j][k]);
+                        m.q_v_u.x[i_base][j][k] = std::max(m.q_v_u.x[i_base][j][k], q_sb);
+                    }
                 }
 
                 M_d_LFS_local[j][k] = clamp_M(gam_d * m.M_u.x[i_base][j][k]);
