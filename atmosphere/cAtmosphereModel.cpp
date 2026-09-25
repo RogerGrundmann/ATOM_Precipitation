@@ -1356,6 +1356,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
+          << "  DAMP_Q_VERT=" << ev("ATM_DAMP_Q_VERT", "1*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
@@ -1585,10 +1586,19 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     const char* w = getenv("ATM_WATER_CLOSURE");   // default OFF again since 2026-09-25 (runaway, bisected)
                     if (w && atoi(w) != 0) return true;
                     const char* e = getenv("ATM_DAMP_Q_MASS"); return e && atoi(e) != 0; }();
+                // ATM_DAMP_Q_VERT=<0|1>, default 1 = shipped (2026-09-25). The along_i pass of this filter is a
+                // 1-2-1 smoother in INDEX space in the VERTICAL, every moist call (0.4 s): an effective
+                // vertical diffusivity 0.25*dz^2/0.4 s ~ 950 m2/s in the 39 m bottom layer, ~1.6e5 m2/s at
+                // 5 km. It pumps boundary-layer water aloft (ColumnWaterBudget, 100 from scratch: surface
+                // band -9e5 / aloft +3.3e6 mm/a shipped, -2.8e5 / +2.8e5 with the mass form). Shipped, RK4
+                // discards it (leapfrog_reset); with ATM_WATER_CLOSURE's RK4 sync it persists and drives the
+                // def600 precipitation runaway. =0 drops the vertical pass for c/cloud/ice only (j, k kept).
+                static const bool damp_q_vert = [](){
+                    const char* e = getenv("ATM_DAMP_Q_VERT"); return e ? atoi(e) != 0 : true; }();
                 if(!damp_q_mass){
-                    AtomUtils::damp_wiggles(ice,   &i_topography, true, true, true);
-                    AtomUtils::damp_wiggles(c,     &i_topography, true, true, true);
-                    AtomUtils::damp_wiggles(cloud, &i_topography, true, true, true);
+                    AtomUtils::damp_wiggles(ice,   &i_topography, damp_q_vert, true, true);
+                    AtomUtils::damp_wiggles(c,     &i_topography, damp_q_vert, true, true);
+                    AtomUtils::damp_wiggles(cloud, &i_topography, damp_q_vert, true, true);
                 }else{
                     static std::vector<double> q_mass;
                     q_mass.assign(static_cast<std::size_t>(im) * jm * km, 0.0);
@@ -1605,9 +1615,9 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                             }
                         }
                     }
-                    AtomUtils::damp_wiggles_mass(ice,   q_mass, true, true, true);
-                    AtomUtils::damp_wiggles_mass(c,     q_mass, true, true, true);
-                    AtomUtils::damp_wiggles_mass(cloud, q_mass, true, true, true);
+                    AtomUtils::damp_wiggles_mass(ice,   q_mass, damp_q_vert, true, true);
+                    AtomUtils::damp_wiggles_mass(c,     q_mass, damp_q_vert, true, true);
+                    AtomUtils::damp_wiggles_mass(cloud, q_mass, damp_q_vert, true, true);
                 }
                 ColumnWaterBudget::mark(*this, "damp_wiggles(q)");
 
