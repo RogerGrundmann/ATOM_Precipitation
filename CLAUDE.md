@@ -48,7 +48,19 @@ not regrid this model, it would **extend the shell 5.1x** while looking like a g
 same goes for `buildReferenceColumn`: ATHAD integrates a DRY ADIABAT because its column is one
 by construction, and that law puts this tree's 16 km lid at 117 K.
 
-## ⭐ `ATM_WATER_CLOSURE` IS DEFAULT ON SINCE 2026-09-24 — ON 20-ITERATION EVIDENCE ONLY
+## ⚠ `ATM_WATER_CLOSURE` IS DEFAULT OFF AGAIN SINCE 2026-09-25 (`1ce14d2`) — IT RAN AWAY AT 600
+
+**The 600 from scratch on the 09-24 defaults (`python/output_def600`) climbed 860 -> 3295 mm/a over 40-600
+iterations and was still rising; r 0.20, sigma 3.91, 65-90 deg 1871 mm/a, convection dead.** Bisected
+(`run_bisect2.sh`, 100 from scratch, one 09-24 flip reverted per arm): the climb over 40-100 is 11.87 mm/a/iter
+in the control and every other arm, 3.58 with this knob off alone. **Mechanism:** the closure forces the RK4
+sync, which keeps the moisture Shapiro filter's VERTICAL pass (index-space 1-2-1 every 0.4 s, ~950 m2/s at the
+ground, ~1.6e5 m2/s at 5 km) instead of discarding it; that pumps boundary-layer water aloft (+2.8e5 mm/a) and
+the microphysics rains it out (1.7e3 -> 6.8e4 mm/a). The "evaporation sink" (-2.3e4 mm/a) is the level-0 skin
+copy mirroring the filter-drained level 1. Test of the filter hypothesis: `ATM_DAMP_Q_VERT=0` (`run_qv100.sh`).
+The record of the flip follows.
+
+### (history) `ATM_WATER_CLOSURE` WAS DEFAULT ON 2026-09-24 — ON 20-ITERATION EVIDENCE ONLY
 
 At the user's instruction. One switch for a four-way cancellation in the water budget: the `c_eq` evaporation
 re-pin (~5e+06 mm/a), the RK4 discard of every pre-RK4 direct write (`leapfrog_reset`), the index-space
