@@ -188,8 +188,11 @@ void cAtmosphereModel::print_min_max_atm(){
     cout << endl << " pressures: " << endl;
     searchMinMax_3D(" max pressure static ", " min pressure static ", 
         "hPa", p_stat, 1.0);
+    // p_dyn is nondimensionalised by r_air*u_0^2 (77.06 Pa), not p_0: the momentum
+    // equations carry no Euler number on it. p_0 made this print 1315x too large.
+    // Same factor as the VTK writers (pdyn_to_hPa, fixed 2026-09-06).
     searchMinMax_3D(" max pressure dynamic ", " min pressure dynamic ", 
-        "hPa", p_dyn, p_0);
+        "hPa", p_dyn, r_air * u_0 * u_0 / 100.0);
 
 
 
