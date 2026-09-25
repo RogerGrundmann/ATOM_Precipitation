@@ -159,6 +159,10 @@ public:
     }
 
     // Difference the column water against the previous mark and charge it to `stage`.
+    static bool bands(){
+        static const bool v = [](){ const char* e = getenv("ATM_CWB_BANDS"); return e && atoi(e) != 0; }();
+        return v;
+    }
     static void mark(cAtmosphereModel& m, const char* stage){
         if(enabled()) state().mark(m, stage);
     }
@@ -196,6 +200,15 @@ private:
         std::vector<double>      q_prev;    // total water at the previous mark       [kg/kg]
         std::vector<std::string> names;     // stage names, in first-seen order
         std::vector<double>      sums;      // 2 per stage: surface band, aloft       [mm]
+        // ATM_CWB_BANDS=1 (2026-09-25, print-only): the same stage totals split by |latitude| into
+        // 0-15 / 15-35 / 35-65 / 65-90, the bands the precipitation score prints (ThermoAtm.h,
+        // alat = |90 - j*180/(jm-1)|, edges < 15 / < 35 / < 65). Asked for by the closure's
+        // polar engine: with ATM_WATER_CLOSURE on and both filter vertical passes off, 65-90
+        // still climbs 28 -> 669 mm/a over 100 iterations (qvt_on) and the global table cannot
+        // say which stage feeds it. Each band is normalised by its OWN cos-lat weight, so a row
+        // reads as a band-mean rate in mm/a, comparable with that band's printed precipitation.
+        std::vector<double>      sums_b;    // 4 per stage: bands 0-15, 15-35, 35-65, 65-90   [mm*wj]
+        double w_band[4] = {0.0, 0.0, 0.0, 0.0};
         double w_lat   = 0.0;               // sum of the cos-lat weights over (j,k)
         double elapsed = 0.0;               // physical seconds in this window
         double P_mm = 0.0, E_mm = 0.0;
@@ -239,6 +252,10 @@ private:
                              : cos((j - 90) * M_PI / 180.0);
         }
 
+        static int band_of(cAtmosphereModel& m, int j){
+            const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+            return (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
+        }
         static double q_total(cAtmosphereModel& m, int i, int j, int k){
             return m.c.x[i][j][k] + m.cloud.x[i][j][k] + m.ice.x[i][j][k] + m.gr.x[i][j][k];
         }
@@ -294,6 +311,11 @@ private:
             }
             names = loop_order();
             sums.assign(2 * names.size(), 0.0);
+            if(bands()){
+                sums_b.assign(4 * names.size(), 0.0);
+                if(w_band[0] + w_band[1] + w_band[2] + w_band[3] <= 0.0)
+                    for(int j = 0; j < m.jm; j++) w_band[band_of(m, j)] += lat_weight(j) * m.km;
+            }
             elapsed = 0.0;
             P_mm = E_mm = 0.0;
             Sq_mm = Sq_nd = Sp_mm = Sp_nd = 0.0;
@@ -380,9 +402,12 @@ private:
 
             size_t s = 0;
             while(s < names.size() && names[s] != stage) s++;
-            if(s == names.size()){ names.emplace_back(stage); sums.resize(2 * (s + 1), 0.0); }
+            if(s == names.size()){ names.emplace_back(stage); sums.resize(2 * (s + 1), 0.0);
+                                   if(bands()) sums_b.resize(4 * (s + 1), 0.0); }
             sums[2*s]     += ds;
             sums[2*s + 1] += da;
+            if(bands())                                   // serial over j: thread-count independent
+                for(int j = 0; j < m.jm; j++) sums_b[4*s + band_of(m, j)] += row_s[j] + row_a[j];
         }
 
         void tick(cAtmosphereModel& m, int iter, double sec_per_iter){
@@ -495,6 +520,28 @@ private:
             cout << "      AGCM: [CWB] " << left << setw(22) << "NET" << right
                  << setw(15) << scientific << setprecision(4) << (net_s + net_a)
                  << setw(15) << net_s << setw(15) << net_a << endl;
+            if(bands() && sums_b.size() >= 4 * names.size()){
+                cout << "      AGCM: [CWB-BANDS] band-mean rates [mm/a], each band on its own cos-lat weight"
+                     << " (compare the band's printed precipitation)" << endl;
+                cout << "      AGCM: [CWB-BANDS] " << left << setw(22) << "stage" << right
+                     << setw(13) << "0-15" << setw(13) << "15-35" << setw(13) << "35-65"
+                     << setw(13) << "65-90" << endl;
+                double nb[4] = {0.0, 0.0, 0.0, 0.0};
+                for(size_t s = 0; s < names.size(); s++){
+                    cout << "      AGCM: [CWB-BANDS] " << left << setw(22) << names[s] << right;
+                    for(int b = 0; b < 4; b++){
+                        const double v = (w_band[b] > 0.0) ? sums_b[4*s + b] / w_band[b] * per_year : 0.0;
+                        nb[b] += sums_b[4*s + b];
+                        cout << setw(13) << scientific << setprecision(3) << v;
+                    }
+                    cout << endl;
+                }
+                cout << "      AGCM: [CWB-BANDS] " << left << setw(22) << "NET" << right;
+                for(int b = 0; b < 4; b++)
+                    cout << setw(13) << scientific << setprecision(3)
+                         << ((w_band[b] > 0.0) ? nb[b] / w_band[b] * per_year : 0.0);
+                cout << endl << fixed;
+            }
 
             // Reference rows. P leaves the domain at the ground, so it is not a budget term; the
             // microphysics row is the part of the RungeKutta bucket that the ice scheme asked for.
