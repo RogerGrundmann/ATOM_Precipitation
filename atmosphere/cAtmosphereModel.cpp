@@ -1366,7 +1366,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  DAMP_Q_HORIZ=" << ev("ATM_DAMP_Q_HORIZ", "1*")
           << "  DAMP_T_VERT=" << ev("ATM_DAMP_T_VERT", "1*")
           << "  DAMP_T_HORIZ=" << ev("ATM_DAMP_T_HORIZ", "1*")
-          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
+          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless those are set; RK_SCALAR_SYNC and SATADJ_FADE honour an explicit value)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
@@ -1976,11 +1976,18 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // ThermoAtm::waterVapourEvaporation. Syncing without replacing the re-pin kept the
         // ~5e+06 mm/a injection and rained 7688 mm/a; replacing the re-pin without syncing
         // leaves every direct write of the pre-RK4 physics discarded.
+        // PRECEDENCE (2026-09-26): an EXPLICITLY SET ATM_RK_SCALAR_SYNC wins over the closure's forced mode 2,
+        // as the banner and CLAUDE.md already said ("unless set") and the code did not. Needed to test the
+        // closure with mode 1 (moisture only): qh_on's 35-65 deg column is +0.65 K warmer than the closure-off
+        // arms, the temperature filter's horizontal passes are exonerated (qth_on), and the suspect is the
+        // pre-RK4 SaturationAdjustment latent heat that mode 2 keeps. Unchanged for every run that does not
+        // set both variables.
         static const int rk_scalar_sync = [](){
+            const char* e = getenv("ATM_RK_SCALAR_SYNC");
+            if (e) return atoi(e);
             const char* w = getenv("ATM_WATER_CLOSURE");       // default OFF again since 2026-09-25 (runaway, bisected)
             if (w && atoi(w) != 0) return 2;
-            const char* e = getenv("ATM_RK_SCALAR_SYNC");
-            return e ? atoi(e) : 0; }();
+            return 0; }();
         if(rk_scalar_sync != 0){
             #pragma omp parallel for collapse(2) schedule(static)
             for(int i = 0; i < im; i++){
