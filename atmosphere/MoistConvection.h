@@ -24,7 +24,14 @@ namespace AtomMoistConvection {
     constexpr double t_00_minus2 = t_00 - 2.0;
     constexpr double bet = 42.0;
     constexpr double b_u = 0.33;
-    constexpr double alf_1 = 0.05;                                      // evaporation rate coefficient [1/s]
+    // ATM_MC_ALF1=<1/s>, default 0 = shipped 0.05 (2026-09-26). Tiedtke's (1989) sub-cloud rain
+    // evaporation coefficient alpha_1 is 5.44e-4 /s, 92x below the shipped value (the 1e1/alf_2 = 200
+    // beside it matches his 1/alpha_2 = 196.5). With the updraft repaired and a saturated downdraft
+    // (ATM_MC_SGZ + ATM_MC_ENTR + ATM_MC_BASE_SAT + ATM_MC_QVD=2, qvd2) e_p evaporates 82 % of ~1.1e4
+    // mm/a of convective rain and P_conv is 2.7 mm/a. Only the e_p site reads it.
+    inline const double alf_1 = [](){ const char* e = std::getenv("ATM_MC_ALF1");
+                                      const double v = e ? std::atof(e) : 0.0;
+                                      return (v > 0.0) ? v : 0.05; }();   // evaporation rate coefficient [1/s]
     constexpr double alf_2 = 0.05;                                      // evaporation rate coefficient [1/s]
     constexpr double bet_p = 2.0e-3;                                    // in [1/s]
     constexpr double R_cloud = 100.0;                                   // cloud radius in [m] by ECMWF
