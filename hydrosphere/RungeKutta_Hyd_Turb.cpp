@@ -133,7 +133,7 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
 
     // HYD_BUOY_CONSISTENT -- the per-level reference density, over WATER cells, from the
     // time-level-n fields. See HydBuoyancy.h. One thread per level, so it is deterministic.
-    if (HydBuoy::strength() != 0.0) {
+    if (HydBuoy::strength() != 0.0 || HydSplit::enabled()) {   // HYD_HYDRO_SPLIT needs rho_ref too
         HydBuoy::rho_ref.assign(im, 0.0);
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < im; i++) {
@@ -148,6 +148,38 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
             }
             HydBuoy::rho_ref[i] = wsum > 0.0 ? sum / wsum : 0.0;
         }
+    }
+
+    // HYD_HYDRO_SPLIT -- the hydrostatic pressure of the density anomaly, by a column integral
+    // DOWN from the surface (p_hb(im-1) = 0), from tn/cn. See HydBuoyancy.h. One column per
+    // (j,k) iteration, so it is deterministic. Never entered when the knob is off.
+    if (HydSplit::enabled()) {
+        const size_t n = (size_t)im * jm * km;
+        if (HydSplit::p_hb.size() != n) { HydSplit::p_hb.assign(n, 0.0); HydSplit::n_j = jm; HydSplit::n_k = km; }
+        const double coeff = HydSplit::strength() * buoyancy * g / (u_0 * u_0) / r_0_water;   // per metre
+        double pmax = 0.0;
+        #pragma omp parallel for collapse(2) schedule(static) reduction(max:pmax)
+        for (int j = 0; j < jm; j++) {
+            for (int k = 0; k < km; k++) {
+                auto f = [&](int i) -> double {       // (g/u_0^2) rho'/r_0 per metre, zero on land
+                    if (AtomUtils::is_land(h, i, j, k)) return 0.0;
+                    return coeff * (HydBuoy::rho_eos(tn.x[i][j][k] * t_0 - t_0, cn.x[i][j][k] * c_35)
+                                    - HydBuoy::rho_ref[i]);
+                };
+                double p = 0.0, f_hi = f(im-1);
+                HydSplit::p_hb[((size_t)(im-1) * jm + j) * km + k] = 0.0;
+                for (int i = im-2; i >= 0; i--) {
+                    const double f_lo = f(i);
+                    p += 0.5 * (f_lo + f_hi) * (rad.z[i+1] - rad.z[i]) * L_hyd;
+                    HydSplit::p_hb[((size_t)i * jm + j) * km + k] = p;
+                    f_hi = f_lo;
+                    if (std::fabs(p) > pmax) pmax = std::fabs(p);
+                }
+            }
+        }
+        if (checkpoint > 0 && iter_n % checkpoint == 0)
+            cout << "      OGCM: [HYDRO_SPLIT] s=" << HydSplit::strength() << "  coeff=" << coeff
+                 << " /m  max|p_hb| nd=" << pmax << "  (= " << pmax * r_0_water * u_0 * u_0 << " Pa)" << endl;
     }
 
     #pragma omp parallel for collapse(2) schedule(static)
