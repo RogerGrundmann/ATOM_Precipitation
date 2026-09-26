@@ -58,7 +58,37 @@ sync, which keeps the moisture Shapiro filter's VERTICAL pass (index-space 1-2-1
 ground, ~1.6e5 m2/s at 5 km) instead of discarding it; that pumps boundary-layer water aloft (+2.8e5 mm/a) and
 the microphysics rains it out (1.7e3 -> 6.8e4 mm/a). The "evaporation sink" (-2.3e4 mm/a) is the level-0 skin
 copy mirroring the filter-drained level 1. Test of the filter hypothesis: `ATM_DAMP_Q_VERT=0` (`run_qv100.sh`).
-The record of the flip follows.
+
+### The filter hypothesis is CONFIRMED BY REMOVAL — and the filter was also feeding the storm track (2026-09-26)
+
+**THE CLOSURE HAS TWO ENGINES AND BOTH ARE THE SAME FILTER.** The vertical pass alone (`qv_on`) only halved the
+climb (11.87 -> 5.44 mm/a/iter) and the polar band climbed FASTER. `ATM_CWB_BANDS` (`qvtb_on`) located the second
+engine: the filter's MERIDIONAL pass, index-space 1-2-1 every 0.4 s = ~8e9 m2/s against ~1e6 for real eddy mixing,
+moving -7.0e5 / -5.2e5 / +8.6e5 / **+5.0e5** mm/a into 0-15 / 15-35 / 35-65 / 65-90 deg -- the whole polar NET.
+`ATM_DAMP_Q_HORIZ=<0|1>` (`bdd60c7`, default 1 = shipped, byte-identical 13 of 14, control 9 differ) switches it off;
+with `ATM_DAMP_Q_VERT=0` the moisture filter is off entirely. 100 from scratch, `cli/atm_dqh`, 8 threads
+(`run_qh100.sh`), both exit 0, zero NaN; high parity at iteration 100:
+
+| arm | P | climb 40-100 | r | sigma | 0-15 / 15-35 / 35-65 / 65-90 | land / ocean |
+|---|---|---|---|---|---|---|
+| **`qh_on`** closure ON, filter fully OFF | 818 | **3.26** | 0.456 | **2.19** | 2997 / **116** / **92** / **2.9** | **774** / 836 |
+| `qvtb_on` closure ON, vertical passes off | 998 | 5.25 | 0.285 | 2.49 | 2725 / 382 / 385 / 669 | 1054 / 975 |
+| `bis_wc` closure OFF | 982 | 3.58 | 0.467 | 2.37 | 3384 / 217 / 192 / 16 | 856 / 1032 |
+| `qh_off` closure OFF, filter fully OFF | 996 | 3.66 | 0.476 | 2.40 | 3439 / 217 / 192 / 17 | 870 / 1045 |
+| *NASA* | *978* | | | *1.00* | *1487 / 761 / 981 / 364* | *782 / 1056* |
+
+**THE RUNAWAY IS GONE.** The CWB `damp_wiggles(q)` bucket reads exactly 0 (the self-check), the polar band is flat
+at 2.9, the climb is at or below the closure-off one, and max cloud water is 0.25 g/kg at 6.7 km in the tropics
+(against `qvtb_on`'s 0.97 in a polar surface cell) -- no 2dt moisture mode appears without the filter in 100
+iterations. **The water budget nearly closes: P 787 / E 757 mm/a**, where the shipped branch runs P/E ~1.9.
+`qh_off` against `bis_wc` is a null, as it must be: on the shipped branch RK4 discards the filter.
+
+**AND THE COST IS THE STORM TRACK.** 15-35 and 35-65 deg fall to **116 and 92**, HALF the closure-off 217 and 192.
+So on the closure branch the ~8e9 m2/s meridional pass was not only flooding the poles, it was ALSO the whole
+of the extratropical moisture supply -- the same missing eddy transport *The moisture transport, measured* reports
+as 7 % of requirement, supplied by a numerical smoother. Global precip is still rising at 100 (ocean 836 climbing,
+land flat at 774 against NASA 782). **Owed: a 600 of `qh_on`** -- do the extratropics recover or stay starved?
+**Not flipped.** The record of the flip follows.
 
 ### (history) `ATM_WATER_CLOSURE` WAS DEFAULT ON 2026-09-24 — ON 20-ITERATION EVIDENCE ONLY
 
