@@ -1362,6 +1362,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  DAMP_Q_VERT=" << ev("ATM_DAMP_Q_VERT", "1*")
           << "  DAMP_Q_HORIZ=" << ev("ATM_DAMP_Q_HORIZ", "1*")
           << "  DAMP_T_VERT=" << ev("ATM_DAMP_T_VERT", "1*")
+          << "  DAMP_T_HORIZ=" << ev("ATM_DAMP_T_HORIZ", "1*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
@@ -1583,7 +1584,16 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // is vertical or horizontal is not recorded; watch the Pamir surface t with =0.
                 static const bool damp_t_vert = [](){
                     const char* e = getenv("ATM_DAMP_T_VERT"); return e ? atoi(e) != 0 : true; }();
-                AtomUtils::damp_wiggles(t,     &i_topography, damp_t_vert, true, true);
+                // ATM_DAMP_T_HORIZ=<0|1>, default 1 = shipped (2026-09-26). The along_j/along_k passes of the
+                // same filter: index-space 1-2-1 every moist call, a meridional diffusivity ~0.25*(111 km)^2/0.4 s
+                // ~ 8e9 m2/s. Under ATM_WATER_CLOSURE (sync mode 2 keeps t) they persist like the moisture
+                // filter's did. qh_on (closure on, moisture filter off) runs its 35-65 deg column +0.65 K warmer
+                // than the closure-off arms at every height, with identical vapour: half the cloud, half the
+                // rain. This is the suspect. Same Pamir caution as ATM_DAMP_T_VERT above.
+                static const bool damp_t_horiz = [](){
+                    const char* e = getenv("ATM_DAMP_T_HORIZ"); return e ? atoi(e) != 0 : true; }();
+                if(damp_t_vert || damp_t_horiz)
+                    AtomUtils::damp_wiggles(t,     &i_topography, damp_t_vert, damp_t_horiz, damp_t_horiz);
                 t0_mark("damp_wiggles(t)");
                 // ATM_DAMP_Q_MASS=<0|1>, default 0 = shipped (B+4). The shipped filter conserves
                 // q in INDEX space and so creates water where neighbouring cells differ in mass
