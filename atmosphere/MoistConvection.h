@@ -897,13 +897,33 @@ void findCloudBaseLFS() {
                     // never below the shipped value. Same saturation formula as the parcel
                     // condensation step in updraftRecurrence, so the first level does not condense
                     // an artefact of a formula mismatch.
+                    //
+                    // =2 (2026-09-26): saturate only the CLOUDY FRACTION f of the base cell,
+                    // q_v_u = q + f*(q_sat_parcel - q), f from the same uniform-PDF closure as the
+                    // stratiform scheme. =1 is MEASURED to manufacture water: at the base the grid air
+                    // is at RH ~61 % (q 9.6 g/kg, alf_tie/qvd2 28N land, iter 520), =1 seeds 14.9 g/kg,
+                    // the extra 5.3 g/kg condenses on ascent (q_c_u 6.9 against 0.13 g/kg unseeded) and
+                    // the updraft generates ~46 000 mm/a per convecting column. The base is the first
+                    // level with f > 0 (RH > H_crit), not a saturated level, so only f of it is cloud.
                     static const int mc_base_sat = [](){ const char* e = std::getenv("ATM_MC_BASE_SAT");
                                                          return e ? std::atoi(e) : 0; }();
                     if (mc_base_sat) {
                         const double T_b  = t_base + t_pert;
                         const double E_sb = m.hp * AtomUtils::exp_func(T_b, 17.2694, 35.86);
                         const double q_sb = safe_q_sat(m.ep, E_sb, m.p_stat.x[i_base][j][k]);
-                        m.q_v_u.x[i_base][j][k] = std::max(m.q_v_u.x[i_base][j][k], q_sb);
+                        double q_seed = q_sb;
+                        if (mc_base_sat == 2) {
+                            const double p_b  = m.p_stat.x[i_base][j][k];
+                            const double q_t  = m.c.x[i_base][j][k] + m.cloud.x[i_base][j][k]
+                                              + m.ice.x[i_base][j][k];
+                            const double q_sg = CloudFraction::qSat(t_base, p_b, m.t_0, m.hp, m.ep);
+                            const double f    = CloudFraction::enabled()
+                                              ? CloudFraction::fraction(q_t, q_sg, p_b)
+                                              : ((q_t > q_sg) ? 1.0 : 0.0);
+                            const double q_0  = m.q_v_u.x[i_base][j][k];
+                            q_seed = q_0 + f * std::max(q_sb - q_0, 0.0);
+                        }
+                        m.q_v_u.x[i_base][j][k] = std::max(m.q_v_u.x[i_base][j][k], q_seed);
                     }
                 }
 
@@ -971,8 +991,19 @@ void findCloudBaseLFS() {
                         // Precipitation formation
                         double K_p = (height_i > height_base + delta_i_c) ? bet_p : 0.0;
 
+                        // ATM_MC_GP_AREA=<0|1>, default 0 = shipped (2026-09-26). g_p is a rate per kg of
+                        // GRID air (the q_c_u recurrence debits rho*g_p*dz from the flux M_u*q_c_u, and
+                        // c_u is formed per grid mass as dcond*M_u/(rho*dz)), but K_p*q_c_u is the rate
+                        // INSIDE the updraft. The grid-mean rate is a_u*K_p*q_c_u with a_u the updraft area
+                        // fraction the scheme already assumes for u_u = u + M_u/(rho*a_u*u_0). Unweighted
+                        // (q_c_u ~7 g/kg on the repaired-parcel stack) g_p ~1.4e-5 /s is ~50x the
+                        // condensation c_u that feeds it. Sixth occurrence of the grid-mean defect.
+                        static const bool mc_gp_area = [](){ const char* e = std::getenv("ATM_MC_GP_AREA");
+                                                             return e && std::atoi(e) != 0; }();
                         if(t_u >= m.t_0){
-                            m.g_p.x[i][j][k] = (iter_prec == 1) ? 0.0 : K_p * m.q_c_u.x[i][j][k];// in [(kg/kg)/s]
+                            m.g_p.x[i][j][k] = (iter_prec == 1) ? 0.0
+                                : (mc_gp_area ? a_u * K_p * m.q_c_u.x[i][j][k]
+                                              : K_p * m.q_c_u.x[i][j][k]);// in [(kg/kg)/s]
                         }else{
                             m.g_p.x[i][j][k] = 0.0;
                         }
