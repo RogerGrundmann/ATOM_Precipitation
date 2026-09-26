@@ -268,7 +268,7 @@ private:
             for(int j = 0; j < m.jm; j++){
                 double s = 0.0;
                 const double wj = lat_weight(j);
-                for(int k = 0; k < m.km; k++){
+                for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
                     for(int i = i0; i < m.im - 1; i++){
                         double rho = m.r_humid.x[i][j][k];
@@ -293,11 +293,11 @@ private:
             if(mass.size()   != n) mass.assign(n, 0.0);
             if(q_prev.size() != n) q_prev.assign(n, 0.0);
             if(w_lat <= 0.0){
-                for(int j = 0; j < m.jm; j++) w_lat += lat_weight(j) * m.km;
+                for(int j = 0; j < m.jm; j++) w_lat += lat_weight(j) * (m.km - 1);   // seam counted once (2026-09-26)
             }
             #pragma omp parallel for collapse(2) schedule(static)
             for(int j = 0; j < m.jm; j++){
-                for(int k = 0; k < m.km; k++){
+                for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
                     for(int i = 0; i < m.im; i++){
                         const size_t p = idx(m, i, j, k);
@@ -314,7 +314,7 @@ private:
             if(bands()){
                 sums_b.assign(4 * names.size(), 0.0);
                 if(w_band[0] + w_band[1] + w_band[2] + w_band[3] <= 0.0)
-                    for(int j = 0; j < m.jm; j++) w_band[band_of(m, j)] += lat_weight(j) * m.km;
+                    for(int j = 0; j < m.jm; j++) w_band[band_of(m, j)] += lat_weight(j) * (m.km - 1);   // seam once
             }
             elapsed = 0.0;
             P_mm = E_mm = 0.0;
@@ -360,7 +360,7 @@ private:
             for(int j = 0; j < m.jm; j++){
                 double ss = 0.0, sa = 0.0;
                 const double wj = lat_weight(j);
-                for(int k = 0; k < m.km; k++){
+                for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
                     for(int i = i0; i < m.im - 1; i++){
                         const double qn = m.cn.x[i][j][k] + m.cloudn.x[i][j][k]
@@ -384,7 +384,7 @@ private:
             for(int j = 0; j < m.jm; j++){
                 double ss = 0.0, sa = 0.0;
                 const double wj = lat_weight(j);
-                for(int k = 0; k < m.km; k++){
+                for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
                     for(int i = i0; i < m.im - 1; i++){
                         const size_t p = idx(m, i, j, k);
@@ -460,7 +460,7 @@ private:
             for(int j = 0; j < m.jm; j++){
                 double s = 0.0, s_nd = 0.0, sp = 0.0, sp_nd = 0.0;
                 const double wj = lat_weight(j);
-                for(int k = 0; k < m.km; k++){
+                for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
                     for(int i = i0; i < m.im - 1; i++){
                         const double S = m.S_v.x[i][j][k] + m.S_c.x[i][j][k]

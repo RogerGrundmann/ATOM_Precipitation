@@ -291,6 +291,26 @@ private:
                         // proportional and safe on its own, but S_d_au is sized by the DEPOSITION
                         // rate (S_i_dep/1.5*((m_s_0/m_i)^(2/3)-1)), which is supersaturation-
                         // limited and knows nothing about how much ice is present.
+                        // ATM_ONECAT_CLOUD_LIMIT=<0|1>, default 0 = shipped (2026-09-26). The CLOUD-WATER
+                        // availability limiter TwoCatIceScheme.h:553 carries and this scheme never got:
+                        // the four cloud sinks S_au, S_ac, S_rim, S_shed are scaled together so that they
+                        // cannot take more than cloud/dt_snow_dim in one step. Without it a sink larger than
+                        // the cloud present drives `cloud` negative and the RK4 max(0, .) clip refills it --
+                        // a water SOURCE (ATM_CWB_DIAG's RungeKutta bucket). Same timescale as TwoCat's,
+                        // including the open question of whether dt_snow_dim is the right one there.
+                        static const bool cloud_limit = [](){ const char* e = std::getenv("ATM_ONECAT_CLOUD_LIMIT");
+                                                              return e && std::atoi(e) != 0; }();
+                        if(cloud_limit){
+                            const double S_cloud_total  = S_au + S_ac + S_rim + S_shed;
+                            const double max_cloud_loss = m.cloud.x[i][j][k] / dt_snow_dim;
+                            if(S_cloud_total > max_cloud_loss && S_cloud_total > 0.0){
+                                const double factor = max_cloud_loss / S_cloud_total;
+                                S_au   *= factor;
+                                S_ac   *= factor;
+                                S_rim  *= factor;
+                                S_shed *= factor;
+                            }
+                        }
                         {
                             const double S_ice_total = thr.S_i_au + thr.S_d_au;
                             const double max_ice_loss = m.ice.x[i][j][k] / dt_snow_dim;

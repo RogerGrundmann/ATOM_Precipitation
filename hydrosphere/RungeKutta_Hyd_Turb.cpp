@@ -53,7 +53,7 @@ void cHydrosphereModel::solveRungeKutta_Hydrosphere_Turb(){
     std::vector<double> sinthe_tbl(jm), costhe_tbl(jm);
     for (int j = 0; j < jm; j++) {
         sinthe_tbl[j] = sin(the.z[j]);
-        if (sinthe_tbl[j] < 0.4) sinthe_tbl[j] = 0.4;
+        if (sinthe_tbl[j] < hydMetricSinFloor()) sinthe_tbl[j] = hydMetricSinFloor();   // HYD_METRIC_SIN_FLOOR, default 0.4
         costhe_tbl[j] = cos(the.z[j]);
     }
 

@@ -816,15 +816,52 @@ public:
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
+        // ATM_SEAM_Q_CONSERVE=<0|1>, default 0 = shipped (2026-09-26). The seam column k = 0 (== km-1) is
+        // not integrated by RK4, and the line below OVERWRITES its water with the average of k = 1 and
+        // k = km-2 on every call -- so whatever else wrote water into the seam column since the last call
+        // (evaporation, saturation adjustment, and under ATM_WATER_CLOSURE every persisting pre-RK4
+        // write) is deleted instead of passed on: ColumnWaterBudget's "BC:phi(seam)" row (-2.5e3 mm/a
+        // global on the closure branch, +8.2e3 into 15-35 deg in qh_on). =1 keeps the seam equal to the
+        // average of its neighbours but adds ONE common increment e to the seam and both neighbours,
+        //     e = m_0 (q_old - q_avg) / (m_0 + m_1 + m_{km-2}),   m = r_humid (same i, so same dz),
+        // which conserves m_0 q_0 + m_1 q_1 + m_{km-2} q_{km-2} EXACTLY and leaves seam = neighbour mean.
+        // Water only (c, cloud, ice, gr); only in the periodic seam mode (where the seam IS that mean);
+        // only where the seam and both neighbours are air; e is clipped so no cell goes negative.
+        static const bool seam_q_conserve = [](){
+            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e && atoi(e) != 0; }();
+        const bool seam_q = seam_q_conserve && seam_periodic;
+        Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
+
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
+
+                double q_old[4] = {0.0, 0.0, 0.0, 0.0};
+                const bool seam_q_here = seam_q && is_air(m.h, i, j, 0)
+                                       && is_air(m.h, i, j, 1) && is_air(m.h, i, j, m.km-2);
+                if (seam_q_here)
+                    for (int f = 0; f < 4; f++) q_old[f] = seam_q_fields[f]->x[i][j][0];
 
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
                     double v0   = s43 * xij[j][1]      - s13 * xij[j][2];
                     double vend = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
                     xij[j][0] = xij[j][m.km-1] = (v0 + vend) * 0.5;
+                }
+
+                if (seam_q_here) {
+                    auto rho_at = [&](int k){ const double r = m.r_humid.x[i][j][k];
+                                              return (AtomUtils::is_finite_safe(r) && r > 0.0) ? r : m.r_air; };
+                    const double m0 = rho_at(0), m1 = rho_at(1), m2 = rho_at(m.km-2);
+                    for (int f = 0; f < 4; f++) {
+                        double** xij = seam_q_fields[f]->x[i];
+                        double e = m0 * (q_old[f] - xij[j][0]) / (m0 + m1 + m2);
+                        const double floor_e = -std::min(xij[j][1], xij[j][m.km-2]);   // no negative water
+                        if (e < floor_e) e = floor_e;
+                        xij[j][1]      += e;
+                        xij[j][m.km-2] += e;
+                        xij[j][0] = xij[j][m.km-1] = xij[j][0] + e;
+                    }
                 }
 
                 for (int f = 0; f < n_extrap; f++) {

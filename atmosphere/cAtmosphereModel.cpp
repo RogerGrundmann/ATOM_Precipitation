@@ -1357,6 +1357,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_QVD=" << ev("ATM_MC_QVD", "0*")
           << "  MC_ALF1=" << ev("ATM_MC_ALF1", "0.05*")
           << "  MC_GP_AREA=" << ev("ATM_MC_GP_AREA", "0*")
+          << "  ONECAT_CLOUD_LIMIT=" << ev("ATM_ONECAT_CLOUD_LIMIT", "0*")
+          << "  TURB_SIN_FLOOR=" << ev("ATM_TURB_SIN_FLOOR", "0*")
           << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
@@ -1366,6 +1368,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  DAMP_T_HORIZ=" << ev("ATM_DAMP_T_HORIZ", "1*")
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless =0)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
+          << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")

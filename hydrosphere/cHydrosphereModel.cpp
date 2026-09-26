@@ -509,6 +509,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1")
              << "  BUOY_CONSISTENT="                           << ev("HYD_BUOY_CONSISTENT", "0.0")
              << "  HYDRO_SPLIT="                               << ev("HYD_HYDRO_SPLIT", "0.0")
+             << "  METRIC_SIN_FLOOR="                          << ev("HYD_METRIC_SIN_FLOOR", "0.4")
              << "  VW_BOTTOM_ZG="                              << ev("HYD_VW_BOTTOM_ZG", "0")
              << "  DEEP_DRAG="                                 << ev("HYD_DEEP_DRAG", "0")
              << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")

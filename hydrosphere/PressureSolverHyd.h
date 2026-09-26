@@ -52,7 +52,7 @@ public:
         std::vector<double> sinthe_table(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_table[j] = sin(m.the.z[j]);
-            if (sinthe_table[j] < 0.4)  sinthe_table[j] = 0.4;
+            if (sinthe_table[j] < cHydrosphereModel::hydMetricSinFloor())  sinthe_table[j] = cHydrosphereModel::hydMetricSinFloor();   // HYD_METRIC_SIN_FLOOR
         }
 
         // ====================================================================
@@ -494,7 +494,7 @@ public:
         std::vector<double> sinthe_tab(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_tab[j] = sin(m.the.z[j]);
-            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;   // metric floor — match run()
+            if (sinthe_tab[j] < cHydrosphereModel::hydMetricSinFloor()) sinthe_tab[j] = cHydrosphereModel::hydMetricSinFloor();   // metric floor — match run() (HYD_METRIC_SIN_FLOOR)
         }
 
         #pragma omp parallel for collapse(2) schedule(static)
@@ -577,7 +577,7 @@ public:
         std::vector<double> sinthe_tab(m.jm);
         for (int j = 0; j < m.jm; j++) {
             sinthe_tab[j] = sin(m.the.z[j]);
-            if (sinthe_tab[j] < 0.4) sinthe_tab[j] = 0.4;   // metric floor — match run()
+            if (sinthe_tab[j] < cHydrosphereModel::hydMetricSinFloor()) sinthe_tab[j] = cHydrosphereModel::hydMetricSinFloor();   // metric floor — match run() (HYD_METRIC_SIN_FLOOR)
         }
 
         auto water = [&](int i, int j, int k){ return is_water(m.h, i, j, k); };

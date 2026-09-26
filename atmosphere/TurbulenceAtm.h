@@ -19,6 +19,17 @@
 
 using namespace AtomUtils;
 
+// ATM_TURB_SIN_FLOOR=<0|1>, default 0 = shipped (2026-09-26). The RHS, the pressure solver and the
+// residuum monitor floor sin(theta) at ATM_METRIC_SIN_FLOOR (0.26 since 2026-09-10, ~75 deg); this
+// closure only replaces sin = 0 by 1e-5, so the two disagree about the metric poleward of ~75 deg --
+// the zonal derivatives of u/v/w/tke/dis that build production and the Neumann corrections see a
+// 1/sin up to ~15x (row j = 1, 89 deg; 26 000x at a pole row, where sin = 1e-5) larger than the momentum equations beside them.
+// =1 applies the same floor here, at both sites (the SST closure receives sinthe from the first).
+inline bool turbSinFloorOn(){
+    static const bool on = [](){ const char* e = std::getenv("ATM_TURB_SIN_FLOOR"); return e && std::atoi(e) != 0; }();
+    return on;
+}
+
 class TurbulenceAtm {
 public:
     enum Model { k_epsilon, k_omega, k_omega_SST };
@@ -340,6 +351,7 @@ private:
                     const double exp_rm       = m.metricExpRm(rm);
                     double sinthe             = sin(m.the.z[j]);
                     if (sinthe == 0.0) sinthe = 1.0e-5;
+                    if (turbSinFloorOn()) sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
                     const double inv_2dr      = 1.0 / (2.0 * m.dr);
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
@@ -549,6 +561,7 @@ private:
         const double rm        = m.rad.z[i];
         double sinthe          = sin(m.the.z[j]);
         if (sinthe == 0.0) sinthe = 1.0e-5;
+        if (turbSinFloorOn()) sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
         const double rmsinthe  = rm * sinthe;
 
         // Geometry for exp-stretching — placed here so Neumann corrections below can use exp_rm.
