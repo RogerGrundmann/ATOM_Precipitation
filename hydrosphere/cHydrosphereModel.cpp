@@ -9,6 +9,8 @@
  * code developed by Roger Grundmann, Zum Marktsteig 1, D-01728 Bannewitz(roger.grundmann@web.de)
 */
 
+#include <string>
+void rollRestart(const std::string& out, const char* model, int Ma, int iter, int explicit_iter);  // cAtmosphereModel.cpp
 #include <cstdlib>
 #include <string>
 
@@ -776,6 +778,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         if(cf) cf << "iter,mean_T_K,drift_T_pct,drift_T_K,mean_KE_m2s2,drift_KE_pct,converged\n";
     }
 
+    int hyd_last_saved = -1;   // last periodic restart written by this loop (rolling restarts, 2026-09-27)
     for(iter_n = 1; iter_n <= nm; iter_n++){
 
         print_loop_3D_headings();
@@ -1012,8 +1015,11 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // (every panorama_print iters) rather than the VTK cadence (`checkpoint`),
             // so the large .bin + .vts share the coarser interval while the VTK
             // slices write more often. Falls back to every checkpoint if disabled.
-            if (panorama_print <= 0 || iter_n % panorama_print == 0)
+            if (panorama_print <= 0 || iter_n % panorama_print == 0){
                 save_state(total_iter_count, Ma);
+                rollRestart(output_path, "hyd", Ma, total_iter_count, -1);   // keep only the newest (2026-09-27)
+                hyd_last_saved = total_iter_count;
+            }
 
             // Zonal-mean w-momentum budget CSV (uses the wbud_* term split
             // captured this iter + the wbar_before snapshot for the net Δwbar).
@@ -1037,6 +1043,12 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         }
     }  // end iter_n
 
+    // FINAL checkpoint (2026-09-27): if the loop saved at least once but not at its last iteration, write the
+    // final state so the run ends with a usable seed. Runs that never saved (short byte checks) are unchanged.
+    if(hyd_last_saved >= 0 && hyd_last_saved != total_iter_count){
+        save_state(total_iter_count, Ma);
+        rollRestart(output_path, "hyd", Ma, total_iter_count, -1);
+    }
 
     cout << endl << "      OGCM: run_3D_loop ended ..........................." << endl;
     return;

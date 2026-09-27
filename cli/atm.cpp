@@ -26,5 +26,6 @@ int main(int argc, char **argv){
 
     catch(const std::exception &exc){
         std::cerr << exc.what() << std::endl;
+        return 1;   // was: fell through to exit 0, so a refused run looked like a success to every script
     }
 }

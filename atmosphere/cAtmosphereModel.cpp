@@ -1,3 +1,5 @@
+#include <map>
+#include <cstdio>
 /*
  * Atmosphere General Circulation Modell(AGCM) applied to laminar flow
  * program for the computation of geo-atmospherical circulating flows in a spherical shell
@@ -17,10 +19,7 @@
 
 #include "MoistConvection.h"
 
-#include "ZeroCatIceScheme.h"
-#include "OneCatIceScheme.h"
 #include "TwoCatIceScheme.h"
-#include "ThreeCatIceScheme.h"
 #include "SaturationAdjustment.h"
 #include "VelocityInitializer.h"
 #include "ConvectiveAdjustment.h"
@@ -96,6 +95,42 @@ cAtmosphereModel::~cAtmosphereModel(){
 /*
 *
 */
+// ONLY TwoCat REMAINS (2026-09-27, at the user's instruction). ZeroCat (0), OneCat (1) and ThreeCat (3) were
+// DROPPED from the source the same day -- first retired, then removed; they are in git history before this
+// commit. OneCat's precipitation went NaN in ~6 % of columns; ThreeCat's was a clamp residual (P_max_flux
+// removed 99.999998 % of the snow demand); ZeroCat was never used. This departs from the family rule of
+// identical files across the ATHAD forks, deliberately: a fork still carrying them keeps its own copies.
+// Allowed: 2 = TwoCat (default) and -1 = no ice scheme.
+static void refuseRetiredIceScheme(int scheme, const char* where){
+    if(scheme != 2 && scheme != -1)
+        throw std::invalid_argument(std::string(where) + ": CategoryIceScheme = " + std::to_string(scheme)
+            + " is not available -- ZeroCat (0), OneCat (1) and ThreeCat (3) were dropped on 2026-09-27."
+            + " Use 2 = TwoCat (default).");
+}
+
+// ROLLING RESTARTS (2026-09-27, at the user's instruction, after the disk filled: 887 checkpoints = 490 GB).
+// After a periodic checkpoint is written, delete the previous periodic checkpoint THIS PROCESS wrote for the
+// same Ma, so a run ends with only its final one while a crash still leaves the latest state. Never touches a
+// file this process did not write (seeds copied in, the checkpoint a run resumed from), never the explicit
+// checkpoint_save_iter file, never another Ma slice's. ATM_RESTART_KEEP=all (HYD_RESTART_KEEP=all for the
+// ocean) restores keep-every-checkpoint. Function-local state, not a class member (sizeof / stack-canary hazard).
+void rollRestart(const std::string& out, const char* model, int Ma, int iter, int explicit_iter){
+    static std::map<std::string, std::string> last;           // key model+Ma -> last periodic file written
+    const char* ek = (std::string(model) == "hyd") ? getenv("HYD_RESTART_KEEP") : getenv("ATM_RESTART_KEEP");
+    const bool keep_all = ek && std::string(ek) == "all";
+    auto name = [&](int it){ return out + "/" + model + "_restart_" + std::to_string(Ma) + "Ma_"
+                                    + std::to_string(it) + ".bin"; };
+    const std::string key = std::string(model) + std::to_string(Ma);
+    const std::string fn = name(iter);
+    const std::string prev = last[key];
+    const std::string expl = (explicit_iter >= 0) ? name(explicit_iter) : std::string();
+    if(!keep_all && !prev.empty() && prev != fn && prev != expl){
+        if(std::remove(prev.c_str()) == 0)
+            std::cout << "      " << model << ": rolling restart -- removed " << prev << " (newer: " << fn << ")\n";
+    }
+    last[key] = fn;
+}
+
 void cAtmosphereModel::LoadConfig(const char *filename){
     XMLDocument doc;
     XMLError err = doc.LoadFile(filename);
@@ -125,6 +160,7 @@ void cAtmosphereModel::LoadConfig(const char *filename){
         throw std::invalid_argument(std::string("config ") + filename
             + ": no <atmosphere> section (is this a hydrosphere config?) -- nothing would be applied");
 #include "AtmosphereLoadConfig.cpp.inc"
+    refuseRetiredIceScheme(CategoryIceScheme, (std::string("config ") + filename).c_str());
 }
 /*
 *
@@ -496,17 +532,12 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 
     ThermoAtm(*this).precipitableWater();
 
+    refuseRetiredIceScheme(CategoryIceScheme, "setup");                 // also covers values set through the Python interface
     switch(CategoryIceScheme){                                          // rain, snow graupel and precipitation production and reduction
         case -1: cout << endl << endl << endl                           // no CategoryIceScheme used
             << "  no CategoryIceScheme used" << endl;
                 break;
-        case 0: ZeroCatIceScheme(*this).run();                          // development of rain fall, water vapour and cloud water
-                break;
-        case 1: OneCatIceScheme(*this).run();                           // development of rain and snow fall, water vapour, cloud water and ice
-                break;
         case 2: TwoCatIceScheme(*this).run();                           // development of rain and snow fall, water vapour, cloud water and ice
-                break;
-        case 3: ThreeCatIceScheme(*this).run();                         // development of rain and snow fall, water vapour, cloud water, ice and graupel
                 break;
     }
     AtomUtils::damp_wiggles(P_rain, &i_topography, true, true, true);
@@ -1309,12 +1340,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     {
         auto ev = [](const char* n, const char* dflt){
             const char* e = getenv(n); return std::string(e ? e : dflt); };
-        static const char* scheme_name[] = {"ZeroCat (warm rain)", "OneCat", "TwoCat (rain+snow)",
-                                            "ThreeCat (rain+snow+graupel)"};
+
         std::ostringstream b;
         b << "      AGCM: [RUN CONFIG] ice scheme " << CategoryIceScheme << " = "
-          << ((CategoryIceScheme >= 0 && CategoryIceScheme <= 3)
-                 ? scheme_name[CategoryIceScheme] : "none")
+          << (CategoryIceScheme == 2 ? "TwoCat (rain+snow)" : "none")
           << ";  nm = " << nm
           << ";  restart_from_iter = " << restart_from_iter
           << ";  moist_phys_start_iter = " << moist_phys_start_iter
@@ -1337,8 +1366,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  RAD_TOPO="     << ev("ATM_RAD_TOPO",     "1*")
           << "  RAD_EQUIL="    << ev("ATM_RAD_EQUIL",    "0*")
           << "  SW_INSOL="     << ev("ATM_SW_INSOL",     "0*")
-          << "  ICE_RAW_FLUX=" << ev("ATM_ICE_RAW_FLUX", "0*")
-          << "  ICE_LIMITERS=" << ev("ATM_ICE_LIMITERS", "0*")
           << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
           << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
           << "  SATADJ_PHASE=" << ev("ATM_SATADJ_PHASE", "1*")
@@ -1357,7 +1384,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_QVD=" << ev("ATM_MC_QVD", "0*")
           << "  MC_ALF1=" << ev("ATM_MC_ALF1", "0.05*")
           << "  MC_GP_AREA=" << ev("ATM_MC_GP_AREA", "0*")
-          << "  ONECAT_CLOUD_LIMIT=" << ev("ATM_ONECAT_CLOUD_LIMIT", "0*")
           << "  TURB_SIN_FLOOR=" << ev("ATM_TURB_SIN_FLOOR", "0*")
           << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
@@ -1370,6 +1396,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
           << "  SNOW_WINDOW=" << ev("ATM_SNOW_WINDOW", "0*")
+          << "  PRECIP_UPWIND=" << ev("ATM_PRECIP_UPWIND", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
@@ -1398,6 +1425,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
           << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "5*")
           << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
+          << "  RESTART_KEEP=" << ev("ATM_RESTART_KEEP", "latest*")
           << "  NUE_GRAD="      << ev("ATM_NUE_GRAD",       "1.0*")
           << "  BC_SECOND_ORDER=" << ev("ATM_BC_SECOND_ORDER", "1*")
           << "   (* = compiled-in default, not set in the environment)\n";
@@ -1666,13 +1694,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     case -1: cout << endl << endl << endl               // no CategoryIceScheme used
                         << "  no CategoryIceScheme used" << endl;
                         break;
-                    case 0: ZeroCatIceScheme(*this).run();              // development of rain and snow fall, water vapour and cloud water
-                        break;
-                    case 1: OneCatIceScheme(*this).run();               // development of rain and snow fall, water vapour, cloud water and ice
-                        break;
                     case 2: TwoCatIceScheme(*this).run();               // development of rain and snow fall, water vapour, cloud water and ice
-                        break;
-                    case 3: ThreeCatIceScheme(*this).run();             // development of rain and snow fall, water vapour, cloud water, ice and graupel
                         break;
                 }
 
@@ -2301,8 +2323,10 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                             for(int k = 0; k < km && clean; k++)
                                 if(!AtomUtils::is_finite_safe(a->x[i][j][k])) clean = false;
                 }
-                if(clean)
+                if(clean){
                     save_state(total_iter_count, Ma);
+                    rollRestart(output_path, "atm", Ma, total_iter_count, checkpoint_save_iter);
+                }
                 else
                     cout << "      AGCM: restart checkpoint SKIPPED at iter "
                          << total_iter_count << " — non-finite cell present (not clean)" << endl;
@@ -2310,6 +2334,26 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         }
 
     }  // end iter_n
+
+    // FINAL checkpoint (2026-09-27): a run whose last iteration is not a multiple of the stride used to end
+    // without its final state on disk (nm = 640 kept 600). Written here, clean-checked like the periodic
+    // ones; runs shorter than one stride are exempt, so 20-iteration byte checks write nothing new.
+    {
+        const char* e = getenv("ATM_RESTART_STRIDE");
+        int stride = e ? atoi(e) : 100; if(stride < 0) stride = 100;
+        if(stride > 0 && total_iter_count >= stride && total_iter_count % stride != 0){
+            bool clean = true;
+            for(Array* a : restart_arrays())
+                for(int i = 0; i < im && clean; i++)
+                    for(int j = 0; j < jm && clean; j++)
+                        for(int k = 0; k < km && clean; k++)
+                            if(!AtomUtils::is_finite_safe(a->x[i][j][k])) clean = false;
+            if(clean){
+                save_state(total_iter_count, Ma);
+                rollRestart(output_path, "atm", Ma, total_iter_count, checkpoint_save_iter);
+            }
+        }
+    }
 
 
     cout << endl << "      AGCM: run_3D_loop atm ended ..........................." << endl;

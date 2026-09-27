@@ -256,6 +256,22 @@ private:
     // after each pass (a column that broke early carries its last pass forward), mean |pass3 - pass2|
     // and |pass2 - pass1|, and the % of columns that stopped at pass 1 / pass 2 and that have their
     // test level inside the terrain.
+    // ATM_PRECIP_UPWIND=<0|1> -- make the precipitation column a single converged top-down sweep. Default 0 =
+    // shipped, byte-identical. MEASURED 2026-09-27 (ATM_RAIN_PASS_DIAG, 600 -> 620 from sgzb_ctl): the iter_prec
+    // fixed point does NOT converge -- ground rain after passes 1/2/3 is 370 / 93 / 3465 mm/a in 0-15 deg and
+    // 141 / 57 / 201 in 35-65, and pass 3 is what the model writes, so the tropical spike (3390 against NASA's
+    // 1487) is largely the pass-3 phase of an oscillation. Cause: every flux-dependent rate reads `Rain` /
+    // `Snow` = P[i] at its OWN level, i.e. the PREVIOUS pass's value, so each pass responds to the last one.
+    // With this knob the rates read the flux arriving from above, P[i+1], already computed by the current
+    // sweep: the column becomes an explicit upwind integration, every pass gives the same answer, and
+    // ATM_RAIN_PASS_DIAG's |pass3 - pass2| must read exactly 0 (the self-check). Rates see the flux entering
+    // the layer rather than the one leaving it -- the standard first-order form.
+    static bool precipUpwind(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_PRECIP_UPWIND"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool rainPassDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_RAIN_PASS_DIAG"); return e && atoi(e) != 0; }();
@@ -283,6 +299,7 @@ private:
         std::vector<double> srd;
         if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
 
+        const bool precip_upwind = precipUpwind();
         const int  snow_win = snowWindow();
         const bool sdd_on   = snowDiag();
         // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev
@@ -353,8 +370,12 @@ private:
                             continue;
                         }
 
-                        double Rain = m.P_rain.x[i][j][k];
-                        double Snow = m.P_snow.x[i][j][k];
+                        // ATM_PRECIP_UPWIND=1: the flux-dependent rates (S_ev, S_ac, S_r_frz, S_r_cri on rain;
+                        // S_rim, S_agg, S_s_dep, S_s_melt, S_shed on snow) read the flux ARRIVING from above,
+                        // P[i+1], which this pass has already computed, instead of P[i] from the PREVIOUS
+                        // pass. Unset: exactly the shipped same-level values.
+                        double Rain = precip_upwind ? m.P_rain.x[i+1][j][k] : m.P_rain.x[i][j][k];
+                        double Snow = precip_upwind ? m.P_snow.x[i+1][j][k] : m.P_snow.x[i][j][k];
 
                         // Compute rain power terms only when raining
                     

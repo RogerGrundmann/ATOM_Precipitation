@@ -23,6 +23,10 @@ r/sigma identical, 15-35 band +4 %; `run_o2val600.sh`). Consequences: `make OPT=
 **both sides of a byte check must share the same OPT** (the `cli/atm_*` copies from before 2026-09-27 are
 -O0); -O0 and -O2 runs agree to the thread noise, not to the digit. The model is memory-bandwidth bound:
 no gain past ~8 threads, and three concurrent 8-thread runs each slow ~2.2x (`python/run_scaling.out`).
+**BYTE CHECKS ARE BUILT AT -O0, BOTH SIDES (decided 2026-09-27).** At -O2 with `-ffast-math` any edit to a physics
+function may reorder its floating-point arithmetic: `ATM_PRECIP_UPWIND`, knob off, flipped 4 `S_r` cells between `-0`
+and `0`. A strict byte check proves logic identity only at -O0. `python/build_o0.sh <rev|WORKTREE> <name>` builds
+`cli/<name>_atm` / `_hyd` at -O0 in a throw-away worktree; science runs stay -O2.
 
 ## READ THIS BEFORE QUOTING ANY NUMBER FROM THIS TREE
 
@@ -461,6 +465,17 @@ cannot produce a 40 % error.
 projection calls the solver 200 times, so one knob would make "10 sweeps in the time loop" also
 mean 2000 relaxations at startup, and any comparison would differ in its INITIAL STATE as well
 as in the quantity under test. ATHAD lost an attribution exactly that way.
+
+## ⚠ ZeroCat, OneCat AND ThreeCat WERE DROPPED FROM THE SOURCE ON 2026-09-27 — ONLY TwoCat REMAINS
+
+At the user's instruction: `CategoryIceScheme` accepts only 2 (TwoCat, the default) or -1 (none); any
+other value is refused at config load and at setup with exit status 1. OneCat's precipitation went NaN in
+~6 % of columns (the ocean evaporation re-pin then copied it into level-0 vapour, where no NaN detector
+looks); ThreeCat's precipitation was a clamp residual (below); ZeroCat was unused. `ATM_ICE_RAW_FLUX`,
+`ATM_ICE_LIMITERS`, `ATM_SS_DIAG` and `ATM_ONECAT_CLOUD_LIMIT` went with them. **This departs from the family
+rule of identical files across the ATHAD forks, deliberately** — a fork keeps its own copies; the three
+headers are in git history before the commit that removed them. The ThreeCat record below is kept as the
+evidence the decision rests on; it describes code that is no longer in this tree.
 
 ## The ice scheme was ThreeCat for one day, and is TwoCat again since 2026-09-01
 

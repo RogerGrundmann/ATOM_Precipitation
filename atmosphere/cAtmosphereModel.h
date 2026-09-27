@@ -36,10 +36,7 @@
 using namespace std;
 
 class MoistConvection;
-class ZeroCatIceScheme;
-class OneCatIceScheme;
 class TwoCatIceScheme;
-class ThreeCatIceScheme;
 class SaturationAdjustment;
 class VelocityInitializer;
 class PressureSolverAtm;
@@ -51,10 +48,7 @@ class TurbulenceAtm;
 class cAtmosphereModel{
 
     friend class MoistConvection;
-    friend class ZeroCatIceScheme;
-    friend class OneCatIceScheme;
     friend class TwoCatIceScheme;
-    friend class ThreeCatIceScheme;
     friend class SaturationAdjustment;
     friend class VelocityInitializer;
     friend class PressureSolverAtm;
