@@ -246,6 +246,22 @@ private:
     // flux at the local ground, the snow the window DELETES on its warm and on its cold side, the
     // gross snow-flux sources and S_s_melt, and the rain-flux sources and S_ev. Final iter_prec pass,
     // like ATM_SR_DIAG. Deletion is measured before the P_max cap.
+    // ATM_RAIN_PASS_DIAG=1 -- print-only, default off. Does the iter_prec fixed-point iteration converge?
+    // Found 2026-09-27 on the scheme's own probe column (j=90, k=180): the ground rain cycles
+    // 1.97 -> 0.0 -> 14.7 mm/d over the three passes, identically every call, and pass 3 is what is
+    // written. Two structural suspicions, both reported here: (a) the convergence test compares the pass
+    // against Rain_check, the PREVIOUS CALL's final flux, not the previous pass; (b) i_check = 1 is a
+    // fixed level, inside the rock wherever i_topography > 1, where the guard zeroes the flux, so those
+    // columns "converge" on pass 1 by construction. Per |lat| band, cos-lat weighted, mm/a: ground rain
+    // after each pass (a column that broke early carries its last pass forward), mean |pass3 - pass2|
+    // and |pass2 - pass1|, and the % of columns that stopped at pass 1 / pass 2 and that have their
+    // test level inside the terrain.
+    static bool rainPassDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_RAIN_PASS_DIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     static bool snowDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_SNOW_DIAG"); return e && atoi(e) != 0; }();
@@ -273,6 +289,12 @@ private:
         const int  NSD = 8;
         std::vector<double> sdd;
         if (sdd_on) sdd.assign((size_t)NSD * m.jm * m.km, 0.0);
+
+        const bool rpd_on = rainPassDiag();
+        std::vector<double> rpd;      // ground rain after pass p, [p*N + b]
+        std::vector<int>    rpn;      // last pass executed per column
+        if (rpd_on) { rpd.assign((size_t)iter_prec_end * m.jm * m.km, 0.0);
+                      rpn.assign((size_t)m.jm * m.km, 0); }
 
         #pragma omp parallel for collapse(2)
         for(int k = 1; k < m.km-1; k++){
@@ -747,6 +769,12 @@ private:
                         sdd[0*N+b] = m.P_rain.x[i_g][j][k];
                         sdd[1*N+b] = m.P_snow.x[i_g][j][k];
                     }
+                    if (rpd_on) {   // before the convergence break
+                        const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
+                        const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                        rpd[(size_t)(iter_prec-1)*N + b] = m.P_rain.x[i_g][j][k];
+                        rpn[b] = iter_prec;
+                    }
 
                     P_rain_diff = fabs(m.P_rain.x[i_check][j][k] - Rain_check) * 8.64e4;
 
@@ -775,6 +803,12 @@ private:
                             << " .... P_rain_diff = " << P_rain_diff << endl << endl << endl;
                     }
                 }  // end iter_prec
+
+                if (rpd_on) {   // a column that broke early carries its last pass forward
+                    const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                    for (int p = rpn[b]; p < iter_prec_end; p++)
+                        rpd[(size_t)p*N + b] = rpd[(size_t)(rpn[b]-1)*N + b];
+                }
             }  // end j
         }  // end k
 
@@ -843,6 +877,45 @@ private:
             for (int q = 0; q < 8; q++) {
                 printf("      AGCM: [SNOW DIAG] %-28s", lab[q]);
                 for (int b = 0; b < 4; b++) printf(" %12.3f", wb[b] > 0.0 ? acc[b][q] * yr / wb[b] : 0.0);
+                printf("\n");
+            }
+        }
+
+        if (rpd_on) {
+            // rows 0..NP-1: ground rain after pass p; NP: |p_last - p_last-1|; NP+1: |p2 - p1|;
+            // NP+2 / NP+3: % columns stopped at pass 1 / pass 2; NP+4: % columns with i_check in rock.
+            const int NP = iter_prec_end, NR = NP + 5;
+            const double yr = 365.0 * 8.64e4;
+            const size_t N = (size_t)m.jm * m.km;
+            std::vector<double> acc(4 * NR, 0.0);
+            double wb[4] = {0, 0, 0, 0};
+            for (int j = 1; j < m.jm-1; j++) {
+                const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                const int bnd = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for (int k = 1; k < m.km-1; k++) {
+                    const size_t b = (size_t)j * m.km + k;
+                    wb[bnd] += w;
+                    for (int p = 0; p < NP; p++) acc[bnd*NR + p] += w * rpd[(size_t)p*N + b] * yr;
+                    if (NP >= 2) acc[bnd*NR + NP] += w * fabs(rpd[(size_t)(NP-1)*N + b] - rpd[(size_t)(NP-2)*N + b]) * yr;
+                    if (NP >= 2) acc[bnd*NR + NP+1] += w * fabs(rpd[N + b] - rpd[b]) * yr;
+                    if (rpn[b] == 1) acc[bnd*NR + NP+2] += w * 100.0;
+                    if (rpn[b] == 2) acc[bnd*NR + NP+3] += w * 100.0;
+                    if (m.i_topography[j][k] > i_check) acc[bnd*NR + NP+4] += w * 100.0;
+                }
+            }
+            printf("      AGCM: [RAIN PASS DIAG] iter %d.  iter_prec_end = %d, i_check = %d.  band means"
+                   "                   0-15        15-35        35-65        65-90\n", m.iter_n, NP, i_check);
+            for (int r = 0; r < NR; r++) {
+                char lab[64];
+                if (r < NP)          snprintf(lab, sizeof lab, "ground rain after pass %d, mm/a", r+1);
+                else if (r == NP)    snprintf(lab, sizeof lab, "|pass %d - pass %d|, mm/a", NP, NP-1);
+                else if (r == NP+1)  snprintf(lab, sizeof lab, "|pass 2 - pass 1|, mm/a");
+                else if (r == NP+2)  snprintf(lab, sizeof lab, "%% columns stopped at pass 1");
+                else if (r == NP+3)  snprintf(lab, sizeof lab, "%% columns stopped at pass 2");
+                else                 snprintf(lab, sizeof lab, "%% columns with i_check in rock");
+                printf("      AGCM: [RAIN PASS DIAG] %-34s", lab);
+                for (int b = 0; b < 4; b++) printf(" %12.3f", wb[b] > 0.0 ? acc[b*NR + r] / wb[b] : 0.0);
                 printf("\n");
             }
         }

@@ -118,7 +118,8 @@ private:
         double q_sat = 0.0, E_sat = 0.0;
         double q_Ice = 0.0,  E_Ice = 0.0;
 
-        double S_frz, S_cf_frz, S_if_frz, S_au, S_ac, S_rim, S_shed, S_ev, S_melt;
+        double S_frz = 0.0, S_cf_frz = 0.0, S_if_frz = 0.0, S_au = 0.0, S_ac = 0.0, S_rim = 0.0,
+               S_shed = 0.0, S_ev = 0.0, S_melt = 0.0;
 
         std::vector<double> step(m.im, 0.0);
 
@@ -211,8 +212,12 @@ private:
                                 max(0.0, m.cloud.x[i][j][k]) + max(0.0, m.ice.x[i][j][k]));
                         const double cloud_in = m.cloud.x[i][j][k] / f_cld;   // in-cloud water
 
+                        // The `else` was missing from the initial commit until 2026-09-27: a cloud-free level
+                        // kept the PREVIOUS level's S_au, and before the first cloudy cell an UNINITIALIZED
+                        // value -- the NaN in OneCat's `Precip mean` (found by -O2's -Wmaybe-uninitialized).
                         if(m.cloud.x[i][j][k] > 0.0)
                             S_au  = f_cld * (1.0 - eps_t)/tau_r * max(0.0, cloud_in - q_c_crit); // Kessler threshold: only cloud excess rains
+                        else S_au = 0.0;
 
 
                         // collection mechanisms: accretion, riming, shedding
