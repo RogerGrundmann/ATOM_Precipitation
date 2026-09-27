@@ -8,7 +8,15 @@
 # .cpp timestamps, and since nearly all the physics in this tree lives in headers,
 # a header edit produced a link of stale objects that looked like a successful build.
 # Ported from ATHAD.
-CFLAGS = -ggdb -Wall -ffast-math -march=native -fPIC -std=c++17 -Ilib -Iatmosphere -Ihydrosphere -Itinyxml2 -fopenmp -MMD -MP
+# OPT: optimisation level. Until 2026-09-27 there was NONE, so every binary in this tree was -O0.
+# -O2 is 3.4-3.9x faster (python/run_scaling.out) and reproduces the -O0 reference climate to the
+# thread noise (run_o2val600.sh: cli/atm_O2 vs sgzb_ctl at iteration 600 -- precip +0.4 %, r/sigma
+# identical, bands 0-15/35-65/65-90 within 0.1 %, 15-35 +4 %, velocities at the same cells).
+# `make OPT=-O0` restores the old build for debugging. Changing OPT rebuilds everything (every object
+# depends on this Makefile), so -O0 and -O2 objects never mix. BOTH sides of a byte check must be
+# built with the same OPT -- an -O2 "new" against an -O0 "old" differs in every file.
+OPT ?= -O2
+CFLAGS = -ggdb -Wall $(OPT) -ffast-math -march=native -fPIC -std=c++17 -Ilib -Iatmosphere -Ihydrosphere -Itinyxml2 -fopenmp -MMD -MP
 
 # Common files for the shared lib(libatom.a)
 LIB_OBJ = lib/Array.o lib/Array_2D.o lib/Array_1D.o lib/Config.o lib/Utils.o lib/FFT.o

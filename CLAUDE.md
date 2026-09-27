@@ -17,6 +17,13 @@ cd python && OMP_NUM_THREADS=8 ../cli/atm config_atm.xml
 `make` regenerates the parameter bindings from `param.py` first. **Every object depends on the
 `Makefile`**, deliberately — see the build hazard below.
 
+**THE TREE IS -O2 SINCE 2026-09-27 (`OPT ?= -O2`); EVERY BINARY AND EVERY RUN BEFORE THAT WAS -O0.**
+-O2 is 3.4-3.9x faster and reproduced `sgzb_ctl` at iteration 600 to the thread noise (precip +0.4 %,
+r/sigma identical, 15-35 band +4 %; `run_o2val600.sh`). Consequences: `make OPT=-O0` for debugging;
+**both sides of a byte check must share the same OPT** (the `cli/atm_*` copies from before 2026-09-27 are
+-O0); -O0 and -O2 runs agree to the thread noise, not to the digit. The model is memory-bandwidth bound:
+no gain past ~8 threads, and three concurrent 8-thread runs each slow ~2.2x (`python/run_scaling.out`).
+
 ## READ THIS BEFORE QUOTING ANY NUMBER FROM THIS TREE
 
 **EVERY FIGURE RECORDED BEFORE 2026-08-26 CAME FROM A BINARY WITH THREE DATA RACES IN IT**, and

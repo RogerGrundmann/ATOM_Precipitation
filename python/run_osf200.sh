@@ -12,7 +12,7 @@ if ! grep -q "OFF-BRANCH.*PASS" run_verify_vosf.out || ! grep -q "CONTROL.*PASS"
 for t in 40 26 10; do mkdir output_osf_$t || { touch OSF200_DONE; exit 1; }
   cp output_oc_ctl/hyd_restart_0Ma_1000.bin output_osf_$t/; cp output_twctl/0Ma_smooth_Transfer_Atm_600.vwtp output_osf_$t/; done
 echo "start $(date +%H:%M)"
-run(){ ( env OMP_NUM_THREADS=${NT:-8} HYD_METRIC_SIN_FLOOR=$2 ../cli/hyd_fx4 config_osf_$1.xml > osf_$1.log 2>&1
+run(){ ( env OMP_NUM_THREADS=${NT:-8} HYD_METRIC_SIN_FLOOR=$2 ${HYDBIN:-../cli/hyd_fx4} config_osf_$1.xml > osf_$1.log 2>&1
          echo "osf_$1 exit $?  NaN $(grep -c 'NaN/Inf DETECTED' osf_$1.log)  $(date +%H:%M)" ) & }
 run 40 0.4; run 26 0.26; run 10 0.10
 wait

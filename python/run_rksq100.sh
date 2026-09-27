@@ -18,6 +18,6 @@ mkdir output_rksq_on || { touch RKSQ100_DONE; exit 1; }
 echo "rksq_on start $(date +%H:%M)"
 env OMP_NUM_THREADS=${NT:-24} ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 \
     ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_RK_SCALAR_SYNC=1 \
-    ../cli/atm_rkp config_rksq_on.xml > rksq_on.log 2>&1
+    ${ATMBIN:-../cli/atm_rkp} config_rksq_on.xml > rksq_on.log 2>&1
 echo "rksq_on exit $?  NaN $(grep -c 'NaN/Inf DETECTED' rksq_on.log)  $(date +%H:%M)"
 touch RKSQ100_DONE

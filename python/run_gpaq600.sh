@@ -22,6 +22,6 @@ echo "gpaqb start $(date +%H:%M)"
 env OMP_NUM_THREADS=${NT:-24} ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 \
     ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 \
     ATM_MC_SGZ=1 ATM_MC_ENTR=1.0e-4 ATM_MC_QVD=2 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 \
-    ../cli/atm_rkp config_gpaqb.xml > gpaqb.log 2>&1
+    ${ATMBIN:-../cli/atm_rkp} config_gpaqb.xml > gpaqb.log 2>&1
 echo "gpaqb exit $?  NaN $(grep -c 'NaN/Inf DETECTED' gpaqb.log)  $(date +%H:%M)"
 touch GPAQ600_DONE

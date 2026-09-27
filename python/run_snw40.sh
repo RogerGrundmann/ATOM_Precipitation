@@ -16,8 +16,9 @@
 #  (4) exit 0, zero NaN; P_max cap: max precipitation cells.
 set -u; cd "$(dirname "$0")"; rm -f SNW40_DONE
 until [ -f VSNW_VERIFY_DONE ]; do sleep 30; done
-BAD=$(sed -n '1,/A  OFF BRANCH/p' run_verify_vsnw.out | grep 'DIFFERS:' | grep -vc 'RUN_CONFIG.txt')
-if [ "$BAD" != 0 ] || ! grep -q "A  OFF BRANCH" run_verify_vsnw.out || ! grep -q "D  SNOW_DIAG.*PASS" run_verify_vsnw.out \
+# A (off branch) and D (print-only) both count: any DIFFERS other than RUN_CONFIG.txt (path + banner) blocks.
+BAD=$(sed -n '1,/D  SNOW_DIAG/p' run_verify_vsnw.out | grep 'DIFFERS:' | grep -vc 'RUN_CONFIG.txt')
+if [ "$BAD" != 0 ] || ! grep -q "A  OFF BRANCH" run_verify_vsnw.out || ! grep -q "D  SNOW_DIAG" run_verify_vsnw.out \
    || [ "$(grep -c 'CONTROL.*PASS' run_verify_vsnw.out)" != 2 ]; then
     echo "byte check did not pass -- NOT started"; cat run_verify_vsnw.out; touch SNW40_DONE; exit 1; fi
 for t in r0 r1 r2 r3 q0 q3; do mkdir output_snw_$t || { touch SNW40_DONE; exit 1; }; done
@@ -25,7 +26,7 @@ for t in r0 r1 r2 r3; do cp output_sgzb_ctl/atm_restart_0Ma_600.bin output_snw_$
 for t in q0 q3;       do cp output_qh600/atm_restart_0Ma_600.bin    output_snw_$t/; done
 QH="ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0"
 echo "start $(date +%H:%M)"
-run(){ ( env OMP_NUM_THREADS=${NT:-4} ATM_SNOW_DIAG=1 ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 $2 ../cli/atm_snw config_snw_$1.xml > snw_$1.log 2>&1
+run(){ ( env OMP_NUM_THREADS=${NT:-4} ATM_SNOW_DIAG=1 ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 $2 ${ATMBIN:-../cli/atm_snw} config_snw_$1.xml > snw_$1.log 2>&1
          echo "snw_$1 exit $?  NaN $(grep -c 'NaN/Inf DETECTED' snw_$1.log)  $(date +%H:%M)" ) & }
 run r0 "ATM_SNOW_WINDOW=0"; run r1 "ATM_SNOW_WINDOW=1"; run r2 "ATM_SNOW_WINDOW=2"; run r3 "ATM_SNOW_WINDOW=3"
 run q0 "$QH ATM_SNOW_WINDOW=0"; run q3 "$QH ATM_SNOW_WINDOW=3"
