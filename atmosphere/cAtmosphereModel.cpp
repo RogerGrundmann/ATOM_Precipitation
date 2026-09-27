@@ -1397,6 +1397,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
           << "  SNOW_WINDOW=" << ev("ATM_SNOW_WINDOW", "0*")
           << "  PRECIP_UPWIND=" << ev("ATM_PRECIP_UPWIND", "0*")
+          << "  PRECIP_PASSES=" << ev("ATM_PRECIP_PASSES", "3*")
+          << "  PRECIP_RELAX=" << ev("ATM_PRECIP_RELAX", "1.0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")

@@ -272,6 +272,26 @@ private:
         return v;
     }
 
+    // ATM_PRECIP_PASSES=<N> / ATM_PRECIP_RELAX=<w> -- iterate the SHIPPED formulation to convergence (2026-09-27),
+    // the cross-check for ATM_PRECIP_UPWIND: upwind converges exactly but lands at ~9 % of NASA (92 mm/a default
+    // branch, 24.5 closure, 600 -> 640), and the question is whether that is the converged answer or a property of
+    // the upwind form. N passes (default iter_prec_end = 3); from pass 2 each level's new flux is blended
+    // P = w*P_new + (1-w)*P_previous_pass (default w = 1, no damping). When either is set, the shipped early exit
+    // (which tests against the PREVIOUS CALL's value and stops rock-i_check columns at pass 1) is skipped, so every
+    // column runs all N passes. ATM_RAIN_PASS_DIAG's last two pass rows then measure convergence. Unset: shipped.
+    static int precipPasses(){
+        static const int v = [](){
+            const char* e = getenv("ATM_PRECIP_PASSES"); const int n = e ? atoi(e) : TwoCatIce::iter_prec_end;
+            return n >= 1 ? n : TwoCatIce::iter_prec_end; }();
+        return v;
+    }
+    static double precipRelax(){
+        static const double v = [](){
+            const char* e = getenv("ATM_PRECIP_RELAX"); const double w = e ? atof(e) : 1.0;
+            return (w > 0.0 && w <= 1.0) ? w : 1.0; }();
+        return v;
+    }
+
     static bool rainPassDiag(){
         static const bool v = [](){
             const char* e = getenv("ATM_RAIN_PASS_DIAG"); return e && atoi(e) != 0; }();
@@ -300,6 +320,9 @@ private:
         if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
 
         const bool precip_upwind = precipUpwind();
+        const int    n_pass = precipPasses();
+        const double w_rel  = precipRelax();
+        const bool   damped = (n_pass != iter_prec_end) || (w_rel != 1.0);
         const int  snow_win = snowWindow();
         const bool sdd_on   = snowDiag();
         // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev
@@ -310,7 +333,7 @@ private:
         const bool rpd_on = rainPassDiag();
         std::vector<double> rpd;      // ground rain after pass p, [p*N + b]
         std::vector<int>    rpn;      // last pass executed per column
-        if (rpd_on) { rpd.assign((size_t)iter_prec_end * m.jm * m.km, 0.0);
+        if (rpd_on) { rpd.assign((size_t)n_pass * m.jm * m.km, 0.0);
                       rpn.assign((size_t)m.jm * m.km, 0); }
 
         #pragma omp parallel for collapse(2)
@@ -337,7 +360,7 @@ private:
 
                 double P_rain_diff = 0.0;
 
-                for(int iter_prec = 1; iter_prec <= iter_prec_end; iter_prec++){
+                for(int iter_prec = 1; iter_prec <= n_pass; iter_prec++){
 
                     if (srd_on) for (int q = 0; q < NSR; q++)
                         srd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
@@ -737,8 +760,12 @@ private:
                             const double raw = m.P_rain.x[i+1][j][k] + dP_rain;
                             inj[(size_t)j * m.km + k] += max(0.0, raw) - raw;
                         }
-                        m.P_rain.x[i][j][k] = std::min(P_max,
-                            max(0.0, m.P_rain.x[i+1][j][k] + dP_rain));
+                        {
+                            const double pr_new = std::min(P_max,
+                                max(0.0, m.P_rain.x[i+1][j][k] + dP_rain));
+                            m.P_rain.x[i][j][k] = (w_rel != 1.0 && iter_prec > 1)
+                                ? w_rel * pr_new + (1.0 - w_rel) * m.P_rain.x[i][j][k] : pr_new;
+                        }
 
                         // snow flux integration (top-down)
                         // S_i_melt excluded: suspended cloud ice and falling snow are
@@ -765,9 +792,13 @@ private:
                             sdd[6*N+b] += (S_c_au + S_ac + S_shed + S_s_melt) * mass_layer;
                             sdd[7*N+b] += S_ev * mass_layer;
                         }
-                        m.P_snow.x[i][j][k] = (warm_ok && cold_ok)
-                            ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
-                            : 0.0;
+                        {
+                            const double ps_new = (warm_ok && cold_ok)
+                                ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
+                                : 0.0;
+                            m.P_snow.x[i][j][k] = (w_rel != 1.0 && iter_prec > 1)
+                                ? w_rel * ps_new + (1.0 - w_rel) * m.P_snow.x[i][j][k] : ps_new;
+                        }
 
                         m.Precipitation.x[i][j][k] = std::min(P_max,
                             m.P_rain.x[i][j][k] + m.P_snow.x[i][j][k]);  // in mm/s, total capped at 50 mm/d
@@ -799,7 +830,7 @@ private:
 
                     P_rain_diff = fabs(m.P_rain.x[i_check][j][k] - Rain_check) * 8.64e4;
 
-                    if(P_rain_diff <= 1.0e-3){
+                    if(P_rain_diff <= 1.0e-3 && !damped){
                         std::cout.precision(10);
                         std::cout.setf(std::ios::fixed);
                         if((j == 90)&&(k == 180))  std::cout << endl
@@ -827,7 +858,7 @@ private:
 
                 if (rpd_on) {   // a column that broke early carries its last pass forward
                     const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
-                    for (int p = rpn[b]; p < iter_prec_end; p++)
+                    for (int p = rpn[b]; p < n_pass; p++)
                         rpd[(size_t)p*N + b] = rpd[(size_t)(rpn[b]-1)*N + b];
                 }
             }  // end j
@@ -905,7 +936,7 @@ private:
         if (rpd_on) {
             // rows 0..NP-1: ground rain after pass p; NP: |p_last - p_last-1|; NP+1: |p2 - p1|;
             // NP+2 / NP+3: % columns stopped at pass 1 / pass 2; NP+4: % columns with i_check in rock.
-            const int NP = iter_prec_end, NR = NP + 5;
+            const int NP = n_pass, NR = NP + 5;
             const double yr = 365.0 * 8.64e4;
             const size_t N = (size_t)m.jm * m.km;
             std::vector<double> acc(4 * NR, 0.0);
@@ -925,9 +956,10 @@ private:
                     if (m.i_topography[j][k] > i_check) acc[bnd*NR + NP+4] += w * 100.0;
                 }
             }
-            printf("      AGCM: [RAIN PASS DIAG] iter %d.  iter_prec_end = %d, i_check = %d.  band means"
+            printf("      AGCM: [RAIN PASS DIAG] iter %d.  passes = %d, i_check = %d.  band means"
                    "                   0-15        15-35        35-65        65-90\n", m.iter_n, NP, i_check);
             for (int r = 0; r < NR; r++) {
+                if (r >= 3 && r < NP - 2) continue;                   // print passes 1-3 and the last two only
                 char lab[64];
                 if (r < NP)          snprintf(lab, sizeof lab, "ground rain after pass %d, mm/a", r+1);
                 else if (r == NP)    snprintf(lab, sizeof lab, "|pass %d - pass %d|, mm/a", NP, NP-1);
