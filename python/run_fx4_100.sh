@@ -16,7 +16,7 @@ if [ "$BAD" != 0 ] || ! grep -q "A  OFF BRANCH" run_verify_vfx4.out || [ "$(grep
 for t in ctl tsf sqcoff sqcon oc1 oc2; do mkdir output_fx4_$t || { touch FX4_100_DONE; exit 1; }; done
 QH="ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0"
 echo "start $(date +%H:%M)"
-run(){ ( env OMP_NUM_THREADS=4 ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 $2 ../cli/atm_fx4 config_$1.xml > $1.log 2>&1
+run(){ ( env OMP_NUM_THREADS=${NT:-4} ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 $2 ../cli/atm_fx4 config_$1.xml > $1.log 2>&1
          echo "$1 exit $?  NaN $(grep -c 'NaN/Inf DETECTED' $1.log)  $(date +%H:%M)" ) & }
 run fx4_ctl    ""
 run fx4_tsf    "ATM_TURB_SIN_FLOOR=1"

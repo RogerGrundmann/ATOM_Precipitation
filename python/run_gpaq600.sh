@@ -1,8 +1,10 @@
 #!/bin/bash
 # Convection repairs scored on a WATER-CONSERVING branch (2026-09-26, POSTPONED -- launch by hand). 600 from scratch,
 # cli/atm_rkp, 24 threads, gated on run_verify_vrks.sh (queue it after run_rksq100.sh, or run it alone).
-#   gpaq  qh600 setup (ATM_WATER_CLOSURE=1, moisture filter off, T vert off) + the gpa_bc convection stack
-#         (ATM_MC_SGZ=1 ATM_MC_ENTR=1.0e-4 ATM_MC_QVD=2 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_MC_GP_AREA=1)
+#   gpaqb qh600 setup (ATM_WATER_CLOSURE=1, moisture filter off, T vert off) + the gpa_b convection stack
+#         (ATM_MC_SGZ=1 ATM_MC_ENTR=1.0e-4 ATM_MC_QVD=2 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2)
+#         2026-09-27, at the user's instruction: BASE_SAT=2 ALONE, no GP_AREA -- gpa_b vs gpa_bc showed GP_AREA
+#         makes convective rain 90x LARGER (8.8 -> 779) on top of (b). Renamed gpaq -> gpaqb for that reason.
 # WHY: on the default branch the surface humidity is re-pinned, so precipitable water stays 30.4 mm and every mm of
 # convective rain is refilled (gpa_bc: P - E 1187 mm/a, P_conv 779 on top of an unchanged ~1000 of other rain). With
 # the closure, E is a flux (qh600: P/E 1.07) and convective rain must compete with stratiform rain for the same water.
@@ -15,11 +17,11 @@ until [ -f VRKS_VERIFY_DONE ]; do sleep 30; done
 BAD=$(sed -n '1,/A  OFF BRANCH/p' run_verify_vrks.out | grep 'DIFFERS:' | grep -vc 'RUN_CONFIG.txt')
 if [ "$BAD" != 0 ] || ! grep -q "A  OFF BRANCH" run_verify_vrks.out; then
     echo "byte check did not pass -- NOT started"; cat run_verify_vrks.out; touch GPAQ600_DONE; exit 1; fi
-mkdir output_gpaq || { touch GPAQ600_DONE; exit 1; }
-echo "gpaq start $(date +%H:%M)"
-env OMP_NUM_THREADS=24 ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 \
+mkdir output_gpaqb || { touch GPAQ600_DONE; exit 1; }
+echo "gpaqb start $(date +%H:%M)"
+env OMP_NUM_THREADS=${NT:-24} ATM_CWB_DIAG=1 ATM_CWB_BANDS=1 ATM_MC_CAP_DIAG=1 \
     ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 \
-    ATM_MC_SGZ=1 ATM_MC_ENTR=1.0e-4 ATM_MC_QVD=2 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_MC_GP_AREA=1 \
-    ../cli/atm_rkp config_gpaq.xml > gpaq.log 2>&1
-echo "gpaq exit $?  NaN $(grep -c 'NaN/Inf DETECTED' gpaq.log)  $(date +%H:%M)"
+    ATM_MC_SGZ=1 ATM_MC_ENTR=1.0e-4 ATM_MC_QVD=2 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 \
+    ../cli/atm_rkp config_gpaqb.xml > gpaqb.log 2>&1
+echo "gpaqb exit $?  NaN $(grep -c 'NaN/Inf DETECTED' gpaqb.log)  $(date +%H:%M)"
 touch GPAQ600_DONE

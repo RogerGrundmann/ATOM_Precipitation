@@ -22,7 +22,7 @@ for d in ohs_1:oc_vis ohs_sh1:oc_ctl; do t=${d%%:*}; s=${d##*:}
   cp output_$s/hyd_restart_0Ma_1000.bin output_$t/; cp output_twctl/0Ma_smooth_Transfer_Atm_600.vwtp output_$t/; done
 VIS="HYD_METRIC_RADIUS=6370 HYD_RUN_NEUMANN=1 HYD_A_H_BIHARM=3.0e18"
 echo "start $(date +%H:%M)"
-run(){ ( env OMP_NUM_THREADS=12 $2 ../cli/hyd_hsp config_$1.xml > $1.log 2>&1
+run(){ ( env OMP_NUM_THREADS=${NT:-12} $2 ../cli/hyd_hsp config_$1.xml > $1.log 2>&1
          echo "$1 exit $?  NaN $(grep -c 'NaN/Inf DETECTED' $1.log)  $(date +%H:%M)" ) & }
 run ohs_1   "$VIS HYD_HYDRO_SPLIT=1.0"
 run ohs_sh1 "HYD_HYDRO_SPLIT=1.0"
