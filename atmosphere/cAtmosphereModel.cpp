@@ -1369,6 +1369,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless those are set; RK_SCALAR_SYNC and SATADJ_FADE honour an explicit value)"
           << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
           << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
+          << "  SNOW_WINDOW=" << ev("ATM_SNOW_WINDOW", "0*")
           << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
           << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
           << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")

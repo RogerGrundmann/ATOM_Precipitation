@@ -212,6 +212,46 @@ private:
         return v;
     }
 
+    // ATM_SNOW_WINDOW=<bitmask> -- the SNOW TEMPERATURE WINDOW. Default 0 = shipped, byte-identical.
+    //
+    // Since the initial commit the snow flux is set to ZERO at every level outside
+    // t_000 <= T < t_0, i.e. outside -20 .. 0 C (t_000 = 253.15 K):
+    //
+    //     P_snow[i] = (t_u < t_0 && t_u >= t_000) ? clamp(P_snow[i+1] + dP_snow) : 0.0;
+    //
+    // WARM SIDE. Snow reaching the melting level is DELETED, not melted: S_s_melt and S_shed are
+    // computed from `Snow` = P_snow[i] at the SAME level, which this very line has set to 0 on the
+    // previous pass wherever T >= t_0 -- so both are structurally zero, S_s_melt ~ Snow^(1/3) cannot
+    // be revived by the arriving-flux limiter (it only scales DOWN), and the water that S_i_au,
+    // S_d_au, S_rim, S_agg and S_r_frz moved out of ice/cloud/rain into snow leaves the atmosphere
+    // through nothing. Same defect CLAUDE.md records for ThreeCat ("snow crossing the melting level
+    // is discarded rather than melted, in a scheme that HAS S_s_melt"), never checked in TwoCat.
+    // COLD SIDE. Below -20 C the flux is zeroed too, while S_i_au = c_i_au*ice has no temperature
+    // gate -- cirrus ice keeps converting to a snow flux that is deleted level by level.
+    // COSMO, where these constants come from, carries the snow flux at all temperatures and melts it
+    // below the freezing level. Mid-latitude precipitation is largely ice-phase aloft (Bergeron) that
+    // falls as rain after melting: the storm-track suspect (35-65 deg at ~20 % of NASA).
+    //   bit 1: below the freezing level keep the snow flux and melt it from the ARRIVING flux
+    //          (S_s_melt, S_shed read P_snow[i+1]); what is not melted falls on as snow.
+    //   bit 2: keep the snow flux below -20 C.
+    // 3 = both. Measure 1 and 2 separately before reading 3. ATM_SNOW_DIAG sizes what the window deletes.
+    static int snowWindow(){
+        static const int v = [](){
+            const char* e = getenv("ATM_SNOW_WINDOW"); return e ? atoi(e) : 0; }();
+        return v;
+    }
+
+    // ATM_SNOW_DIAG=1 -- print-only, default off. Per |latitude| band (0-15/15-35/35-65/65-90, each on
+    // its own cos-lat weight, as the precipitation score prints them), in mm/a: the rain and snow
+    // flux at the local ground, the snow the window DELETES on its warm and on its cold side, the
+    // gross snow-flux sources and S_s_melt, and the rain-flux sources and S_ev. Final iter_prec pass,
+    // like ATM_SR_DIAG. Deletion is measured before the P_max cap.
+    static bool snowDiag(){
+        static const bool v = [](){
+            const char* e = getenv("ATM_SNOW_DIAG"); return e && atoi(e) != 0; }();
+        return v;
+    }
+
     void computeColumns() {
         using namespace std;
         using namespace TwoCatIce;
@@ -226,6 +266,13 @@ private:
         const int  NSR = 9;   // c_au, ac, shed, s_melt, ev, r_frz, r_cri, ground, truncated
         std::vector<double> srd;
         if (srd_on) srd.assign((size_t)NSR * m.jm * m.km, 0.0);
+
+        const int  snow_win = snowWindow();
+        const bool sdd_on   = snowDiag();
+        // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev
+        const int  NSD = 8;
+        std::vector<double> sdd;
+        if (sdd_on) sdd.assign((size_t)NSD * m.jm * m.km, 0.0);
 
         #pragma omp parallel for collapse(2)
         for(int k = 1; k < m.km-1; k++){
@@ -255,6 +302,8 @@ private:
 
                     if (srd_on) for (int q = 0; q < NSR; q++)
                         srd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
+                    if (sdd_on) for (int q = 0; q < NSD; q++)
+                        sdd[(size_t)q * m.jm * m.km + (size_t)j * m.km + k] = 0.0;
 
                     inj[(size_t)j * m.km + k] = 0.0;
 
@@ -314,6 +363,12 @@ private:
                                 - m.get_layer_height(i);                // local atmospheric shell thickness
 
                         double mass_layer = m.r_humid.x[i][j][k] * step[i]; // density * shell thickness
+
+                        // ATM_SNOW_WINDOW bit 1: at and below the freezing level the same-level
+                        // P_snow is the window's 0, so melting/shedding read the ARRIVING flux.
+                        // Unset: exactly `Snow`, the shipped value.
+                        const double Snow_w = ((snow_win & 1) && t_u >= m.t_0)
+                                            ? m.P_snow.x[i+1][j][k] : Snow;
 
                         // (No dt_rain_dim. It was computed here as step[i]/1.6 -- a RAIN fall-transit time -- and
     // never read: S_ev uses pow(R_ev, exp_4_9) on the area-weighted rate instead. Deleted
@@ -451,19 +506,19 @@ private:
 
                         // collection of cloud water by wet snow to form rain (shedding)
                         if(t_u >= m.t_0)
-                            S_shed = c_rim * m.cloud.x[i][j][k] * Snow; // c_rim = 18.6, m²/kg
+                            S_shed = c_rim * m.cloud.x[i][j][k] * Snow_w; // c_rim = 18.6, m²/kg
                         else  S_shed = 0.0;                             // rate of water shed by melting wet snow particles, < IX > in kg/(kg*s)
 
 
                         // melting processes (snow/ice to rain at T > 0°C)
                         if(t_u > m.t_0){
                             // melting of falling snow
-                            if(Snow > 1e-12){
+                            if(Snow_w > 1e-12){
                                 S_s_melt = c_s_melt
-                                    * (1.0 + b_s_melt * pow(Snow, exp_5_26))
-                                    * (t_u - m.t_0) * pow(Snow, exp_1_3);
+                                    * (1.0 + b_s_melt * pow(Snow_w, exp_5_26))
+                                    * (t_u - m.t_0) * pow(Snow_w, exp_1_3);
                                 if(!arriving)
-                                    S_s_melt = std::min(S_s_melt, Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
+                                    S_s_melt = std::min(S_s_melt, Snow_w/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                             }else S_s_melt = 0.0;
 
                             // melting of cloud ice to cloud water/rain
@@ -653,7 +708,21 @@ private:
                             const double raw = m.P_snow.x[i+1][j][k] + dP_snow;
                             inj[(size_t)j * m.km + k] += max(0.0, raw) - raw;
                         }
-                        m.P_snow.x[i][j][k] = (t_u < m.t_0 && t_u >= m.t_000)
+                        // ATM_SNOW_WINDOW: unset, warm_ok && cold_ok is exactly the shipped
+                        // (t_u < t_0 && t_u >= t_000).
+                        const bool warm_ok = (t_u < m.t_0)    || (snow_win & 1);
+                        const bool cold_ok = (t_u >= m.t_000) || (snow_win & 2);
+                        if (sdd_on) {
+                            const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                            const double raw_s = max(0.0, m.P_snow.x[i+1][j][k] + dP_snow);
+                            if      (!warm_ok) sdd[2*N+b] += raw_s;       // deleted, warm side
+                            else if (!cold_ok) sdd[3*N+b] += raw_s;       // deleted, cold side
+                            sdd[4*N+b] += (S_i_au + S_d_au + S_rim + S_agg + S_r_frz) * mass_layer;
+                            sdd[5*N+b] += S_s_melt * mass_layer;
+                            sdd[6*N+b] += (S_c_au + S_ac + S_shed + S_s_melt) * mass_layer;
+                            sdd[7*N+b] += S_ev * mass_layer;
+                        }
+                        m.P_snow.x[i][j][k] = (warm_ok && cold_ok)
                             ? std::min(P_max, max(0.0, m.P_snow.x[i+1][j][k] + dP_snow))
                             : 0.0;
 
@@ -671,6 +740,12 @@ private:
                         const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
                         srd[(size_t)7 * m.jm * m.km + (size_t)j * m.km + k]
                             = m.P_rain.x[i_g][j][k];
+                    }
+                    if (sdd_on) {   // before the convergence break, for the reason given above
+                        const int i_g = std::min(std::max(m.i_topography[j][k], 0), m.im-1);
+                        const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                        sdd[0*N+b] = m.P_rain.x[i_g][j][k];
+                        sdd[1*N+b] = m.P_snow.x[i_g][j][k];
                     }
 
                     P_rain_diff = fabs(m.P_rain.x[i_check][j][k] - Rain_check) * 8.64e4;
@@ -743,6 +818,33 @@ private:
                        "  the clamp %.1f %%,  surviving %.1f %%\n",
                        1e2*acc[0]/src, 1e2*acc[1]/src, 1e2*acc[3]/src,
                        1e2*acc[4]/src, 1e2*acc[8]/src, 1e2*acc[7]/src);
+        }
+
+        if (sdd_on) {
+            // Serial over rows, so the print does not depend on the thread count. Computed columns
+            // only (j, k interior), each band on its own cos-lat weight.
+            const double yr = 365.0 * 8.64e4;
+            const size_t N = (size_t)m.jm * m.km;
+            double acc[4][8] = {}, wb[4] = {0, 0, 0, 0};
+            for (int j = 1; j < m.jm-1; j++) {
+                const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                const int bnd = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for (int k = 1; k < m.km-1; k++) {
+                    wb[bnd] += w;
+                    for (int q = 0; q < 8; q++) acc[bnd][q] += w * sdd[(size_t)q * N + (size_t)j * m.km + k];
+                }
+            }
+            const char* lab[8] = {"rain at ground", "snow at ground", "snow DELETED warm (>=0C)",
+                                  "snow DELETED cold (<-20C)", "snow-flux sources", "S_s_melt (snow->rain)",
+                                  "rain-flux sources", "S_ev"};
+            printf("      AGCM: [SNOW DIAG] iter %d.  ATM_SNOW_WINDOW=%d.  band means, mm/a"
+                   "                0-15        15-35        35-65        65-90\n", m.iter_n, snow_win);
+            for (int q = 0; q < 8; q++) {
+                printf("      AGCM: [SNOW DIAG] %-28s", lab[q]);
+                for (int b = 0; b < 4; b++) printf(" %12.3f", wb[b] > 0.0 ? acc[b][q] * yr / wb[b] : 0.0);
+                printf("\n");
+            }
         }
     }
 /*
