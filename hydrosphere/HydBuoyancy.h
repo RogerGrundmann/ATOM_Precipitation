@@ -100,6 +100,11 @@ inline double rho_eos(double t_Celsius, double S_psu){
 //
 // TIME LEVEL: tn/cn, once per iteration before the pointwise RK4 sweep (deterministic), exactly
 // like rho_ref. Storage is namespace-scope, not a member (sizeof / stack-canary hazard).
+//
+// DECIDED 2026-09-28, AT THE USER'S INSTRUCTION: WON'T FLIP -- stays default 0. ohs_1 (fixed-metric branch,
+// 1000 -> 1600, -O2) was stable with rms|u_radial| equal to the control and the B.6 profile ratio unchanged
+// (1.268); v/w moved 1e-3 / 2e-4, not separable from the -O0/-O2 difference. The shipped-metric arm (ohs_sh1)
+// is unjudgeable: it carries the phi-seam blow-up every shipped-metric restart has since 2026-09-27.
 // ======================================================================================
 namespace HydSplit {
 

@@ -38,7 +38,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 - **C. Retire F / X / N in batches** of ~10, each with a 1-thread byte check of the default branch.
 - **D. Move P / S / I into the XML config** via `param.py`, so a run's configuration lives in one recorded place.
 
-## F -- Decided ON by measurement (29)
+## F -- Decided ON by measurement (30)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -71,6 +71,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_SSS_FILL` | `hydrosphere/InitValues_Hyd.cpp:1025` | 1 | `1` | 1; SSS sentinel, 09-08 |
 | `HYD_T_FREEZE` | `hydrosphere/UtilsHyd.h:257` | 1 | `1` | 1; 09-05 |
 | `HYD_T_FREEZE_SFC` | `hydrosphere/cHydrosphereModel.cpp:274` | 1 | `1` | 1; 09-05 |
+| `ATM_TURB_SIN_FLOOR` | `atmosphere/TurbulenceAtm.h:32` | 1 | `1*` | 1; 09-28 (correctness flip; fx4_tsf connected, null) |
 
 ## X -- Switched on, then reverted by measurement (1)
 
@@ -78,7 +79,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 |---|---|---|---|---|
 | `ATM_BUOY_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1320` | 1 | `0*` | reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes |
 
-## N -- Off; measured null, refuted or superseded (22)
+## N -- Off; measured null, refuted or superseded (23)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -104,8 +105,9 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_TAU_PBROAD` | `atmosphere/MultiLayerRadiation.h:404` | 1 | **missing** | refuted (lapse 3 %) |
 | `HYD_LINE_SOLVE` | `hydrosphere/PressureSolverHyd.h:444` | 1 | `0` | not needed (w2 slightly worse) |
 | `HYD_VW_BOTTOM_ZG` | `hydrosphere/BC_Hyd.h:125` | 1 | `0` | -17 % of the profile excess; refuted as cause |
+| `HYD_HYDRO_SPLIT` | `hydrosphere/HydBuoyancy.h:108` | 2 | `0.0` | won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged) |
 
-## R -- Open: repair or experiment, runs owed or decision pending (41)
+## R -- Open: repair or experiment, runs owed or decision pending (39)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -134,7 +136,6 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_SURF_DRAG_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1407` | 2 | `0.0*` | B.9, arm postponed |
 | `ATM_SW_INSOL` | `atmosphere/MultiLayerRadiation.h:110` | 1 | `0*` | pair with RAD_EQUIL |
 | `ATM_TEQ_SKIN_ONLY` | `atmosphere/cAtmosphereModel.cpp:822` | 1 | **missing** | instrument branch, must NOT be flipped -- NOT IN BANNER |
-| `ATM_TURB_SIN_FLOOR` | `atmosphere/TurbulenceAtm.h:29` | 1 | `0*` | new, byte check tomorrow |
 | `ATM_TW_BALANCE` | `atmosphere/VelocityInitializer.h:1013` | 1 | `0.0*` | off; the only mid-lat jet IC |
 | `ATM_WATER_CLOSURE` | `atmosphere/SaturationAdjustment.h:160` | 4 | `0*` | reverted 09-25; works with filter off (qh600) |
 | `HYD_A_H` | `hydrosphere/RHS_Hyd_Turb.cpp:762` | 2 | `0` | Laplacian; biharmonic preferred |
@@ -143,7 +144,6 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_BC_DRAG` | `hydrosphere/PressureSolverHyd.h:1067` | 1 | **missing** | numerical, not physical -- NOT IN BANNER |
 | `HYD_BUOY_CONSISTENT` | `hydrosphere/HydBuoyancy.h:51` | 2 | `0.0` | radial runaway; HYDRO_SPLIT |
 | `HYD_DEEP_DRAG` | `hydrosphere/RHS_Hyd_Turb.cpp:1248` | 2 | `0` | B.7, arm owed |
-| `HYD_HYDRO_SPLIT` | `hydrosphere/HydBuoyancy.h:108` | 2 | `0.0` | new, runs tomorrow |
 | `HYD_METRIC_RADIUS` | `hydrosphere/cHydrosphereModel.cpp:475` | 1 | `0` | blocked by the profile item |
 | `HYD_METRIC_SIN_FLOOR` | `hydrosphere/cHydrosphereModel.h:357` | 1 | `0.4` | new, sweep tomorrow |
 | `HYD_NUE_GRAD` | `hydrosphere/RHS_Hyd_Turb.cpp:654` | 1 | **missing** | off; would inherit the broken metric -- NOT IN BANNER |

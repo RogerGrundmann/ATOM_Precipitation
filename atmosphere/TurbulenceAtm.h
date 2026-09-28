@@ -19,14 +19,17 @@
 
 using namespace AtomUtils;
 
-// ATM_TURB_SIN_FLOOR=<0|1>, default 0 = shipped (2026-09-26). The RHS, the pressure solver and the
+// ATM_TURB_SIN_FLOOR=<0|1>, DEFAULT 1 SINCE 2026-09-28 (was 0), at the user's instruction, as a CORRECTNESS flip:
+// fx4_tsf (100 from scratch, 1 thread) measured it connected and a null -- budgets move ~1e-12 relative, Psi 2e-6
+// only poleward of 75 deg, every printed score identical. ATM_TURB_SIN_FLOOR=0 restores the old branch.
+// Original note (2026-09-26): The RHS, the pressure solver and the
 // residuum monitor floor sin(theta) at ATM_METRIC_SIN_FLOOR (0.26 since 2026-09-10, ~75 deg); this
 // closure only replaces sin = 0 by 1e-5, so the two disagree about the metric poleward of ~75 deg --
 // the zonal derivatives of u/v/w/tke/dis that build production and the Neumann corrections see a
 // 1/sin up to ~15x (row j = 1, 89 deg; 26 000x at a pole row, where sin = 1e-5) larger than the momentum equations beside them.
 // =1 applies the same floor here, at both sites (the SST closure receives sinthe from the first).
 inline bool turbSinFloorOn(){
-    static const bool on = [](){ const char* e = std::getenv("ATM_TURB_SIN_FLOOR"); return e && std::atoi(e) != 0; }();
+    static const bool on = [](){ const char* e = std::getenv("ATM_TURB_SIN_FLOOR"); return e ? std::atoi(e) != 0 : true; }();
     return on;
 }
 
