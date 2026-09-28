@@ -818,7 +818,11 @@ public:
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
-        // ATM_SEAM_Q_CONSERVE=<0|1|2>, DEFAULT 2 SINCE 2026-09-28 (user; was 0). run_sq20928.sh (600 -> 620, -O2): the
+        // ATM_SEAM_Q_CONSERVE=<0|1|2>, DEFAULT 0 AGAIN (reverted 2026-09-28 evening, user) after being default 2 for a
+        // few hours: sd_ctl (600 from scratch on the default-2 build) regrew the k=1 seam mode, max|v| 6.6 -> 26.02 m/s
+        // at 11N 1E 236 m, where rp_ctl/rp_oqm (default 0) stay at 2.3-2.5 m/s. Mode 2 is the prime suspect (it acts on
+        // exactly the land-neighbour seam cells, and was only run 20 iterations); NOT yet attributed. Modes 1/2 remain
+        // available. Record of the flip: run_sq20928.sh (600 -> 620, -O2): the
         // seam water leak falls 981 -> 1.3 mm/a on the closure branch and -2.27e4 -> -6.7 mm/a on the default branch,
         // the residual being the no-negative clip; bands unchanged to 0.1 %. ATM_SEAM_Q_CONSERVE=0 restores the
         // shipped overwrite. Original note (2026-09-26, mode 1): The seam column k = 0 (== km-1) is
@@ -840,7 +844,7 @@ public:
         //     no air neighbour:     the seam keeps q_old (nothing to average with, nothing overwritten)
         // with the same no-negative clip; all-air cells are treated exactly as =1. Water only.
         static const int seam_q_conserve = [](){
-            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 2; }();
+            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 0; }();
         const bool seam_q  = seam_q_conserve != 0 && seam_periodic;
         const bool seam_q2 = seam_q_conserve == 2 && seam_periodic;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };

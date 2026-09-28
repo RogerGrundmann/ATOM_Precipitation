@@ -38,7 +38,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 - **C. Retire F / X / N in batches** of ~10, each with a 1-thread byte check of the default branch.
 - **D. Move P / S / I into the XML config** via `param.py`, so a run's configuration lives in one recorded place.
 
-## F -- Decided ON by measurement (33)
+## F -- Decided ON by measurement (32)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -74,13 +74,13 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_TURB_SIN_FLOOR` | `atmosphere/TurbulenceAtm.h:32` | 1 | `1*` | 1; 09-28 (correctness flip; fx4_tsf connected, null) |
 | `HYD_SEAM_PERIODIC` | `hydrosphere/BC_Hyd.h:201` | 1 | `1*` | 1; 09-28 (ocean seam blow-up 0.128 -> 79 m/s under HYD_BC_SECOND_ORDER=1; sp_ship) |
 | `ATM_OROG_Q_MASS` | `atmosphere/cAtmosphereModel.cpp:2174` | 1 | `1*` | 1; 09-28 (leak -3125 -> +108 mm/a, climate null; rp_oqm) |
-| `ATM_SEAM_Q_CONSERVE` | `atmosphere/BC_Atm.h:843` | 1 | `2*` | 2; 09-28 (seam water leak 981 -> 1.3 mm/a closure, -2.27e4 -> -6.7 default; sq2_*) |
 
-## X -- Switched on, then reverted by measurement (1)
+## X -- Switched on, then reverted by measurement (2)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
 | `ATM_BUOY_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1320` | 1 | `0*` | reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes |
+| `ATM_SEAM_Q_CONSERVE` | `atmosphere/BC_Atm.h:847` | 1 | `0*` | default 2 for a few hours 09-28, REVERTED: suspected of regrowing the k=1 seam mode (sd_ctl max\|v\| 26 m/s); mode 2 closes the water leak (981 -> 1.3 mm/a) |
 
 ## N -- Off; measured null, refuted or superseded (24)
 
