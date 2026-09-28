@@ -1385,7 +1385,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_ALF1=" << ev("ATM_MC_ALF1", "0.05*")
           << "  MC_GP_AREA=" << ev("ATM_MC_GP_AREA", "0*")
           << "  TURB_SIN_FLOOR=" << ev("ATM_TURB_SIN_FLOOR", "1*")
-          << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "0*")
+          << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "1*")
           << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
           << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
           << "  DAMP_Q_VERT=" << ev("ATM_DAMP_Q_VERT", "1*")
@@ -2162,13 +2162,16 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // field bit-unchanged — avoiding the global perturbation that reverted the 2026-06-08
         // horizontal scalar filter. n_layers_above=10 reaches the surf+7 mode at NZ (surf=6).
         AtomUtils::orographic_radial_shapiro_filter(t,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-        // ATM_OROG_Q_MASS=<0|1>, default 0 = shipped (B+4, 2026-09-24): the moisture fields get the
+        // ATM_OROG_Q_MASS=<0|1>, DEFAULT 1 SINCE 2026-09-28 (user; was 0): rp_oqm vs rp_ctl (600 from scratch, -O2)
+        // cut the orographic water leak -3125 -> +108 mm/a (96.5 %; the rest is column-internal redistribution) with a
+        // null climate (988.7 -> 990.5 mm/a, bands within 2 %). ATM_OROG_Q_MASS=0 restores the shipped filter.
+        // Original note (B+4, 2026-09-24): the moisture fields get the
         // flux-form, mass-weighted variant (same gate). The shipped filter moves only the extremum
         // cell -- not conservative even in index space; -1.0e+04 mm/a with the closure on, the
         // largest leak left. The mass is ColumnWaterBudget's (r_humid*dz; the cos-lat weight
         // cancels within a column); t keeps the shipped filter.
         static const bool orog_q_mass = [](){
-            const char* e = getenv("ATM_OROG_Q_MASS"); return e && atoi(e) != 0; }();
+            const char* e = getenv("ATM_OROG_Q_MASS"); return e ? atoi(e) != 0 : true; }();
         if(!orog_q_mass){
             AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
             AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);

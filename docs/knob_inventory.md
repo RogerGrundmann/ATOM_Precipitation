@@ -38,7 +38,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 - **C. Retire F / X / N in batches** of ~10, each with a 1-thread byte check of the default branch.
 - **D. Move P / S / I into the XML config** via `param.py`, so a run's configuration lives in one recorded place.
 
-## F -- Decided ON by measurement (31)
+## F -- Decided ON by measurement (32)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -73,6 +73,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_T_FREEZE_SFC` | `hydrosphere/cHydrosphereModel.cpp:274` | 1 | `1` | 1; 09-05 |
 | `ATM_TURB_SIN_FLOOR` | `atmosphere/TurbulenceAtm.h:32` | 1 | `1*` | 1; 09-28 (correctness flip; fx4_tsf connected, null) |
 | `HYD_SEAM_PERIODIC` | `hydrosphere/BC_Hyd.h:201` | 1 | `1*` | 1; 09-28 (ocean seam blow-up 0.128 -> 79 m/s under HYD_BC_SECOND_ORDER=1; sp_ship) |
+| `ATM_OROG_Q_MASS` | `atmosphere/cAtmosphereModel.cpp:2174` | 1 | `1*` | 1; 09-28 (leak -3125 -> +108 mm/a, climate null; rp_oqm) |
 
 ## X -- Switched on, then reverted by measurement (1)
 
@@ -80,7 +81,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 |---|---|---|---|---|
 | `ATM_BUOY_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1320` | 1 | `0*` | reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes |
 
-## N -- Off; measured null, refuted or superseded (23)
+## N -- Off; measured null, refuted or superseded (24)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -107,8 +108,9 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_LINE_SOLVE` | `hydrosphere/PressureSolverHyd.h:444` | 1 | `0` | not needed (w2 slightly worse) |
 | `HYD_VW_BOTTOM_ZG` | `hydrosphere/BC_Hyd.h:125` | 1 | `0` | -17 % of the profile excess; refuted as cause |
 | `HYD_HYDRO_SPLIT` | `hydrosphere/HydBuoyancy.h:108` | 2 | `0.0` | won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged) |
+| `HYD_DEEP_DRAG` | `hydrosphere/RHS_Hyd_Turb.cpp:1248` | 2 | `0` | diagnosis only, 09-28 (user): IS the B.6 profile cause (1.268 -> 0.707 at tau 20 s), numerical strengths only |
 
-## R -- Open: repair or experiment, runs owed or decision pending (39)
+## R -- Open: repair or experiment, runs owed or decision pending (37)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -129,7 +131,6 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_MC_QVD` | `atmosphere/MoistConvection.h:177` | 1 | `0*` | B.10c |
 | `ATM_MC_SGZ` | `atmosphere/MoistConvection.h:166` | 1 | `0*` | B.10b |
 | `ATM_ONECAT_CLOUD_LIMIT` | `atmosphere/OneCatIceScheme.h:301` | 1 | `0*` | new, byte check tomorrow |
-| `ATM_OROG_Q_MASS` | `atmosphere/cAtmosphereModel.cpp:2139` | 1 | `0*` | arm owed |
 | `ATM_RAD_EQUIL` | `atmosphere/MultiLayerRadiation.h:183` | 1 | `0*` | pair with SW_INSOL; needs a prognostic T |
 | `ATM_RK_SCALAR_SYNC` | `atmosphere/cAtmosphereModel.cpp:1982` | 1 | `0*` | forced by WATER_CLOSURE |
 | `ATM_SATADJ_FADE` | `atmosphere/SaturationAdjustment.h:158` | 1 | `0*` | mode 2 if ever flipped; forced by closure |
@@ -144,7 +145,6 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_BAROCLINIC_PGF` | `hydrosphere/RHS_Hyd_Turb.cpp:969` | 2 | `0.0` | pair with PHYDRO_SALT; HYDRO_SPLIT may supersede |
 | `HYD_BC_DRAG` | `hydrosphere/PressureSolverHyd.h:1067` | 1 | **missing** | numerical, not physical -- NOT IN BANNER |
 | `HYD_BUOY_CONSISTENT` | `hydrosphere/HydBuoyancy.h:51` | 2 | `0.0` | radial runaway; HYDRO_SPLIT |
-| `HYD_DEEP_DRAG` | `hydrosphere/RHS_Hyd_Turb.cpp:1248` | 2 | `0` | B.7, arm owed |
 | `HYD_METRIC_RADIUS` | `hydrosphere/cHydrosphereModel.cpp:475` | 1 | `0` | blocked by the profile item |
 | `HYD_METRIC_SIN_FLOOR` | `hydrosphere/cHydrosphereModel.h:357` | 1 | `0.4` | new, sweep tomorrow |
 | `HYD_NUE_GRAD` | `hydrosphere/RHS_Hyd_Turb.cpp:654` | 1 | **missing** | off; would inherit the broken metric -- NOT IN BANNER |

@@ -1230,6 +1230,10 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         if (wbudget_capture) vbud_wind.x[i][j][k] = accel_nd * v_wind.y[j][k];
     }
 
+    // DECIDED 2026-09-28 (user): HYD_DEEP_DRAG STAYS OFF, A DIAGNOSIS ONLY. rp_od240 / rp_od2400 vs rp_oc (fixed-metric
+    // branch, 1000 -> 1600, -O2) showed the B.6 bottom-intensified profile IS this missing outlet: i=1/i=12 speed
+    // 1.268 -> 1.139 (tau 200 s) -> 0.707 (tau 20 s), monotone -- but only at numerical strengths, a physical tau
+    // acts on no affordable run.
     // HYD_DEEP_DRAG=<tau in days>, default 0 = off (B.7). In shallow mode (L_hyd = 200 m) the
     // column is TRUNCATED at 200 m: there is no seafloor, and the momentum a real upper ocean hands
     // DOWN through that depth to the deep ocean (where it ends in bottom friction) has no outlet.
