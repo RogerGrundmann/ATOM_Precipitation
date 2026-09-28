@@ -829,9 +829,17 @@ public:
         // which conserves m_0 q_0 + m_1 q_1 + m_{km-2} q_{km-2} EXACTLY and leaves seam = neighbour mean.
         // Water only (c, cloud, ice, gr); only in the periodic seam mode (where the seam IS that mean);
         // only where the seam and both neighbours are air; e is clipped so no cell goes negative.
-        static const bool seam_q_conserve = [](){
-            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e && atoi(e) != 0; }();
-        const bool seam_q = seam_q_conserve && seam_periodic;
+        // =2 (2026-09-28): ALSO the seam cells whose seam is air but a neighbour is LAND. ATM_SEAM_Q_DIAG located
+        // the leak =1 leaves there: 72 such cells (1 % of the seam) carry 99.6 % of it with =1 on, 79 % in 15-35 deg
+        // (0 E crosses the Sahara) -- the average above mixes the air neighbour's water with a ROCK value. =2 sets
+        // the seam's water from its AIR neighbour(s) only and conserves over the air cells:
+        //     one air neighbour n:  e = m_0 (q_old - q_n) / (m_0 + m_n),  seam = q_n + e,  q_n += e
+        //     no air neighbour:     the seam keeps q_old (nothing to average with, nothing overwritten)
+        // with the same no-negative clip; all-air cells are treated exactly as =1. Water only.
+        static const int seam_q_conserve = [](){
+            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 0; }();
+        const bool seam_q  = seam_q_conserve != 0 && seam_periodic;
+        const bool seam_q2 = seam_q_conserve == 2 && seam_periodic;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
 
         // ATM_SEAM_Q_DIAG=1, print-only, default off (2026-09-28). fx4_sqcon showed ATM_SEAM_Q_CONSERVE removing
@@ -882,8 +890,18 @@ public:
                     }
                     sqd_q0 = sqd_colq(i, j, sqd_rho3);
                 }
-                if (seam_q_here)
+                const bool air1 = is_air(m.h, i, j, 1), air2 = is_air(m.h, i, j, m.km-2);
+                const bool seam_q2_here = seam_q2 && is_air(m.h, i, j, 0) && !(air1 && air2);
+                double rho_pre[3] = {0.0, 0.0, 0.0};   // densities BEFORE the average (r_humid is averaged too)
+                if (seam_q_here || seam_q2_here)
                     for (int f = 0; f < 4; f++) q_old[f] = seam_q_fields[f]->x[i][j][0];
+                if (seam_q2_here) {
+                    const int ks[3] = { 0, 1, m.km - 2 };
+                    for (int n = 0; n < 3; n++) {
+                        const double r = m.r_humid.x[i][j][ks[n]];
+                        rho_pre[n] = (AtomUtils::is_finite_safe(r) && r > 0.0) ? r : m.r_air;
+                    }
+                }
 
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
@@ -904,6 +922,20 @@ public:
                         xij[j][1]      += e;
                         xij[j][m.km-2] += e;
                         xij[j][0] = xij[j][m.km-1] = xij[j][0] + e;
+                    }
+                }
+
+                if (seam_q2_here) {
+                    for (int f = 0; f < 4; f++) {
+                        double** xij = seam_q_fields[f]->x[i];
+                        if (!air1 && !air2) { xij[j][0] = xij[j][m.km-1] = q_old[f]; continue; }
+                        const int    kn = air1 ? 1 : m.km - 2;
+                        const double mn = air1 ? rho_pre[1] : rho_pre[2];
+                        const double qn = xij[j][kn];
+                        double e = rho_pre[0] * (q_old[f] - qn) / (rho_pre[0] + mn);
+                        if (e < -qn) { e = -qn; sqd_clip = true; }
+                        xij[j][kn] = qn + e;
+                        xij[j][0] = xij[j][m.km-1] = qn + e;
                     }
                 }
 
@@ -936,7 +968,7 @@ public:
             const char* nm[SQD_N] = { "A all 3 air (conserved set)", "B seam air, land neighbour",
                                       "C seam land", "A* of A: no-negative clip fired", "total" };
             std::printf("      AGCM: [SEAM Q DIAG] water change this bcPhi call, kg/m2 per call (= mm), cos-lat mean as CWB; "
-                        "SEAM_Q_CONSERVE=%d\n", seam_q ? 1 : 0);
+                        "SEAM_Q_CONSERVE=%d\n", seam_q ? seam_q_conserve : 0);
             std::printf("      AGCM: [SEAM Q DIAG] %-34s %12s %12s %12s %12s %12s %8s\n",
                         "category", "global", "0-15", "15-35", "35-65", "65-90", "cells");
             for (int c = 0; c < SQD_N; c++) {
