@@ -344,7 +344,10 @@ public:
     void initMetricRadius();
 
     // The radius the HORIZONTAL metric should use, in rad.z units, given a grid coordinate rm.
-    // HYD_METRIC_SIN_FLOOR=<f>, default 0.4 = shipped (2026-09-26). The polar metric floor
+    // HYD_METRIC_SIN_FLOOR=<f>, DEFAULT 0.26 SINCE 2026-09-28 (user; was 0.4), matching ATM_METRIC_SIN_FLOOR.
+    // ro_osf26 vs ro_osf40 (shipped metric, seam-clean, 1000 -> 1200, -O2): equatorward of 66 deg identical to
+    // thread noise, KE -0.8 % at 66-75 and -7.5 % at 75-90; 0.10 NaNs at the first step. =0.4 restores the old floor.
+    // Original note (2026-09-26): The polar metric floor
     // sin(theta) >= f, applied together at the four sites that must agree -- the RHS geometry table
     // (RungeKutta_Hyd_Turb.cpp) and the three Poisson operator/source/gradient tables
     // (PressureSolverHyd.h) -- so the projection stays consistent with the momentum equations.
@@ -355,7 +358,7 @@ public:
     static double hydMetricSinFloor(){
         static const double v = [](){
             const char* e = getenv("HYD_METRIC_SIN_FLOOR");
-            double f = e ? atof(e) : 0.4;
+            double f = e ? atof(e) : 0.26;
             if (!(f > 0.0)) f = 1.0e-6;      // 0 or nonsense means "no floor", not a divide by zero
             if (f > 1.0) f = 1.0;
             return f; }();

@@ -111,7 +111,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_HYDRO_SPLIT` | `hydrosphere/HydBuoyancy.h:108` | 2 | `0.0` | won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged) |
 | `HYD_DEEP_DRAG` | `hydrosphere/RHS_Hyd_Turb.cpp:1248` | 2 | `0` | diagnosis only, 09-28 (user): IS the B.6 profile cause (1.268 -> 0.707 at tau 20 s), numerical strengths only |
 
-## R -- Open: repair or experiment, runs owed or decision pending (36)
+## R -- Open: repair or experiment, runs owed or decision pending (35)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
@@ -146,16 +146,16 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `HYD_BC_DRAG` | `hydrosphere/PressureSolverHyd.h:1067` | 1 | **missing** | numerical, not physical -- NOT IN BANNER |
 | `HYD_BUOY_CONSISTENT` | `hydrosphere/HydBuoyancy.h:51` | 2 | `0.0` | radial runaway; HYDRO_SPLIT |
 | `HYD_METRIC_RADIUS` | `hydrosphere/cHydrosphereModel.cpp:475` | 1 | `0` | blocked by the profile item |
-| `HYD_METRIC_SIN_FLOOR` | `hydrosphere/cHydrosphereModel.h:357` | 1 | `0.4` | new, sweep tomorrow |
 | `HYD_NUE_GRAD` | `hydrosphere/RHS_Hyd_Turb.cpp:654` | 1 | **missing** | off; would inherit the broken metric -- NOT IN BANNER |
 | `HYD_PHYDRO_SALT` | `hydrosphere/ThermoHyd.h:101` | 1 | `0` | pair |
 | `HYD_RUN_NEUMANN` | `hydrosphere/PressureSolverHyd.h:39` | 1 | `0` | pair with METRIC_RADIUS |
 | `HYD_SFC_FLUX` | `hydrosphere/RHS_Hyd_Turb.cpp:1111` | 2 | `0` | unmeasured |
 
-## P -- Numerical parameter (a value, not a switch) (25)
+## P -- Numerical parameter (a value, not a switch) (26)
 
 | knob | read at | sites | banner default | note |
 |---|---|---|---|---|
+| `HYD_METRIC_SIN_FLOOR` | `hydrosphere/cHydrosphereModel.h:357` | 1 | `0.26` | 0.26 since 09-28, was 0.4 (ro_osf26/40: 75-90 KE -7.5 %, equatorward null; matches the atmosphere) |
 | `ATM_CO2_BAND` | `atmosphere/MultiLayerRadiation.h:546` | 1 | **missing** | 0.17 -- NOT IN BANNER |
 | `ATM_CONV_ADJ_LAPSE` | `atmosphere/ConvectiveAdjustment.h:84` | 1 | **missing** | sub-parameter of CONV_ADJ |
 | `ATM_CONV_ADJ_PASSES` | `atmosphere/ConvectiveAdjustment.h:88` | 1 | **missing** | sub-parameter of CONV_ADJ |
