@@ -5,6 +5,8 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cstdio>
+#include <vector>
 #include <cmath>
 
 #ifdef _OPENMP
@@ -832,6 +834,37 @@ public:
         const bool seam_q = seam_q_conserve && seam_periodic;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
 
+        // ATM_SEAM_Q_DIAG=1, print-only, default off (2026-09-28). fx4_sqcon showed ATM_SEAM_Q_CONSERVE removing
+        // only 27 % of ColumnWaterBudget's "BC:phi(seam)" row (1317 -> 959 mm/a, 3052 left in 15-35 deg), while
+        // 0-15 deg went to ~1e-3. The conserving step runs only where the seam AND both neighbours are air, and
+        // 0 deg longitude crosses Africa and Europe. This splits the water change this call makes in the three
+        // cells {km-2, 0, 1} by cell type -- (A) all three air, (B) seam air with a land neighbour, (C) seam land
+        // -- plus (A*) cells of A where the no-negative clip fired, cos-lat weighted exactly as ColumnWaterBudget
+        // (i >= i_topography of each cell, rho*dz with the density at entry, seam counted once), per band.
+        // Reads and writes only its own scratch; the model state is untouched.
+        static const bool seam_q_diag = [](){
+            const char* e = getenv("ATM_SEAM_Q_DIAG"); return e && atoi(e) != 0; }();
+        const int SQD_N = 5;          // A, B, C, A-clipped, total
+        std::vector<double> sqd_dq, sqd_n;
+        std::vector<double> sqd_rho, sqd_dz;
+        if (seam_q_diag) {
+            sqd_dq.assign((size_t)SQD_N * m.im * m.jm, 0.0);
+            sqd_n.assign((size_t)SQD_N * m.im * m.jm, 0.0);
+            sqd_dz.assign(m.im, 0.0);
+            for (int i = 0; i < m.im - 1; i++) sqd_dz[i] = m.get_layer_height(i+1) - m.get_layer_height(i);
+        }
+        auto sqd_colq = [&](int i, int j, const double rho3[3]) {   // mass-weighted water of the 3 cells, CWB rules
+            const int ks[3] = { 0, 1, m.km - 2 };
+            double s = 0.0;
+            if (i >= m.im - 1) return 0.0;
+            for (int n = 0; n < 3; n++) {
+                const int k = ks[n];
+                if (i < m.i_topography[j][k]) continue;
+                s += rho3[n] * sqd_dz[i] * (m.c.x[i][j][k] + m.cloud.x[i][j][k] + m.ice.x[i][j][k] + m.gr.x[i][j][k]);
+            }
+            return s;
+        };
+
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
@@ -839,6 +872,16 @@ public:
                 double q_old[4] = {0.0, 0.0, 0.0, 0.0};
                 const bool seam_q_here = seam_q && is_air(m.h, i, j, 0)
                                        && is_air(m.h, i, j, 1) && is_air(m.h, i, j, m.km-2);
+                double sqd_rho3[3] = {0.0, 0.0, 0.0}, sqd_q0 = 0.0;
+                bool sqd_clip = false;
+                if (seam_q_diag) {
+                    const int ks[3] = { 0, 1, m.km - 2 };
+                    for (int n = 0; n < 3; n++) {
+                        const double r = m.r_humid.x[i][j][ks[n]];
+                        sqd_rho3[n] = (AtomUtils::is_finite_safe(r) && r > 0.0) ? r : m.r_air;
+                    }
+                    sqd_q0 = sqd_colq(i, j, sqd_rho3);
+                }
                 if (seam_q_here)
                     for (int f = 0; f < 4; f++) q_old[f] = seam_q_fields[f]->x[i][j][0];
 
@@ -857,7 +900,7 @@ public:
                         double** xij = seam_q_fields[f]->x[i];
                         double e = m0 * (q_old[f] - xij[j][0]) / (m0 + m1 + m2);
                         const double floor_e = -std::min(xij[j][1], xij[j][m.km-2]);   // no negative water
-                        if (e < floor_e) e = floor_e;
+                        if (e < floor_e) { e = floor_e; sqd_clip = true; }
                         xij[j][1]      += e;
                         xij[j][m.km-2] += e;
                         xij[j][0] = xij[j][m.km-1] = xij[j][0] + e;
@@ -869,6 +912,42 @@ public:
                     xij[j][0]      = s43 * xij[j][1]      - s13 * xij[j][2];
                     xij[j][m.km-1] = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
                 }
+
+                if (seam_q_diag) {
+                    const double dq = sqd_colq(i, j, sqd_rho3) - sqd_q0;
+                    const bool a0 = is_air(m.h, i, j, 0);
+                    const bool all3 = a0 && is_air(m.h, i, j, 1) && is_air(m.h, i, j, m.km-2);
+                    const int cat = all3 ? 0 : (a0 ? 1 : 2);
+                    const size_t N = (size_t)m.im * m.jm, b = (size_t)i * m.jm + j;
+                    sqd_dq[cat*N + b] = dq;  sqd_n[cat*N + b] = 1.0;
+                    if (all3 && sqd_clip) { sqd_dq[3*N + b] = dq; sqd_n[3*N + b] = 1.0; }
+                    sqd_dq[4*N + b] = dq;    sqd_n[4*N + b] = 1.0;
+                }
+            }
+        }
+
+        if (seam_q_diag) {   // serial reduction in a fixed order: deterministic under OpenMP
+            const size_t N = (size_t)m.im * m.jm;
+            auto wlat = [](int j){ return (j <= 90) ? cos((90 - j) * M_PI / 180.0) : cos((j - 90) * M_PI / 180.0); };
+            auto band = [&](int j){ const double a = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                                    return (a < 15.0) ? 0 : (a < 35.0) ? 1 : (a < 65.0) ? 2 : 3; };
+            double w_all = 0.0, w_b[4] = {0,0,0,0};
+            for (int j = 0; j < m.jm; j++) { w_all += wlat(j) * (m.km - 1); w_b[band(j)] += wlat(j) * (m.km - 1); }
+            const char* nm[SQD_N] = { "A all 3 air (conserved set)", "B seam air, land neighbour",
+                                      "C seam land", "A* of A: no-negative clip fired", "total" };
+            std::printf("      AGCM: [SEAM Q DIAG] water change this bcPhi call, kg/m2 per call (= mm), cos-lat mean as CWB; "
+                        "SEAM_Q_CONSERVE=%d\n", seam_q ? 1 : 0);
+            std::printf("      AGCM: [SEAM Q DIAG] %-34s %12s %12s %12s %12s %12s %8s\n",
+                        "category", "global", "0-15", "15-35", "35-65", "65-90", "cells");
+            for (int c = 0; c < SQD_N; c++) {
+                double g = 0.0, bb[4] = {0,0,0,0}, n = 0.0;
+                for (int i = 0; i < m.im; i++)
+                    for (int j = 0; j < m.jm; j++) {
+                        const double v = sqd_dq[c*N + (size_t)i * m.jm + j] * wlat(j);
+                        g += v; bb[band(j)] += v; n += sqd_n[c*N + (size_t)i * m.jm + j];
+                    }
+                std::printf("      AGCM: [SEAM Q DIAG] %-34s %12.4e %12.4e %12.4e %12.4e %12.4e %8.0f\n", nm[c],
+                            g / w_all, bb[0] / w_b[0], bb[1] / w_b[1], bb[2] / w_b[2], bb[3] / w_b[3], n);
             }
         }
 
