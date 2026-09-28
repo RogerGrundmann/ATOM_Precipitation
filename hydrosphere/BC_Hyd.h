@@ -185,13 +185,29 @@ public:
         };
         constexpr int n_avg = sizeof(fields_avg) / sizeof(fields_avg[0]);
 
+        // HYD_SEAM_PERIODIC=<0|1>, default 0 = shipped (2026-09-28). The ocean twin of ATM_SEAM_PERIODIC
+        // (BC_Atm.h). The seam k = 0 (== km-1) is the point BETWEEN k = km-2 and k = 1 on a periodic circle, not a
+        // wall. With the first-order constants (c43 = 1, c13 = 0, the accidental `int` values until 0571bc1) the
+        // line below is exactly 0.5*(x[1] + x[km-2]), the correct periodic interpolation; with the second-order
+        // constants (HYD_BC_SECOND_ORDER default 1 since 2026-09-23) it becomes a two-sided EXTRAPOLATION with no
+        // damping. MEASURED 2026-09-28 (run_sm0928.sh, shipped metric, restart 1000 -> 1200 from oc_ctl, -O2):
+        // HYD_BC_SECOND_ORDER=1 grows max|u| 0.128 -> 0.43 -> 1.67 -> 6.4 -> 23.8 -> 66 -> 79 m/s at 55N 0E
+        // (~3.9x per 20 iterations, then saturating); =0 stays at 0.128 m/s. Every shipped-metric ocean restart
+        // since 09-27 carried it (osf_*, ohs_sh1, probably bn_sh1). =1 uses the centred average whatever c43/c13
+        // are -- the pre-0571bc1 seam exactly, second order kept everywhere else; at first order a no-op by
+        // arithmetic.
+        static const bool seam_periodic = [](){
+            const char* e = std::getenv("HYD_SEAM_PERIODIC"); return e && std::atoi(e) != 0; }();
+        const double s43 = seam_periodic ? 1.0 : m.c43;
+        const double s13 = seam_periodic ? 0.0 : m.c13;
+
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
-                    double v0   = m.c43 * xij[j][1]      - m.c13 * xij[j][2];
-                    double vend = m.c43 * xij[j][m.km-2] - m.c13 * xij[j][m.km-3];
+                    double v0   = s43 * xij[j][1]      - s13 * xij[j][2];
+                    double vend = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
                     xij[j][0] = xij[j][m.km-1] = 0.5 * (v0 + vend);
                 }
             }
