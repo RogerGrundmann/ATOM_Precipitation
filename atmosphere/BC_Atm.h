@@ -818,7 +818,10 @@ public:
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
-        // ATM_SEAM_Q_CONSERVE=<0|1>, default 0 = shipped (2026-09-26). The seam column k = 0 (== km-1) is
+        // ATM_SEAM_Q_CONSERVE=<0|1|2>, DEFAULT 2 SINCE 2026-09-28 (user; was 0). run_sq20928.sh (600 -> 620, -O2): the
+        // seam water leak falls 981 -> 1.3 mm/a on the closure branch and -2.27e4 -> -6.7 mm/a on the default branch,
+        // the residual being the no-negative clip; bands unchanged to 0.1 %. ATM_SEAM_Q_CONSERVE=0 restores the
+        // shipped overwrite. Original note (2026-09-26, mode 1): The seam column k = 0 (== km-1) is
         // not integrated by RK4, and the line below OVERWRITES its water with the average of k = 1 and
         // k = km-2 on every call -- so whatever else wrote water into the seam column since the last call
         // (evaporation, saturation adjustment, and under ATM_WATER_CLOSURE every persisting pre-RK4
@@ -837,7 +840,7 @@ public:
         //     no air neighbour:     the seam keeps q_old (nothing to average with, nothing overwritten)
         // with the same no-negative clip; all-air cells are treated exactly as =1. Water only.
         static const int seam_q_conserve = [](){
-            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 0; }();
+            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 2; }();
         const bool seam_q  = seam_q_conserve != 0 && seam_periodic;
         const bool seam_q2 = seam_q_conserve == 2 && seam_periodic;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
