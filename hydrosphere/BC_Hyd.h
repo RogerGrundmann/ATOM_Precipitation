@@ -185,7 +185,10 @@ public:
         };
         constexpr int n_avg = sizeof(fields_avg) / sizeof(fields_avg[0]);
 
-        // HYD_SEAM_PERIODIC=<0|1>, default 0 = shipped (2026-09-28). The ocean twin of ATM_SEAM_PERIODIC
+        // HYD_SEAM_PERIODIC=<0|1>, DEFAULT 1 SINCE 2026-09-28 (written the same day default 0), at the user's
+        // instruction: sp_ship (knob on, second order elsewhere) = the first-order run to 6 digits in max|u| and to
+        // 1e-8 rms away from the seam, where the default blew up to 79 m/s and changed the WHOLE ocean ~100 %.
+        // HYD_SEAM_PERIODIC=0 restores the two-sided extrapolation. The ocean twin of ATM_SEAM_PERIODIC
         // (BC_Atm.h). The seam k = 0 (== km-1) is the point BETWEEN k = km-2 and k = 1 on a periodic circle, not a
         // wall. With the first-order constants (c43 = 1, c13 = 0, the accidental `int` values until 0571bc1) the
         // line below is exactly 0.5*(x[1] + x[km-2]), the correct periodic interpolation; with the second-order
@@ -197,7 +200,7 @@ public:
         // are -- the pre-0571bc1 seam exactly, second order kept everywhere else; at first order a no-op by
         // arithmetic.
         static const bool seam_periodic = [](){
-            const char* e = std::getenv("HYD_SEAM_PERIODIC"); return e && std::atoi(e) != 0; }();
+            const char* e = std::getenv("HYD_SEAM_PERIODIC"); return e ? std::atoi(e) != 0 : true; }();
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
