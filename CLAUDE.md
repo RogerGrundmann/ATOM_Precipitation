@@ -1616,6 +1616,10 @@ thermal wind*. **Nothing is written and nothing is flipped.**
 strength blending `kf*L_atm/u_0*dt` -> `kf*metricShellLength()/u_0`; `[TIMESCALES]` prints both and
 the e-folding (4.31e+05 iterations at s = 1). Off branch byte-identical, 13 of 14 at 1 thread
 (`RUN_CONFIG.txt` by the banner token). NO SCIENCE ARM, deliberately, at the user's instruction.**
+**⭐ DEFAULT 1.0 SINCE 2026-09-29 (`55489e9`, user).** Fresh -O2 pair, 600 from scratch (`run_sdr.sh`): median
+`drag_sfc`/`coriolis` below 300 m, 20-70 deg, **1.4e-6 -> 0.561**; climate null (precip +0.2 %, r, sigma, bands, KE
+unchanged). -O0 byte check both directions 13/14 (banner token), control 9/14. `ATM_SURF_DRAG_CONSISTENT=0` restores.
+*The 09-28 pair (`run_sd0928.sh`) is void: `cp -n` onto an existing `cli/atm_sd` left a 09-24 binary in place.*
 
 ### `ATM_MC_T_NDIM`: the latent half of `MC_t` carries a spare `t_0`, and removing it is a null
 
