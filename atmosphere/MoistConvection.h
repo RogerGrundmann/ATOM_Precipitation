@@ -1118,6 +1118,25 @@ void findCloudBaseLFS() {
                         m.e_d.x[i][j][k] = 0.0;
                     else{
                         double precip_i = m.P_conv.x[i][j][k];
+                        // ATM_MC_ED_AREA=<0|1>, default 0 = shipped. The shipped e_d applies the
+                        // rain-evaporation law to the GRID-MEAN flux over the whole box, while e_p
+                        // above carries the convective area fraction sigma_p. Convective rain falls
+                        // in a shaft of area sigma_p, so the grid-mean tendency is sigma*E(P/sigma):
+                        // with E ~ P^(4/9) that is sigma^(5/9) of the shipped value (~0.16 at the
+                        // measured mean sigma_p 0.035). Same defect as the microphysics' S_ev
+                        // (ATM_RAIN_AREA). Measured 2026-09-29 (run_mcd9.sh): shipped e_d removes
+                        // 99.96 % of convective generation on both branches.
+                        static const bool mc_ed_area = [](){
+                            const char* e = std::getenv("ATM_MC_ED_AREA"); return e && atoi(e) != 0; }();
+                        if(mc_ed_area){
+                          if(precip_i > 0.0 && sigma_p > 0.0){
+                            const double P_s  = precip_i / sigma_p;
+                            m.e_d.x[i][j][k] = sigma_p * a_ev * (1.0 + b_ev * pow(P_s, 1.0/6.0))
+                                * (q_sat - m.q_v_d.x[i][j][k]) * pow(P_s, 4.0/9.0);
+                          }else{
+                            m.e_d.x[i][j][k] = 0.0;
+                          }
+                        }else
                         if(precip_i > 0.0){
                           double P_16 = pow(precip_i, 1.0/6.0);
                           double P_49 = pow(precip_i, 4.0/9.0);
