@@ -1348,6 +1348,21 @@ void cAtmosphereModel::initWaterWapour() {
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
                     if (rh_i < rh_floor) rh_i = rh_floor;
                 }
+                // ATM_RH_STORM=<factor>, default 1.0 = OFF (code skipped, byte-identical).
+                // Multiplies the INITIAL relative humidity by 1 + (factor-1)*G, G the storm-track
+                // Gaussian of ATM_RH_MIN_LAT (55 deg, width 15 deg), capped at 0.98. A test of the
+                // 2026-09-29 fill hypothesis: on the energy-conserving working branch the 35-65 deg
+                // column gains +2471 mm/a of water (below saturation) while raining 69 mm/a, and
+                // filling it takes ~1 day of physical time (~4.3e5 iterations). If starting it
+                // moister makes the band rain from the start, the deficit is spin-up.
+                static const double rh_storm = [](){
+                    const char* e = getenv("ATM_RH_STORM"); return e ? atof(e) : 1.0; }();
+                if (rh_storm != 1.0) {
+                    const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
+                    const double b = (phi_deg - 55.0) / 15.0;
+                    rh_i *= 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
+                    if (rh_i > 0.98) rh_i = 0.98;
+                }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes
                 if (!rh_profile)
