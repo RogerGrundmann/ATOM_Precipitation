@@ -520,6 +520,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")
              << "  A_H="                                       << ev("HYD_A_H", "0")
              << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
+             << "  A_H_BIHARM_SCALED="                         << ev("HYD_A_H_BIHARM_SCALED", "0")
              << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")
              << "  SSS_FILL="                                  << ev("HYD_SSS_FILL", "1")
              << "   (* = compiled-in default, not set in the environment)" << endl;

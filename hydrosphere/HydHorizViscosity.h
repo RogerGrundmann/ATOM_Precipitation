@@ -48,4 +48,11 @@ inline double biharm_strength(){
     return b;
 }
 
+// HYD_A_H_BIHARM_SCALED=<0|1>: scale B by sin(theta)^4 (grid-scaled biharmonic). Default 0.
+inline bool biharm_scaled(){
+    static const bool b = [](){
+        const char* e = getenv("HYD_A_H_BIHARM_SCALED"); return e && atoi(e) != 0; }();
+    return b;
+}
+
 }  // namespace HydHorizVisc

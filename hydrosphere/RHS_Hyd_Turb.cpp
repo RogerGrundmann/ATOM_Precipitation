@@ -834,8 +834,18 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
             // B * L_hyd / (u_0 * r_Earth^4), dimensionless; 5.06e-25 per (m^4/s) here.
             const double r_m    = r_Earth * 1.0e3;
             const double r_m2   = r_m * r_m;
-            const double b_h_nd = HydHorizVisc::biharm_strength() * L_hyd
-                                / (u_0 * r_m2 * r_m2) * diffusion_ramp;
+            double b_h_nd = HydHorizVisc::biharm_strength() * L_hyd
+                          / (u_0 * r_m2 * r_m2) * diffusion_ramp;
+            // HYD_A_H_BIHARM_SCALED=1 (default 0 = OFF, and then b_h_nd is not touched):
+            // B is the EQUATORIAL value and falls as sin(theta)^4 poleward, i.e. with the
+            // fourth power of the zonal spacing. The explicit nabla^4 limit is
+            // B <= dx^4/(8 dt) with dx the SMALLEST spacing, and on a floored metric that is
+            // the zonal dx at the floor: 28.9 km at HYD_METRIC_SIN_FLOOR = 0.26, where the
+            // limit is ~9e17 m^4/s against ~4.4e18 at 0.4. That is why om_met (B = 3e18,
+            // metric on, floor 0.26) NaN'd at 89N at iteration 27 while floor 0.4 ran.
+            // Scaling holds the zonal 2*dx e-folding in ITERATIONS constant with latitude;
+            // sinthe2 is the FLOORED value, the same one the stencil below divides by.
+            if(HydHorizVisc::biharm_scaled()) b_h_nd *= sinthe2 * sinthe2;
 
             const double cot_the = costhe / sinthe;
             const double inv_s2  = 1.0 / sinthe2;
