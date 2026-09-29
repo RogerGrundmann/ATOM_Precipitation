@@ -1391,7 +1391,10 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double drag_profile = 1.0 - (double)(i - i_topography[j][k]) / drag_n_layers;
     if(drag_profile < 0.0) drag_profile = 0.0;
     if(drag_profile > 1.0) drag_profile = 1.0;
-    // ATM_SURF_DRAG_CONSISTENT=<s>, default 0.0 = shipped (B.9). The shipped coefficient
+    // ATM_SURF_DRAG_CONSISTENT=<s>, DEFAULT 1.0 SINCE 2026-09-29 (user; was 0.0 = shipped, B.9).
+    // Measured on a fresh -O2 build, 600 from scratch (run_sdr.sh): median drag/coriolis below 300 m,
+    // 20-70 deg, 1.4e-6 -> 0.561; climate null (precip +0.2 %, r/sigma/bands/KE unchanged).
+    // A correctness flip. `ATM_SURF_DRAG_CONSISTENT=0` restores the shipped branch exactly. The shipped coefficient
     // kf*L_atm/u_0*dt is wrong twice: RungeKutta_Atm_Turb already multiplies rhs_v/rhs_w by dt,
     // so the `* dt` is a SECOND one (the extra-dt defect of ATM_BUOY_CONSISTENT and the ocean's
     // buoy_nd -- and, contrary to the comment at the buoyancy term, NOT repaired here), and
@@ -1404,7 +1407,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // this tree can afford the drag is correct and slow. It becomes the model's only
     // velocity-proportional momentum sink that is actually present.
     static const double surf_drag_s = [](){
-        const char* e = getenv("ATM_SURF_DRAG_CONSISTENT"); return e ? atof(e) : 0.0; }();
+        const char* e = getenv("ATM_SURF_DRAG_CONSISTENT"); return e ? atof(e) : 1.0; }();   // DEFAULT 1.0 since 2026-09-29
     const double surf_drag_ship = rayleigh_kf * ndimLength() / u_0 * dt;
     double surf_drag = (surf_drag_s == 0.0)
         ? (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile

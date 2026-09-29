@@ -1375,7 +1375,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "1.0*")
           << "  RK_SCALAR_SYNC=" << ev("ATM_RK_SCALAR_SYNC", "0*")
           << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
-          << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "0.0*")
+          << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "1.0*")
           << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
           << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "1*")
           << "  MC_SGZ=" << ev("ATM_MC_SGZ", "0*")
@@ -1453,7 +1453,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         {   // ATM_SURF_DRAG_CONSISTENT (B.9). kf = 1/86400 must match rayleigh_kf in RHS_Atm_Turb.cpp.
             const double kf = 1.0 / 86400.0;
             const char* e = getenv("ATM_SURF_DRAG_CONSISTENT");
-            const double s = e ? atof(e) : 0.0;
+            const double s = e ? atof(e) : 1.0;   // default 1.0 since 2026-09-29, must match RHS_Atm_Turb.cpp
             const double c_ship = kf * ndimLength() / u_0 * dt_visc;
             const double c_cons = kf * metricShellLength() / u_0;
             const double c = c_ship + s * (c_cons - c_ship);

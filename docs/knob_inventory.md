@@ -135,7 +135,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_RAD_EQUIL` | `atmosphere/MultiLayerRadiation.h:183` | 1 | `0*` | pair with SW_INSOL; needs a prognostic T |
 | `ATM_RK_SCALAR_SYNC` | `atmosphere/cAtmosphereModel.cpp:1982` | 1 | `0*` | forced by WATER_CLOSURE |
 | `ATM_SATADJ_FADE` | `atmosphere/SaturationAdjustment.h:158` | 1 | `0*` | mode 2 if ever flipped; forced by closure |
-| `ATM_SURF_DRAG_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1407` | 2 | `0.0*` | B.9, arm postponed |
+| `ATM_SURF_DRAG_CONSISTENT` | `atmosphere/RHS_Atm_Turb.cpp:1407` | 2 | `1.0*` | B.9, default 1.0 since 2026-09-29 (run_sdr.sh: connected, climate null) |
 | `ATM_SW_INSOL` | `atmosphere/MultiLayerRadiation.h:110` | 1 | `0*` | pair with RAD_EQUIL |
 | `ATM_TEQ_SKIN_ONLY` | `atmosphere/cAtmosphereModel.cpp:822` | 1 | **missing** | instrument branch, must NOT be flipped -- NOT IN BANNER |
 | `ATM_TW_BALANCE` | `atmosphere/VelocityInitializer.h:1013` | 1 | `0.0*` | off; the only mid-lat jet IC |
