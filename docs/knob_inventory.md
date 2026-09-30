@@ -25,6 +25,18 @@ switches until decided, D = 18 stay as diagnostic switches.
 > (a fractional value like 0.5 used to be ON at one site and OFF at two). The "read at" column below is the
 > pre-registry site and is kept as history. Byte check: `python/run_vknob.sh`.
 
+> **2026-09-30 -- plan C is DONE: 57 knobs retired, the registry is down from 156 to 99.** Five batches, each with an
+> -O0 1-thread byte check of the default branch (`python/run_vretire.sh`): batch 1 `786c042` (10 F flags), batch 2
+> `bba6e10` (14 F flags), batch 3 `9b51645` (8 F strengths/values + X `ATM_BUOY_CONSISTENT`), batch 4 `91409f4`
+> (18 atmosphere N knobs), batch 5 `bc4e63a` (6 ocean N knobs). Batches 3-5 passed strictly; batches 1 and 2 differed
+> only by `-ffast-math` folds that GCC performs even at -O0 once a retired switch becomes a literal
+> (`a + 1.0*(b - a)` -> `b`; `1.0*x - 0.0*y` -> `x` at the phi seam), each proven by a fold test that reproduces the
+> batch byte for byte from the old code with only that literal changed (`python/run_vfold*.sh`).
+> **Kept on purpose:** the four ocean-metric knobs flipped on 2026-09-30 (class F, still switchable: every older ocean
+> comparison lives on the branch they turn off), and four N knobs kept as documented experiments (class E):
+> `ATM_POISSON_METRIC_FIX`, `ATM_METRIC_EXACT`, `ATM_PROJECT_IN_LOOP`, `ATM_PRESS_LINE_SOLVE`. The tables below are the
+> 2026-09-26 inventory, kept as history; `lib/Knobs.h` is the current list. Next: plan D (P / S / I into the XML config).
+
 ## Defects found by the inventory itself
 
 1. **32 knobs that can change results are missing from the `[RUN CONFIG]` banner**, so a run log does not record them:

@@ -36,6 +36,12 @@ with the accessor, and it appears in the `[RUN CONFIG]` banner by itself. To fli
 nothing else holds a copy. Both banners are generated (every Result knob as `SHORT=value`, `*` = compiled-in; Diag
 knobs only when set), and the atmosphere prints the values `ATM_WATER_CLOSURE` actually forces. Conversion verified
 byte-identical at -O0 in both models, clean and with knobs set (`python/run_vknob.sh`).
+**57 decided or refuted knobs were then RETIRED (KNOB-INV plan C, 2026-09-30): their switch and old branch are gone
+from the source, 156 -> 99 knobs.** A retired knob in a run script or an older CLAUDE.md section is now silently ignored --
+the model no longer reads it; the branch is in git history before the retirement commits (`786c042`..`bc4e63a`, list in
+`docs/knob_inventory.md`). **Byte-check lesson:** when a retired switch fed arithmetic it becomes a literal, and
+`-ffast-math` folds it (`a + 1.0*(b - a)` -> `b`) EVEN AT -O0, flipping last bits and signed zeros although the logic is
+identical; a "fold test" (old code with only that literal changed) separates the two (`python/run_vfold*.sh`).
 
 ## READ THIS BEFORE QUOTING ANY NUMBER FROM THIS TREE
 
