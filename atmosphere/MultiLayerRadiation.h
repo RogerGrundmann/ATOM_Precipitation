@@ -383,9 +383,7 @@ public:
                 // and no setting of eps_dry or co2_band_scale reaches the latter without
                 // collapsing the OLR. The column TOTAL is renormalised, so this redistributes
                 // optical depth downward without adding any.
-                static const double pbroad = [](){
-                    const double v = knob::real(knob::ATM_TAU_PBROAD);
-                    return (v >= 0.0 && v <= 4.0) ? v : 0.0; }();
+                // ATM_TAU_PBROAD -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
                 for (int i = i_mount; i <= i_trop; i++) {
                     double dp = (i < i_trop) ? (m.p_stat.x[i][j][k] - m.p_stat.x[i+1][j][k])
                                              : m.p_stat.x[i][j][k];   // top layer: all mass above
@@ -393,13 +391,11 @@ public:
                     double cw    = (m.c.x[i][j][k] > 0.0) ? m.c.x[i][j][k] : 0.0;
                     dp_col[i]    = dp;
                     vpath_col[i] = cw * dp;                          // ~ layer precipitable water
-                    const double pw = (pbroad > 0.0 && m.p_0 > 0.0)
-                                    ? pow(m.p_stat.x[i][j][k] / m.p_0, pbroad) : 1.0;
-                    wdp_col[i]   = dp * pw;
+                    wdp_col[i]   = dp;
                     sum_dp      += dp;
                     sum_vp      += vpath_col[i];
                     sum_wdp     += wdp_col[i];
-                    sum_wvp     += vpath_col[i] * pw;
+                    sum_wvp     += vpath_col[i];
                 }
                 const double e_surf  = m.c.x[i_mount][j][k] * m.p_stat.x[i_mount][j][k] / m.ep; // [hPa]
                 double eps_col       = eps_dry + 0.0056 * e_surf;    // Bignami column emissivity

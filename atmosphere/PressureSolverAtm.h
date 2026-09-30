@@ -136,9 +136,7 @@ public:
         const double inv_2dr   = 0.5 / dr;
         static const bool poisson_metric_fix = [](){
             return knob::on(knob::ATM_POISSON_METRIC_FIX); }();
-        const bool anelastic = (int)m.m_dlnrho_dr.size() == m.im
-                               && [](){
-                                        return knob::on(knob::ATM_ANELASTIC); }();
+        // ATM_ANELASTIC -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
         for (int colour = 0; colour < 2; colour++) {
             #pragma omp parallel for collapse(2) schedule(static)
@@ -166,8 +164,7 @@ public:
                         const double num1  = exp_2rm * inv_dr2;
                         const double num2  = m_the * inv_dthe2;
                         const double num3  = m_phi * inv_dphi2;
-                        const double dlr   = anelastic ? m.m_dlnrho_dr[i] : 0.0;
-                        const double num_a = exp_2rm * (dlr - curv) * inv_2dr;
+                        const double num_a = exp_2rm * (-curv) * inv_2dr;
                         const double denom = 2.0 * num1 + 2.0 * num2 + 2.0 * num3;
 
                         aa[i] = -(num1 - num_a);
@@ -338,14 +335,10 @@ public:
         //
         // Off-branch bit-identical: dlnrho_i is 0 when the knob is off, so num_a and div_src
         // reduce exactly to what they were.
-        static const bool anelastic_knob = [](){
-            return knob::on(knob::ATM_ANELASTIC); }();
-        const bool anelastic = anelastic_knob && ((int)m.m_dlnrho_dr.size() == m.im);
-        const double* const dlnrho = anelastic ? m.m_dlnrho_dr.data() : nullptr;
+        // ATM_ANELASTIC -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
         // ATM_RHIE_CHOW -- fourth-difference pressure smoothing, ported from ATHAD 2026-08-27.
         // 0 (default) restores the old branch exactly. See the term at the update below.
-        static const double rc_alpha = [](){
-            return knob::real(knob::ATM_RHIE_CHOW); }();
+        // ATM_RHIE_CHOW -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         // ATM_PRESS_SWEEPS -- relaxation sweeps per call, default 1, which is what this solver
@@ -459,8 +452,7 @@ public:
                 // is bit-identical; under ATM_METRIC_EXACT it is the same order as the term it
                 // sits beside. Diagonal dominance is unaffected -- the ratio to num1 is
                 // curv*dr/2, which is 0.046 at zeta = 3.715.
-                const double dlnrho_i = anelastic ? dlnrho[i] : 0.0;
-                const double num_a = geo.exp_2_rm * (dlnrho_i - geo.curv) * geo.inv_2dr;
+                const double num_a = geo.exp_2_rm * (-geo.curv) * geo.inv_2dr;
                 const double num2 = m_the * inv_dthe2;
                 const double num3 = m_phi * inv_dphi2;
 
@@ -648,8 +640,6 @@ public:
                         // (1/rho_bar) div(rho_bar u*) - div(u*) is this one extra piece. Formed
                         // from aux_u, because the source is the divergence of the PROVISIONAL
                         // velocity the projection has to remove.
-                        if (anelastic)
-                            div_src += m.aux_u.x[i][j][k] * dlnrho[i] * geo.exp_rm;
 
                         const double src_max = denom * p_dyn_cap;
 
@@ -681,24 +671,6 @@ public:
                         // rather than confined to k, and where c_phi/c_r is 0.0322 against 0.59.
                         // Do not assume alpha = 1 transfers.
                         double rc = 0.0;
-                        if (rc_alpha != 0.0) {
-                            if (i >= 2 && i < m.im-2)
-                                rc += num1 * ((m.p_dyn.x[i+1][j][k] - 2.0*m.p_dyn.x[i][j][k]
-                                             + m.p_dyn.x[i-1][j][k])
-                                            - 0.25*(m.p_dyn.x[i+2][j][k] - 2.0*m.p_dyn.x[i][j][k]
-                                                  + m.p_dyn.x[i-2][j][k]));
-                            if (j >= 2 && j < m.jm-2)
-                                rc += num2 * ((m.p_dyn.x[i][j+1][k] - 2.0*m.p_dyn.x[i][j][k]
-                                             + m.p_dyn.x[i][j-1][k])
-                                            - 0.25*(m.p_dyn.x[i][j+2][k] - 2.0*m.p_dyn.x[i][j][k]
-                                                  + m.p_dyn.x[i][j-2][k]));
-                            if (k >= 2 && k < m.km-2)
-                                rc += num3 * ((m.p_dyn.x[i][j][k+1] - 2.0*m.p_dyn.x[i][j][k]
-                                             + m.p_dyn.x[i][j][k-1])
-                                            - 0.25*(m.p_dyn.x[i][j][k+2] - 2.0*m.p_dyn.x[i][j][k]
-                                                  + m.p_dyn.x[i][j][k-2]));
-                            rc *= rc_alpha;
-                        }
 
                         m.p_dyn.x[i][j][k] =
                             ((m.p_dyn.x[i+1][j][k] + m.p_dyn.x[i-1][j][k]) * num1
@@ -1466,9 +1438,7 @@ public:
 
     void project_initial_velocity(int n_sweeps = 200)
     {
-        static const int proj_sweeps = [](){
-            const int v = knob::integer(knob::ATM_PROJ_SWEEPS);
-            return v > 0 ? v : 1; }();
+        // ATM_PROJ_SWEEPS (1) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
         using namespace std;
         cout << endl << endl << "      ATOM: project_initial_velocity ("
              << n_sweeps << " Jacobi sweeps)" << endl;
@@ -1491,7 +1461,7 @@ public:
         // pressure.  Each call to run() also re-applies the i, theta, and phi BCs on
         // p_dyn, so polar/topographic anchors stay consistent with the time loop.
         for (int s = 0; s < n_sweeps; s++) {
-            run(false, proj_sweeps);
+            run(false, 1);
         }
 
         // Between Steps 2 and 3 is the ONLY place this can be measured: p_dyn is converged

@@ -185,11 +185,7 @@ public:
     // is no conserved mass to attach an energy release to.
     // Default 0. Nothing is flipped on an argument in this tree.
     // ==================================================================
-    static bool freezeLatent(){
-        static const bool v = [](){
-                                    return knob::on(knob::ATM_SATADJ_FREEZE_LATENT); }();
-        return v;
-    }
+    // ATM_SATADJ_FREEZE_LATENT -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
     static bool diagOn(){
         static const bool v = [](){
                                     return knob::on(knob::ATM_SATADJ_DIAG); }();
@@ -250,7 +246,6 @@ private:
         const double inv_t_0      = 1.0 / m.t_0;
         const double t_range_inv  = 1.0 / (m.t_0 - m.t_00);
         const double lv_over_cp   = m.lv / m.cp_l;
-        const double lf_over_cp   = (m.ls - m.lv) / m.cp_l;  // fusion; ATM_SATADJ_FREEZE_LATENT
         const double ls_over_cp   = m.ls / m.cp_l;
 
         // Surface row is skipped below, but its condensation source must still be
@@ -466,15 +461,6 @@ private:
                                 const double frozen = cloud_row[k];
                                 ice_row[k]  += frozen;
                                 cloud_row[k] = 0.0;
-                                // ATM_SATADJ_FREEZE_LATENT=1 -- the energy follows the mass.
-                                // Applied to t_row[k], which the write-back above has already
-                                // set, rather than to the local T: T is not read again, and the
-                                // field is what the rest of the model sees.
-                                if (freezeLatent() && frozen > 0.0) {
-                                    double T_frz = t_row[k] * m.t_0 + lf_over_cp * frozen;
-                                    if (T_frz > T_max) T_frz = T_max;
-                                    t_row[k] = T_frz * inv_t_0;
-                                }
                             }
                         }
                         if (diag) {

@@ -64,12 +64,7 @@ namespace CloudFraction {
     // p >= p_mid, then ramps linearly from critMid() at p_mid to critIce() at p_ice = 300 hPa
     // and stays flat above. Continuous at p_mid by construction, because the parabola's minimum
     // IS critMid() there -- a jump in H_crit would be a jump in cloud fraction.
-    inline double critIce(){
-        static const double v = [](){
-            const double x = knob::real(knob::ATM_RH_CRIT_ICE);
-            return (x > 0.0 && x < 1.0) ? x : 0.0; }();
-        return v;
-    }
+    // ATM_RH_CRIT_ICE (a separate upper-level threshold) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
     // Parabola H_crit(p): roots at p = 0 and p = p_crit, minimum critMid() at
     // p = p_mid. The same curve initCloudIce builds from Hu_cr_max / Hu_curv.
@@ -91,18 +86,11 @@ namespace CloudFraction {
     // leaves the calibrated tropospheric branch untouched, and still degenerates to H_crit = 1
     // everywhere as critMid -> 1, so the grid-mean limit is preserved.
     inline double hCrit(double p_hPa){
-        constexpr double p_crit = 1000.0, x_mid = 0.55, p_ice = 300.0;
+        constexpr double p_crit = 1000.0, x_mid = 0.55;
         const double curv = (1.0 - critMid()) / (x_mid * (1.0 - x_mid));
         double x = p_hPa / p_crit;
         if (x < x_mid) x = x_mid;                     // no upturn toward the lid
         double h = 1.0 - curv * x * (1.0 - x);        // == critMid() for p <= p_mid
-        const double h_ice = critIce();
-        constexpr double p_mid = x_mid * p_crit;
-        if (h_ice > 0.0 && p_hPa < p_mid) {           // ATM_RH_CRIT_ICE: ramp to the ice branch
-            double u = (p_mid - p_hPa) / (p_mid - p_ice);
-            if (u < 0.0) u = 0.0; else if (u > 1.0) u = 1.0;
-            h = critMid() + u * (h_ice - critMid());
-        }
         return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
     }
 

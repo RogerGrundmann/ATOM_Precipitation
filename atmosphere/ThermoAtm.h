@@ -160,8 +160,7 @@ public:
         // Default 0. This tree flips defaults on measurements, not on arguments, and nothing has
         // been run yet.
         // ==================================================================
-        static const int evap_spread = [](){
-            return knob::integer(knob::ATM_EVAP_SPREAD); }();
+        // ATM_EVAP_SPREAD (0 = the absolute c_eq*weight addition) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
         // ==================================================================
         // ATM_EVAP_FLUX=<0|1> -- make the surface evaporation a FLUX instead of a prescription.
@@ -210,8 +209,7 @@ public:
         // never writes `t`. That is the structural surface-energy item, not this one.
         // Default 0. Nothing is flipped on an argument in this tree.
         // ==================================================================
-        static const bool evap_flux = [](){
-            return knob::on(knob::ATM_EVAP_FLUX); }();
+        // ATM_EVAP_FLUX (superseded by ATM_WATER_CLOSURE) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
         // Seconds of physical time per CALL. FIXED 2026-09-24: this was per ITERATION, while the
         // time loop calls the routine only every moist_stride = 2 iterations, so ATM_EVAP_FLUX and
         // ATM_WATER_CLOSURE delivered HALF of E. ATM_EVAP_STRIDE_FIX retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
@@ -498,25 +496,7 @@ public:
                         double c_sat_i = (denom_i > 0.0) ? m.ep * E_i / denom_i : m.ep * E_i / p_i;
 
                         const double c_before = m.c.x[i][j][k];
-                        double incr;
-                        if (evap_flux) {
-                            // ATM_EVAP_FLUX=1 -- the ACTIVE MODEL'S OWN E, as a tendency.
-                            // E [mm/d] = kg/(m2 d); /8.64e4 -> kg/(m2 s); / (rho*dz) [kg/m2]
-                            // -> (kg/kg)/s; * seconds per iteration -> the increment.
-                            double rho_f = m.r_humid.x[i][j][k];
-                            if (!AtomUtils::is_finite_safe(rho_f) || rho_f <= 0.0) rho_f = m.r_air;
-                            const double dz_f = 0.5 * (m.get_layer_height(i+1)
-                                                     - m.get_layer_height(i-1));
-                            incr = (dz_f > 0.0)
-                                 ? (m.Evaporation.y[j][k] / 8.64e4) * weight
-                                   / (rho_f * dz_f) * sec_per_iter
-                                 : 0.0;
-                        } else
-                        switch (evap_spread) {
-                            case 1:  incr = (c_eq - m.c_fix.y[j][k]) * weight; break;  // deficit
-                            case 2:  incr = (c_eq - c_before)        * weight; break;  // relaxation
-                            default: incr =  c_eq                    * weight; break;  // shipped
-                        }
+                        const double incr = c_eq * weight;
                         double c_new = c_before + incr;
                         if (c_new > c_sat_i) { c_new = c_sat_i; }
                         if (c_new < 0.0)     { c_new = 0.0; }
@@ -566,8 +546,7 @@ public:
         // of it is sitting on the saturation cap. On the shipped branch the injection is an
         // ABSOLUTE c_eq*weight rather than an increment, so a large positive number here with a
         // high capped fraction is the ratchet described above, measured rather than argued.
-        cout << "      ATOM: evap spread mode " << evap_spread
-             << (evap_spread == 0 ? " (shipped)" : evap_spread == 1 ? " (deficit)" : " (relax)")
+        cout << "      ATOM: evap spread"
              << "   injected into levels 1.." << n_spread << " = "
              << scientific << setprecision(3) << (wsum > 0.0 ? inj_pw / wsum * (double)n_spread : 0.0)
              << " mm precipitable water (cos-lat mean per call)"

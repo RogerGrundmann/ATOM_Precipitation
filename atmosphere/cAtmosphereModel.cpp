@@ -613,10 +613,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     // byte-identical). Runs AFTER densities() so rho is real, and immediately BEFORE the mass
     // balance -- which is the check: if the cells close, that correction has nothing to remove.
     VelocityInitializer(*this).install_cells_from_streamfunction();
-    // ATM_CELLS_U_FROM_PSI: rebuild the RADIAL velocity from the installed v by discrete
-    // continuity. Must run AFTER the v loop (it differences v across neighbouring j) and
-    // BEFORE the mass balance, which only shifts v by a column constant. Default off.
-    VelocityInitializer(*this).install_u_from_cells();
+    // ATM_CELLS_U_FROM_PSI (install_u_from_cells) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
     VelocityInitializer(*this).balance_column_mass_flux();
 
     {
@@ -1382,16 +1379,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                       << "   in force (s = " << s << ") " << c << " -> e-folding "
                       << (c > 0.0 ? 1.0 / (c * dt_visc) : 0.0) << " iterations" << std::endl;
             std::cout.flags(fl); std::cout.precision(pr);
-        }
-        const double cH = [](){ return knob::real(knob::ATM_SFC_FLUX); }();
-        if (cH != 0.0) {
-            const double dz1 = 0.5 * (get_layer_height(2) - get_layer_height(0));
-            const double tau_S = (r_air * cp_l * dz1) / cH;               // [s]
-            std::cout << "      AGCM: [TIMESCALES] ATM_SFC_FLUX c_H = " << cH
-                      << " W/m2/K -> surface-flux timescale " << tau_S << " s ("
-                      << tau_S / 3600.0 << " h); the run reaches "
-                      << 100.0 * (1.0 - exp(-nm * sec_it / tau_S))
-                      << " % of the skin-air difference" << std::endl;
         }
     }
     // ----------------------------------------------------------------------------------------

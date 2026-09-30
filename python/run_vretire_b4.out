@@ -1,0 +1,22 @@
+built -O0: cli/ret_b4_atm cli/ret_b4_hyd  from WORKTREE (9b51645 + working tree)
+  launched vretb4_a  (ret_b4_atm  clean)  pid 35273
+  launched vretb4_b  (ret_b3_atm  clean)  pid 35276
+  launched vretb4_c  (ret_b4_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 35279
+  launched vretb4_d  (ret_b3_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 35282
+  launched vretb4_e  (ret_b4_hyd  clean)  pid 35285
+  launched vretb4_f  (ret_b3_hyd  clean)  pid 35288
+=== waiting for arms: vretb4_a vretb4_b vretb4_c vretb4_d vretb4_e vretb4_f  (13:08:20)
+  vretb4_a exit 0
+  vretb4_b exit 0
+  vretb4_c exit 0
+  vretb4_d exit 0
+  vretb4_e exit 0
+  vretb4_f exit 0
+=== all arms done 13:23:09
+    DIFFERS: RUN_CONFIG.txt
+A  atm new clean == old clean: identical 13 / differing 1  -> FAIL
+    DIFFERS: RUN_CONFIG.txt
+B  atm new+working branch == old+working branch: identical 13 / differing 1  -> FAIL
+C  hyd new clean == old clean: identical 17 / differing 0  -> PASS
+E  CONTROL atm new+working branch vs old clean -- MUST differ: identical 1 / differing 13  -> PASS
+VERDICT: PASS

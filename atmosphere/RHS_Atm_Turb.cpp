@@ -473,14 +473,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // MUST BE VIRTUAL TOO: t_ref_level is a horizontal mean whose whole purpose is to give the
     // force zero mean at every height, so moistening the parcel alone would add a uniform
     // updraft rather than a buoyancy. tv_ref_level is built in the same sweep.
-    static const bool moist_buoy = [](){
-        return knob::on(knob::ATM_BUOY_MOIST); }();
-    const bool moist_buoy_ok = moist_buoy && ((int)tv_ref_level.size() == im);
-    const double t_buoy = moist_buoy_ok
-        ? t.x[i][j][k] * (1.0 + (R_WaterVapour / R_Air - 1.0) * c.x[i][j][k]
-                              - cloud.x[i][j][k] - ice.x[i][j][k])
-        : t.x[i][j][k];
-    const double t_buoy_ref = moist_buoy_ok ? tv_ref_level[i] : t_ref_level[i];
+    // ATM_BUOY_MOIST (virtual-temperature buoyancy) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
+    const double t_buoy = t.x[i][j][k];
+    const double t_buoy_ref = t_ref_level[i];
 
     BuoyancyForce.x[i][j][k] = buoyancy * coeff_buoy * (t_buoy - t_buoy_ref);
     PressureGradientForce.x[i][j][k] = -coeff_u_p
@@ -1085,53 +1080,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // move and the wind not to, on any run this tree can currently afford.
     // ATM_HYDRO_PGF is a STRENGTH, not a flag, so the approach can be ramped.
     // ==================================================================================
-    static const double hydro_pgf = [](){
-        return knob::real(knob::ATM_HYDRO_PGF); }();
-    static const bool hydro_raw = [](){
-        return knob::on(knob::ATM_HYDRO_PGF_RAW); }();
-
+    // ATM_HYDRO_PGF / ATM_HYDRO_PGF_RAW (superseded by ATM_HYDRO_SPLIT) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
     double hydro_the = 0.0, hydro_phi = 0.0;
-    if(hydro_pgf != 0.0 && !land_ijk
-       && j > 0 && j < jm-1 && k > 0 && k < km-1){
-        // The normalising reference is `p_stat` AT A COMMON INDEX, and both halves of the
-        // ratio are therefore the same field at the same time level. Two things forced that
-        // choice and both are worth keeping:
-        //
-        //   (a) NOT the column's own GROUND value. Normalising each column at its own surface
-        //       is the sigma-coordinate normalisation, and over a plateau it is catastrophic:
-        //       Tibet's ground is at ~4 km, so p_hyd at 5 km would be p_0*p(5)/p(4) ~ 0.88*p_0
-        //       against ~0.51*p_0 over the neighbouring ocean -- a spurious gradient far larger
-        //       than the real one. The reference has to be a common HEIGHT.
-        //   (b) i = 1, not i = 0. `densities()` overwrites `p_stat.x[0]` with the value at
-        //       i_topography (ThermoAtm.h:914), so level 0 is the local GROUND pressure over
-        //       land and would reintroduce (a). Level 1 (~38.9 m) is never overwritten and
-        //       holds the true barometric value in every column, rock or air.
-        //
-        // An earlier version recomputed the sea-level pressure from `t.x[0]` instead. That was
-        // wrong in a way worth recording: `densities()` runs inside the `iter_n % moist_stride`
-        // block (cAtmosphereModel.cpp:1367, stride 2) while this RHS runs EVERY iteration, so
-        // `p_stat` is one iteration stale on odd steps while `t` is not -- and a ratio of two
-        // different time levels puts a 2dt sawtooth into the horizontal gradient. Same-array
-        // normalisation cancels it exactly. (This is the trap the `Q_Latent` note below
-        // records, met a second time.)
-        auto p_hyd = [&](int jj, int kk, int ii) -> double {
-            const double ps = p_stat.x[ii][jj][kk];
-            if(!AtomUtils::is_finite_safe(ps)) return 0.0;
-            if(hydro_raw) return ps;
-            const double p_ref = p_stat.x[1][jj][kk];
-            return (AtomUtils::is_finite_safe(p_ref) && p_ref > 0.0) ? (p_0 * ps / p_ref) : 0.0;
-        };
-        double rho_c = r_humid.x[i][j][k];
-        if(!AtomUtils::is_finite_safe(rho_c) || rho_c <= 0.0) rho_c = r_air;
-        const double eu = hydro_pgf * 100.0 / (rho_c * u_0 * u_0);   // hPa -> Pa, / (rho u_0^2)
-
-        const double dphyd_dthe = (p_hyd(j+1, k, i) - p_hyd(j-1, k, i)) * inv_2dthe;
-        const double dphyd_dphi = (p_hyd(j, k+1, i) - p_hyd(j, k-1, i)) * inv_2dphi;
-        hydro_the = eu * dphyd_dthe * inv_rm;
-        hydro_phi = eu * dphyd_dphi * inv_rmsinthe;
-        if(!AtomUtils::is_finite_safe(hydro_the)) hydro_the = 0.0;
-        if(!AtomUtils::is_finite_safe(hydro_phi)) hydro_phi = 0.0;
-    }
 
     // ATM_HYDRO_SPLIT: the horizontal gradient of the HYDROSTATIC pressure p_hb, built from the
     // buoyancy by a column integral (AtmHydroSplit.h). Added to hydro_the/hydro_phi so that the
@@ -1242,18 +1192,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //
     // ATM_SFC_FLUX = c_H in W/m2/K. Default 0 = OFF and bit-identical; 15 matches MLR's own
     // constant. Applied at the FIRST AIR LEVEL only, i_topography+1, over land and ocean alike.
-    static const double sfc_flux_cH = [](){
-        return knob::real(knob::ATM_SFC_FLUX); }();
-    if (sfc_flux_cH != 0.0 && i == i_topography[j][k] + 1) {
-        double rho = r_humid.x[i][j][k];
-        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
-        const double dz = 0.5 * (get_layer_height(i+1) - get_layer_height(i-1));   // [m]
-        if (dz > 0.0 && cp_l > 0.0) {
-            const double k_S = sfc_flux_cH / (rho * cp_l * dz);                    // [1/s]
-            rhs_t.x[i][j][k] += (k_S * metricShellLength() / u_0)
-                              * (t.x[i-1][j][k] - t.x[i][j][k]);
-        }
-    }
+    // ATM_SFC_FLUX -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
 
     // Boussinesq buoyancy body force, in the laminar RHS_Atm.cpp advective-time form
@@ -1313,19 +1252,10 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //     because the force reaches momentum through the model's own elliptic pressure --
     //     and the pressure answers only 24 % of it (corr -0.75, slope -0.24), which is why
     //     the other 76 % integrates into `u`. See CLAUDE.md.
-    static const bool buoy_tref = [](){
-        return knob::on(knob::ATM_BUOY_TREF); }();
+    // ATM_BUOY_TREF -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
     // ATM_BUOY_CONSISTENT (reverted off 2026-09-14; superseded by ATM_HYDRO_SPLIT) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
-    double buoyancy_term;
-    if(buoy_tref){
-        // (b) alone, on the shipped coefficient -- the arm that is measurable here.
-        const double tref = (t_buoy_ref > 0.0) ? t_buoy_ref : 1.0;
-        buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
-                      * (t_buoy - t_buoy_ref) / tref;
-    }else{
-        buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
-                      * (t_buoy - t_buoy_ref);
-    }
+    double buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
+                         * (t_buoy - t_buoy_ref);
 
     // ATM_HYDRO_SPLIT: the buoyancy is balanced EXACTLY by d(p_hb)/dr, which is not formed --
     // b - dp_hb/dr = 0 by construction -- so rhs_u carries neither, and the budget records the

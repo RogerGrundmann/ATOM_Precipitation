@@ -38,10 +38,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATOM_CORIOLIS_NONTRAD, "0", Result, 'S', "non-traditional Coriolis terms (both models)") \
     X(ATOM_METRIC_CURVATURE, "0", Result, 'S', "spherical curvature terms in the shared metric (both models)") \
     X(ATOM_METRIC_DIVERGENCE, "0", Result, 'S', "metric terms in the shared divergence (both models)") \
-    X(ATM_ANELASTIC, "0", Result, 'N', "null on Psi (-0.006 %), structural") \
-    X(ATM_BUOY_MOIST, "0", Result, 'N', "null unless BUOY_CONSISTENT") \
-    X(ATM_BUOY_TREF, "0", Result, 'N', "measured +1.0 % on the term, null on the model") \
-    X(ATM_CELLS_U_FROM_PSI, "0", Result, 'N', "off; not scored separately") \
     X(ATM_CELL_ROT_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_CLOUD_INIT_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_CO2_BAND, "0.17", Result, 'P', "0.17") \
@@ -57,14 +53,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_DAMP_T_HORIZ, "1", Result, 'R', "qth_on today") \
     X(ATM_DAMP_T_VERT, "1", Result, 'R', "null alone (qvt_on)") \
     X(ATM_EPS_DRY, "0.684", Result, 'P', "0.684") \
-    X(ATM_EVAP_FLUX, "0", Result, 'N', "superseded by WATER_CLOSURE") \
-    X(ATM_EVAP_SPREAD, "0", Result, 'N', "null on a spun-up field (0.2 %)") \
-    X(ATM_GRID_BETA, "3.988", Result, 'P', "3.988 (with GRID_PRESSURE)") \
-    X(ATM_GRID_PRESSURE, "0", Result, 'N', "~1 %, sign against it") \
-    X(ATM_GRID_PTOP, "0.08538", Result, 'P', "0.08538 (with GRID_PRESSURE)") \
     X(ATM_HADLEY_SL, "4.0", Result, 'P', "IC 4.0N/3.0S") \
-    X(ATM_HYDRO_PGF, "0.0", Result, 'N', "superseded by HYDRO_SPLIT") \
-    X(ATM_HYDRO_PGF_RAW, "0", Result, 'N', "worse than HYDRO_PGF; superseded") \
     X(ATM_LAND_BUCKET, "0.0", Result, 'R', "20-iter evidence only") \
     X(ATM_LENGTH_NDIM, "0", Result, 'R', "the 40x L_atm defect (item 4 pending)") \
     X(ATM_LONGAL_J, "62", Diag, 'I', "output slice latitude") \
@@ -78,23 +67,21 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_QVD, "0", Result, 'R', "B.10c") \
     X(ATM_MC_SGZ, "0", Result, 'R', "B.10b") \
     X(ATM_METRIC_CHECK, "0", Diag, 'D', "print/dump only") \
-    X(ATM_METRIC_EXACT, "0", Result, 'N', "null on integrated quantities; undecidable") \
-    X(ATM_METRIC_NOCURV, "0", Result, 'N', "attribution arm, done") \
+    X(ATM_METRIC_EXACT, "0", Result, 'E', "kept as a documented experiment (user 2026-09-30); null on integrated quantities; undecidable") \
     X(ATM_METRIC_SIN_FLOOR, "0.26", Result, 'P', "0.26 since 09-10") \
     X(ATM_METRIC_STRICT, "0", Diag, 'I', "abort on metric check") \
     X(ATM_MFC_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_PDYN_CAP, "2.0", Result, 'P', "p_dyn source cap (non-dim)") \
     X(ATM_PDYN_CEILING, "0.0", Result, 'P', "p_dyn clamp; 0 = phase-dependent (10 before iteration 300, 3 after)") \
-    X(ATM_POISSON_METRIC_FIX, "0", Result, 'N', "consistent horizontal Poisson metric; parsed as an integer at all sites since 2026-09-30 (was atof at one)") \
+    X(ATM_POISSON_METRIC_FIX, "0", Result, 'E', "kept as a documented experiment (user 2026-09-30); consistent horizontal Poisson metric; parsed as an integer at all sites since 2026-09-30 (was atof at one)") \
     X(ATM_POLAR_CELL_SHEAR, "0.1", Result, 'P', "IC 0.1") \
     X(ATM_PRECIP_PASSES, "3", Result, 'R', "rain-column passes; default is TwoCatIce::iter_prec_end (3), the site falls back to it") \
     X(ATM_PRECIP_RELAX, "1.0", Result, 'R', "under-relaxation of the rain-column passes, (0,1]") \
     X(ATM_PRECIP_UPWIND, "0", Result, 'R', "converged upwind rain column (working branch 1)") \
-    X(ATM_PRESS_LINE_SOLVE, "0", Result, 'N', "measured through the clamp; no runaway fix") \
+    X(ATM_PRESS_LINE_SOLVE, "0", Result, 'E', "kept as a documented experiment (user 2026-09-30); measured through the clamp; no runaway fix") \
     X(ATM_PRESS_SWEEPS, "1", Result, 'P', "1x") \
-    X(ATM_PROJECT_IN_LOOP, "0", Result, 'N', "null at 10 and 200 sweeps") \
+    X(ATM_PROJECT_IN_LOOP, "0", Result, 'E', "kept as a documented experiment (user 2026-09-30); null at 10 and 200 sweeps") \
     X(ATM_PROJ_CONSISTENCY, "0", Diag, 'D', "print/dump only") \
-    X(ATM_PROJ_SWEEPS, "1", Result, 'N', "inert (-0.04 % at 10x)") \
     X(ATM_PSI_FERREL, "40.0", Result, 'P', "Ferrel cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
     X(ATM_PSI_HADLEY, "120.0", Result, 'P', "Hadley cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
     X(ATM_PSI_POLAR, "26.0", Result, 'P', "polar cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
@@ -109,26 +96,21 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RAIN_PASS_DIAG, "0", Diag, 'D', "print the rain-column pass convergence") \
     X(ATM_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic restart file (default: only the latest)") \
     X(ATM_RESTART_STRIDE, "100", Diag, 'I', "restart cadence") \
-    X(ATM_RHIE_CHOW, "0.0", Result, 'N', "null on Psi (structural)") \
     X(ATM_RH_CRIT, "0.30", Result, 'P', "0.30 since 08-31") \
-    X(ATM_RH_CRIT_ICE, "0.0", Result, 'N', "off; global cirrus -- superseded by RH_MIN_LAT/PTOP") \
     X(ATM_RH_MIN, "0.65", Result, 'P', "0.65") \
     X(ATM_RH_MIN_PTOP, "482.0", Result, 'P', "482 hPa (fitted)") \
     X(ATM_RH_STORM, "1.0", Result, 'R', "initial storm-track RH factor at 55 deg (working branch 1.15)") \
     X(ATM_RK_SCALAR_SYNC, "0", Result, 'R', "forced by WATER_CLOSURE") \
     X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
-    X(ATM_SATADJ_FREEZE_LATENT, "0", Result, 'N', "null (0.05 % of cloud)") \
     X(ATM_SEAM_Q_CONSERVE, "0", Result, 'R', "conserve water at the phi seam; 2 = also next to land (working branch 2)") \
     X(ATM_SEAM_Q_DIAG, "0", Diag, 'D', "print the seam water-conservation buckets") \
-    X(ATM_SFC_FLUX, "0.0", Result, 'N', "null (timescale wall)") \
     X(ATM_SNOW_DIAG, "0", Diag, 'D', "print the snow budget") \
     X(ATM_SNOW_WINDOW, "0", Result, 'R', "snow kept on the cold side of -20 C (working branch 2)") \
     X(ATM_SR_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_SURF_DRAG_CONSISTENT, "1.0", Result, 'R', "B.9, default 1.0 since 2026-09-29 (run_sdr.sh: connected, climate null)") \
     X(ATM_SW_INSOL, "0.0", Result, 'R', "pair with RAD_EQUIL") \
     X(ATM_T0_ATTRIB, "0", Diag, 'D', "print/dump only") \
-    X(ATM_TAU_PBROAD, "0.0", Result, 'N', "refuted (lapse 3 %)") \
     X(ATM_TEQ_SKIN_ONLY, "0", Result, 'R', "instrument branch, must NOT be flipped") \
     X(ATM_TW_BALANCE, "0.0", Result, 'R', "off; the only mid-lat jet IC") \
     X(ATM_TW_BALANCE_V, "0", Result, 'P', "sub-option of TW_BALANCE") \
