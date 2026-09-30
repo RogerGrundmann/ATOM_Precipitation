@@ -121,6 +121,26 @@ jet GENERATED for the first time -- `max|w|` 27.12 -> 27.70 m/s over 600 iterati
 `p_dyn` still grows (0.192 -> 0.265, slowing -35 %, 11x below the 3.0 ceiling) and the jet has not
 levelled off. Byte check both ways (13/14, banner token only). `ATM_HYDRO_SPLIT=0` restores the old branch.
 
+## ⭐ THE OCEAN RUNS ON THE CORRECT HORIZONTAL METRIC SINCE 2026-09-30 (OCN-METRIC, at the user's instruction)
+
+Four defaults together: `HYD_METRIC_RADIUS` 0 -> **6370**, `HYD_RUN_NEUMANN` 0 -> **1**, `HYD_A_H_BIHARM` 0 -> **1.0e19**,
+`HYD_A_H_BIHARM_SCALED` 0 -> **1** (with `HYD_METRIC_SIN_FLOOR` 0.26, the default since 09-28). 1000 from scratch, -O2,
+6 threads (`run_ombig.sh`, `ocprofile.py`), against the shipped metric (`om_ship`):
+
+| arm | grid noise | rms radial u (nd) | KE drift | surface rms speed |
+|---|---|---|---|---|
+| shipped metric | 0.549 | 2.4e-02 | 1.10 % | 2.96 cm/s |
+| B 3e18 scaled (`om_scl`) | 0.797 | 1.0e-05 | 1.60 % | 2.81 |
+| **B 1e19 scaled (`om_b1e19`) = the new default** | **0.515** | **1.0e-05** | **1.59 %** | **2.70** |
+| B 3e19 scaled (`om_b3e19`) | 0.416 | 1.7e-05 | **63.5 %** | **22.7 -- a surface runaway** |
+
+**The spurious radial velocity falls 2400x and the grid noise ends below the shipped value.** What it does NOT cure is
+the bottom-intensified velocity profile (rms 2.0 cm/s at -200 m against 1.0 shipped): that is OCN-PROF, the missing
+deep momentum outlet at the 200 m truncation, structural. **Set all four back to 0 to restore the shipped branch.**
+-O0 byte check both directions, 1 thread, restart 1000 -> 1020 from `oc_ctl` (`run_vomf.sh`): **17 of 17 identical
+each way**, control 12 of 17 differ. The ocean sections below that say "`HYD_METRIC_RADIUS` stays 0" are the record
+of the state before this flip.
+
 ## The ported A/B knobs, and what each MEASURED here
 
 All but `ATM_V_MASSBAL` default to what this tree has always done, and all are verified

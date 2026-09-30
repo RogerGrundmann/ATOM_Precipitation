@@ -1,0 +1,19 @@
+built -O0: cli/omf_old_atm cli/omf_old_hyd  from 1b0f343 (1b0f343)
+built -O0: cli/omf_new_atm cli/omf_new_hyd  from WORKTREE (1b0f343 + working tree)
+  launched vomf_a  (omf_new_hyd  clean)  pid 11112
+  launched vomf_b  (omf_old_hyd  HYD_METRIC_RADIUS=6370 HYD_RUN_NEUMANN=1 HYD_A_H_BIHARM=1.0e19 HYD_A_H_BIHARM_SCALED=1)  pid 11115
+  launched vomf_c  (omf_new_hyd  HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0)  pid 11118
+  launched vomf_d  (omf_old_hyd  clean)  pid 11121
+=== waiting for arms: vomf_a vomf_b vomf_c vomf_d  (09:35:42)
+  vomf_a exit 0
+  vomf_b exit 0
+  vomf_c exit 0
+  vomf_d exit 0
+=== all arms done 09:48:43
+A  FLIP == old+knobs: identical 17 / differing 0  -> PASS
+B  new+knobs=0 == old clean: identical 17 / differing 0  -> PASS
+C  CONTROL new clean vs old clean -- MUST differ: identical 5 / differing 12  -> PASS
+vomf_a: NaN 0 METRIC_RADIUS=6370*  RUN_NEUMANN=1* A_H_BIHARM=1.0e19*  A_H_BIHARM_SCALED=1*
+vomf_b: NaN 0 METRIC_RADIUS=6370  RUN_NEUMANN=1 A_H_BIHARM=1.0e19  A_H_BIHARM_SCALED=1
+vomf_c: NaN 0 METRIC_RADIUS=0  RUN_NEUMANN=0 A_H_BIHARM=0  A_H_BIHARM_SCALED=0
+vomf_d: NaN 0 METRIC_RADIUS=0*  RUN_NEUMANN=0* A_H_BIHARM=0*  A_H_BIHARM_SCALED=0*

@@ -36,7 +36,7 @@ public:
     void run(int n_sweeps = 1, bool verbose = true)
     {
         static const bool run_neumann = [](){
-            const char* e = getenv("HYD_RUN_NEUMANN"); return e && atoi(e) != 0; }();
+            const char* e = getenv("HYD_RUN_NEUMANN"); return e ? atoi(e) != 0 : true; }();  // default ON since 2026-09-30 (OCN-METRIC, with HYD_METRIC_RADIUS)
         using namespace std;
         if (verbose) cout << endl << endl << endl
             << "      OGCM: PressureSolverHyd (" << n_sweeps << " Jacobi sweeps)" << endl;

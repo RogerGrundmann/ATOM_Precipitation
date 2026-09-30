@@ -141,14 +141,15 @@ switches until decided, D = 18 stay as diagnostic switches.
 | `ATM_TW_BALANCE` | `atmosphere/VelocityInitializer.h:1013` | 1 | `0.0*` | off; the only mid-lat jet IC |
 | `ATM_WATER_CLOSURE` | `atmosphere/SaturationAdjustment.h:160` | 4 | `0*` | reverted 09-25; works with filter off (qh600) |
 | `HYD_A_H` | `hydrosphere/RHS_Hyd_Turb.cpp:762` | 2 | `0` | Laplacian; biharmonic preferred |
-| `HYD_A_H_BIHARM` | `hydrosphere/HydHorizViscosity.h:47` | 2 | `0` | metric-branch stack |
+| `HYD_A_H_BIHARM` | `hydrosphere/HydHorizViscosity.h:47` | F | `1.0e19` | default 1.0e19 since 09-30 (OCN-METRIC, om_b1e19: noise 0.515, radial u 2400x below shipped; 3e19 ran away) |
+| `HYD_A_H_BIHARM_SCALED` | `hydrosphere/HydHorizViscosity.h:54` | F | `1` | default 1 since 09-30 (sin^4 scaling; unscaled 3e18 NaN'd at the pole with floor 0.26) |
 | `HYD_BAROCLINIC_PGF` | `hydrosphere/RHS_Hyd_Turb.cpp:969` | 2 | `0.0` | pair with PHYDRO_SALT; HYDRO_SPLIT may supersede |
 | `HYD_BC_DRAG` | `hydrosphere/PressureSolverHyd.h:1067` | 1 | **missing** | numerical, not physical -- NOT IN BANNER |
 | `HYD_BUOY_CONSISTENT` | `hydrosphere/HydBuoyancy.h:51` | 2 | `0.0` | radial runaway; HYDRO_SPLIT |
-| `HYD_METRIC_RADIUS` | `hydrosphere/cHydrosphereModel.cpp:475` | 1 | `0` | blocked by the profile item |
+| `HYD_METRIC_RADIUS` | `hydrosphere/cHydrosphereModel.cpp:475` | F | `6370` | default 6370 km since 09-30 (user); profile stays bottom-intensified (structural, OCN-PROF) |
 | `HYD_NUE_GRAD` | `hydrosphere/RHS_Hyd_Turb.cpp:654` | 1 | **missing** | off; would inherit the broken metric -- NOT IN BANNER |
 | `HYD_PHYDRO_SALT` | `hydrosphere/ThermoHyd.h:101` | 1 | `0` | pair |
-| `HYD_RUN_NEUMANN` | `hydrosphere/PressureSolverHyd.h:39` | 1 | `0` | pair with METRIC_RADIUS |
+| `HYD_RUN_NEUMANN` | `hydrosphere/PressureSolverHyd.h:39` | F | `1` | default 1 since 09-30, with METRIC_RADIUS |
 | `HYD_SFC_FLUX` | `hydrosphere/RHS_Hyd_Turb.cpp:1111` | 2 | `0` | unmeasured |
 
 ## P -- Numerical parameter (a value, not a switch) (26)

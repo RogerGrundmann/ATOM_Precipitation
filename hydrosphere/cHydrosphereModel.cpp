@@ -475,7 +475,7 @@ void cHydrosphereModel::initMetricRadius(){
     // atmosphere, whose exponential stretch makes its metricShellLength() an average.
     static const double r_km = [this](){
         const char* e = getenv("HYD_METRIC_RADIUS");
-        return e ? atof(e) : 0.0; }();          // DEFAULT 0 = off, unlike the atmosphere's
+        return e ? atof(e) : 6370.0; }();       // DEFAULT ON SINCE 2026-09-30 (user, OCN-METRIC): om_b1e19 = metric 6370 km + RUN_NEUMANN + B 1e19 sin^4-scaled, 1000 from scratch: grid noise 0.515 (shipped 0.549), radial u 2400x below shipped, KE drift 1.59 %; B 3e19 ran away at the surface. The four go together -- set HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 to restore the shipped branch.
 
     if(r_km <= 0.0){
         m_metric_r0 = 0.0;
@@ -506,8 +506,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         };
         cout << "      OGCM: [RUN CONFIG] knobs:  PHYDRO_SALT=" << ev("HYD_PHYDRO_SALT", "0")
              << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
-             << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "0")
-             << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "0")
+             << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "6370")
+             << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "1")
              << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1")
              << "  SEAM_PERIODIC="                             << ev("HYD_SEAM_PERIODIC", "1")
              << "  BUOY_CONSISTENT="                           << ev("HYD_BUOY_CONSISTENT", "0.0")
@@ -519,8 +519,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
              << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")
              << "  A_H="                                       << ev("HYD_A_H", "0")
-             << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "0")
-             << "  A_H_BIHARM_SCALED="                         << ev("HYD_A_H_BIHARM_SCALED", "0")
+             << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "1.0e19")
+             << "  A_H_BIHARM_SCALED="                         << ev("HYD_A_H_BIHARM_SCALED", "1")
              << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")
              << "  SSS_FILL="                                  << ev("HYD_SSS_FILL", "1")
              << "   (* = compiled-in default, not set in the environment)" << endl;
@@ -582,7 +582,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
                      << " W/m2/K -> tau = " << tau << " s = " << tau / 86400.0
                      << " d = " << tau / s_per << " iterations" << endl;
             }
-            const double b_h = [](){ const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 0.0; }();
+            const double b_h = [](){ const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 1.0e19; }();
             if(b_h != 0.0)
                 cout << "      OGCM: [SCALES] A_H_BIHARM = " << b_h << " m4/s -> 2dx e-folding "
                      << 1.0 / (b_h * k2 * k2) << " s = " << 1.0 / (b_h * k2 * k2) / s_per
