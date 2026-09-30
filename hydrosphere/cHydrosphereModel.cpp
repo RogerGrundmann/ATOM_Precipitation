@@ -9,6 +9,7 @@
  * code developed by Roger Grundmann, Zum Marktsteig 1, D-01728 Bannewitz(roger.grundmann@web.de)
 */
 
+#include "Knobs.h"
 #include <string>
 void rollRestart(const std::string& out, const char* model, int Ma, int iter, int explicit_iter);  // cAtmosphereModel.cpp
 #include <cstdlib>
@@ -273,8 +274,7 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     {
         // DEFAULT ON since 2026-09-05, at the user's instruction. HYD_T_FREEZE_SFC=0
         // restores the constant t_pole_salt floor.
-        const char* e_sfc = getenv("HYD_T_FREEZE_SFC");
-        if (!e_sfc || atoi(e_sfc) != 0){
+        if (knob::on(knob::HYD_T_FREEZE_SFC)){
             int    n_seen = 0, n_fresh = 0, n_raised = 0;
             double raise_max = 0.0;
             double t_sfc_min = 1.0e30;            // coldest prescribed SST, [C]
@@ -474,8 +474,7 @@ void cHydrosphereModel::initMetricRadius(){
     // from r0 = 1.0, so one unit is L_hyd metres EXACTLY and uniformly -- simpler than the
     // atmosphere, whose exponential stretch makes its metricShellLength() an average.
     static const double r_km = [this](){
-        const char* e = getenv("HYD_METRIC_RADIUS");
-        return e ? atof(e) : 6370.0; }();       // DEFAULT ON SINCE 2026-09-30 (user, OCN-METRIC): om_b1e19 = metric 6370 km + RUN_NEUMANN + B 1e19 sin^4-scaled, 1000 from scratch: grid noise 0.515 (shipped 0.549), radial u 2400x below shipped, KE drift 1.59 %; B 3e19 ran away at the surface. The four go together -- set HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 to restore the shipped branch.
+        return knob::real(knob::HYD_METRIC_RADIUS); }();       // DEFAULT ON SINCE 2026-09-30 (user, OCN-METRIC): om_b1e19 = metric 6370 km + RUN_NEUMANN + B 1e19 sin^4-scaled, 1000 from scratch: grid noise 0.515 (shipped 0.549), radial u 2400x below shipped, KE drift 1.59 %; B 3e19 ran away at the surface. The four go together -- set HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 to restore the shipped branch.
 
     if(r_km <= 0.0){
         m_metric_r0 = 0.0;
@@ -500,30 +499,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     // two "flipped on" claims in CLAUDE.md turned out to be wrong about a default; the ocean had
     // no knobs to print until now. `*` marks a compiled-in default not set in the environment.
     {
-        auto ev = [](const char* k, const char* dflt){
-            const char* e = getenv(k);
-            return e ? std::string(e) : (std::string(dflt) + "*");
-        };
-        cout << "      OGCM: [RUN CONFIG] knobs:  PHYDRO_SALT=" << ev("HYD_PHYDRO_SALT", "0")
-             << "  BAROCLINIC_PGF="                            << ev("HYD_BAROCLINIC_PGF", "0.0")
-             << "  METRIC_RADIUS="                             << ev("HYD_METRIC_RADIUS", "6370")
-             << "  RUN_NEUMANN="                               << ev("HYD_RUN_NEUMANN", "1")
-             << "  BC_SECOND_ORDER="                           << ev("HYD_BC_SECOND_ORDER", "1")
-             << "  SEAM_PERIODIC="                             << ev("HYD_SEAM_PERIODIC", "1")
-             << "  BUOY_CONSISTENT="                           << ev("HYD_BUOY_CONSISTENT", "0.0")
-             << "  HYDRO_SPLIT="                               << ev("HYD_HYDRO_SPLIT", "0.0")
-             << "  METRIC_SIN_FLOOR="                          << ev("HYD_METRIC_SIN_FLOOR", "0.26")
-             << "  VW_BOTTOM_ZG="                              << ev("HYD_VW_BOTTOM_ZG", "0")
-             << "  DEEP_DRAG="                                 << ev("HYD_DEEP_DRAG", "0")
-             << "  LINE_SOLVE="                                << ev("HYD_LINE_SOLVE", "0")
-             << "  T_FREEZE="                                  << ev("HYD_T_FREEZE", "1")
-             << "  T_FREEZE_SFC="                              << ev("HYD_T_FREEZE_SFC", "1")
-             << "  A_H="                                       << ev("HYD_A_H", "0")
-             << "  A_H_BIHARM="                                << ev("HYD_A_H_BIHARM", "1.0e19")
-             << "  A_H_BIHARM_SCALED="                         << ev("HYD_A_H_BIHARM_SCALED", "1")
-             << "  SFC_FLUX="                                  << ev("HYD_SFC_FLUX", "0")
-             << "  SSS_FILL="                                  << ev("HYD_SSS_FILL", "1")
-             << "   (* = compiled-in default, not set in the environment)" << endl;
+        // Every HYD_* and ATOM_* knob, generated from lib/Knobs.h -- nothing to keep in step by hand.
+        cout << knob::banner("      OGCM: ", {"HYD_", "ATOM_"});
         cout << "      OGCM: [SCALES] L_hyd = " << L_hyd << " m   u_0 = " << u_0
              << " m/s   L_hyd/u_0 = " << L_hyd / u_0 << " s   one iteration = "
              << dt * L_hyd / u_0 << " s" << endl;
@@ -533,17 +510,16 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
              << "   consistent g*L_hyd/u_0^2 = " << g * L_hyd / (u_0 * u_0)
              << "   ratio = " << (L_hyd / (u_0 * dt)) << endl;
         {   // HYD_HYDRO_SPLIT + HYD_BAROCLINIC_PGF both add a hydrostatic horizontal pressure gradient
-            const char* a = getenv("HYD_HYDRO_SPLIT"); const char* b = getenv("HYD_BAROCLINIC_PGF");
-            if (a && atof(a) != 0.0 && b && atof(b) != 0.0)
+            const bool split = knob::real(knob::HYD_HYDRO_SPLIT) != 0.0;
+            if (split && knob::real(knob::HYD_BAROCLINIC_PGF) != 0.0)
                 cout << "      OGCM: *** WARNING: HYD_HYDRO_SPLIT and HYD_BAROCLINIC_PGF are BOTH set -- the"
                      << " baroclinic pressure gradient is counted twice ***" << endl;
-            if (a && atof(a) != 0.0 && getenv("HYD_BUOY_CONSISTENT"))
+            if (split && knob::is_set(knob::HYD_BUOY_CONSISTENT))
                 cout << "      OGCM: note: HYD_HYDRO_SPLIT replaces the radial buoyancy; HYD_BUOY_CONSISTENT"
                      << " only sets the budget's ubud_buoy then" << endl;
         }
         {   // HYD_DEEP_DRAG (B.7): the lowest-level coupling to a deep ocean at rest
-            const char* e = getenv("HYD_DEEP_DRAG");
-            const double tau_d = e ? atof(e) : 0.0;
+            const double tau_d = knob::real(knob::HYD_DEEP_DRAG);
             if (tau_d > 0.0)
                 cout << "      OGCM: [SCALES] HYD_DEEP_DRAG tau = " << tau_d << " d -> e-folding "
                      << tau_d * 86400.0 / (dt * L_hyd / u_0) << " iterations at i = 1" << endl;
@@ -564,7 +540,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
                  << " m (Earth: " << r_Earth * 1.0e3 << ")" << endl;
             // domain-scale wavenumber, for the selectivity line below
             const double kL  = 2.0 * M_PI / 2.0e7;
-            const double a_h = [](){ const char* e = getenv("HYD_A_H"); return e ? atof(e) : 0.0; }();
+            const double a_h = knob::real(knob::HYD_A_H);
             if(a_h != 0.0)
                 cout << "      OGCM: [SCALES] A_H = " << a_h << " m2/s -> 2dx e-folding "
                      << 1.0 / (a_h * k2) << " s = " << 1.0 / (a_h * k2) / s_per
@@ -573,7 +549,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
             // air-sea flux timescale: tau = rho*cp*dz/c_H over the TOP PROGNOSTIC layer,
             // which is where HYD_SFC_FLUX puts it (im-1 is the prescribed skin).
             const double dz_top = (rad.z[im-1] - rad.z[im-2]) * L_hyd;
-            const double c_H = [](){ const char* e = getenv("HYD_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+            const double c_H = knob::real(knob::HYD_SFC_FLUX);
             cout << "      OGCM: [SCALES] top prognostic layer (i = im-2) = " << dz_top
                  << " m" << endl;
             if(c_H != 0.0){
@@ -582,7 +558,7 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
                      << " W/m2/K -> tau = " << tau << " s = " << tau / 86400.0
                      << " d = " << tau / s_per << " iterations" << endl;
             }
-            const double b_h = [](){ const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 1.0e19; }();
+            const double b_h = knob::real(knob::HYD_A_H_BIHARM);
             if(b_h != 0.0)
                 cout << "      OGCM: [SCALES] A_H_BIHARM = " << b_h << " m4/s -> 2dx e-folding "
                      << 1.0 / (b_h * k2 * k2) << " s = " << 1.0 / (b_h * k2 * k2) / s_per
@@ -728,8 +704,8 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
     // deviation (baroclinic) part, and print both with the total. If the barotropic part is
     // flat and the baroclinic one climbs, the target is a sink on the DEVIATION and the
     // recorded fix is aimed at the wrong mode. Print-only, default off, changes no field.
-    static const bool ke_split = [](){ const char* e = getenv("HYD_KE_SPLIT");
-                                       return e && atoi(e) != 0; }();
+    static const bool ke_split = [](){
+                                       return knob::on(knob::HYD_KE_SPLIT); }();
     auto ocean_KE_split = [&](double& ke_bt, double& ke_bc) {
         double sbt = 0.0, sbc = 0.0, wsum = 0.0;
         #pragma omp parallel for reduction(+:sbt,sbc,wsum) schedule(static)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 
 #include <cstdlib>
@@ -32,13 +33,12 @@ namespace IceSchemeCommon {
     // takes rain 0.0092 -> 17.05 mm/a (x1850) and still leaves 18.17 mm/a against NASA's 978.
     inline double qcCrit() {
         static const double v = [](){
-            const char* e = getenv("ATM_QC_CRIT");
             // DEFAULT 0.05 g/kg since 2026-08-31: the shipped 0.5 was fitted against a
             // grid-mean condensate 20x too large. ATM_QC_CRIT=0.5 restores it.
-            const double g = e ? atof(e) : 0.05;                 // g/kg
+            const double g = knob::real(knob::ATM_QC_CRIT);                 // g/kg
             const double x = (g > 0.0 && g < 20.0) ? g : 0.05;
             std::cout << "      AGCM: [MICROPHYS] q_c_crit = " << x << " g/kg"
-                      << (e ? "  (ATM_QC_CRIT)" : "  (default)") << std::endl;
+                      << (knob::is_set(knob::ATM_QC_CRIT) ? "  (ATM_QC_CRIT)" : "  (default)") << std::endl;
             return x * 1.0e-3;                                   // -> kg/kg
         }();
         return v;
@@ -78,11 +78,10 @@ namespace IceSchemeCommon {
     // `ATM_RAIN_AREA=0` restores the un-weighted grid-mean form exactly.
     inline double rainArea() {
         static const double v = [](){
-            const char* e = getenv("ATM_RAIN_AREA");
-            const double f = e ? atof(e) : 0.10;              // DEFAULT 0.10 since 2026-09-01
+            const double f = knob::real(knob::ATM_RAIN_AREA);              // DEFAULT 0.10 since 2026-09-01
             const double x = (f > 0.0 && f <= 1.0) ? f : 0.0;
             std::cout << "      AGCM: [MICROPHYS] rain area fraction = " << x
-                      << (e ? "  (ATM_RAIN_AREA)" : "  (default)")
+                      << (knob::is_set(knob::ATM_RAIN_AREA) ? "  (ATM_RAIN_AREA)" : "  (default)")
                       << (x > 0.0 ? "" : "  -- DISABLED, S_ev is grid-mean")
                       << std::endl;
             return x;

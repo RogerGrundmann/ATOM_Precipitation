@@ -58,6 +58,7 @@
  * Storage is namespace-scope, NOT a cAtmosphereModel member: adding a member moves
  * sizeof(cAtmosphereModel), which is this tree's stack-canary hazard.
  */
+#include "Knobs.h"
 #include <vector>
 #include <cstdlib>
 
@@ -69,7 +70,7 @@ namespace AtmHydroSplit {
 // clean. Open at the flip: the non-hydrostatic p_dyn still grows (0.19 -> 0.27 over 600, slowing -35 %,
 // 11x below the 3.0 ceiling) and the jet has not levelled off. ATM_HYDRO_SPLIT=0 restores the old branch.
 inline double strength(){
-    static const double s = [](){ const char* e = getenv("ATM_HYDRO_SPLIT"); return e ? atof(e) : 1.0; }();
+    static const double s = [](){ return knob::real(knob::ATM_HYDRO_SPLIT); }();
     return s;
 }
 inline bool enabled(){ return strength() != 0.0; }

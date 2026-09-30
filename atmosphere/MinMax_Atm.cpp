@@ -6,6 +6,7 @@
  * 4. order Runge-Kutta scheme to solve 2. order differential equations
 */
 
+#include "Knobs.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -247,8 +248,8 @@ void cAtmosphereModel::searchMinMax_2D(const string &name_maxValue, const string
 // against a cell whose amplitude peaks at 75 puts it near 70; init_u's linear blend between
 // -ua_90 at the pole and +ua_60 at 60 puts it at 78.0, and the projection leaves it near 77.7.
 void cAtmosphereModel::report_cell_rotation(int iter){
-    static const bool on = [](){ const char* e = getenv("ATM_CELL_ROT_DIAG");
-                                 return e && atoi(e) != 0; }();
+    static const bool on = [](){
+                                return knob::on(knob::ATM_CELL_ROT_DIAG); }();
     if(!on) return;
     using namespace std;
     const double a     = r_Earth * 1000.0;

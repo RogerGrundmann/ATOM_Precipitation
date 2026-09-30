@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "IceSchemeCommon.h"
 #include "CloudFraction.h"
@@ -200,15 +201,14 @@ private:
     // `ATM_RAIN_AREA=0` beside it, the whole shipped branch.
     static bool limitArriving(){
         static const bool v = [](){
-            const char* e = getenv("ATM_ICE_LIMIT_ARRIVING");
-            return e ? (atoi(e) != 0) : true;              // DEFAULT ON since 2026-09-01
+            return knob::on(knob::ATM_ICE_LIMIT_ARRIVING);              // DEFAULT ON since 2026-09-01
         }();
         return v;
     }
 
     static bool srDiag(){
         static const bool v = [](){
-            const char* e = getenv("ATM_SR_DIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_SR_DIAG); }();
         return v;
     }
 
@@ -237,7 +237,7 @@ private:
     // 3 = both. Measure 1 and 2 separately before reading 3. ATM_SNOW_DIAG sizes what the window deletes.
     static int snowWindow(){
         static const int v = [](){
-            const char* e = getenv("ATM_SNOW_WINDOW"); return e ? atoi(e) : 0; }();
+            return knob::integer(knob::ATM_SNOW_WINDOW); }();
         return v;
     }
 
@@ -268,7 +268,7 @@ private:
     // the layer rather than the one leaving it -- the standard first-order form.
     static bool precipUpwind(){
         static const bool v = [](){
-            const char* e = getenv("ATM_PRECIP_UPWIND"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_PRECIP_UPWIND); }();
         return v;
     }
 
@@ -281,26 +281,26 @@ private:
     // column runs all N passes. ATM_RAIN_PASS_DIAG's last two pass rows then measure convergence. Unset: shipped.
     static int precipPasses(){
         static const int v = [](){
-            const char* e = getenv("ATM_PRECIP_PASSES"); const int n = e ? atoi(e) : TwoCatIce::iter_prec_end;
+            const int n = knob::is_set(knob::ATM_PRECIP_PASSES) ? knob::integer(knob::ATM_PRECIP_PASSES) : TwoCatIce::iter_prec_end;
             return n >= 1 ? n : TwoCatIce::iter_prec_end; }();
         return v;
     }
     static double precipRelax(){
         static const double v = [](){
-            const char* e = getenv("ATM_PRECIP_RELAX"); const double w = e ? atof(e) : 1.0;
+            const double w = knob::real(knob::ATM_PRECIP_RELAX);
             return (w > 0.0 && w <= 1.0) ? w : 1.0; }();
         return v;
     }
 
     static bool rainPassDiag(){
         static const bool v = [](){
-            const char* e = getenv("ATM_RAIN_PASS_DIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_RAIN_PASS_DIAG); }();
         return v;
     }
 
     static bool snowDiag(){
         static const bool v = [](){
-            const char* e = getenv("ATM_SNOW_DIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_SNOW_DIAG); }();
         return v;
     }
 

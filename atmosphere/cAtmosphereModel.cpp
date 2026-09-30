@@ -1,3 +1,4 @@
+#include "Knobs.h"
 #include <map>
 #include <cstdio>
 /*
@@ -116,8 +117,7 @@ static void refuseRetiredIceScheme(int scheme, const char* where){
 // ocean) restores keep-every-checkpoint. Function-local state, not a class member (sizeof / stack-canary hazard).
 void rollRestart(const std::string& out, const char* model, int Ma, int iter, int explicit_iter){
     static std::map<std::string, std::string> last;           // key model+Ma -> last periodic file written
-    const char* ek = (std::string(model) == "hyd") ? getenv("HYD_RESTART_KEEP") : getenv("ATM_RESTART_KEEP");
-    const bool keep_all = ek && std::string(ek) == "all";
+    const bool keep_all = knob::text(std::string(model) == "hyd" ? knob::HYD_RESTART_KEEP : knob::ATM_RESTART_KEEP) == "all";
     auto name = [&](int it){ return out + "/" + model + "_restart_" + std::to_string(Ma) + "Ma_"
                                     + std::to_string(it) + ".bin"; };
     const std::string key = std::string(model) + std::to_string(Ma);
@@ -234,8 +234,7 @@ void cAtmosphereModel::initGridCoordinates(){
 // atmosphere; 1.45 was too small. The rise is a suppression being removed, not energy appearing.
 void cAtmosphereModel::initMetricRadius(){
     static const double r_km = [this](){
-        const char* e = getenv("ATM_METRIC_RADIUS");
-        return e ? atof(e) : r_Earth; }();
+        return knob::is_set(knob::ATM_METRIC_RADIUS) ? knob::real(knob::ATM_METRIC_RADIUS) : r_Earth; }();
     if(r_km <= 0.0){
         m_metric_r0 = 0.0;
         cout << "      AGCM: ATM_METRIC_RADIUS = 0 - horizontal metric left on the grid"
@@ -286,7 +285,7 @@ void cAtmosphereModel::checkMetricConsistency() const {
          << " - set ATM_METRIC_RADIUS=" << (r_planet_m / 1.0e3) << " to do that." << endl;
 
     static const bool strict = [](){
-        const char* e = getenv("ATM_METRIC_STRICT"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_METRIC_STRICT); }();
     if(strict){
         cout << "      AGCM: metric check - ATM_METRIC_STRICT is set, stopping." << endl;
         std::exit(1);
@@ -325,7 +324,7 @@ void cAtmosphereModel::checkRadialMetric() const {
     if(m_layer_heights.size() < (std::size_t)im) return;      // called before init_layer_heights
 
     static const bool verbose = [](){
-        const char* e = getenv("ATM_METRIC_CHECK"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_METRIC_CHECK); }();
 
     // setprecision/fixed are sticky on the stream, so save and restore rather than leaving
     // every later diagnostic in whatever format this one wanted.
@@ -505,7 +504,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 //    goto Printout;
 
     SaturationAdjustment(*this).run();                                  // based on the initial distribution, recomputation of the cloud water and cloud ice formation in case of saturated water vapour detected
-    if (const char* e_ = getenv("ATM_CLOUD_INIT_DIAG")) if (atoi(e_) != 0) {
+    if (knob::on(knob::ATM_CLOUD_INIT_DIAG)) {
         double cw_sum = 0.0, w_tot2 = 0.0;
         for (int j = 0; j < jm; j++) {
             const double w = cos((j / (double)(jm - 1) - 0.5) * M_PI);
@@ -628,7 +627,7 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
 
     {
         static const bool psi_proj_dump = [](){
-            const char* e = getenv("ATM_PSI_PROJ_DUMP"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_PSI_PROJ_DUMP); }();
         if (psi_proj_dump) write_meridional_streamfunction(-1);   // before
         PressureSolverAtm(*this).project_initial_velocity(200);
         if (psi_proj_dump) write_meridional_streamfunction(-2);   // after
@@ -768,8 +767,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // MLR at omega_rad = 0.05 per iteration. Every use below is a runtime comparison in this one
     // translation unit; nothing needs it in a constant expression.
     static const int radiation_mode = [](){
-        const char* e = getenv("ATM_RADIATION_MODE");
-        const int v = e ? atoi(e) : 5;
+        const int v = knob::integer(knob::ATM_RADIATION_MODE);
         return (v >= 0 && v <= 5) ? v : 5; }();
     constexpr int    teq_refresh_stride = 20;              // option A: MLR re-solve cadence
     constexpr double omega_rad          = 0.05;            // option B: radiative heating (frac/iter toward RE)
@@ -850,7 +848,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // relaxation, so every CO2-sensitivity result in this tree is on the other branch. This
     // exists to make the surface layer measurable, not to be switched on.
     static const bool teq_skin_only = [](){
-        const char* e = getenv("ATM_TEQ_SKIN_ONLY"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_TEQ_SKIN_ONLY); }();
     auto apply_teq_relaxation = [&]() {
         for (int i = 0; i < im; i++)
             for (int j = 0; j < jm; j++)
@@ -1244,8 +1242,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     //
     // ATM_T0_ATTRIB=1 enables. Default off, and it never writes the field -- every hook is
     // behind the flag and reads only.
-    static const bool t0_attrib = [](){ const char* e = getenv("ATM_T0_ATTRIB");
-                                        return e && atoi(e) != 0; }();
+    static const bool t0_attrib = [](){
+                                        return knob::on(knob::ATM_T0_ATTRIB); }();
     std::vector<double> t0_prev;                       // levels 0 and 1 at the previous mark
     std::vector<std::string> t0_names;                 // stage names, in first-seen order
     std::vector<double> t0_sum;                        // 4 per stage: ocean i0, ocean i1, land i0, land i1
@@ -1338,9 +1336,6 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // have been edited and in environment variables that leave no trace at all. Every number in
     // CLAUDE.md had to be labelled by hand with the arm it came from; this makes that automatic.
     {
-        auto ev = [](const char* n, const char* dflt){
-            const char* e = getenv(n); return std::string(e ? e : dflt); };
-
         std::ostringstream b;
         b << "      AGCM: [RUN CONFIG] ice scheme " << CategoryIceScheme << " = "
           << (CategoryIceScheme == 2 ? "TwoCat (rain+snow)" : "none")
@@ -1349,90 +1344,18 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
           << ";  moist_phys_start_iter = " << moist_phys_start_iter
           << ";  radiation_mode = " << radiation_mode
           << ";  output " << output_path << "\n";
-        b << "      AGCM: [RUN CONFIG] cloud/ice knobs (blank = default):"
-          << "  RH_PROFILE="   << ev("ATM_RH_PROFILE",   "1*")
-          << "  RH_CRIT="      << ev("ATM_RH_CRIT",      "0.30*")
-          << "  RH_MIN="       << ev("ATM_RH_MIN",       "0.65*")
-          << "  RH_MIN_LAT="   << ev("ATM_RH_MIN_LAT",   "1*")
-          << "  RH_MIN_PTOP="  << ev("ATM_RH_MIN_PTOP",  "482*")
-          << "  RH_CRIT_ICE="  << ev("ATM_RH_CRIT_ICE",  "off*") << "\n";
-        b << "      AGCM: [RUN CONFIG]"
-          << "  CLOUD_FRAC="   << ev("ATM_CLOUD_FRAC",   "1*")
-          << "  CLOUD_RAD_FRAC=" << ev("ATM_CLOUD_RAD_FRAC", "1*")
-          << "  CWP_CAP="      << ev("ATM_CWP_CAP",      "off*")
-          << "  QC_CRIT="      << ev("ATM_QC_CRIT",      "0.05*")
-          << "  ICE_COLD="     << ev("ATM_ICE_COLD",     "1*")
-          << "  T_FLOOR="      << ev("ATM_T_FLOOR",      "216.65*")
-          << "  RAD_TOPO="     << ev("ATM_RAD_TOPO",     "1*")
-          << "  RAD_EQUIL="    << ev("ATM_RAD_EQUIL",    "0*")
-          << "  SW_INSOL="     << ev("ATM_SW_INSOL",     "0*")
-          << "  ICE_LIMIT_ARRIVING=" << ev("ATM_ICE_LIMIT_ARRIVING", "1*")
-          << "  RAIN_AREA=" << ev("ATM_RAIN_AREA", "0.10*")
-          << "  SATADJ_PHASE=" << ev("ATM_SATADJ_PHASE", "1*")
-          << "  SATADJ_FADE=" << ev("ATM_SATADJ_FADE", "0*") << "(2 when WATER_CLOSURE on)"
-          << "  SATADJ_FREEZE_LATENT=" << ev("ATM_SATADJ_FREEZE_LATENT", "0*")
-          << "  MICRO_NDIM=" << ev("ATM_MICRO_NDIM", "1.0*")
-          << "  MC_T_NDIM=" << ev("ATM_MC_T_NDIM", "1.0*")
-          << "  RK_SCALAR_SYNC=" << ev("ATM_RK_SCALAR_SYNC", "0*")
-          << "  MC_EVAP_LIMIT=" << ev("ATM_MC_EVAP_LIMIT", "1*")
-          << "  SURF_DRAG_CONSISTENT=" << ev("ATM_SURF_DRAG_CONSISTENT", "1.0*")
-          << "  DAMP_Q_MASS=" << ev("ATM_DAMP_Q_MASS", "0*")
-          << "  MC_S_NDIM=" << ev("ATM_MC_S_NDIM", "1*")
-          << "  MC_SGZ=" << ev("ATM_MC_SGZ", "0*")
-          << "  MC_ENTR=" << ev("ATM_MC_ENTR", "2.0e-3*")
-          << "  MC_BASE_SAT=" << ev("ATM_MC_BASE_SAT", "0*")
-          << "  MC_QVD=" << ev("ATM_MC_QVD", "0*")
-          << "  MC_ALF1=" << ev("ATM_MC_ALF1", "0.05*")
-          << "  MC_ED_AREA=" << ev("ATM_MC_ED_AREA", "0*")
-          << "  RH_STORM=" << ev("ATM_RH_STORM", "1.0*")
-          << "  MC_GP_AREA=" << ev("ATM_MC_GP_AREA", "0*")
-          << "  TURB_SIN_FLOOR=" << ev("ATM_TURB_SIN_FLOOR", "1*")
-          << "  OROG_Q_MASS=" << ev("ATM_OROG_Q_MASS", "1*")
-          << "  EVAP_STRIDE_FIX=" << ev("ATM_EVAP_STRIDE_FIX", "1*")
-          << "  LAND_BUCKET=" << ev("ATM_LAND_BUCKET", "0*")
-          << "  DAMP_Q_VERT=" << ev("ATM_DAMP_Q_VERT", "1*")
-          << "  DAMP_Q_HORIZ=" << ev("ATM_DAMP_Q_HORIZ", "1*")
-          << "  DAMP_T_VERT=" << ev("ATM_DAMP_T_VERT", "1*")
-          << "  DAMP_T_HORIZ=" << ev("ATM_DAMP_T_HORIZ", "1*")
-          << "  WATER_CLOSURE=" << ev("ATM_WATER_CLOSURE", "0*") << "(forces RK_SCALAR_SYNC=2 DAMP_Q_MASS=1 SATADJ_FADE=2 unless those are set; RK_SCALAR_SYNC and SATADJ_FADE honour an explicit value)"
-          << "  SEAM_PERIODIC=" << ev("ATM_SEAM_PERIODIC", "1*")
-          << "  SEAM_Q_CONSERVE=" << ev("ATM_SEAM_Q_CONSERVE", "0*")
-          << "  SNOW_WINDOW=" << ev("ATM_SNOW_WINDOW", "0*")
-          << "  PRECIP_UPWIND=" << ev("ATM_PRECIP_UPWIND", "0*")
-          << "  PRECIP_PASSES=" << ev("ATM_PRECIP_PASSES", "3*")
-          << "  PRECIP_RELAX=" << ev("ATM_PRECIP_RELAX", "1.0*")
-          << "\n      AGCM: [RUN CONFIG] dynamics knobs:"
-          << "  HYDRO_PGF="     << ev("ATM_HYDRO_PGF",     "0*")
-          << "  HYDRO_PGF_RAW=" << ev("ATM_HYDRO_PGF_RAW", "0*")
-          << "  POISSON_METRIC_FIX=" << ev("ATM_POISSON_METRIC_FIX", "0*")
-          << "  RADIAL_SHAPIRO_STRENGTH=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH", "1.0*")
-          << "  RADIAL_SHAPIRO_STRENGTH_VW=" << ev("ATM_RADIAL_SHAPIRO_STRENGTH_VW", "0.0*")
-          << "  POLAR_CELL_SHEAR=" << ev("ATM_POLAR_CELL_SHEAR", "0.1*")
-          << "  HADLEY_SL=" << ev("ATM_HADLEY_SL", "4.0N/3.0S*")
-          << "  CELLS_FROM_PSI=" << ev("ATM_CELLS_FROM_PSI", "1*")
-          << "  CELLS_U_FROM_PSI=" << ev("ATM_CELLS_U_FROM_PSI", "0*")
-          << "  CELL_ROT_DIAG=" << ev("ATM_CELL_ROT_DIAG", "0*")
-          << "  PRESS_LINE_SOLVE=" << ev("ATM_PRESS_LINE_SOLVE", "0*")
-          << "  PSI_SHAPE=" << ev("ATM_PSI_SHAPE", "1*")
-          << "  V_MASSBAL="     << ev("ATM_V_MASSBAL",     "1*")
-          << "  V_MASSBAL_STRIDE=" << ev("ATM_V_MASSBAL_STRIDE", "1*")
-          << "  METRIC_SIN_FLOOR=" << ev("ATM_METRIC_SIN_FLOOR", "0.26*")
-          << "  TROPO_INDEX_FIX=" << ev("ATM_TROPO_INDEX_FIX", "1*")
-          << "  BUOY_CONSISTENT=" << ev("ATM_BUOY_CONSISTENT", "0*")
-          << "  HYDRO_SPLIT=" << ev("ATM_HYDRO_SPLIT", "1.0*")
-          << "  EVAP_SPREAD="   << ev("ATM_EVAP_SPREAD",   "0*")
-          << "  EVAP_FLUX=" << ev("ATM_EVAP_FLUX", "0*")
-          << "  TW_BALANCE="    << ev("ATM_TW_BALANCE",    "0.0*")
-          << "  TW_BALANCE_V="  << ev("ATM_TW_BALANCE_V",  "0*")
-          << "  TW_LATMIN="     << ev("ATM_TW_LATMIN",     "15*")
-          << "  PDYN_CEILING="  << ev("ATM_PDYN_CEILING",  "3.0*")
-          << "  PDYN_CAP="      << ev("ATM_PDYN_CAP",      "2.0*")
-          << "  VTK_STRIDE="    << ev("ATM_VTK_STRIDE",     "5*")
-          << "  RESTART_STRIDE=" << ev("ATM_RESTART_STRIDE", "100*")
-          << "  RESTART_KEEP=" << ev("ATM_RESTART_KEEP", "latest*")
-          << "  NUE_GRAD="      << ev("ATM_NUE_GRAD",       "1.0*")
-          << "  BC_SECOND_ORDER=" << ev("ATM_BC_SECOND_ORDER", "1*")
-          << "   (* = compiled-in default, not set in the environment)\n";
+        // Every ATM_* and ATOM_* knob, generated from lib/Knobs.h -- nothing to keep in step by hand.
+        b << knob::banner("      AGCM: ", {"ATM_", "ATOM_"});
+        // The three knobs ATM_WATER_CLOSURE forces unless they are set: the values IN FORCE, by the same rules
+        // as their read sites (SaturationAdjustment.h, cAtmosphereModel.cpp's rk_scalar_sync and damp_q_mass).
+        {
+            const bool wc = knob::on(knob::ATM_WATER_CLOSURE);
+            const int rk  = knob::is_set(knob::ATM_RK_SCALAR_SYNC) ? knob::integer(knob::ATM_RK_SCALAR_SYNC) : (wc ? 2 : 0);
+            const int fd  = knob::is_set(knob::ATM_SATADJ_FADE)    ? knob::integer(knob::ATM_SATADJ_FADE)    : (wc ? 2 : 0);
+            const bool dq = wc || knob::on(knob::ATM_DAMP_Q_MASS);
+            b << "      AGCM: [RUN CONFIG] in force (WATER_CLOSURE=" << wc << "):  RK_SCALAR_SYNC=" << rk
+              << "  SATADJ_FADE=" << fd << "  DAMP_Q_MASS=" << dq << "\n";
+        }
         std::cout << b.str();
         std::ofstream rc(output_path + "/RUN_CONFIG.txt");
         if (rc) rc << b.str();
@@ -1454,8 +1377,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                       << std::endl;
         {   // ATM_SURF_DRAG_CONSISTENT (B.9). kf = 1/86400 must match rayleigh_kf in RHS_Atm_Turb.cpp.
             const double kf = 1.0 / 86400.0;
-            const char* e = getenv("ATM_SURF_DRAG_CONSISTENT");
-            const double s = e ? atof(e) : 1.0;   // default 1.0 since 2026-09-29, must match RHS_Atm_Turb.cpp
+            const double s = knob::real(knob::ATM_SURF_DRAG_CONSISTENT);   // default 1.0 since 2026-09-29, must match RHS_Atm_Turb.cpp
             const double c_ship = kf * ndimLength() / u_0 * dt_visc;
             const double c_cons = kf * metricShellLength() / u_0;
             const double c = c_ship + s * (c_cons - c_ship);
@@ -1467,7 +1389,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                       << (c > 0.0 ? 1.0 / (c * dt_visc) : 0.0) << " iterations" << std::endl;
             std::cout.flags(fl); std::cout.precision(pr);
         }
-        const double cH = [](){ const char* e = getenv("ATM_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+        const double cH = [](){ return knob::real(knob::ATM_SFC_FLUX); }();
         if (cH != 0.0) {
             const double dz1 = 0.5 * (get_layer_height(2) - get_layer_height(0));
             const double tau_S = (r_air * cp_l * dz1) / cH;               // [s]
@@ -1620,7 +1542,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // CAUTION: this call exists for the Pamir 2dt surface mode above. Whether that mode
                 // is vertical or horizontal is not recorded; watch the Pamir surface t with =0.
                 static const bool damp_t_vert = [](){
-                    const char* e = getenv("ATM_DAMP_T_VERT"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_DAMP_T_VERT); }();
                 // ATM_DAMP_T_HORIZ=<0|1>, default 1 = shipped (2026-09-26). The along_j/along_k passes of the
                 // same filter: index-space 1-2-1 every moist call, a meridional diffusivity ~0.25*(111 km)^2/0.4 s
                 // ~ 8e9 m2/s. Under ATM_WATER_CLOSURE (sync mode 2 keeps t) they persist like the moisture
@@ -1628,7 +1550,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // than the closure-off arms at every height, with identical vapour: half the cloud, half the
                 // rain. This is the suspect. Same Pamir caution as ATM_DAMP_T_VERT above.
                 static const bool damp_t_horiz = [](){
-                    const char* e = getenv("ATM_DAMP_T_HORIZ"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_DAMP_T_HORIZ); }();
                 if(damp_t_vert || damp_t_horiz)
                     AtomUtils::damp_wiggles(t,     &i_topography, damp_t_vert, damp_t_horiz, damp_t_horiz);
                 t0_mark("damp_wiggles(t)");
@@ -1645,9 +1567,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // NET +2.38e+06 mm/a with the sync and the shipped filter). The filter, the re-pin
                 // and the discard are a THREE-way cancellation, so the closure knob owns all three.
                 static const bool damp_q_mass = [](){
-                    const char* w = getenv("ATM_WATER_CLOSURE");   // default OFF again since 2026-09-25 (runaway, bisected)
-                    if (w && atoi(w) != 0) return true;
-                    const char* e = getenv("ATM_DAMP_Q_MASS"); return e && atoi(e) != 0; }();
+                    if (knob::on(knob::ATM_WATER_CLOSURE)) return true;   // WATER_CLOSURE default OFF again since 2026-09-25
+                    return knob::on(knob::ATM_DAMP_Q_MASS); }();
                 // ATM_DAMP_Q_VERT=<0|1>, default 1 = shipped (2026-09-25). The along_i pass of this filter is a
                 // 1-2-1 smoother in INDEX space in the VERTICAL, every moist call (0.4 s): an effective
                 // vertical diffusivity 0.25*dz^2/0.4 s ~ 950 m2/s in the 39 m bottom layer, ~1.6e5 m2/s at
@@ -1656,7 +1577,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // discards it (leapfrog_reset); with ATM_WATER_CLOSURE's RK4 sync it persists and drives the
                 // def600 precipitation runaway. =0 drops the vertical pass for c/cloud/ice only (j, k kept).
                 static const bool damp_q_vert = [](){
-                    const char* e = getenv("ATM_DAMP_Q_VERT"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_DAMP_Q_VERT); }();
                 // ATM_DAMP_Q_HORIZ=<0|1>, default 1 = shipped (2026-09-26). The along_j and along_k passes of
                 // the same filter. The meridional pass is index-space 1-2-1 every moist call (0.4 s), an
                 // effective diffusivity ~0.25*(111 km)^2/0.4 s ~ 8e9 m2/s against ~1e6 for real eddy mixing.
@@ -1665,7 +1586,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                 // polar NET, the closure's second engine. With ATM_DAMP_Q_VERT=0 this switches the moisture
                 // filter off entirely (the damp_wiggles(q) CWB bucket must then read exactly 0).
                 static const bool damp_q_horiz = [](){
-                    const char* e = getenv("ATM_DAMP_Q_HORIZ"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_DAMP_Q_HORIZ); }();
                 if(!damp_q_vert && !damp_q_horiz){
                     // nothing to do: every pass is off
                 }else if(!damp_q_mass){
@@ -1901,8 +1822,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
                     // stride 1. Every CSV diagnostic stays on `checkpoint` and is unaffected.
                     // ⚠ the cadence is checkpoint x stride, so it is 100 iterations only while
                     // `checkpoint` is 20.
-                    const char* e = getenv("ATM_VTK_STRIDE");
-                    const int v = e ? atoi(e) : 5; return v > 0 ? v : 5; }();
+                    const int v = knob::integer(knob::ATM_VTK_STRIDE); return v > 0 ? v : 5; }();
                 static int vtk_tick = 0;
                 if(vtk_tick++ % vtk_stride == 0){
                     UtilsAtm(*this).writeFile(bathymetry_name, output_path, false);
@@ -2010,10 +1930,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // pre-RK4 SaturationAdjustment latent heat that mode 2 keeps. Unchanged for every run that does not
         // set both variables.
         static const int rk_scalar_sync = [](){
-            const char* e = getenv("ATM_RK_SCALAR_SYNC");
-            if (e) return atoi(e);
-            const char* w = getenv("ATM_WATER_CLOSURE");       // default OFF again since 2026-09-25 (runaway, bisected)
-            if (w && atoi(w) != 0) return 2;
+            if (knob::is_set(knob::ATM_RK_SCALAR_SYNC)) return knob::integer(knob::ATM_RK_SCALAR_SYNC);
+            if (knob::on(knob::ATM_WATER_CLOSURE)) return 2;       // WATER_CLOSURE default OFF again since 2026-09-25
             return 0; }();
         if(rk_scalar_sync != 0){
             #pragma omp parallel for collapse(2) schedule(static)
@@ -2111,7 +2029,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // we can A/B whether easing it slows the jet spin-down WITHOUT re-triggering the radial 2Δ
         // checkerboard / near-surface CFL blow-up it guards against. 0 = filter off (CFL risk).
         static const double radial_shapiro_strength = [](){
-            const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH"); return e ? atof(e) : 1.0; }();
+            return knob::real(knob::ATM_RADIAL_SHAPIRO_STRENGTH); }();
         // ATM_RADIAL_SHAPIRO_STRENGTH_VW=<s> -- the SAME filter on the HORIZONTAL components
         // only. Default = whatever the global knob is, so unset is bit-identical and the two
         // together behave exactly as the single knob always did.
@@ -2136,8 +2054,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // filter v/w. Every `ATM_RADIAL_SHAPIRO_STRENGTH` sweep recorded in CLAUDE.md was taken
         // under the INHERITING behaviour and its v/w half is not reproducible without _VW set.
         static const double radial_shapiro_strength_vw = [](){
-            const char* e = getenv("ATM_RADIAL_SHAPIRO_STRENGTH_VW");
-            return e ? atof(e) : 0.0; }();
+            return knob::real(knob::ATM_RADIAL_SHAPIRO_STRENGTH_VW); }();
         AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2, radial_shapiro_strength);
         AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
         AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
@@ -2173,7 +2090,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // largest leak left. The mass is ColumnWaterBudget's (r_humid*dz; the cos-lat weight
         // cancels within a column); t keeps the shipped filter.
         static const bool orog_q_mass = [](){
-            const char* e = getenv("ATM_OROG_Q_MASS"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_OROG_Q_MASS); }();
         if(!orog_q_mass){
             AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
             AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
@@ -2319,8 +2236,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
             // -- but a 1000-iteration run writes ten of them, 6.2 GB, which is more disk than
             // all the VTK put together, and until 2026-09-02 there was no way to say no.
             static const int restart_save_stride = [](){
-                const char* e = getenv("ATM_RESTART_STRIDE");
-                const int v = e ? atoi(e) : 100; return v >= 0 ? v : 100; }();
+                const int v = knob::integer(knob::ATM_RESTART_STRIDE); return v >= 0 ? v : 100; }();
             if(restart_save_stride > 0 && total_iter_count > 0
                && total_iter_count % restart_save_stride == 0){
                 bool clean = true;
@@ -2346,8 +2262,7 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
     // without its final state on disk (nm = 640 kept 600). Written here, clean-checked like the periodic
     // ones; runs shorter than one stride are exempt, so 20-iteration byte checks write nothing new.
     {
-        const char* e = getenv("ATM_RESTART_STRIDE");
-        int stride = e ? atoi(e) : 100; if(stride < 0) stride = 100;
+        int stride = knob::integer(knob::ATM_RESTART_STRIDE); if(stride < 0) stride = 100;
         if(stride > 0 && total_iter_count >= stride && total_iter_count % stride != 0){
             bool clean = true;
             for(Array* a : restart_arrays())

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -63,9 +64,9 @@ public:
         // The unset branch returns the shipped LITERALS rather than recomputing them, because
         // 0.55 + 0.5*0.1 is 0.6000000000000001 in double and not 0.6 -- so the arithmetic form
         // would NOT be bit-identical off, which is this tree's standing requirement for a knob.
-        static const bool   polar_set   = (getenv("ATM_POLAR_CELL_SHEAR") != nullptr);
+        static const bool   polar_set   = knob::is_set(knob::ATM_POLAR_CELL_SHEAR);
         static const double polar_shear = [](){
-            const char* e = getenv("ATM_POLAR_CELL_SHEAR"); return e ? atof(e) : 0.1; }();
+            return knob::real(knob::ATM_POLAR_CELL_SHEAR); }();
         const double pc_mean = 0.55;
         const double pc_trop = polar_set ? (pc_mean - 0.5 * polar_shear) : 0.5;
         const double pc_sl   = polar_set ? (pc_mean + 0.5 * polar_shear) : 0.6;
@@ -102,9 +103,9 @@ public:
         // `24ff23a` intended, 3.0 restores the symmetric pair this model ran with for its first
         // two months. Do not read 3.5 as "the compromise" -- it splits the difference between a
         // value and a mistake.
-        static const bool   hadley_set = (getenv("ATM_HADLEY_SL") != nullptr);
+        static const bool   hadley_set = knob::is_set(knob::ATM_HADLEY_SL);
         static const double hadley_sl  = [](){
-            const char* e = getenv("ATM_HADLEY_SL"); return e ? atof(e) : 4.0; }();
+            return knob::real(knob::ATM_HADLEY_SL); }();
         // northern Hadley cell
         init_v_or_w(m.v,  60,  0.0,  0.5);                              // lat:  30   j=60
         init_v_or_w(m.v,  75, -3.0, hadley_set ? hadley_sl : 4.0);      // lat:  15   j=75
@@ -349,20 +350,19 @@ public:
     void install_cells_from_streamfunction()
     {
         // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores the shipped analytic ramp exactly.
-        static const bool on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
-                                     return e ? atoi(e) != 0 : true; }();
+        static const bool on = [](){
+                                    return knob::on(knob::ATM_CELLS_FROM_PSI); }();
         if (!on) return;
-        auto amp = [](const char* n, double d){ const char* e = getenv(n);
-                                                return (e ? atof(e) : d) * 1.0e9; };
-        const double A_had = amp("ATM_PSI_HADLEY", 120.0);
-        const double A_fer = amp("ATM_PSI_FERREL",  40.0);
+        auto amp = [](knob::Id id){ return knob::real(id) * 1.0e9; };
+        const double A_had = amp(knob::ATM_PSI_HADLEY);
+        const double A_fer = amp(knob::ATM_PSI_FERREL);
         // 26 rather than an observed 12: the taper and the ground-to-tropopause span cut the
         // installed cell to ~46 % of the prescribed value in the north and ~22 % in the south,
         // so the knob is not the cell. Measured at 26: 75N reaches 12.10e9 = 10.1 % of Hadley
         // and 75S 5.85e9 = 4.9 %, both inside the observed 5-15 %. The asymmetry is Antarctica
         // shortening the span and must NOT be tuned out -- forcing the south to 10 % needs ~53,
         // which puts the north at 20 %.
-        const double A_pol = amp("ATM_PSI_POLAR",   26.0);
+        const double A_pol = amp(knob::ATM_PSI_POLAR);
         const double a_E   = m.r_Earth * 1000.0;                 // r_Earth is in km
         const double inv_u0 = 1.0 / m.u_0;
         const double cos60 = cos(60.0 * M_PI / 180.0);
@@ -439,8 +439,8 @@ public:
                 //      SMOOTHLY at the tropopause -- no discontinuity, no sheet. Psi peaks at
                 //      zeta = 1/3 with value (4/27)*A, so the 27/4 normalises the knob to mean
                 //      the cell's actual maximum. Closure is untouched: Psi = 0 at both ends.
-                static const int shape = [](){ const char* e = getenv("ATM_PSI_SHAPE");
-                                               return e ? atoi(e) : 1; }();
+                static const int shape = [](){
+                                               return knob::integer(knob::ATM_PSI_SHAPE); }();
                 std::vector<double> rv(m.im, 0.0), wq(m.im, 0.0);
                 for (int i = i0; i <= it; i++) {
                     double rho = m.r_humid.x[i][j][k];
@@ -573,11 +573,11 @@ public:
     // integration returns, which is the residual and should be ~0.
     void install_u_from_cells()
     {
-        static const bool on = [](){ const char* e = getenv("ATM_CELLS_U_FROM_PSI");
-                                     return e && atoi(e) != 0; }();
+        static const bool on = [](){
+                                    return knob::on(knob::ATM_CELLS_U_FROM_PSI); }();
         if (!on) return;
-        static const bool cells_on = [](){ const char* e = getenv("ATM_CELLS_FROM_PSI");
-                                           return e ? atoi(e) != 0 : true; }();
+        static const bool cells_on = [](){
+                                           return knob::on(knob::ATM_CELLS_FROM_PSI); }();
         if (!cells_on) {
             std::cout << "      AGCM: [CELLS U] ATM_CELLS_U_FROM_PSI set but ATM_CELLS_FROM_PSI"
                       << " is off -- nothing to derive u from, ignored." << std::endl;
@@ -773,7 +773,7 @@ public:
     // correction this routine applies is reported on its own line instead.
     static int massBalanceStride(){
         static const int v = [](){
-            const char* e = getenv("ATM_V_MASSBAL_STRIDE"); return e ? atoi(e) : 1; }();
+            return knob::integer(knob::ATM_V_MASSBAL_STRIDE); }();
         return v;
     }
 
@@ -837,7 +837,7 @@ public:
     // exactly, which is the branch every measurement recorded before that date was made on.
     static bool massBalance(){
         static const bool v = [](){
-            const char* e = getenv("ATM_V_MASSBAL"); return e ? (atoi(e) != 0) : true; }();
+            return knob::on(knob::ATM_V_MASSBAL); }();
         return v;
     }
 
@@ -1010,17 +1010,17 @@ public:
     // reason ATM_HYDRO_PGF is one: it makes a partial arm possible if the full one is unstable.
     static double twStrength(){
         static const double v = [](){
-            const char* e = getenv("ATM_TW_BALANCE"); return e ? atof(e) : 0.0; }();
+            return knob::real(knob::ATM_TW_BALANCE); }();
         return v;
     }
     static double twLatMin(){
         static const double v = [](){
-            const char* e = getenv("ATM_TW_LATMIN"); return e ? atof(e) : 15.0; }();
+            return knob::real(knob::ATM_TW_LATMIN); }();
         return v;
     }
     static double twWmax(){
         static const double v = [](){
-            const char* e = getenv("ATM_TW_WMAX"); return e ? atof(e) : 80.0; }();
+            return knob::real(knob::ATM_TW_WMAX); }();
         return v;
     }
     // The MERIDIONAL component, from the ZONAL temperature gradient. Default OFF even when
@@ -1029,7 +1029,7 @@ public:
     // The jet -- and the 35-65 deg storm track that needs it -- is entirely in w.
     static bool twDoV(){
         static const bool v = [](){
-            const char* e = getenv("ATM_TW_BALANCE_V"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_TW_BALANCE_V); }();
         return v;
     }
 

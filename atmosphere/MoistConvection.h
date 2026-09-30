@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "CloudFraction.h"
 
@@ -29,8 +30,8 @@ namespace AtomMoistConvection {
     // beside it matches his 1/alpha_2 = 196.5). With the updraft repaired and a saturated downdraft
     // (ATM_MC_SGZ + ATM_MC_ENTR + ATM_MC_BASE_SAT + ATM_MC_QVD=2, qvd2) e_p evaporates 82 % of ~1.1e4
     // mm/a of convective rain and P_conv is 2.7 mm/a. Only the e_p site reads it.
-    inline const double alf_1 = [](){ const char* e = std::getenv("ATM_MC_ALF1");
-                                      const double v = e ? std::atof(e) : 0.0;
+    inline const double alf_1 = [](){
+                                      const double v = knob::real(knob::ATM_MC_ALF1);
                                       return (v > 0.0) ? v : 0.05; }();   // evaporation rate coefficient [1/s]
     constexpr double alf_2 = 0.05;                                      // evaporation rate coefficient [1/s]
     constexpr double bet_p = 2.0e-3;                                    // in [1/s]
@@ -39,8 +40,8 @@ namespace AtomMoistConvection {
     // Tiedtke (1989) uses 1.0e-4 for deep convection; at 2e-3 the per-level mixing fraction
     // D_u*dz/M_u is 0.66-1.67 (MEASURED, def600 iter 120, 87E), so the "updraft" is the
     // environment one level below and never carries its own buoyancy. Sets eps_u = del_u.
-    double eps_u = [](){ const char* e = std::getenv("ATM_MC_ENTR");
-                         const double v = e ? std::atof(e) : 0.0;
+    double eps_u = [](){
+                        const double v = knob::real(knob::ATM_MC_ENTR);
                          return (v > 0.0) ? v : 0.2 / R_cloud; }();         // in [1/m]
     double del_u = eps_u;                                               // in [1/m] by ECMWF
 //    double eps_u = 1.0e-4;                                              // in [1/m] by COSMO for penetrative (deep) and midlevel clouds
@@ -163,8 +164,8 @@ private:
     // MUST NOT be used alone at the shipped entrainment: a parcel remixed to the environment of
     // the level below then has s_u - s = cp*dz*(Gamma_env - Gamma_d) < 0 and the flux flips sign.
     // Pair it with ATM_MC_ENTR.
-    static int mcSgz() { static const int v = [](){ const char* e = std::getenv("ATM_MC_SGZ");
-                                                    return e ? std::atoi(e) : 0; }(); return v; }
+    static int mcSgz() { static const int v = [](){
+                                                    return knob::integer(knob::ATM_MC_SGZ); }(); return v; }
     double gz(int i) const { return m.g * height_table[i] / m.s_0; }
 
     // ATM_MC_QVD=<0|1|2>, default 0 = shipped (2026-09-25). The downdraft humidity that e_d and e_p
@@ -174,8 +175,8 @@ private:
     // of it (bst_sgeb, iter ~120), P_conv 0.00. The shape is Tiedtke's LFS mix of equal parts cloud
     // air (saturated) and ENVIRONMENT air, whose humidity is c, not cloud water (initial commit, no
     // history). =1 uses 0.5*(c + 0.98*q_sat); =2 a saturated downdraft 0.98*q_sat (Tiedtke 1989).
-    static int mcQvd() { static const int v = [](){ const char* e = std::getenv("ATM_MC_QVD");
-                                                   return e ? std::atoi(e) : 0; }(); return v; }
+    static int mcQvd() { static const int v = [](){
+                                                   return knob::integer(knob::ATM_MC_QVD); }(); return v; }
     double qvDown(int i, int j, int k, double q_sat) const {
         switch (mcQvd()) {
             case 1:  return 0.5 * (m.c.x[i][j][k] + AtomMoistConvection::scale * q_sat);
@@ -905,8 +906,8 @@ void findCloudBaseLFS() {
                     // the extra 5.3 g/kg condenses on ascent (q_c_u 6.9 against 0.13 g/kg unseeded) and
                     // the updraft generates ~46 000 mm/a per convecting column. The base is the first
                     // level with f > 0 (RH > H_crit), not a saturated level, so only f of it is cloud.
-                    static const int mc_base_sat = [](){ const char* e = std::getenv("ATM_MC_BASE_SAT");
-                                                         return e ? std::atoi(e) : 0; }();
+                    static const int mc_base_sat = [](){
+                                                        return knob::integer(knob::ATM_MC_BASE_SAT); }();
                     if (mc_base_sat) {
                         const double T_b  = t_base + t_pert;
                         const double E_sb = m.hp * AtomUtils::exp_func(T_b, 17.2694, 35.86);
@@ -998,8 +999,8 @@ void findCloudBaseLFS() {
                         // fraction the scheme already assumes for u_u = u + M_u/(rho*a_u*u_0). Unweighted
                         // (q_c_u ~7 g/kg on the repaired-parcel stack) g_p ~1.4e-5 /s is ~50x the
                         // condensation c_u that feeds it. Sixth occurrence of the grid-mean defect.
-                        static const bool mc_gp_area = [](){ const char* e = std::getenv("ATM_MC_GP_AREA");
-                                                             return e && std::atoi(e) != 0; }();
+                        static const bool mc_gp_area = [](){
+                                                            return knob::on(knob::ATM_MC_GP_AREA); }();
                         if(t_u >= m.t_0){
                             m.g_p.x[i][j][k] = (iter_prec == 1) ? 0.0
                                 : (mc_gp_area ? a_u * K_p * m.q_c_u.x[i][j][k]
@@ -1127,7 +1128,7 @@ void findCloudBaseLFS() {
                         // (ATM_RAIN_AREA). Measured 2026-09-29 (run_mcd9.sh): shipped e_d removes
                         // 99.96 % of convective generation on both branches.
                         static const bool mc_ed_area = [](){
-                            const char* e = std::getenv("ATM_MC_ED_AREA"); return e && atoi(e) != 0; }();
+                            return knob::on(knob::ATM_MC_ED_AREA); }();
                         if(mc_ed_area){
                           if(precip_i > 0.0 && sigma_p > 0.0){
                             const double P_s  = precip_i / sigma_p;
@@ -1210,8 +1211,8 @@ void findCloudBaseLFS() {
                     // restart): in 100 % of the cells where MC_t's flux half exceeds MCt_max,
                     // |s_u - s|*t_0 > 100 K, 100 % updraft-dominated, 50 % at a mass-flux edge.
                     // A leftover of s having once been dimensional (J/kg). =1 drops the extra /s_0.
-                    static const int mc_s_ndim = [](){ const char* e = getenv("ATM_MC_S_NDIM");
-                                                       return e ? atoi(e) : 1; }();
+                    static const int mc_s_ndim = [](){
+                                                       return knob::integer(knob::ATM_MC_S_NDIM); }();
                     double dummy_s_u = (mc_s_ndim == 0)
                         ? (M_u_prev * m.s_u.x[i-1][j][k]
                            + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
@@ -1343,8 +1344,8 @@ void findCloudBaseLFS() {
                     // ATM_MC_S_NDIM=1: only the LATENT term is dimensional (L [J/kg] * r_h * e_d
                     // * step -> J/(m2 s)) and needs / s_0; the M_d*s_d and E_d*s, D_d*s_d terms
                     // are already non-dimensional. The shipped form divides all of them.
-                    static const int mc_s_ndim_d = [](){ const char* e = getenv("ATM_MC_S_NDIM");
-                                                         return e ? atoi(e) : 1; }();
+                    static const int mc_s_ndim_d = [](){
+                                                        return knob::integer(knob::ATM_MC_S_NDIM); }();
                     double dummy_s_d = (mc_s_ndim_d == 0)
                         ? (M_d_ip1 * m.s_d.x[i+1][j][k]
                            - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
@@ -1414,8 +1415,8 @@ void findCloudBaseLFS() {
                     // charge the level's evaporation against the rain ARRIVING plus the rain MADE
                     // there, scaling e_d and e_p together. At i = 0 the recurrence passes the flux
                     // through unchanged, so nothing evaporated there is backed: both are zeroed.
-                    static const bool mc_evap_limit = [](){ const char* e = getenv("ATM_MC_EVAP_LIMIT");
-                                                            return e ? (atoi(e) != 0) : true; }();
+                    static const bool mc_evap_limit = [](){
+                                                            return knob::on(knob::ATM_MC_EVAP_LIMIT); }();
                     if(mc_evap_limit){
                         if(i == 0){
                             m.e_d.x[i][j][k] = 0.0;
@@ -1563,8 +1564,8 @@ void findCloudBaseLFS() {
         // ThreeCat's precipitation. This counts the cells and bands the excess.
         //
         // Counts only -- no sums of doubles -- so the numbers are deterministic under OpenMP.
-        const bool cap_diag = [](){ const char* e = getenv("ATM_MC_CAP_DIAG");
-                                    return e && atoi(e) != 0; }();
+        const bool cap_diag = [](){
+                                    return knob::on(knob::ATM_MC_CAP_DIAG); }();
 
 // ==================== ATM_MC_T_NDIM: the latent half of MC_t carries a spare t_0 ============
         // ATM_MC_T_NDIM=<strength>, **DEFAULT 1.0 SINCE 2026-09-22, AT THE USER'S INSTRUCTION**,
@@ -1620,8 +1621,8 @@ void findCloudBaseLFS() {
         // A STRENGTH rather than a flag, like ATM_MICRO_NDIM, because the endpoint is a factor
         // of 273 on a term that feeds rhs_t: 1.0 is the consistent value, 0.0 the shipped one,
         // and the blend is linear in the coefficient.
-        const double mc_t_ndim = [](){ const char* e = getenv("ATM_MC_T_NDIM");
-                                       return e ? atof(e) : 1.0; }();
+        const double mc_t_ndim = [](){
+                                       return knob::real(knob::ATM_MC_T_NDIM); }();
         const double mc_t_lat_scale = m.t_0 + mc_t_ndim * (1.0 - m.t_0);
         long n_fluid = 0;
         long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
@@ -2034,7 +2035,7 @@ void findCloudBaseLFS() {
     // without adding fields to the VTK writers.
     static bool mcDiag(){
         static const bool v = [](){
-            const char* e = getenv("ATM_MC_DIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_MC_DIAG); }();
         return v;
     }
 

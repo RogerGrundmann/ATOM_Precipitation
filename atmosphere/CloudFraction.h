@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "Utils.h"
 
 #include <algorithm>
@@ -41,7 +42,7 @@ namespace CloudFraction {
     inline bool enabled(){
         static const bool v = [](){
             // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            const char* e = getenv("ATM_CLOUD_FRAC"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_CLOUD_FRAC); }();
         return v;
     }
 
@@ -49,8 +50,7 @@ namespace CloudFraction {
     inline double critMid(){
         static const double v = [](){
             // DEFAULT 0.30 since 2026-08-31; ATM_RH_CRIT=0.8 restores the shipped value.
-            const char* e = getenv("ATM_RH_CRIT");
-            const double x = e ? atof(e) : 0.30;
+            const double x = knob::real(knob::ATM_RH_CRIT);
             return (x > 0.0 && x < 1.0) ? x : 0.30; }();
         return v;
     }
@@ -74,8 +74,7 @@ namespace CloudFraction {
     // IS critMid() there -- a jump in H_crit would be a jump in cloud fraction.
     inline double critIce(){
         static const double v = [](){
-            const char* e = getenv("ATM_RH_CRIT_ICE");
-            const double x = e ? atof(e) : 0.0;
+            const double x = knob::real(knob::ATM_RH_CRIT_ICE);
             return (x > 0.0 && x < 1.0) ? x : 0.0; }();
         return v;
     }
@@ -195,7 +194,7 @@ namespace ColdCloud {
     inline bool enabled(){
         static const bool v = [](){
             // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            const char* e = getenv("ATM_ICE_COLD"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_ICE_COLD); }();
         return v;
     }
 }

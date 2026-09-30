@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 #include "CloudFraction.h"
@@ -107,7 +108,7 @@ public:
     // construction. `rad_equator_short` / `rad_pole_short` are ignored on this branch.
     static double swInsol(){
         static const double v = [](){
-            const char* e = getenv("ATM_SW_INSOL"); return e ? atof(e) : 0.0; }();
+            return knob::real(knob::ATM_SW_INSOL); }();
         return v;
     }
 
@@ -122,7 +123,7 @@ public:
     // from "a fifth of them at 7500", and those imply completely different cloud fractions.
     static bool cwpCensus(){
         static const bool v = [](){
-            const char* e = getenv("ATM_CWP_CENSUS"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_CWP_CENSUS); }();
         return v;
     }
 
@@ -158,7 +159,7 @@ public:
     static bool cloudRadFrac(){
         static const bool v = [](){
             // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            const char* e = getenv("ATM_CLOUD_RAD_FRAC"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_CLOUD_RAD_FRAC); }();
         return v;
     }
 
@@ -174,13 +175,13 @@ public:
     // than reasoned.
     static bool radColDiag(){
         static const bool v = [](){
-            const char* e = getenv("ATM_RAD_COLDIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_RAD_COLDIAG); }();
         return v;
     }
 
     static bool radEquil(){
         static const bool v = [](){
-            const char* e = getenv("ATM_RAD_EQUIL"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_RAD_EQUIL); }();
         return v;
     }
 
@@ -294,7 +295,7 @@ public:
         // ATM_CLOUD_TAU_MAX (layer bound, default on) and ATM_CWP_CAP being disabled (2026-08-31).
         // ATM_RAD_TOPO=0 restores the sea-level column exactly. See CLAUDE.md for the arm.
         static const bool topo_rad = [](){
-            const char* e = getenv("ATM_RAD_TOPO"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_RAD_TOPO); }();
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         // (No `sfc_coupled` flag here: ATM_SFC_COUPLED was written, measured as a null and
         // REMOVED -- it solved the surface balance with a neutral-lapse constraint and never
@@ -387,8 +388,7 @@ public:
                 // radiative equilibrium against a US-standard column without running the model.
                 // Defaults are the shipped values, so unset is bit-identical.
                 static const double eps_dry = [](){
-                    const char* e = getenv("ATM_EPS_DRY");
-                    const double v = e ? atof(e) : 0.684;
+                    const double v = knob::real(knob::ATM_EPS_DRY);
                     return (v > 0.0 && v < 1.0) ? v : 0.684; }();     // Bignami dry-air baseline
                 double sum_dp = 0.0, sum_vp = 0.0, sum_wdp = 0.0, sum_wvp = 0.0;
                 // ATM_TAU_PBROAD -- PRESSURE BROADENING of the optical-depth distribution.
@@ -401,8 +401,7 @@ public:
                 // collapsing the OLR. The column TOTAL is renormalised, so this redistributes
                 // optical depth downward without adding any.
                 static const double pbroad = [](){
-                    const char* e = getenv("ATM_TAU_PBROAD");
-                    const double v = e ? atof(e) : 0.0;
+                    const double v = knob::real(knob::ATM_TAU_PBROAD);
                     return (v >= 0.0 && v <= 4.0) ? v : 0.0; }();
                 for (int i = i_mount; i <= i_trop; i++) {
                     double dp = (i < i_trop) ? (m.p_stat.x[i][j][k] - m.p_stat.x[i+1][j][k])
@@ -495,8 +494,7 @@ public:
                     // DEFAULT DISABLED since 2026-08-31: the cap was compensating for a
                     // condensate 20x too large and it INVERTS the geography (see CLAUDE.md).
                     // ATM_CWP_CAP=20 restores the shipped cap.
-                    const char* e = getenv("ATM_CWP_CAP");
-                    const double v = e ? atof(e) : 1.0e9;
+                    const double v = knob::real(knob::ATM_CWP_CAP);
                     return v > 0.0 ? v : 1.0e9; }();
                 double cwp_raw = 0.0;
                 for (int i = i_mount; i <= i_trop; i++) {
@@ -543,8 +541,7 @@ public:
                     // (cAtmosphereModel.cpp). If MLR is ever wired AND that t_eq forcing is on,
                     // CO2 acts twice; reconcile then (see project_multilayer_radiation).
                     static const double co2_band_scale = [](){
-                        const char* e = getenv("ATM_CO2_BAND");
-                        const double v = e ? atof(e) : 0.17;
+                        const double v = knob::real(knob::ATM_CO2_BAND);
                         return (v >= 0.0) ? v : 0.17; }();
                     const double dz  = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
                                                     : (m.get_layer_height(i) - m.get_layer_height(i-1));
@@ -633,8 +630,7 @@ public:
                     // while 1773 near-blackbody layers per latitude slice become zero. Removing a
                     // pathology the design already forbids, at 0.05 W/m2, is worth taking.
                     static const double tau_cloud_max = [](){
-                        const char* e = getenv("ATM_CLOUD_TAU_MAX");
-                        const double v = e ? atof(e) : 2.0;
+                        const double v = knob::real(knob::ATM_CLOUD_TAU_MAX);
                         return v > 0.0 ? v : 0.0; }();
                     if (tau_cloud_max > 0.0 && tau_cloud > tau_cloud_max) {
                         const double f = tau_cloud_max / tau_cloud;
@@ -1039,8 +1035,8 @@ public:
                 acc += v[n].second;
                 while (pi < 7 && acc >= pct[pi] * w_tot) q[pi++] = v[n].first;
             }
-            const double cap = [](){ const char* e = getenv("ATM_CWP_CAP");
-                                     const double x = e ? atof(e) : 1.0e9; return x > 0.0 ? x : 1.0e9; }();
+            const double cap = [](){
+                                    const double x = knob::real(knob::ATM_CWP_CAP); return x > 0.0 ? x : 1.0e9; }();
             std::cout << "      AGCM: [CWP CENSUS] column condensate path g/m2, cos-lat weighted."
                       << "  mean=" << mean / w_tot
                       << "  cloudy(>5)=" << 100.0 * w_cloudy / w_tot << " %" << std::endl;

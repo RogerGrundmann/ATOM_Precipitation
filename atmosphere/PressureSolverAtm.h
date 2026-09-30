@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -134,10 +135,10 @@ public:
         const double inv_dphi2 = 1.0 / (dphi * dphi);
         const double inv_2dr   = 0.5 / dr;
         static const bool poisson_metric_fix = [](){
-            const char* e = getenv("ATM_POISSON_METRIC_FIX"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_POISSON_METRIC_FIX); }();
         const bool anelastic = (int)m.m_dlnrho_dr.size() == m.im
-                               && [](){ const char* e = getenv("ATM_ANELASTIC");
-                                        return e && atoi(e) != 0; }();
+                               && [](){
+                                        return knob::on(knob::ATM_ANELASTIC); }();
 
         for (int colour = 0; colour < 2; colour++) {
             #pragma omp parallel for collapse(2) schedule(static)
@@ -294,8 +295,7 @@ public:
         // companion of ATM_PDYN_CEILING below; read that note for why 2.0 is 87 Pa and not
         // 2000 hPa, and why both are a latent barrier rather than a present cause.
         const double p_dyn_cap = [](){
-            const char* e = getenv("ATM_PDYN_CAP");
-            const double v = e ? atof(e) : 0.0;
+            const double v = knob::real(knob::ATM_PDYN_CAP);
             return (v > 0.0) ? v : 2.0;
         }();
 
@@ -312,8 +312,8 @@ public:
         // stabilisers (p_dyn_cap, p_dyn_ceiling, topo Dirichlet pins) that were calibrated on
         // the old operator. NB: this repairs the metric POWER only; the collocated checkerboard
         // (Rhie-Chow face reconstruction) is a separate, larger port not done here.
-        const bool poisson_metric_fix = [](){ const char* e = getenv("ATM_POISSON_METRIC_FIX");
-                                              return e ? (atof(e) != 0.0) : false; }();
+        const bool poisson_metric_fix = [](){
+                                              return knob::on(knob::ATM_POISSON_METRIC_FIX); }();
 
         // ATOM_METRIC_DIVERGENCE — hoisted out of the cell loop; see lib/Utils.h.
         const bool metric_div = AtomUtils::metric_divergence();
@@ -339,21 +339,21 @@ public:
         // Off-branch bit-identical: dlnrho_i is 0 when the knob is off, so num_a and div_src
         // reduce exactly to what they were.
         static const bool anelastic_knob = [](){
-            const char* e = getenv("ATM_ANELASTIC"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_ANELASTIC); }();
         const bool anelastic = anelastic_knob && ((int)m.m_dlnrho_dr.size() == m.im);
         const double* const dlnrho = anelastic ? m.m_dlnrho_dr.data() : nullptr;
         // ATM_RHIE_CHOW -- fourth-difference pressure smoothing, ported from ATHAD 2026-08-27.
         // 0 (default) restores the old branch exactly. See the term at the update below.
         static const double rc_alpha = [](){
-            const char* e = getenv("ATM_RHIE_CHOW"); return e ? atof(e) : 0.0; }();
+            return knob::real(knob::ATM_RHIE_CHOW); }();
 
         // Main compute loop — land mask lookups + hoisted j-invariants + k sliding window
         // ATM_PRESS_SWEEPS -- relaxation sweeps per call, default 1, which is what this solver
         // has always done. Ported from ATHAD, which took it from ATURAN's shared
         // PressureSolver.h (<TAG>_PRESS_SWEEPS). Independent of ATM_PROJ_SWEEPS below, so
         // varying one does not move the other.
-        static const int n_sweeps_knob = [](){ const char* e = getenv("ATM_PRESS_SWEEPS");
-                                               const int v = e ? atoi(e) : 1;
+        static const int n_sweeps_knob = [](){
+                                               const int v = knob::integer(knob::ATM_PRESS_SWEEPS);
                                                return v > 0 ? v : 1; }();
         const int n_press_sweeps = (sweeps_override > 0) ? sweeps_override : n_sweeps_knob;
 
@@ -362,7 +362,7 @@ public:
         // Function-local statics, NOT model members (sizeof(cAtmosphereModel) is a stack-canary
         // hazard in this tree). Allocated only when the knob is on.
         static const bool line_solve = [](){
-            const char* e = getenv("ATM_PRESS_LINE_SOLVE"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_PRESS_LINE_SOLVE); }();
         static std::vector<double> rhs_cache;
         static std::vector<char>   is_fluid;
         const size_t ncell = (size_t)m.im * m.jm * m.km;
@@ -837,8 +837,7 @@ public:
         // is exactly why this needs a COUNTER and not an argument: the first repair that works
         // will hit the clamp before it shows a circulation, and would otherwise look like a null.
         const double p_dyn_ceiling = [&](){
-            const char* e = getenv("ATM_PDYN_CEILING");
-            const double v = e ? atof(e) : 0.0;
+            const double v = knob::real(knob::ATM_PDYN_CEILING);
             return (v > 0.0) ? v : ((m.total_iter_count > 300) ? 3.0 : 10.0);
         }();
         long   n_clip   = 0;     // cells the ceiling actually truncated
@@ -1190,8 +1189,7 @@ public:
     // ==================================================================
     static int projectInLoopSweeps(){
         static const int v = [](){
-            const char* e = getenv("ATM_PROJECT_IN_LOOP");
-            const int n = e ? atoi(e) : 0;
+            const int n = knob::integer(knob::ATM_PROJECT_IN_LOOP);
             return n > 0 ? n : 0; }();
         return v;
     }
@@ -1310,7 +1308,7 @@ public:
     void report_projection_consistency(const char* tag)
     {
         static const bool on = [](){
-            const char* e = getenv("ATM_PROJ_CONSISTENCY"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_PROJ_CONSISTENCY); }();
         if (!on) return;
         using namespace std;
 
@@ -1321,14 +1319,13 @@ public:
         const double inv_dphi2= 1.0 / (m.dphi * m.dphi);
         const double inv_2dphi= 1.0 / (2.0 * m.dphi);
         const bool   metric_fix = [](){
-            const char* e = getenv("ATM_POISSON_METRIC_FIX"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_POISSON_METRIC_FIX); }();
 
         // metric factors at a level; sinthe carries the model's own 0.55 floor
         auto sin_j = [&](int j){ double s = sin(m.the.z[j]); return (s < 0.55) ? 0.55 : s; };
 
         static const double pdyn_cap = [](){
-            const char* e = getenv("ATM_PDYN_CAP");
-            const double v = e ? atof(e) : 0.0;
+            const double v = knob::real(knob::ATM_PDYN_CAP);
             return (v > 0.0) ? v : 2.0; }();
 
         double s_div = 0.0, s_rc = 0.0, s_rw = 0.0, s_lf = 0.0;  long n = 0, n_clamped = 0;
@@ -1470,8 +1467,7 @@ public:
     void project_initial_velocity(int n_sweeps = 200)
     {
         static const int proj_sweeps = [](){
-            const char* e = getenv("ATM_PROJ_SWEEPS");
-            const int v = e ? atoi(e) : 1;
+            const int v = knob::integer(knob::ATM_PROJ_SWEEPS);
             return v > 0 ? v : 1; }();
         using namespace std;
         cout << endl << endl << "      ATOM: project_initial_velocity ("

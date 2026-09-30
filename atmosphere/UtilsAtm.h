@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "CloudFraction.h"
 
 #include "cAtmosphereModel.h"
@@ -357,8 +358,7 @@ public:
             // a latitude where the 1/sin^2(theta) Poisson metric is large, and the shipped cut
             // is mid-latitude. Read once via getenv, like every other knob here.
             static const int j_longal = [](){
-                const char* e = getenv("ATM_LONGAL_J");
-                const int v = e ? atoi(e) : 62;
+                const int v = knob::integer(knob::ATM_LONGAL_J);
                 return (v >= 0 && v < cAtmosphereModel::jm) ? v : 62; }();
             m.paraview_vtk_longal(bathymetry_name, j_longal, m.iter_n);
 

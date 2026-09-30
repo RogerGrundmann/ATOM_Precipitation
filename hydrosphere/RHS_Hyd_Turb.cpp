@@ -4,6 +4,7 @@
  * Called by solveRungeKutta_Hydrosphere_Turb at every RK4 sub-stage.
 */
 
+#include "Knobs.h"
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
@@ -651,8 +652,8 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // HYD_METRIC_RADIUS default 0) BY DESIGN, because this term corrects the existing diffusion
     // operator and must be scaled like it rather than like the physics; and salinity `c` gets
     // nothing, because diff_prec_re_inv = 1/(sc*re_turb) is a constant with no nue in it.
-    static const double nue_grad_s = [](){ const char* e = getenv("HYD_NUE_GRAD");
-                                           return e ? atof(e) : 0.0; }();
+    static const double nue_grad_s = [](){
+                                           return knob::real(knob::HYD_NUE_GRAD); }();
     double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
            cross_tke = 0.0, cross_dis = 0.0;
     if(nue_grad_s != 0.0){
@@ -759,7 +760,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // that could remove the noise without removing the circulation with it.
     // ==================================================================================
     static const double a_h_phys = [](){
-        const char* e = getenv("HYD_A_H"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::HYD_A_H); }();
 
     if(a_h_phys != 0.0){
         const double inv_r_true = L_hyd / (r_Earth * 1.0e3);          // L_hyd / R_Earth [m/m]
@@ -976,7 +977,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // ceiling ATM_HYDRO_PGF met and the reason its default is also 0.0.
     // ==================================================================================
     static const double bcl_pgf = [](){
-        const char* e = getenv("HYD_BAROCLINIC_PGF"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::HYD_BAROCLINIC_PGF); }();
 
     double bcl_the = 0.0, bcl_phi = 0.0;
     if(bcl_pgf != 0.0 && is_water(h, i, j, k)
@@ -1118,7 +1119,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // non-dimensional temperature difference, so t_0 cancels and no extra factor appears.
     // ==================================================================================
     static const double sfc_flux_cH = [](){
-        const char* e = getenv("HYD_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::HYD_SFC_FLUX); }();
 
     if(sfc_flux_cH != 0.0 && i == im-2
        && is_water(h, i, j, k) && is_water(h, im-1, j, k)){
@@ -1259,7 +1260,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // so this acts on the baroclinic deviation at the bottom -- which is where B.6's lower-column
     // rise lives.
     static const double deep_drag_tau_d = [](){
-        const char* e = getenv("HYD_DEEP_DRAG"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::HYD_DEEP_DRAG); }();
     if (deep_drag_tau_d > 0.0 && i == 1 && is_water(h, i, j, k)) {
         const double r_nd = (L_hyd / u_0) / (deep_drag_tau_d * 86400.0);
         rhs_v.x[i][j][k] -= r_nd * v_ijk;

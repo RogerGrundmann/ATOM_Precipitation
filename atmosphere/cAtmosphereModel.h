@@ -1,6 +1,7 @@
 #ifndef CATMOSPHEREMODEL_H
 #define CATMOSPHEREMODEL_H
 
+#include "Knobs.h"
 #include <fenv.h>
 #include <algorithm>
 #include <cstdio>
@@ -160,7 +161,7 @@ public:
             // *** RE-FLIPPED ON 2026-09-23 AT THE USER'S INSTRUCTION, WITH THE NOTE ABOVE IN
             // FRONT OF IT: the seam mode is the known cost, and the fix for it is seam damping,
             // not the truncated boundary condition. ATM_BC_SECOND_ORDER=0 restores first order.
-            const char* e = getenv("ATM_BC_SECOND_ORDER"); return !(e && atoi(e) == 0); }();
+            return knob::on(knob::ATM_BC_SECOND_ORDER); }();
         return on;
     }
     const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
@@ -385,8 +386,7 @@ public:
     // at its 12-pass cap. The filter, not the floor, is doing the work here.
     static double metricSinFloor(){
         static const double v = [](){
-            const char* e = getenv("ATM_METRIC_SIN_FLOOR");
-            double f = e ? atof(e) : 0.26;
+            double f = knob::real(knob::ATM_METRIC_SIN_FLOOR);
             if (!(f > 0.0)) f = 1.0e-6;      // 0 or nonsense means "no floor", not a divide by zero
             if (f > 1.0) f = 1.0;
             return f; }();
@@ -604,20 +604,18 @@ private:
     // ==================================================================
     static bool gridPressure(){
         static const bool v = [](){
-            const char* e = getenv("ATM_GRID_PRESSURE"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_GRID_PRESSURE); }();
         return v;
     }
     static double gridPTop(){
         static const double v = [](){
-            const char* e = getenv("ATM_GRID_PTOP");
-            const double d = e ? atof(e) : 0.08538;
+            const double d = knob::real(knob::ATM_GRID_PTOP);
             return (d > 0.0 && d < 1.0) ? d : 0.08538; }();
         return v;
     }
     static double gridBeta(){
         static const double v = [](){
-            const char* e = getenv("ATM_GRID_BETA");
-            const double d = e ? atof(e) : 3.988;
+            const double d = knob::real(knob::ATM_GRID_BETA);
             return (d > 0.0) ? d : 3.988; }();
         return v;
     }
@@ -753,7 +751,7 @@ private:
     // ==================================================================
     static bool metricExact(){
         static const bool v = [](){
-            const char* e = getenv("ATM_METRIC_EXACT"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_METRIC_EXACT); }();
         return v;
     }
 
@@ -785,7 +783,7 @@ private:
     // anyway.
     static bool metricNoCurv(){
         static const bool v = [](){
-            const char* e = getenv("ATM_METRIC_NOCURV"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_METRIC_NOCURV); }();
         return v;
     }
 
@@ -840,7 +838,7 @@ private:
     // ==================================================================
     static bool lengthNdimConsistent(){
         static const bool v = [](){
-            const char* e = getenv("ATM_LENGTH_NDIM"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_LENGTH_NDIM); }();
         return v;
     }
     double ndimLength() const {

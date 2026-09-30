@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 
@@ -122,7 +123,7 @@ public:
                 // truncation condition: no shear across the cut, no extrapolated trend. The
                 // surface (i = im-1) is untouched. u stays Dirichlet 0 either way.
                 static const bool vw_bottom_zg = [](){
-                    const char* e = getenv("HYD_VW_BOTTOM_ZG"); return e && atoi(e) != 0; }();
+                    return knob::on(knob::HYD_VW_BOTTOM_ZG); }();
                 if (vw_bottom_zg) {
                     m.v.x[0][j][k] = m.v.x[1][j][k];
                     m.w.x[0][j][k] = m.w.x[1][j][k];
@@ -200,7 +201,7 @@ public:
         // are -- the pre-0571bc1 seam exactly, second order kept everywhere else; at first order a no-op by
         // arithmetic.
         static const bool seam_periodic = [](){
-            const char* e = std::getenv("HYD_SEAM_PERIODIC"); return e ? std::atoi(e) != 0 : true; }();
+            return knob::on(knob::HYD_SEAM_PERIODIC); }();
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 

@@ -1,0 +1,272 @@
+#pragma once
+// Knobs.h -- THE registry of runtime environment knobs (ATM_*, HYD_*, ATOM_*). KNOB-INV plan B, 2026-09-30.
+//
+// Every environment switch in atmosphere/, hydrosphere/ and lib/ is declared ONCE, in ATOM_KNOB_LIST below:
+// name, default (as text), Result/Diag, the class from docs/knob_inventory.md (F X N R P S I D), a one-line note.
+// Code reads a knob only through the accessors -- knob::on / integer / real / text / is_set -- never getenv().
+// That removes three defects the inventory found (docs/knob_inventory.md, "Defects found by the inventory"):
+//   1. a result-changing knob missing from the [RUN CONFIG] banner: the banner is GENERATED from this list;
+//   2. one knob parsed differently at different sites (ATM_POISSON_METRIC_FIX was atof at one site and atoi at
+//      two): each accessor parses one way, everywhere;
+//   3. a default copied into every site that reads the knob: it lives here once.
+// Validation that belongs to one use (clamps, "0 means the shipped value") stays at the site.
+//
+// TO ADD A KNOB: add one X(...) row, read it with knob::<accessor>(knob::NAME). It is in the banner automatically.
+// TO FLIP A DEFAULT: change the text in its row. Nothing else holds a copy.
+//
+// Parsing: on() = atoi(value) != 0; integer() = atoi; real() = atof; text() = the raw string. A default that is
+// not a number (ATM_METRIC_RADIUS = "r_Earth") must be read with is_set() first -- the site supplies the value --
+// and real()/integer() abort if asked to parse it. Values are read from the environment once, at first use, and
+// cached; nothing in the tree sets environment variables at runtime.
+// Byte identity of the conversion: atof/strtod and the compiler both round a decimal literal correctly, so
+// real("0.08538") is the same double as the literal 0.08538 it replaced.
+
+#include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <sstream>
+#include <string>
+
+namespace knob {
+
+enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cannot change a result
+
+// X(name, default, kind, inventory class, note)
+#define ATOM_KNOB_LIST(X) \
+    X(ATOM_CORIOLIS_NONTRAD, "0", Result, 'S', "non-traditional Coriolis terms (both models)") \
+    X(ATOM_METRIC_CURVATURE, "0", Result, 'S', "spherical curvature terms in the shared metric (both models)") \
+    X(ATOM_METRIC_DIVERGENCE, "0", Result, 'S', "metric terms in the shared divergence (both models)") \
+    X(ATM_ANELASTIC, "0", Result, 'N', "null on Psi (-0.006 %), structural") \
+    X(ATM_BC_SECOND_ORDER, "1", Result, 'F', "2nd-order Neumann, 09-23 (B.5)") \
+    X(ATM_BUOY_CONSISTENT, "0", Result, 'X', "reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes") \
+    X(ATM_BUOY_MOIST, "0", Result, 'N', "null unless BUOY_CONSISTENT") \
+    X(ATM_BUOY_TREF, "0", Result, 'N', "measured +1.0 % on the term, null on the model") \
+    X(ATM_CELLS_FROM_PSI, "1", Result, 'F', "closed-cell IC, 09-12") \
+    X(ATM_CELLS_U_FROM_PSI, "0", Result, 'N', "off; not scored separately") \
+    X(ATM_CELL_ROT_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_CLOUD_FRAC, "1", Result, 'F', "sub-grid cloud, 08-31") \
+    X(ATM_CLOUD_INIT_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_CLOUD_RAD_FRAC, "1", Result, 'F', "08-31") \
+    X(ATM_CLOUD_TAU_MAX, "2.0", Result, 'F', "layer tau ceiling, 08-28") \
+    X(ATM_CO2_BAND, "0.17", Result, 'P', "0.17") \
+    X(ATM_CONV_ADJ, "0", Result, 'R', "off; palliative") \
+    X(ATM_CONV_ADJ_LAPSE, "1.0", Result, 'P', "sub-parameter of CONV_ADJ") \
+    X(ATM_CONV_ADJ_PASSES, "64", Result, 'P', "sub-parameter of CONV_ADJ") \
+    X(ATM_CWB_BANDS, "0", Diag, 'D', "print/dump only") \
+    X(ATM_CWB_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_CWP_CAP, "1.0e9", Result, 'F', "08-31") \
+    X(ATM_CWP_CENSUS, "0", Diag, 'D', "print/dump only") \
+    X(ATM_DAMP_Q_HORIZ, "1", Result, 'R', "step A; qh600 scored") \
+    X(ATM_DAMP_Q_MASS, "0", Result, 'R', "forced by WATER_CLOSURE") \
+    X(ATM_DAMP_Q_VERT, "1", Result, 'R', "step A") \
+    X(ATM_DAMP_T_HORIZ, "1", Result, 'R', "qth_on today") \
+    X(ATM_DAMP_T_VERT, "1", Result, 'R', "null alone (qvt_on)") \
+    X(ATM_EPS_DRY, "0.684", Result, 'P', "0.684") \
+    X(ATM_EVAP_FLUX, "0", Result, 'N', "superseded by WATER_CLOSURE") \
+    X(ATM_EVAP_SPREAD, "0", Result, 'N', "null on a spun-up field (0.2 %)") \
+    X(ATM_EVAP_STRIDE_FIX, "1", Result, 'F', "09-24 (acts only under the closure)") \
+    X(ATM_GRID_BETA, "3.988", Result, 'P', "3.988 (with GRID_PRESSURE)") \
+    X(ATM_GRID_PRESSURE, "0", Result, 'N', "~1 %, sign against it") \
+    X(ATM_GRID_PTOP, "0.08538", Result, 'P', "0.08538 (with GRID_PRESSURE)") \
+    X(ATM_HADLEY_SL, "4.0", Result, 'P', "IC 4.0N/3.0S") \
+    X(ATM_HYDRO_PGF, "0.0", Result, 'N', "superseded by HYDRO_SPLIT") \
+    X(ATM_HYDRO_PGF_RAW, "0", Result, 'N', "worse than HYDRO_PGF; superseded") \
+    X(ATM_HYDRO_SPLIT, "1.0", Result, 'F', "thermal wind, 09-24 (B.2)") \
+    X(ATM_ICE_COLD, "1", Result, 'F', "08-31") \
+    X(ATM_ICE_LIMIT_ARRIVING, "1", Result, 'F', "with RAIN_AREA, 09-01") \
+    X(ATM_LAND_BUCKET, "0.0", Result, 'R', "20-iter evidence only") \
+    X(ATM_LENGTH_NDIM, "0", Result, 'R', "the 40x L_atm defect (item 4 pending)") \
+    X(ATM_LONGAL_J, "62", Diag, 'I', "output slice latitude") \
+    X(ATM_MC_ALF1, "0.05", Result, 'R', "sub-cloud rain evaporation rate 1/s (Tiedtke 5.44e-4; working branch)") \
+    X(ATM_MC_BASE_SAT, "0", Result, 'R', "=2 in gpa_* today") \
+    X(ATM_MC_CAP_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_MC_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
+    X(ATM_MC_ENTR, "0.0", Result, 'R', "updraft entrainment 1/m; 0 = the shipped 0.2/R_cloud") \
+    X(ATM_MC_EVAP_LIMIT, "1", Result, 'F', "drift removed, 09-22") \
+    X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \
+    X(ATM_MC_QVD, "0", Result, 'R', "B.10c") \
+    X(ATM_MC_SGZ, "0", Result, 'R', "B.10b") \
+    X(ATM_MC_S_NDIM, "1", Result, 'F', "09-24") \
+    X(ATM_MC_T_NDIM, "1.0", Result, 'F', "09-22") \
+    X(ATM_METRIC_CHECK, "0", Diag, 'D', "print/dump only") \
+    X(ATM_METRIC_EXACT, "0", Result, 'N', "null on integrated quantities; undecidable") \
+    X(ATM_METRIC_NOCURV, "0", Result, 'N', "attribution arm, done") \
+    X(ATM_METRIC_RADIUS, "r_Earth", Result, 'F', "horizontal metric radius in km; default = the configured r_Earth, 0 = grid coordinate") \
+    X(ATM_METRIC_SIN_FLOOR, "0.26", Result, 'P', "0.26 since 09-10") \
+    X(ATM_METRIC_STRICT, "0", Diag, 'I', "abort on metric check") \
+    X(ATM_MFC_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_MICRO_NDIM, "1.0", Result, 'F', "09-21 (read at 3 sites)") \
+    X(ATM_NUE_GRAD, "1.0", Result, 'F', "09-21") \
+    X(ATM_OROG_Q_MASS, "1", Result, 'F', "09-28 (leak -3125 -> +108 mm/a, climate null; rp_oqm)") \
+    X(ATM_PDYN_CAP, "2.0", Result, 'P', "p_dyn source cap (non-dim)") \
+    X(ATM_PDYN_CEILING, "0.0", Result, 'P', "p_dyn clamp; 0 = phase-dependent (10 before iteration 300, 3 after)") \
+    X(ATM_POISSON_METRIC_FIX, "0", Result, 'N', "consistent horizontal Poisson metric; parsed as an integer at all sites since 2026-09-30 (was atof at one)") \
+    X(ATM_POLAR_CELL_SHEAR, "0.1", Result, 'P', "IC 0.1") \
+    X(ATM_PRECIP_PASSES, "3", Result, 'R', "rain-column passes; default is TwoCatIce::iter_prec_end (3), the site falls back to it") \
+    X(ATM_PRECIP_RELAX, "1.0", Result, 'R', "under-relaxation of the rain-column passes, (0,1]") \
+    X(ATM_PRECIP_UPWIND, "0", Result, 'R', "converged upwind rain column (working branch 1)") \
+    X(ATM_PRESS_LINE_SOLVE, "0", Result, 'N', "measured through the clamp; no runaway fix") \
+    X(ATM_PRESS_SWEEPS, "1", Result, 'P', "1x") \
+    X(ATM_PROJECT_IN_LOOP, "0", Result, 'N', "null at 10 and 200 sweeps") \
+    X(ATM_PROJ_CONSISTENCY, "0", Diag, 'D', "print/dump only") \
+    X(ATM_PROJ_SWEEPS, "1", Result, 'N', "inert (-0.04 % at 10x)") \
+    X(ATM_PSI_FERREL, "40.0", Result, 'P', "Ferrel cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
+    X(ATM_PSI_HADLEY, "120.0", Result, 'P', "Hadley cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
+    X(ATM_PSI_POLAR, "26.0", Result, 'P', "polar cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
+    X(ATM_PSI_PROJ_DUMP, "0", Diag, 'D', "print/dump only") \
+    X(ATM_PSI_SHAPE, "1", Result, 'P', "IC shape 1") \
+    X(ATM_QC_CRIT, "0.05", Result, 'P', "0.05 g/kg since 08-31") \
+    X(ATM_RADIAL_SHAPIRO_STRENGTH, "1.0", Result, 'P', "1.0 (u only)") \
+    X(ATM_RADIAL_SHAPIRO_STRENGTH_VW, "0.0", Result, 'F', "09-12") \
+    X(ATM_RADIATION_MODE, "5", Result, 'S', "5 (radiation diagnostic)") \
+    X(ATM_RAD_COLDIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_RAD_EQUIL, "0", Result, 'R', "pair with SW_INSOL; needs a prognostic T") \
+    X(ATM_RAD_TOPO, "1", Result, 'F', "09-24 (B.4)") \
+    X(ATM_RAIN_AREA, "0.10", Result, 'P', "0.10 since 09-01 (fitted)") \
+    X(ATM_RAIN_PASS_DIAG, "0", Diag, 'D', "print the rain-column pass convergence") \
+    X(ATM_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic restart file (default: only the latest)") \
+    X(ATM_RESTART_STRIDE, "100", Diag, 'I', "restart cadence") \
+    X(ATM_RHIE_CHOW, "0.0", Result, 'N', "null on Psi (structural)") \
+    X(ATM_RH_CRIT, "0.30", Result, 'P', "0.30 since 08-31") \
+    X(ATM_RH_CRIT_ICE, "0.0", Result, 'N', "off; global cirrus -- superseded by RH_MIN_LAT/PTOP") \
+    X(ATM_RH_MIN, "0.65", Result, 'P', "0.65") \
+    X(ATM_RH_MIN_LAT, "1", Result, 'F', "08-31") \
+    X(ATM_RH_MIN_PTOP, "482.0", Result, 'P', "482 hPa (fitted)") \
+    X(ATM_RH_PROFILE, "1", Result, 'F', "08-31") \
+    X(ATM_RH_STORM, "1.0", Result, 'R', "initial storm-track RH factor at 55 deg (working branch 1.15)") \
+    X(ATM_RK_SCALAR_SYNC, "0", Result, 'R', "forced by WATER_CLOSURE") \
+    X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
+    X(ATM_SATADJ_FREEZE_LATENT, "0", Result, 'N', "null (0.05 % of cloud)") \
+    X(ATM_SATADJ_PHASE, "1", Result, 'F', "09-09") \
+    X(ATM_SEAM_PERIODIC, "1", Result, 'F', "09-24") \
+    X(ATM_SEAM_Q_CONSERVE, "0", Result, 'R', "conserve water at the phi seam; 2 = also next to land (working branch 2)") \
+    X(ATM_SEAM_Q_DIAG, "0", Diag, 'D', "print the seam water-conservation buckets") \
+    X(ATM_SFC_FLUX, "0.0", Result, 'N', "null (timescale wall)") \
+    X(ATM_SNOW_DIAG, "0", Diag, 'D', "print the snow budget") \
+    X(ATM_SNOW_WINDOW, "0", Result, 'R', "snow kept on the cold side of -20 C (working branch 2)") \
+    X(ATM_SR_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_SURF_DRAG_CONSISTENT, "1.0", Result, 'R', "B.9, default 1.0 since 2026-09-29 (run_sdr.sh: connected, climate null)") \
+    X(ATM_SW_INSOL, "0.0", Result, 'R', "pair with RAD_EQUIL") \
+    X(ATM_T0_ATTRIB, "0", Diag, 'D', "print/dump only") \
+    X(ATM_TAU_PBROAD, "0.0", Result, 'N', "refuted (lapse 3 %)") \
+    X(ATM_TEQ_SKIN_ONLY, "0", Result, 'R', "instrument branch, must NOT be flipped") \
+    X(ATM_TROPO_INDEX_FIX, "1", Result, 'F', "09-12") \
+    X(ATM_TURB_SIN_FLOOR, "1", Result, 'F', "09-28 (correctness flip; fx4_tsf connected, null)") \
+    X(ATM_TW_BALANCE, "0.0", Result, 'R', "off; the only mid-lat jet IC") \
+    X(ATM_TW_BALANCE_V, "0", Result, 'P', "sub-option of TW_BALANCE") \
+    X(ATM_TW_LATMIN, "15.0", Result, 'P', "sub-parameter of TW_BALANCE") \
+    X(ATM_TW_WMAX, "80.0", Result, 'P', "sub-parameter of TW_BALANCE") \
+    X(ATM_T_FLOOR, "216.65", Result, 'P', "216.65 K since 08-31") \
+    X(ATM_UBUD_BALANCE, "0", Diag, 'D', "print/dump only") \
+    X(ATM_VTK_STRIDE, "5", Diag, 'I', "VTK cadence") \
+    X(ATM_V_MASSBAL, "1", Result, 'F', "08-28") \
+    X(ATM_V_MASSBAL_STRIDE, "1", Result, 'F', "09-12") \
+    X(ATM_WATER_CLOSURE, "0", Result, 'R', "reverted 09-25; works with filter off (qh600)") \
+    X(HYD_A_H, "0.0", Result, 'R', "Laplacian; biharmonic preferred") \
+    X(HYD_A_H_BIHARM, "1.0e19", Result, 'F', "default 1.0e19 since 09-30 (OCN-METRIC, om_b1e19: noise 0.515, radial u 2400x below shipped; 3e19 ran away)") \
+    X(HYD_A_H_BIHARM_SCALED, "1", Result, 'F', "default 1 since 09-30 (sin^4 scaling; unscaled 3e18 NaN'd at the pole with floor 0.26)") \
+    X(HYD_BAROCLINIC_PGF, "0.0", Result, 'R', "pair with PHYDRO_SALT; HYDRO_SPLIT may supersede") \
+    X(HYD_BC_DRAG, "0.0", Result, 'R', "numerical, not physical") \
+    X(HYD_BC_SECOND_ORDER, "1", Result, 'F', "09-23") \
+    X(HYD_BUOY_CONSISTENT, "0.0", Result, 'R', "radial runaway; HYDRO_SPLIT") \
+    X(HYD_DEEP_DRAG, "0.0", Result, 'N', "diagnosis only, 09-28 (user): IS the B.6 profile cause (1.268 -> 0.707 at tau 20 s), numerical strengths only") \
+    X(HYD_HYDRO_SPLIT, "0.0", Result, 'N', "won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged)") \
+    X(HYD_KE_SPLIT, "0", Diag, 'D', "print/dump only") \
+    X(HYD_LINE_FOLD, "1", Result, 'P', "sub-option of LINE_SOLVE") \
+    X(HYD_LINE_GAUGE, "1", Result, 'P', "sub-option of LINE_SOLVE") \
+    X(HYD_LINE_SOLVE, "0", Result, 'N', "not needed (w2 slightly worse)") \
+    X(HYD_METRIC_RADIUS, "6370.0", Result, 'F', "default 6370 km since 09-30 (user); profile stays bottom-intensified (structural, OCN-PROF)") \
+    X(HYD_METRIC_SIN_FLOOR, "0.26", Result, 'P', "0.26 since 09-28, was 0.4 (ro_osf26/40: 75-90 KE -7.5 %, equatorward null; matches the atmosphere)") \
+    X(HYD_NUE_GRAD, "0.0", Result, 'R', "off; would inherit the broken metric") \
+    X(HYD_PHYDRO_SALT, "0", Result, 'R', "pair") \
+    X(HYD_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic ocean restart file (default: only the latest)") \
+    X(HYD_RUN_NEUMANN, "1", Result, 'F', "default 1 since 09-30, with METRIC_RADIUS") \
+    X(HYD_SEAM_PERIODIC, "1", Result, 'F', "09-28 (ocean seam blow-up 0.128 -> 79 m/s under HYD_BC_SECOND_ORDER=1; sp_ship)") \
+    X(HYD_SFC_FLUX, "0.0", Result, 'R', "unmeasured") \
+    X(HYD_SSS_FILL, "1", Result, 'F', "SSS sentinel, 09-08") \
+    X(HYD_T_FREEZE, "1", Result, 'F', "09-05") \
+    X(HYD_T_FREEZE_SFC, "1", Result, 'F', "09-05") \
+    X(HYD_VW_BOTTOM_ZG, "0", Result, 'N', "-17 % of the profile excess; refuted as cause")
+
+enum Id : int {
+#define ATOM_KNOB_ID(n, d, k, c, doc) n,
+    ATOM_KNOB_LIST(ATOM_KNOB_ID)
+#undef ATOM_KNOB_ID
+    N_KNOBS
+};
+
+struct Spec { const char* name; const char* dflt; Kind kind; char cls; const char* doc; };
+
+inline constexpr Spec specs[N_KNOBS] = {
+#define ATOM_KNOB_SPEC(n, d, k, c, doc) {#n, d, k, c, doc},
+    ATOM_KNOB_LIST(ATOM_KNOB_SPEC)
+#undef ATOM_KNOB_SPEC
+};
+
+// The environment, read once for all knobs (thread-safe static init).
+inline const char* env(Id id) {
+    static const std::array<const char*, N_KNOBS> cache = [](){
+        std::array<const char*, N_KNOBS> a{};
+        for (int i = 0; i < N_KNOBS; i++) a[i] = std::getenv(specs[i].name);
+        return a; }();
+    return cache[id];
+}
+
+inline bool is_set(Id id) { return env(id) != nullptr; }
+
+// The value in force as text: the environment's, else the registry default.
+inline const char* value(Id id) { const char* e = env(id); return e ? e : specs[id].dflt; }
+
+inline const char* numeric_value(Id id) {
+    const char* v = value(id);
+    char* end = nullptr;
+    std::strtod(v, &end);
+    if (end == v) {
+        std::fprintf(stderr, "knob::%s: default \"%s\" is not a number -- read it with knob::is_set() first\n",
+                     specs[id].name, specs[id].dflt);
+        std::abort();
+    }
+    return v;
+}
+
+inline bool        on(Id id)      { return std::atoi(numeric_value(id)) != 0; }
+inline int         integer(Id id) { return std::atoi(numeric_value(id)); }
+inline double      real(Id id)    { return std::atof(numeric_value(id)); }
+inline std::string text(Id id)    { return value(id); }
+
+// [RUN CONFIG] lines for every knob whose name starts with one of the prefixes. Result knobs are listed in full,
+// SHORT=value, with '*' when the value is the compiled-in default (not set in the environment); Diag knobs only
+// when set. `tag` is the log prefix ("      AGCM: "), `per_line` the entries per line.
+inline std::string banner(const char* tag, std::initializer_list<const char*> prefixes, int per_line = 8) {
+    auto want = [&](const char* n){
+        for (const char* p : prefixes) if (std::strncmp(n, p, std::strlen(p)) == 0) return true;
+        return false; };
+    auto entry = [](int i){
+        const char* n = specs[i].name;
+        const char* s = std::strchr(n, '_');
+        std::string e = std::string(s ? s + 1 : n) + "=";
+        const char* v = env(static_cast<Id>(i));
+        if (v) e += v; else e += std::string(specs[i].dflt[0] ? specs[i].dflt : "\"\"") + "*";
+        return e; };
+    std::ostringstream b;
+    int n = 0;
+    for (int i = 0; i < N_KNOBS; i++) {
+        if (!want(specs[i].name) || specs[i].kind != Result) continue;
+        if (n % per_line == 0) b << (n ? "\n" : "") << tag << "[RUN CONFIG] knobs:";
+        b << "  " << entry(i);
+        n++;
+    }
+    b << "\n" << tag << "[RUN CONFIG] diagnostic/output knobs set:";
+    int d = 0;
+    for (int i = 0; i < N_KNOBS; i++)
+        if (want(specs[i].name) && specs[i].kind == Diag && env(static_cast<Id>(i))) { b << "  " << entry(i); d++; }
+    if (!d) b << "  none";
+    b << "\n" << tag << "[RUN CONFIG] (* = compiled-in default, not set in the environment; the list is lib/Knobs.h)\n";
+    return b.str();
+}
+
+}  // namespace knob

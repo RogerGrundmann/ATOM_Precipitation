@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -814,7 +815,7 @@ public:
         // the k = 1 seam mode needs a ~600-iteration run (the mode takes ~300 to leave the noise),
         // which was postponed at the flip.
         static const bool seam_periodic = [](){
-            const char* e = getenv("ATM_SEAM_PERIODIC"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_SEAM_PERIODIC); }();
         const double s43 = seam_periodic ? 1.0 : m.c43;
         const double s13 = seam_periodic ? 0.0 : m.c13;
 
@@ -844,7 +845,7 @@ public:
         //     no air neighbour:     the seam keeps q_old (nothing to average with, nothing overwritten)
         // with the same no-negative clip; all-air cells are treated exactly as =1. Water only.
         static const int seam_q_conserve = [](){
-            const char* e = getenv("ATM_SEAM_Q_CONSERVE"); return e ? atoi(e) : 0; }();
+            return knob::integer(knob::ATM_SEAM_Q_CONSERVE); }();
         const bool seam_q  = seam_q_conserve != 0 && seam_periodic;
         const bool seam_q2 = seam_q_conserve == 2 && seam_periodic;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
@@ -858,7 +859,7 @@ public:
         // (i >= i_topography of each cell, rho*dz with the density at entry, seam counted once), per band.
         // Reads and writes only its own scratch; the model state is untouched.
         static const bool seam_q_diag = [](){
-            const char* e = getenv("ATM_SEAM_Q_DIAG"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_SEAM_Q_DIAG); }();
         const int SQD_N = 5;          // A, B, C, A-clipped, total
         std::vector<double> sqd_dq, sqd_n;
         std::vector<double> sqd_rho, sqd_dz;

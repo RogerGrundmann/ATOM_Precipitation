@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 
 #include <algorithm>
@@ -29,7 +30,7 @@ using namespace AtomUtils;
 // 1/sin up to ~15x (row j = 1, 89 deg; 26 000x at a pole row, where sin = 1e-5) larger than the momentum equations beside them.
 // =1 applies the same floor here, at both sites (the SST closure receives sinthe from the first).
 inline bool turbSinFloorOn(){
-    static const bool on = [](){ const char* e = std::getenv("ATM_TURB_SIN_FLOOR"); return e ? std::atoi(e) != 0 : true; }();
+    static const bool on = [](){ return knob::on(knob::ATM_TURB_SIN_FLOOR); }();
     return on;
 }
 

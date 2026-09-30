@@ -50,6 +50,7 @@
 
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 
 #include <chrono>
@@ -67,7 +68,7 @@ public:
     // changes the thermal structure of every unstable column; it is measured before any flip.
     static bool enabled(){
         static const bool v = [](){
-            const char* e = getenv("ATM_CONV_ADJ"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_CONV_ADJ); }();
         return v;
     }
 
@@ -81,12 +82,12 @@ public:
         // ATM_CONV_ADJ_LAPSE scales the critical lapse rate: 0 gives an isothermal criterion,
         // values above 1 make the scheme stricter than the dry adiabat, which is one crude way
         // to stand in for a moist adiabat in a condensing region.
-        static const double lapse_fac = [](){ const char* e = getenv("ATM_CONV_ADJ_LAPSE");
-                                              return e ? atof(e) : 1.0; }();
+        static const double lapse_fac = [](){
+                                              return knob::real(knob::ATM_CONV_ADJ_LAPSE); }();
         // Sweeps repeat until the column is stable; the cap only exists so a pathological
         // column cannot spin here.
-        static const int max_pass = [](){ const char* e = getenv("ATM_CONV_ADJ_PASSES");
-                                          const int v = e ? atoi(e) : 64;
+        static const int max_pass = [](){
+                                          const int v = knob::integer(knob::ATM_CONV_ADJ_PASSES);
                                           return v > 0 ? v : 64; }();
 
         // A column is left alone unless it is superadiabatic by more than this, so round-off

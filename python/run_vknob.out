@@ -1,0 +1,53 @@
+built -O0: cli/knob_new_atm cli/knob_new_hyd  from WORKTREE (c90630c + working tree)
+working branch env: ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15 
+  launched vknob_a  (knob_new_atm  clean)  pid 15429
+  launched vknob_b  (knob_old_atm  clean)  pid 15432
+  launched vknob_c  (knob_new_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 15435
+  launched vknob_d  (knob_old_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 15438
+  launched vknob_e  (knob_new_hyd  clean)  pid 15441
+  launched vknob_f  (knob_old_hyd  clean)  pid 15444
+  launched vknob_g  (knob_new_hyd  HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 HYD_T_FREEZE=0)  pid 15447
+  launched vknob_h  (knob_old_hyd  HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 HYD_T_FREEZE=0)  pid 15450
+=== waiting for arms: vknob_a vknob_b vknob_c vknob_d vknob_e vknob_f vknob_g vknob_h  (10:06:52)
+  vknob_a exit 0
+  vknob_b exit 0
+  vknob_c exit 0
+  vknob_d exit 0
+  vknob_e exit 0
+  vknob_f exit 0
+  vknob_g exit 0
+  vknob_h exit 0
+=== all arms done 10:37:56
+    DIFFERS: RUN_CONFIG.txt
+A  atm new clean == old clean: identical 13 / differing 1  -> FAIL
+    DIFFERS: RUN_CONFIG.txt
+B  atm new+working branch == old+working branch: identical 13 / differing 1  -> FAIL
+C  hyd new clean == old clean: identical 17 / differing 0  -> PASS
+D  hyd new+5 knobs == old+5 knobs: identical 17 / differing 0  -> PASS
+E  CONTROL atm new+working branch vs old clean -- MUST differ: identical 1 / differing 13  -> PASS
+F  CONTROL hyd new+5 knobs vs old clean -- MUST differ: identical 3 / differing 14  -> PASS
+--- new banners
+      AGCM: [RUN CONFIG] ice scheme 2 = TwoCat (rain+snow);  nm = 20;  restart_from_iter = -1;  moist_phys_start_iter = 0;  radiation_mode = 5;  output output_vknob_c/
+      AGCM: [RUN CONFIG] knobs:  CORIOLIS_NONTRAD=0*  METRIC_CURVATURE=0*  METRIC_DIVERGENCE=0*  ANELASTIC=0*  BC_SECOND_ORDER=1*  BUOY_CONSISTENT=0*  BUOY_MOIST=0*  BUOY_TREF=0*
+      AGCM: [RUN CONFIG] knobs:  CELLS_FROM_PSI=1*  CELLS_U_FROM_PSI=0*  CLOUD_FRAC=1*  CLOUD_RAD_FRAC=1*  CLOUD_TAU_MAX=2.0*  CO2_BAND=0.17*  CONV_ADJ=0*  CONV_ADJ_LAPSE=1.0*
+      AGCM: [RUN CONFIG] knobs:  CONV_ADJ_PASSES=64*  CWP_CAP=1.0e9*  DAMP_Q_HORIZ=0  DAMP_Q_MASS=0*  DAMP_Q_VERT=0  DAMP_T_HORIZ=1*  DAMP_T_VERT=0  EPS_DRY=0.684*
+      AGCM: [RUN CONFIG] knobs:  EVAP_FLUX=0*  EVAP_SPREAD=0*  EVAP_STRIDE_FIX=1*  GRID_BETA=3.988*  GRID_PRESSURE=0*  GRID_PTOP=0.08538*  HADLEY_SL=4.0*  HYDRO_PGF=0.0*
+      AGCM: [RUN CONFIG] knobs:  HYDRO_PGF_RAW=0*  HYDRO_SPLIT=1.0*  ICE_COLD=1*  ICE_LIMIT_ARRIVING=1*  LAND_BUCKET=0.0*  LENGTH_NDIM=0*  MC_ALF1=5.44e-4  MC_BASE_SAT=2
+      AGCM: [RUN CONFIG] knobs:  MC_ED_AREA=1  MC_ENTR=0.0*  MC_EVAP_LIMIT=1*  MC_GP_AREA=0*  MC_QVD=2  MC_SGZ=0*  MC_S_NDIM=1*  MC_T_NDIM=1.0*
+      AGCM: [RUN CONFIG] knobs:  METRIC_EXACT=0*  METRIC_NOCURV=0*  METRIC_RADIUS=r_Earth*  METRIC_SIN_FLOOR=0.26*  MICRO_NDIM=1.0*  NUE_GRAD=1.0*  OROG_Q_MASS=1*  PDYN_CAP=2.0*
+      AGCM: [RUN CONFIG] knobs:  PDYN_CEILING=0.0*  POISSON_METRIC_FIX=0*  POLAR_CELL_SHEAR=0.1*  PRECIP_PASSES=3*  PRECIP_RELAX=1.0*  PRECIP_UPWIND=1  PRESS_LINE_SOLVE=0*  PRESS_SWEEPS=1*
+      AGCM: [RUN CONFIG] knobs:  PROJECT_IN_LOOP=0*  PROJ_SWEEPS=1*  PSI_FERREL=40.0*  PSI_HADLEY=120.0*  PSI_POLAR=26.0*  PSI_SHAPE=1*  QC_CRIT=0.05*  RADIAL_SHAPIRO_STRENGTH=1.0*
+      AGCM: [RUN CONFIG] knobs:  RADIAL_SHAPIRO_STRENGTH_VW=0.0*  RADIATION_MODE=5*  RAD_EQUIL=0*  RAD_TOPO=1*  RAIN_AREA=0.10*  RHIE_CHOW=0.0*  RH_CRIT=0.30*  RH_CRIT_ICE=0.0*
+      AGCM: [RUN CONFIG] knobs:  RH_MIN=0.65*  RH_MIN_LAT=1*  RH_MIN_PTOP=482.0*  RH_PROFILE=1*  RH_STORM=1.15  RK_SCALAR_SYNC=0*  SATADJ_FADE=0*  SATADJ_FREEZE_LATENT=0*
+      AGCM: [RUN CONFIG] knobs:  SATADJ_PHASE=1*  SEAM_PERIODIC=1*  SEAM_Q_CONSERVE=2  SFC_FLUX=0.0*  SNOW_WINDOW=2  SURF_DRAG_CONSISTENT=1.0*  SW_INSOL=0.0*  TAU_PBROAD=0.0*
+      AGCM: [RUN CONFIG] knobs:  TEQ_SKIN_ONLY=0*  TROPO_INDEX_FIX=1*  TURB_SIN_FLOOR=1*  TW_BALANCE=0.0*  TW_BALANCE_V=0*  TW_LATMIN=15.0*  TW_WMAX=80.0*  T_FLOOR=216.65*
+      AGCM: [RUN CONFIG] knobs:  V_MASSBAL=1*  V_MASSBAL_STRIDE=1*  WATER_CLOSURE=1
+      AGCM: [RUN CONFIG] diagnostic/output knobs set:  none
+      AGCM: [RUN CONFIG] (* = compiled-in default, not set in the environment; the list is lib/Knobs.h)
+      AGCM: [RUN CONFIG] in force (WATER_CLOSURE=1):  RK_SCALAR_SYNC=2  SATADJ_FADE=2  DAMP_Q_MASS=1
+      OGCM: [RUN CONFIG] knobs:  CORIOLIS_NONTRAD=0*  METRIC_CURVATURE=0*  METRIC_DIVERGENCE=0*  A_H=0.0*  A_H_BIHARM=0  A_H_BIHARM_SCALED=0  BAROCLINIC_PGF=0.0*  BC_DRAG=0.0*
+      OGCM: [RUN CONFIG] knobs:  BC_SECOND_ORDER=1*  BUOY_CONSISTENT=0.0*  DEEP_DRAG=0.0*  HYDRO_SPLIT=0.0*  LINE_FOLD=1*  LINE_GAUGE=1*  LINE_SOLVE=0*  METRIC_RADIUS=0
+      OGCM: [RUN CONFIG] knobs:  METRIC_SIN_FLOOR=0.26*  NUE_GRAD=0.0*  PHYDRO_SALT=0*  RUN_NEUMANN=0  SEAM_PERIODIC=1*  SFC_FLUX=0.0*  SSS_FILL=1*  T_FREEZE=0
+      OGCM: [RUN CONFIG] knobs:  T_FREEZE_SFC=1*  VW_BOTTOM_ZG=0*
+      OGCM: [RUN CONFIG] diagnostic/output knobs set:  none
+      OGCM: [RUN CONFIG] (* = compiled-in default, not set in the environment; the list is lib/Knobs.h)

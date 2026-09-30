@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include <vector>
 #include <cstdlib>
 
@@ -48,7 +49,7 @@ namespace HydBuoy {
 
 inline double strength(){
     static const double s = [](){
-        const char* e = std::getenv("HYD_BUOY_CONSISTENT"); return e ? std::atof(e) : 0.0; }();
+        return knob::real(knob::HYD_BUOY_CONSISTENT); }();
     return s;
 }
 
@@ -110,7 +111,7 @@ namespace HydSplit {
 
 inline double strength(){
     static const double s = [](){
-        const char* e = std::getenv("HYD_HYDRO_SPLIT"); return e ? std::atof(e) : 0.0; }();
+        return knob::real(knob::HYD_HYDRO_SPLIT); }();
     return s;
 }
 inline bool enabled(){ return strength() != 0.0; }

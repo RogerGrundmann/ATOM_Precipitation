@@ -8,6 +8,7 @@
  * class to combine the right hand sides of the differential equations for the Runge-Kutta scheme
 */
 
+#include "Knobs.h"
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -473,7 +474,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // force zero mean at every height, so moistening the parcel alone would add a uniform
     // updraft rather than a buoyancy. tv_ref_level is built in the same sweep.
     static const bool moist_buoy = [](){
-        const char* e = getenv("ATM_BUOY_MOIST"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_BUOY_MOIST); }();
     const bool moist_buoy_ok = moist_buoy && ((int)tv_ref_level.size() == im);
     const double t_buoy = moist_buoy_ok
         ? t.x[i][j][k] * (1.0 + (R_WaterVapour / R_Air - 1.0) * c.x[i][j][k]
@@ -944,8 +945,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // maintaining the gradients it needs, in the manner of ATM_METRIC_SIN_FLOOR 0.55 -> 0.26.
     // The OCEAN's HYD_NUE_GRAD is deliberately NOT flipped with it -- it inherits the broken
     // 200-400 m horizontal metric, so its size there is a different question.
-    static const double nue_grad_s = [](){ const char* e = getenv("ATM_NUE_GRAD");
-                                           return e ? atof(e) : 1.0; }();
+    static const double nue_grad_s = [](){
+                                           return knob::real(knob::ATM_NUE_GRAD); }();
     double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
            cross_tke = 0.0, cross_dis = 0.0;
     if(nue_grad_s != 0.0){
@@ -1086,9 +1087,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // ATM_HYDRO_PGF is a STRENGTH, not a flag, so the approach can be ramped.
     // ==================================================================================
     static const double hydro_pgf = [](){
-        const char* e = getenv("ATM_HYDRO_PGF"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::ATM_HYDRO_PGF); }();
     static const bool hydro_raw = [](){
-        const char* e = getenv("ATM_HYDRO_PGF_RAW"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_HYDRO_PGF_RAW); }();
 
     double hydro_the = 0.0, hydro_phi = 0.0;
     if(hydro_pgf != 0.0 && !land_ijk
@@ -1244,7 +1245,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // ATM_SFC_FLUX = c_H in W/m2/K. Default 0 = OFF and bit-identical; 15 matches MLR's own
     // constant. Applied at the FIRST AIR LEVEL only, i_topography+1, over land and ocean alike.
     static const double sfc_flux_cH = [](){
-        const char* e = getenv("ATM_SFC_FLUX"); return e ? atof(e) : 0.0; }();
+        return knob::real(knob::ATM_SFC_FLUX); }();
     if (sfc_flux_cH != 0.0 && i == i_topography[j][k] + 1) {
         double rho = r_humid.x[i][j][k];
         if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = r_air;
@@ -1315,10 +1316,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //     and the pressure answers only 24 % of it (corr -0.75, slope -0.24), which is why
     //     the other 76 % integrates into `u`. See CLAUDE.md.
     static const bool buoy_tref = [](){
-        const char* e = getenv("ATM_BUOY_TREF"); return e && atoi(e) != 0; }();
+        return knob::on(knob::ATM_BUOY_TREF); }();
     static const bool buoy_consistent = [](){
-        const char* e = getenv("ATM_BUOY_CONSISTENT");
-        return e && atoi(e) != 0;                         // DEFAULT OFF AGAIN since 2026-09-14
+        return knob::on(knob::ATM_BUOY_CONSISTENT);                         // DEFAULT OFF AGAIN since 2026-09-14
     }();
 
     double buoyancy_term;
@@ -1407,7 +1407,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // this tree can afford the drag is correct and slow. It becomes the model's only
     // velocity-proportional momentum sink that is actually present.
     static const double surf_drag_s = [](){
-        const char* e = getenv("ATM_SURF_DRAG_CONSISTENT"); return e ? atof(e) : 1.0; }();   // DEFAULT 1.0 since 2026-09-29
+        return knob::real(knob::ATM_SURF_DRAG_CONSISTENT); }();   // DEFAULT 1.0 since 2026-09-29
     const double surf_drag_ship = rayleigh_kf * ndimLength() / u_0 * dt;
     double surf_drag = (surf_drag_s == 0.0)
         ? (rayleigh_kf * ndimLength() / u_0 * dt) * drag_profile
@@ -1531,8 +1531,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // climbing at 600 where the bands were not; and 1712 mm/a on a 30.7 mm reservoir is a
     // 5.8-day e-folding = 2.5e+06 iterations, so what is measured is the fast LOCAL response.
     // ==================================================================
-    static const double micro_ndim = [](){ const char* e = getenv("ATM_MICRO_NDIM");
-                                           return e ? atof(e) : 1.0; }();
+    static const double micro_ndim = [](){
+                                           return knob::real(knob::ATM_MICRO_NDIM); }();
     double coeff_micro = r_humid.x[i][j][k];
     if(micro_ndim != 0.0){
         static const double L_over_u0 = metricShellLength() / u_0;   // fixed after init

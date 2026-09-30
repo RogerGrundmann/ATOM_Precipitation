@@ -1,3 +1,4 @@
+#include "Knobs.h"
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 #include "cAtmosphereModel.h"
@@ -1022,7 +1023,7 @@ void cHydrosphereModel::initSalinity() {
     // 0 = the shipped branch, which copied the -32767 sentinel into the salinity field.
     // Only the Ma==0 (2-D field) branch is affected; the Ma>0 zonal-mean branch has skipped
     // the sentinel since `1cba198` and is unchanged either way.
-    const int sss_fill = [](){ const char* e = getenv("HYD_SSS_FILL"); return e ? atoi(e) : 1; }();
+    const int sss_fill = [](){ return knob::integer(knob::HYD_SSS_FILL); }();
 
     bool nasa_sss = false;
     if (use_NASA_salinity) {

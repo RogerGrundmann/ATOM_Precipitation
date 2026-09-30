@@ -1,6 +1,7 @@
 #ifndef CHYDROSPHEREMODEL_H
 #define CHYDROSPHEREMODEL_H
 
+#include "Knobs.h"
 #include <fenv.h>
 #include <algorithm>
 #include <fstream>
@@ -103,7 +104,7 @@ public:
     // ==================================================================================
     static bool bcSecondOrder() {
         static const bool on = [](){
-            const char* e = getenv("HYD_BC_SECOND_ORDER"); return !(e && atoi(e) == 0); }();
+            return knob::on(knob::HYD_BC_SECOND_ORDER); }();
         return on;
     }
     const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
@@ -357,8 +358,7 @@ public:
     // and the barotropic solve has its own 1e-3 floor (a different operator).
     static double hydMetricSinFloor(){
         static const double v = [](){
-            const char* e = getenv("HYD_METRIC_SIN_FLOOR");
-            double f = e ? atof(e) : 0.26;
+            double f = knob::real(knob::HYD_METRIC_SIN_FLOOR);
             if (!(f > 0.0)) f = 1.0e-6;      // 0 or nonsense means "no floor", not a divide by zero
             if (f > 1.0) f = 1.0;
             return f; }();

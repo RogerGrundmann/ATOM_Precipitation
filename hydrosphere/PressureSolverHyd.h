@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 
@@ -36,7 +37,7 @@ public:
     void run(int n_sweeps = 1, bool verbose = true)
     {
         static const bool run_neumann = [](){
-            const char* e = getenv("HYD_RUN_NEUMANN"); return e ? atoi(e) != 0 : true; }();  // default ON since 2026-09-30 (OCN-METRIC, with HYD_METRIC_RADIUS)
+            return knob::on(knob::HYD_RUN_NEUMANN); }();  // default ON since 2026-09-30 (OCN-METRIC, with HYD_METRIC_RADIUS)
         using namespace std;
         if (verbose) cout << endl << endl << endl
             << "      OGCM: PressureSolverHyd (" << n_sweeps << " Jacobi sweeps)" << endl;
@@ -441,7 +442,7 @@ public:
     // ==================================================================================
     static bool lineSolveEnabled() {
         static const bool on = [](){
-            const char* e = getenv("HYD_LINE_SOLVE"); return e && atoi(e) != 0; }();
+            return knob::on(knob::HYD_LINE_SOLVE); }();
         return on;
     }
 
@@ -621,7 +622,7 @@ public:
         // a direct tridiagonal solve down each radial column. See the note on lineSolveEnabled().
         const bool line_solve = lineSolveEnabled();
         static const bool fold_ends = [](){
-            const char* e = getenv("HYD_LINE_FOLD"); return !e || atoi(e) != 0; }();
+            return knob::on(knob::HYD_LINE_FOLD); }();
 
         // ---- COMPATIBILITY PROJECTION (line path only, HYD_LINE_GAUGE, default ON with it).
         // This operator is pure Neumann EVERYWHERE: zero-gradient on the six domain faces and
@@ -636,7 +637,7 @@ public:
         // mean of p after each sweep to pin the gauge. Global rather than per-basin, which is
         // exact for a single connected ocean and an approximation otherwise.
         static const bool gauge = [](){
-            const char* e = getenv("HYD_LINE_GAUGE"); return !e || atoi(e) != 0; }();
+            return knob::on(knob::HYD_LINE_GAUGE); }();
         if (line_solve && gauge) {
             double ssum = 0.0; long scnt = 0;
             #pragma omp parallel for collapse(2) reduction(+:ssum,scnt) schedule(static)
@@ -1064,8 +1065,8 @@ public:
     // Default 0.0 = OFF and bit-identical.
     void damp_baroclinic_deviation()
     {
-        static const double r_phys = [](){ const char* e = getenv("HYD_BC_DRAG");
-                                           return e ? atof(e) : 0.0; }();
+        static const double r_phys = [](){
+                                           return knob::real(knob::HYD_BC_DRAG); }();
         if (r_phys <= 0.0) return;
         // dt is non-dimensional; one step is dt*L_hyd/u_0 seconds, so the per-step damping
         // fraction of a rate r [1/s] is r*dt*L_hyd/u_0. Clamped so a large r cannot overshoot.

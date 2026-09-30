@@ -1,3 +1,4 @@
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "CloudFraction.h"
 #include "Utils.h"
@@ -432,7 +433,7 @@ void cAtmosphereModel::debug_vapor_output(int i, int j, int k,
 double cAtmosphereModel::tropopause_index(double h_m){
     static const bool fix = [](){
         // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores round(h/L_atm) exactly.
-        const char* e = getenv("ATM_TROPO_INDEX_FIX"); return e ? atoi(e) != 0 : true; }();
+        return knob::on(knob::ATM_TROPO_INDEX_FIX); }();
     if(!fix) return round(h_m / L_atm);                 // shipped: L_atm as if it were a grid step
     if(m_layer_heights.size() < (std::size_t)im) return round(h_m / L_atm);   // not built yet
     int best = 1; double bd = 1.0e30;
@@ -845,8 +846,7 @@ void cAtmosphereModel::initTemperatureData(int Ma) {
                 static const double t_floor_env = [](){
                     // DEFAULT 216.65 K since 2026-08-31 (the US-standard stratosphere).
                     // ATM_T_FLOOR=236.15 restores the shipped t_00 clamp.
-                    const char* e = getenv("ATM_T_FLOOR");
-                    const double v = e ? atof(e) : 216.65;
+                    const double v = knob::real(knob::ATM_T_FLOOR);
                     return (v > 0.0) ? v : 216.65; }();
                 const double t_floor = t_floor_env;
 
@@ -1225,7 +1225,7 @@ void cAtmosphereModel::initWaterWapour() {
             // around 1 km height", i.e. a cloud deck manufactured by a fudge factor.
             static const bool rh_profile = [](){
                 // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                const char* e = getenv("ATM_RH_PROFILE"); return e ? atoi(e) != 0 : true; }();
+                return knob::on(knob::ATM_RH_PROFILE); }();
             const double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
@@ -1255,8 +1255,7 @@ void cAtmosphereModel::initWaterWapour() {
                 static const double rh_min = [](){
                     // DEFAULT 0.65 since 2026-08-31 (the TROPICAL value; see ATM_RH_MIN_LAT).
                     // ATM_RH_MIN=0 restores the unfloored Manabe-Wetherald profile.
-                    const char* e = getenv("ATM_RH_MIN");
-                    const double v = e ? atof(e) : 0.65;
+                    const double v = knob::real(knob::ATM_RH_MIN);
                     return (v > 0.0 && v < 1.0) ? v : 0.0; }();
 
                 // ATM_RH_MIN_LAT=1 -- give the floor the observed LATITUDE structure instead of
@@ -1287,7 +1286,7 @@ void cAtmosphereModel::initWaterWapour() {
                 // assumed, not predicted.
                 static const bool rh_min_lat = [](){
                     // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                    const char* e = getenv("ATM_RH_MIN_LAT"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_RH_MIN_LAT); }();
                 double rh_floor = rh_min;
                 if (rh_min_lat && rh_min > 0.0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
@@ -1333,8 +1332,7 @@ void cAtmosphereModel::initWaterWapour() {
                     // 205.0-205.8, 65-90 24.4, land/ocean ratio 0.766-0.773). ⚠ Fitted on the branch
                     // WITHOUT ATM_WATER_CLOSURE (default since 5c7b001) and without the evaporation
                     // stride fix; re-fit on the current default is owed. =490 restores.
-                    const char* e = getenv("ATM_RH_MIN_PTOP");
-                    const double v = e ? atof(e) : 482.0;
+                    const double v = knob::real(knob::ATM_RH_MIN_PTOP);
                     return (v >= 0.0) ? v : 482.0; }();
                 if (rh_min_ptop > 0.0) {
                     const double p_lo = rh_min_ptop + 200.0;          // no floor below this
@@ -1356,7 +1354,7 @@ void cAtmosphereModel::initWaterWapour() {
                 // filling it takes ~1 day of physical time (~4.3e5 iterations). If starting it
                 // moister makes the band rain from the start, the deficit is spin-up.
                 static const double rh_storm = [](){
-                    const char* e = getenv("ATM_RH_STORM"); return e ? atof(e) : 1.0; }();
+                    return knob::real(knob::ATM_RH_STORM); }();
                 if (rh_storm != 1.0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
                     const double b = (phi_deg - 55.0) / 15.0;
@@ -1409,8 +1407,7 @@ void cAtmosphereModel::initCloudIce() {
     // touching this and the condensate collapses 1584 -> 0.0006 g/m2: no cell reaches threshold.
     // The two must move together, which is why this is a knob and not a constant.
     const double Hu_cr_mid = [](){
-        const char* e = getenv("ATM_RH_CRIT");           // default 0.30 since 2026-08-31
-        const double v = e ? atof(e) : 0.30;
+        const double v = knob::real(knob::ATM_RH_CRIT);           // default 0.30 since 2026-08-31
         return (v > 0.0 && v < 1.0) ? v : 0.30; }();
     const double Hu_diff   = Hu_cr_max - Hu_cr_mid;
 //    const double det_T_0   = t_0 - 3.0;
@@ -1518,7 +1515,7 @@ void cAtmosphereModel::initCloudIce() {
                 // the stack-canary hazard in the README does not apply.
                 static const bool cloud_frac = [](){
                     // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                    const char* e = getenv("ATM_CLOUD_FRAC"); return e ? atoi(e) != 0 : true; }();
+                    return knob::on(knob::ATM_CLOUD_FRAC); }();
                 const double del_q_ls = std::max(0.0, c.x[i][j][k] - H_crit * q_sat);
                 double cloud_ls;
                 if (cloud_frac) {
@@ -1608,7 +1605,7 @@ void cAtmosphereModel::initCloudIce() {
     // over the level, with a threshold that DISAGREES with the 0.8-1.0 H_crit used two passes
     // below. Printing the ratio cloud/cloud_max per level says which regime the field is in.
     // Print-only, default off.
-    if (const char* e = getenv("ATM_CLOUD_INIT_DIAG")) if (atoi(e) != 0) {
+    if (knob::on(knob::ATM_CLOUD_INIT_DIAG)) {
         std::cout << "      AGCM: [CLOUD-INIT] lvl      z[m]   cloud_max[g/kg]   mean del_q   "
                   << "mean cloud   mean RH   H_crit   RH>0.8   cells with cloud" << std::endl;
         for (int i = 0; i < im; i += 2) {

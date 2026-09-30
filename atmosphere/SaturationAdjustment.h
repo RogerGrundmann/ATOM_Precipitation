@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "CloudFraction.h"
 
@@ -98,8 +99,8 @@ public:
     // ATM_RH_MIN_PTOP was swept 475/500/525 in the same step and NOT moved: raising it buys
     // the mean back and hands the shape gain straight back with it (sigma 2.25 -> 2.48).
     static bool satadjPhase(){
-        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_PHASE");
-                                    return e ? (atoi(e) != 0) : true;   // DEFAULT ON 2026-09-09
+        static const bool v = [](){
+                                    return knob::on(knob::ATM_SATADJ_PHASE);   // DEFAULT ON 2026-09-09
                                   }();
         return v;
     }
@@ -155,10 +156,9 @@ public:
     // is the largest term left in ColumnWaterBudget (-4.8e+04 mm/a, 20-iteration restart). An
     // explicit ATM_SATADJ_FADE always wins; ATM_WATER_CLOSURE=0 restores the shipped 0.
     static int fadeMode(){
-        static const int v = [](){ const char* e = getenv("ATM_SATADJ_FADE");
-                                   if (e) return atoi(e);
-                                   const char* w = getenv("ATM_WATER_CLOSURE");
-                                   return (w && atoi(w) != 0) ? 2 : 0; }();   // WATER_CLOSURE default OFF again since 2026-09-25 (runaway, bisected)
+        static const int v = [](){
+                                   if (knob::is_set(knob::ATM_SATADJ_FADE)) return knob::integer(knob::ATM_SATADJ_FADE);
+                                   return knob::on(knob::ATM_WATER_CLOSURE) ? 2 : 0; }();   // WATER_CLOSURE default OFF again since 2026-09-25 (runaway, bisected)
         return v;
     }
     // ==================================================================
@@ -192,13 +192,13 @@ public:
     // Default 0. Nothing is flipped on an argument in this tree.
     // ==================================================================
     static bool freezeLatent(){
-        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_FREEZE_LATENT");
-                                    return e && atoi(e) != 0; }();
+        static const bool v = [](){
+                                    return knob::on(knob::ATM_SATADJ_FREEZE_LATENT); }();
         return v;
     }
     static bool diagOn(){
-        static const bool v = [](){ const char* e = getenv("ATM_SATADJ_DIAG");
-                                    return e && atoi(e) != 0; }();
+        static const bool v = [](){
+                                    return knob::on(knob::ATM_SATADJ_DIAG); }();
         return v;
     }
     // The weight GetMean_2D/GetMean_3D use, replicated exactly as ColumnWaterBudget does.

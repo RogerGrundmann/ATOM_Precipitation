@@ -17,6 +17,14 @@ Every `getenv(...)` switch in `atmosphere/`, `hydrosphere/`, `lib/`, extracted f
 **If the proposals are followed**: F + X + N = 52 knobs disappear, P + S + I = 33 move into the config file, R = 41 stay as
 switches until decided, D = 18 stay as diagnostic switches.
 
+> **2026-09-30 -- plan B is DONE: `lib/Knobs.h` is now the registry and the source of truth.** Every knob (156, incl.
+> `ATM_PSI_*` and the two `*_RESTART_KEEP` added since this list) is declared there once -- default, Result/Diag, class,
+> note -- and read only through `knob::on/integer/real/text/is_set`; no `getenv` is left in `atmosphere/`,
+> `hydrosphere/` or `lib/`. Both `[RUN CONFIG]` banners are generated from it (all Result knobs, and Diag knobs when set),
+> so defects 1-3 below are fixed by construction; `ATM_POISSON_METRIC_FIX` is now parsed as an integer everywhere
+> (a fractional value like 0.5 used to be ON at one site and OFF at two). The "read at" column below is the
+> pre-registry site and is kept as history. Byte check: `python/run_vknob.sh`.
+
 ## Defects found by the inventory itself
 
 1. **32 knobs that can change results are missing from the `[RUN CONFIG]` banner**, so a run log does not record them:
@@ -33,7 +41,7 @@ switches until decided, D = 18 stay as diagnostic switches.
 
 ## Proposed next steps (after tomorrow's arms, so pending byte checks are not compared against moving code)
 
-- **B. One registry header** (`atmosphere/Knobs.h`, `hydrosphere/HydKnobs.h`): each knob defined once -- name, default, type,
+- **B. One registry header -- DONE 2026-09-30 as a single `lib/Knobs.h`** (the `ATOM_*` knobs live in `lib/` and act on both models): each knob defined once -- name, default, type,
   one-line doc -- read through one accessor; the banner generated from it (fixes defects 1-3 by construction).
 - **C. Retire F / X / N in batches** of ~10, each with a 1-thread byte check of the default branch.
 - **D. Move P / S / I into the XML config** via `param.py`, so a run's configuration lives in one recorded place.

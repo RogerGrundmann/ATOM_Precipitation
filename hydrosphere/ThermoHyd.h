@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cHydrosphereModel.h"
 #include "Utils.h"
 
@@ -98,7 +99,7 @@ public:
         //     a separate question, and mixing the two would confound this arm.
         // ==================================================================
         static const bool phydro_salt = [](){
-            const char* e = getenv("HYD_PHYDRO_SALT"); return e && atoi(e) != 0; }();
+            return knob::on(knob::HYD_PHYDRO_SALT); }();
 
         double p_sum = 0.0, w_sum = 0.0, p_max = 0.0;   // print-only, over fluid cells
         long   n_fresh = 0;                             // cells rejected by the plausibility floor

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include <vector>
 #include <cstdlib>
 #include <cstddef>
@@ -44,14 +45,14 @@ inline std::size_t idx(int i, int j, int k){
 // B in m^4/s. DEFAULT ON SINCE 2026-09-30 (user, OCN-METRIC): om_b1e19 = metric 6370 km + RUN_NEUMANN + B 1e19 sin^4-scaled, 1000 from scratch: grid noise 0.515 (shipped 0.549), radial u 2400x below shipped, KE drift 1.59 %; B 3e19 ran away at the surface. The four go together -- set HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 to restore the shipped branch.
 inline double biharm_strength(){
     static const double b = [](){
-        const char* e = getenv("HYD_A_H_BIHARM"); return e ? atof(e) : 1.0e19; }();
+        return knob::real(knob::HYD_A_H_BIHARM); }();
     return b;
 }
 
 // HYD_A_H_BIHARM_SCALED=<0|1>: scale B by sin(theta)^4 (grid-scaled biharmonic). Default 1 since 2026-09-30 (see above).
 inline bool biharm_scaled(){
     static const bool b = [](){
-        const char* e = getenv("HYD_A_H_BIHARM_SCALED"); return e ? atoi(e) != 0 : true; }();
+        return knob::on(knob::HYD_A_H_BIHARM_SCALED); }();
     return b;
 }
 

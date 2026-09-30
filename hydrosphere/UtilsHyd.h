@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include <cstdlib>
 
 #include "cHydrosphereModel.h"
@@ -254,7 +255,7 @@ public:
         // DEFAULT ON since 2026-09-05, at the user's instruction, on the four-arm
         // measurement below. HYD_T_FREEZE=0 restores the shipped flat -4 C floor.
         static const bool t_freeze = [](){
-            const char* e = getenv("HYD_T_FREEZE"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::HYD_T_FREEZE); }();
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {

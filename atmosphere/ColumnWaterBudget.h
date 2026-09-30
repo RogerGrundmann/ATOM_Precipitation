@@ -139,6 +139,7 @@
 
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -153,14 +154,14 @@
 class ColumnWaterBudget {
 public:
     static bool enabled(){
-        static const bool v = [](){ const char* e = getenv("ATM_CWB_DIAG");
-                                    return e && atoi(e) != 0; }();
+        static const bool v = [](){
+                                    return knob::on(knob::ATM_CWB_DIAG); }();
         return v;
     }
 
     // Difference the column water against the previous mark and charge it to `stage`.
     static bool bands(){
-        static const bool v = [](){ const char* e = getenv("ATM_CWB_BANDS"); return e && atoi(e) != 0; }();
+        static const bool v = [](){ return knob::on(knob::ATM_CWB_BANDS); }();
         return v;
     }
     static void mark(cAtmosphereModel& m, const char* stage){
@@ -438,8 +439,8 @@ private:
             // very coefficient it is meant to measure. Mirrors RHS_Atm_Turb.cpp exactly.
             // Default 1.0 since 2026-09-21 -- MUST track RHS_Atm_Turb.cpp's default exactly,
             // or this row reports the shipped coefficient while RK4 applies the corrected one.
-            static const double micro_s = [](){ const char* e = getenv("ATM_MICRO_NDIM");
-                                                return e ? atof(e) : 1.0; }();
+            static const double micro_s = [](){
+                                                return knob::real(knob::ATM_MICRO_NDIM); }();
             //
             // AND THE RAIN/SNOW RATES BESIDE THEM, AS A CONSERVATION CHECK ON THE SCHEME'S OWN
             // ARRAYS. A scheme that conserves has (S_v + S_c + S_i + S_g) + (S_r + S_s) = 0 at
@@ -550,8 +551,8 @@ private:
                  << "   E = " << E_mm * per_year
                  << "   P - E = " << (P_mm - E_mm) * per_year
                  << " mm/a" << endl;
-            static const double micro_ndim = [](){ const char* e = getenv("ATM_MICRO_NDIM");
-                                                   return e ? atof(e) : 1.0; }();
+            static const double micro_ndim = [](){
+                                                   return knob::real(knob::ATM_MICRO_NDIM); }();
             cout << "      AGCM: [CWB] microphysics rate arrays over the column [mm/a], NOT the"
                  << " ground flux (different subset -- see the header);"
                  << "  ATM_MICRO_NDIM = " << scientific << setprecision(3)

@@ -6,6 +6,7 @@
  * 4. order Runge-Kutta scheme to solve 2. order differential equations
 */
 
+#include "Knobs.h"
 #include <iostream>
 #include <cmath>
 #include <iomanip>
@@ -137,8 +138,8 @@ void cAtmosphereModel::print_min_max_atm(){
         // file uses: rms of each term, their correlation, the slope of pgf ON buoy, and the rms
         // of the SUM against the rms of the larger term -- the last being the cancellation
         // actually achieved, which is the number the question asks for.
-        static const bool ubud_bal = [](){ const char* e = getenv("ATM_UBUD_BALANCE");
-                                           return e && atoi(e) != 0; }();
+        static const bool ubud_bal = [](){
+                                           return knob::on(knob::ATM_UBUD_BALANCE); }();
         if(ubud_bal){
             double sp = 0.0, sb = 0.0, spp = 0.0, sbb = 0.0, spb = 0.0, ss = 0.0, sn = 0.0;
             long n = 0;

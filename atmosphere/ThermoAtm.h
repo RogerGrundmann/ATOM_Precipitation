@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 
@@ -160,7 +161,7 @@ public:
         // been run yet.
         // ==================================================================
         static const int evap_spread = [](){
-            const char* e = getenv("ATM_EVAP_SPREAD"); return e ? atoi(e) : 0; }();
+            return knob::integer(knob::ATM_EVAP_SPREAD); }();
 
         // ==================================================================
         // ATM_EVAP_FLUX=<0|1> -- make the surface evaporation a FLUX instead of a prescription.
@@ -210,13 +211,13 @@ public:
         // Default 0. Nothing is flipped on an argument in this tree.
         // ==================================================================
         static const bool evap_flux = [](){
-            const char* e = getenv("ATM_EVAP_FLUX"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_EVAP_FLUX); }();
         // Seconds of physical time per CALL. FIXED 2026-09-24: this was per ITERATION, while the
         // time loop calls the routine only every moist_stride = 2 iterations, so ATM_EVAP_FLUX and
         // ATM_WATER_CLOSURE (default on since 5c7b001) delivered HALF of E. ATM_EVAP_STRIDE_FIX=0
         // restores the half-rate branch exactly (default 1).
         static const bool evap_stride_fix = [](){
-            const char* e = getenv("ATM_EVAP_STRIDE_FIX"); return e ? atoi(e) != 0 : true; }();
+            return knob::on(knob::ATM_EVAP_STRIDE_FIX); }();
         const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0
                                   * (evap_stride_fix ? (double)calls_per : 1.0);
 
@@ -260,7 +261,7 @@ public:
             // this knob alone removes the climb (11.87 -> 3.58 mm/a per iteration over 40-100; bands
             // 3383/217/192/16 against 3711/1488/411/350); the other 09-24 flips are identical to control.
             // The 20-iteration evidence it was flipped on saw only the initial dip. =1 restores it.
-            const char* e = getenv("ATM_WATER_CLOSURE"); return e && atoi(e) != 0; }();
+            return knob::on(knob::ATM_WATER_CLOSURE); }();
         double wc_skin = 0.0;                 // cos-lat weighted water change from the level-0 copy [mm]
 
         // Diagnostics, print-only: how much vapour the i >= 1 branch actually injects, and how
@@ -285,7 +286,7 @@ public:
         // near W0 and this behaves as a beta prescribed by the observed precipitation.
         // ==================================================================
         static const double bucket_cap = [](){
-            const char* e = getenv("ATM_LAND_BUCKET"); return e ? atof(e) : 0.0; }();
+            return knob::real(knob::ATM_LAND_BUCKET); }();
         const bool bucket_on = water_closure && bucket_cap > 0.0;
         if (bucket_on && !LandBucket::initialised) {
             LandBucket::W.assign(static_cast<size_t>(m.jm) * m.km, 0.0);
@@ -1191,8 +1192,8 @@ public:
         // e = q p / ep -- times the horizontal velocity, integrated from i_topography up. If
         // the model were in moisture balance, MFC and P - E would be the same field: r -> +1
         // and the regression slope -> 1. Print-only; nothing here writes a model field.
-        static const bool mfc_on = [](){ const char* e = getenv("ATM_MFC_DIAG");
-                                         return e && atoi(e) != 0; }();
+        static const bool mfc_on = [](){
+                                        return knob::on(knob::ATM_MFC_DIAG); }();
         if(mfc_on){
             // This tree has no named Earth-radius constant -- the metric carries r0 in units of
             // L_atm (cAtmosphereModel.h:691, 397.5) rather than in metres.

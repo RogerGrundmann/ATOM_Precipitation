@@ -28,6 +28,15 @@ function may reorder its floating-point arithmetic: `ATM_PRECIP_UPWIND`, knob of
 and `0`. A strict byte check proves logic identity only at -O0. `python/build_o0.sh <rev|WORKTREE> <name>` builds
 `cli/<name>_atm` / `_hyd` at -O0 in a throw-away worktree; science runs stay -O2.
 
+## Environment knobs live in ONE place: `lib/Knobs.h` (since 2026-09-30)
+
+Every `ATM_*` / `HYD_*` / `ATOM_*` switch is declared once in `lib/Knobs.h` (name, default, Result/Diag, class, note)
+and read only through `knob::on / integer / real / text / is_set`. **Never add a `getenv` call**: add a row, read it
+with the accessor, and it appears in the `[RUN CONFIG]` banner by itself. To flip a default, change its row --
+nothing else holds a copy. Both banners are generated (every Result knob as `SHORT=value`, `*` = compiled-in; Diag
+knobs only when set), and the atmosphere prints the values `ATM_WATER_CLOSURE` actually forces. Conversion verified
+byte-identical at -O0 in both models, clean and with knobs set (`python/run_vknob.sh`).
+
 ## READ THIS BEFORE QUOTING ANY NUMBER FROM THIS TREE
 
 **EVERY FIGURE RECORDED BEFORE 2026-08-26 CAME FROM A BINARY WITH THREE DATA RACES IN IT**, and
