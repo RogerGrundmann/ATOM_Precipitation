@@ -102,13 +102,9 @@ public:
     // thing that has never been tested. Default 0 reproduces the shipped branch exactly by
     // construction, not by a guard.
     // ==================================================================================
-    static bool bcSecondOrder() {
-        static const bool on = [](){
-            return knob::on(knob::HYD_BC_SECOND_ORDER); }();
-        return on;
-    }
-    const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
-    const double c13 = bcSecondOrder() ? 1.0/3.0 : 0.0;
+    // HYD_BC_SECOND_ORDER (on since 2026-09-23) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+    const double c43 = 4.0/3.0;
+    const double c13 = 1.0/3.0;
 
     static const int im = 41, jm = 181, km = 361;
 

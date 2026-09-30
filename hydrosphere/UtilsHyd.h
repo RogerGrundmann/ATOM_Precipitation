@@ -254,8 +254,7 @@ public:
         // ==================================================================================
         // DEFAULT ON since 2026-09-05, at the user's instruction, on the four-arm
         // measurement below. HYD_T_FREEZE=0 restores the shipped flat -4 C floor.
-        static const bool t_freeze = [](){
-            return knob::on(knob::HYD_T_FREEZE); }();
+        // HYD_T_FREEZE -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
         #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < m.im; i++) {
@@ -283,7 +282,7 @@ public:
                     if (m.t.x[i][j][k] > t_max)  m.t.x[i][j][k] = t_max;
 
                     double t_lo = t_min;
-                    if (t_freeze) {
+                    {
                         const double S  = m.c.x[i][j][k] * m.c_35;          // psu
                         const double Sc = (S > 0.0) ? S : 0.0;
                         const double Tf = seawater_freezing_point_C(Sc);    // [C]

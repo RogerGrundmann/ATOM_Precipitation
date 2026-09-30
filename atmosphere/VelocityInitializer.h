@@ -349,10 +349,7 @@ public:
     // A non-zero value there means this function is wrong, and it is measured rather than argued.
     void install_cells_from_streamfunction()
     {
-        // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores the shipped analytic ramp exactly.
-        static const bool on = [](){
-                                    return knob::on(knob::ATM_CELLS_FROM_PSI); }();
-        if (!on) return;
+        // ATM_CELLS_FROM_PSI (on since 2026-09-12) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
         auto amp = [](knob::Id id){ return knob::real(id) * 1.0e9; };
         const double A_had = amp(knob::ATM_PSI_HADLEY);
         const double A_fer = amp(knob::ATM_PSI_FERREL);
@@ -576,13 +573,6 @@ public:
         static const bool on = [](){
                                     return knob::on(knob::ATM_CELLS_U_FROM_PSI); }();
         if (!on) return;
-        static const bool cells_on = [](){
-                                           return knob::on(knob::ATM_CELLS_FROM_PSI); }();
-        if (!cells_on) {
-            std::cout << "      AGCM: [CELLS U] ATM_CELLS_U_FROM_PSI set but ATM_CELLS_FROM_PSI"
-                      << " is off -- nothing to derive u from, ignored." << std::endl;
-            return;
-        }
         const double a_E    = m.r_Earth * 1000.0;
         const double inv_u0 = 1.0 / m.u_0;
         const double Delta  = M_PI / (double)(m.jm - 1);          // radians of latitude per j
@@ -722,7 +712,6 @@ public:
 
     void balance_column_mass_flux()
     {
-        if (!massBalance()) return;
         long n_cols = 0;
         const double worst = apply_column_mass_flux_balance(&n_cols);
         std::cout << "      ATOM: column mass-flux balance applied to " << n_cols
@@ -771,16 +760,9 @@ public:
     // CAVEAT ON THE INSTRUMENT: the call site sits AFTER write_v_momentum_budget, so the four
     // captured stages (dyn/polar/orog/radial) and their `dv_net` are the PRE-balance net. The
     // correction this routine applies is reported on its own line instead.
-    static int massBalanceStride(){
-        static const int v = [](){
-            return knob::integer(knob::ATM_V_MASSBAL_STRIDE); }();
-        return v;
-    }
-
+    // ATM_V_MASSBAL_STRIDE (1 = every iteration, since 2026-09-12) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
     void balance_column_mass_flux_in_loop(int iter_n)
     {
-        const int stride = massBalanceStride();
-        if (stride <= 0 || iter_n % stride != 0) return;
         const double worst = apply_column_mass_flux_balance(nullptr);
         // One line per VTK checkpoint rather than one per application: at stride 1 over 600
         // iterations the per-call print is 600 lines of log for one number.
@@ -835,11 +817,7 @@ public:
 
     // DEFAULT ON since 2026-08-28. ATM_V_MASSBAL=0 restores the unbalanced prescribed profile
     // exactly, which is the branch every measurement recorded before that date was made on.
-    static bool massBalance(){
-        static const bool v = [](){
-            return knob::on(knob::ATM_V_MASSBAL); }();
-        return v;
-    }
+    // ATM_V_MASSBAL (on since 2026-08-28) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
     // ==================================================================
     // THERMAL-WIND BALANCED INITIAL STATE

@@ -814,10 +814,8 @@ public:
         // two-sided extrapolation. Verified: a byte-exact no-op at first order; whether it removes
         // the k = 1 seam mode needs a ~600-iteration run (the mode takes ~300 to leave the noise),
         // which was postponed at the flip.
-        static const bool seam_periodic = [](){
-            return knob::on(knob::ATM_SEAM_PERIODIC); }();
-        const double s43 = seam_periodic ? 1.0 : m.c43;
-        const double s13 = seam_periodic ? 0.0 : m.c13;
+        // ATM_SEAM_PERIODIC (on since 2026-09-24) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history: the seam neighbours are the
+        // plain copies x[1] and x[km-2] (the periodic average), not the one-sided extrapolation.
 
         // ATM_SEAM_Q_CONSERVE=<0|1|2>, DEFAULT 0 AGAIN (reverted 2026-09-28 evening, user) after being default 2 for a
         // few hours: sd_ctl (600 from scratch on the default-2 build) regrew the k=1 seam mode, max|v| 6.6 -> 26.02 m/s
@@ -846,8 +844,8 @@ public:
         // with the same no-negative clip; all-air cells are treated exactly as =1. Water only.
         static const int seam_q_conserve = [](){
             return knob::integer(knob::ATM_SEAM_Q_CONSERVE); }();
-        const bool seam_q  = seam_q_conserve != 0 && seam_periodic;
-        const bool seam_q2 = seam_q_conserve == 2 && seam_periodic;
+        const bool seam_q  = seam_q_conserve != 0;
+        const bool seam_q2 = seam_q_conserve == 2;
         Array* seam_q_fields[] = { &m.c, &m.cloud, &m.ice, &m.gr };
 
         // ATM_SEAM_Q_DIAG=1, print-only, default off (2026-09-28). fx4_sqcon showed ATM_SEAM_Q_CONSERVE removing
@@ -913,8 +911,8 @@ public:
 
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
-                    double v0   = s43 * xij[j][1]      - s13 * xij[j][2];
-                    double vend = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
+                    double v0   = xij[j][1];
+                    double vend = xij[j][m.km-2];
                     xij[j][0] = xij[j][m.km-1] = (v0 + vend) * 0.5;
                 }
 
@@ -949,8 +947,8 @@ public:
 
                 for (int f = 0; f < n_extrap; f++) {
                     double** xij = fields_extrap[f]->x[i];
-                    xij[j][0]      = s43 * xij[j][1]      - s13 * xij[j][2];
-                    xij[j][m.km-1] = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
+                    xij[j][0]      = xij[j][1];
+                    xij[j][m.km-1] = xij[j][m.km-2];
                 }
 
                 if (seam_q_diag) {

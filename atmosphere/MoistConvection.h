@@ -1205,13 +1205,8 @@ void findCloudBaseLFS() {
                     // restart): in 100 % of the cells where MC_t's flux half exceeds MCt_max,
                     // |s_u - s|*t_0 > 100 K, 100 % updraft-dominated, 50 % at a mass-flux edge.
                     // A leftover of s having once been dimensional (J/kg). =1 drops the extra /s_0.
-                    static const int mc_s_ndim = [](){
-                                                       return knob::integer(knob::ATM_MC_S_NDIM); }();
-                    double dummy_s_u = (mc_s_ndim == 0)
-                        ? (M_u_prev * m.s_u.x[i-1][j][k]
-                           + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
-                           - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k])) / m.s_0
-                        :  M_u_prev * m.s_u.x[i-1][j][k]
+                    // ATM_MC_S_NDIM -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+                    double dummy_s_u = M_u_prev * m.s_u.x[i-1][j][k]
                            + step_prev * (m.E_u.x[i-1][j][k] * m.s.x[i-1][j][k]
                            - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k]);
 
@@ -1338,14 +1333,7 @@ void findCloudBaseLFS() {
                     // ATM_MC_S_NDIM=1: only the LATENT term is dimensional (L [J/kg] * r_h * e_d
                     // * step -> J/(m2 s)) and needs / s_0; the M_d*s_d and E_d*s, D_d*s_d terms
                     // are already non-dimensional. The shipped form divides all of them.
-                    static const int mc_s_ndim_d = [](){
-                                                        return knob::integer(knob::ATM_MC_S_NDIM); }();
-                    double dummy_s_d = (mc_s_ndim_d == 0)
-                        ? (M_d_ip1 * m.s_d.x[i+1][j][k]
-                           - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
-                           - m.D_d.x[i+1][j][k] * m.s_d.x[i+1][j][k]
-                           - L_latent * r_h_ip1 * m.e_d.x[i+1][j][k])) / m.s_0
-                        :  M_d_ip1 * m.s_d.x[i+1][j][k]
+                    double dummy_s_d = M_d_ip1 * m.s_d.x[i+1][j][k]
                            - step_ip1 * (m.E_d.x[i+1][j][k] * m.s.x[i+1][j][k]
                            - m.D_d.x[i+1][j][k] * m.s_d.x[i+1][j][k]
                            - L_latent * r_h_ip1 * m.e_d.x[i+1][j][k] / m.s_0);

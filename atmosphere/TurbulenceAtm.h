@@ -29,10 +29,7 @@ using namespace AtomUtils;
 // the zonal derivatives of u/v/w/tke/dis that build production and the Neumann corrections see a
 // 1/sin up to ~15x (row j = 1, 89 deg; 26 000x at a pole row, where sin = 1e-5) larger than the momentum equations beside them.
 // =1 applies the same floor here, at both sites (the SST closure receives sinthe from the first).
-inline bool turbSinFloorOn(){
-    static const bool on = [](){ return knob::on(knob::ATM_TURB_SIN_FLOOR); }();
-    return on;
-}
+// ATM_TURB_SIN_FLOOR -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
 class TurbulenceAtm {
 public:
@@ -355,7 +352,7 @@ private:
                     const double exp_rm       = m.metricExpRm(rm);
                     double sinthe             = sin(m.the.z[j]);
                     if (sinthe == 0.0) sinthe = 1.0e-5;
-                    if (turbSinFloorOn()) sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
+                    sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
                     const double inv_2dr      = 1.0 / (2.0 * m.dr);
                     const double inv_2dthe    = 1.0 / (2.0 * m.dthe);
                     const double inv_2dphi    = 1.0 / (2.0 * m.dphi);
@@ -565,7 +562,7 @@ private:
         const double rm        = m.rad.z[i];
         double sinthe          = sin(m.the.z[j]);
         if (sinthe == 0.0) sinthe = 1.0e-5;
-        if (turbSinFloorOn()) sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
+        sinthe = std::max(sinthe, cAtmosphereModel::metricSinFloor());   // ATM_TURB_SIN_FLOOR
         const double rmsinthe  = rm * sinthe;
 
         // Geometry for exp-stretching — placed here so Neumann corrections below can use exp_rm.

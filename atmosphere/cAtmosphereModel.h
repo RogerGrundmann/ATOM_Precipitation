@@ -118,54 +118,50 @@ public:
     // levels over a 16 km shell, a moist boundary layer and a precipitation flux with its own
     // edge treatment, and IceSchemeCommon's use is on a field with sharp gradients.
     // ==================================================================================
-    static bool bcSecondOrder() {
-        static const bool on = [](){
-            // *** FLIPPED ON 2026-09-21 AND REVERTED THE SAME DAY, ON THE 600-ITERATION ARM
-            // THAT THE FLIP OWED. DEFAULT IS 0 AGAIN. DO NOT RE-FLIP WITHOUT READING THIS. ***
-            //
-            // The byte check passed in both directions and the CLIMATE scores cleared it --
-            // 600 from scratch, precipitation +0.58 %, land +0.83 %, cloud LW forcing -1.4 %,
-            // both starved bands +0.3/+0.5 %, mean KE 36.3694 -> 36.3709 and `converged` = 1 in
-            // BOTH arms. On those numbers it is a null.
-            //
-            // ⚠ AND IT REACTIVATES THE k=1 COAST-SEAM JET BLOW-UP, WHICH NONE OF THOSE NUMBERS
-            // CAN SEE. `max |v|` goes 2.279456 -> 26.016917 m/s, and not as a spike: the
-            // extremum leaves its physical home (18S 68W, 12 029 m, upper troposphere) for
-            // 11N 1E at 236 m and GROWS MONOTONICALLY -- 3.40, 4.86, 6.61, 8.71, 11.23, 14.26,
-            // 17.91, 22.30, 25.99 -- about 1.28x per checkpoint, ending as a vertical
-            // grid-scale dipole with `min v` at exactly -24.000000 in the adjacent level of the
-            // same column. It saturates near 26 because the COASTAL SPONGE catches it
-            // (`max_pre` = 3.29 nondim = 26.3 m/s, `clamped` = 6), which is containment, not
-            // stability: exit 0 and zero NaN is not a stability criterion in this tree.
-            //
-            // THE MECHANISM IS THIS FILE'S OWN, AND IT IS WHY THE DEFECT WAS LOAD-BEARING.
-            // c43/c13 are used in bcPhi, and THE PHI BOUNDARY IS THE SEAM. The truncated-int
-            // first-order form A[0] = A[1] is a plain COPY, strongly damping there; the intended
-            // second-order A[0] = (4A[1] - A[2])/3 is an EXTRAPOLATION, and is not. The coastal
-            // sponge locates it exactly: i5_max 1.23 @(j=135,k=63) on the shipped branch against
-            // 3.02 @(j=80,k=0,topo=5) with the flip -- j=80 is 10N, k=0 IS the seam, and the
-            // runaway cell at 1E is k=1, its neighbour. That is the k=1 coast-seam blow-up fixed
-            // in 4273578 (project_seam_velocity_minmod / project_seam_damping), coming back.
-            //
-            // **SO THE `int` TRUNCATION WAS ACCIDENTALLY HOLDING A KNOWN SEAM INSTABILITY
-            // TOGETHER** -- a LESS accurate scheme doing load-bearing work, which is this tree's
-            // cancelling-pair pattern in a new place. The accuracy defect is real and remains
-            // real; repairing it needs the seam damped on its own terms FIRST (the minmod and
-            // the bcPhi Shapiro pass are the precedent), not a knob flip.
-            //
-            // ⚠ AND THE BYTE CHECK WAS NOT THE PROBLEM -- IT PASSED CORRECTLY AND PROVED ONLY
-            // WHAT IT CAN PROVE. 20 iterations is 4 s of physical time and the mode needs ~300
-            // to leave the noise. A both-directions byte check clears REVERSIBILITY, never
-            // stability. ATM_NUE_GRAD was flipped in the same step and is KEPT: on the same
-            // trio it moves `max v` by 6e-06 and is a null everywhere but the two starved bands.
-            // *** RE-FLIPPED ON 2026-09-23 AT THE USER'S INSTRUCTION, WITH THE NOTE ABOVE IN
-            // FRONT OF IT: the seam mode is the known cost, and the fix for it is seam damping,
-            // not the truncated boundary condition. ATM_BC_SECOND_ORDER=0 restores first order.
-            return knob::on(knob::ATM_BC_SECOND_ORDER); }();
-        return on;
-    }
-    const double c43 = bcSecondOrder() ? 4.0/3.0 : 1.0;
-    const double c13 = bcSecondOrder() ? 1.0/3.0 : 0.0;
+    // ATM_BC_SECOND_ORDER (second-order one-sided Neumann; re-flipped on 2026-09-23) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+    // *** FLIPPED ON 2026-09-21 AND REVERTED THE SAME DAY, ON THE 600-ITERATION ARM
+    // THAT THE FLIP OWED. DEFAULT IS 0 AGAIN. DO NOT RE-FLIP WITHOUT READING THIS. ***
+    //
+    // The byte check passed in both directions and the CLIMATE scores cleared it --
+    // 600 from scratch, precipitation +0.58 %, land +0.83 %, cloud LW forcing -1.4 %,
+    // both starved bands +0.3/+0.5 %, mean KE 36.3694 -> 36.3709 and `converged` = 1 in
+    // BOTH arms. On those numbers it is a null.
+    //
+    // ⚠ AND IT REACTIVATES THE k=1 COAST-SEAM JET BLOW-UP, WHICH NONE OF THOSE NUMBERS
+    // CAN SEE. `max |v|` goes 2.279456 -> 26.016917 m/s, and not as a spike: the
+    // extremum leaves its physical home (18S 68W, 12 029 m, upper troposphere) for
+    // 11N 1E at 236 m and GROWS MONOTONICALLY -- 3.40, 4.86, 6.61, 8.71, 11.23, 14.26,
+    // 17.91, 22.30, 25.99 -- about 1.28x per checkpoint, ending as a vertical
+    // grid-scale dipole with `min v` at exactly -24.000000 in the adjacent level of the
+    // same column. It saturates near 26 because the COASTAL SPONGE catches it
+    // (`max_pre` = 3.29 nondim = 26.3 m/s, `clamped` = 6), which is containment, not
+    // stability: exit 0 and zero NaN is not a stability criterion in this tree.
+    //
+    // THE MECHANISM IS THIS FILE'S OWN, AND IT IS WHY THE DEFECT WAS LOAD-BEARING.
+    // c43/c13 are used in bcPhi, and THE PHI BOUNDARY IS THE SEAM. The truncated-int
+    // first-order form A[0] = A[1] is a plain COPY, strongly damping there; the intended
+    // second-order A[0] = (4A[1] - A[2])/3 is an EXTRAPOLATION, and is not. The coastal
+    // sponge locates it exactly: i5_max 1.23 @(j=135,k=63) on the shipped branch against
+    // 3.02 @(j=80,k=0,topo=5) with the flip -- j=80 is 10N, k=0 IS the seam, and the
+    // runaway cell at 1E is k=1, its neighbour. That is the k=1 coast-seam blow-up fixed
+    // in 4273578 (project_seam_velocity_minmod / project_seam_damping), coming back.
+    //
+    // **SO THE `int` TRUNCATION WAS ACCIDENTALLY HOLDING A KNOWN SEAM INSTABILITY
+    // TOGETHER** -- a LESS accurate scheme doing load-bearing work, which is this tree's
+    // cancelling-pair pattern in a new place. The accuracy defect is real and remains
+    // real; repairing it needs the seam damped on its own terms FIRST (the minmod and
+    // the bcPhi Shapiro pass are the precedent), not a knob flip.
+    //
+    // ⚠ AND THE BYTE CHECK WAS NOT THE PROBLEM -- IT PASSED CORRECTLY AND PROVED ONLY
+    // WHAT IT CAN PROVE. 20 iterations is 4 s of physical time and the mode needs ~300
+    // to leave the noise. A both-directions byte check clears REVERSIBILITY, never
+    // stability. ATM_NUE_GRAD was flipped in the same step and is KEPT: on the same
+    // trio it moves `max v` by 6e-06 and is a null everywhere but the two starved bands.
+    // *** RE-FLIPPED ON 2026-09-23 AT THE USER'S INSTRUCTION, WITH THE NOTE ABOVE IN
+    // FRONT OF IT: the seam mode is the known cost, and the fix for it is seam damping,
+    // not the truncated boundary condition. ATM_BC_SECOND_ORDER=0 restores first order.
+    const double c43 = 4.0/3.0;
+    const double c13 = 1.0/3.0;
 
     static const int im = 41, jm = 181, km = 361;
 

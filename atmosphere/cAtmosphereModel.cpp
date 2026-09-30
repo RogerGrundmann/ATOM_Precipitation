@@ -2089,13 +2089,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // cell -- not conservative even in index space; -1.0e+04 mm/a with the closure on, the
         // largest leak left. The mass is ColumnWaterBudget's (r_humid*dz; the cos-lat weight
         // cancels within a column); t keeps the shipped filter.
-        static const bool orog_q_mass = [](){
-            return knob::on(knob::ATM_OROG_Q_MASS); }();
-        if(!orog_q_mass){
-            AtomUtils::orographic_radial_shapiro_filter(c,     i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-            AtomUtils::orographic_radial_shapiro_filter(cloud, i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-            AtomUtils::orographic_radial_shapiro_filter(ice,   i_topography, /*steep=*/2, /*n_layers_above=*/10, /*passes=*/2);
-        }else{
+        // ATM_OROG_Q_MASS (on since 2026-09-28) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+        {
             static std::vector<double> o_mass;
             o_mass.assign(static_cast<std::size_t>(im) * jm * km, 0.0);
             #pragma omp parallel for collapse(2) schedule(static)

@@ -1023,7 +1023,7 @@ void cHydrosphereModel::initSalinity() {
     // 0 = the shipped branch, which copied the -32767 sentinel into the salinity field.
     // Only the Ma==0 (2-D field) branch is affected; the Ma>0 zonal-mean branch has skipped
     // the sentinel since `1cba198` and is unchanged either way.
-    const int sss_fill = [](){ return knob::integer(knob::HYD_SSS_FILL); }();
+    // HYD_SSS_FILL (on since 2026-09-08) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
     bool nasa_sss = false;
     if (use_NASA_salinity) {
@@ -1082,7 +1082,7 @@ void cHydrosphereModel::initSalinity() {
                 for (int k = 0; k < km; k++) {
                     for (int j = 0; j < jm; j++) {
                         double s_psu = sss.y[j][k];                              // [psu]
-                        if (!(s_psu > 0.0) && sss_fill) {
+                        if (!(s_psu > 0.0)) {
                             s_psu = zmean[j];
                             if (is_water(h, i_max, j, k)) ++n_fill_w; else ++n_fill_l;
                         }
@@ -1093,11 +1093,10 @@ void cHydrosphereModel::initSalinity() {
                 for (int j = 0; j < jm; j++)
                     for (int k = 0; k < km; k++)
                         if (is_water(h, i_max, j, k)) ++n_water;
-                printf("       SSS missing-data fill: %s -- %ld ocean surface cells filled"
-                       " (%.2f %% of %ld), %ld land cells; HYD_SSS_FILL=%d\n",
-                       sss_fill ? "ON" : "OFF (shipped: sentinel copied in)",
+                printf("       SSS missing-data fill: %ld ocean surface cells filled"
+                       " (%.2f %% of %ld), %ld land cells\n",
                        n_fill_w, n_water > 0 ? 1e2 * (double)n_fill_w / (double)n_water : 0.0,
-                       n_water, n_fill_l, sss_fill);
+                       n_water, n_fill_l);
             } else {
                 #pragma omp parallel for collapse(2)
                 for (int k = 0; k < km; k++)

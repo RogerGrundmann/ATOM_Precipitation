@@ -200,18 +200,15 @@ public:
         // since 09-27 carried it (osf_*, ohs_sh1, probably bn_sh1). =1 uses the centred average whatever c43/c13
         // are -- the pre-0571bc1 seam exactly, second order kept everywhere else; at first order a no-op by
         // arithmetic.
-        static const bool seam_periodic = [](){
-            return knob::on(knob::HYD_SEAM_PERIODIC); }();
-        const double s43 = seam_periodic ? 1.0 : m.c43;
-        const double s13 = seam_periodic ? 0.0 : m.c13;
+        // HYD_SEAM_PERIODIC (on since 2026-09-28) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < m.im; i++) {
             for (int j = 0; j < m.jm; j++) {
                 for (int f = 0; f < n_avg; f++) {
                     double** xij = fields_avg[f]->x[i];
-                    double v0   = s43 * xij[j][1]      - s13 * xij[j][2];
-                    double vend = s43 * xij[j][m.km-2] - s13 * xij[j][m.km-3];
+                    double v0   = xij[j][1];
+                    double vend = xij[j][m.km-2];
                     xij[j][0] = xij[j][m.km-1] = 0.5 * (v0 + vend);
                 }
             }

@@ -39,11 +39,9 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATOM_METRIC_CURVATURE, "0", Result, 'S', "spherical curvature terms in the shared metric (both models)") \
     X(ATOM_METRIC_DIVERGENCE, "0", Result, 'S', "metric terms in the shared divergence (both models)") \
     X(ATM_ANELASTIC, "0", Result, 'N', "null on Psi (-0.006 %), structural") \
-    X(ATM_BC_SECOND_ORDER, "1", Result, 'F', "2nd-order Neumann, 09-23 (B.5)") \
     X(ATM_BUOY_CONSISTENT, "0", Result, 'X', "reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes") \
     X(ATM_BUOY_MOIST, "0", Result, 'N', "null unless BUOY_CONSISTENT") \
     X(ATM_BUOY_TREF, "0", Result, 'N', "measured +1.0 % on the term, null on the model") \
-    X(ATM_CELLS_FROM_PSI, "1", Result, 'F', "closed-cell IC, 09-12") \
     X(ATM_CELLS_U_FROM_PSI, "0", Result, 'N', "off; not scored separately") \
     X(ATM_CELL_ROT_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_CLOUD_INIT_DIAG, "0", Diag, 'D', "print/dump only") \
@@ -83,7 +81,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \
     X(ATM_MC_QVD, "0", Result, 'R', "B.10c") \
     X(ATM_MC_SGZ, "0", Result, 'R', "B.10b") \
-    X(ATM_MC_S_NDIM, "1", Result, 'F', "09-24") \
     X(ATM_MC_T_NDIM, "1.0", Result, 'F', "09-22") \
     X(ATM_METRIC_CHECK, "0", Diag, 'D', "print/dump only") \
     X(ATM_METRIC_EXACT, "0", Result, 'N', "null on integrated quantities; undecidable") \
@@ -94,7 +91,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MFC_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_MICRO_NDIM, "1.0", Result, 'F', "09-21 (read at 3 sites)") \
     X(ATM_NUE_GRAD, "1.0", Result, 'F', "09-21") \
-    X(ATM_OROG_Q_MASS, "1", Result, 'F', "09-28 (leak -3125 -> +108 mm/a, climate null; rp_oqm)") \
     X(ATM_PDYN_CAP, "2.0", Result, 'P', "p_dyn source cap (non-dim)") \
     X(ATM_PDYN_CEILING, "0.0", Result, 'P', "p_dyn clamp; 0 = phase-dependent (10 before iteration 300, 3 after)") \
     X(ATM_POISSON_METRIC_FIX, "0", Result, 'N', "consistent horizontal Poisson metric; parsed as an integer at all sites since 2026-09-30 (was atof at one)") \
@@ -118,7 +114,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RADIATION_MODE, "5", Result, 'S', "5 (radiation diagnostic)") \
     X(ATM_RAD_COLDIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_RAD_EQUIL, "0", Result, 'R', "pair with SW_INSOL; needs a prognostic T") \
-    X(ATM_RAD_TOPO, "1", Result, 'F', "09-24 (B.4)") \
     X(ATM_RAIN_AREA, "0.10", Result, 'P', "0.10 since 09-01 (fitted)") \
     X(ATM_RAIN_PASS_DIAG, "0", Diag, 'D', "print the rain-column pass convergence") \
     X(ATM_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic restart file (default: only the latest)") \
@@ -133,7 +128,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
     X(ATM_SATADJ_FREEZE_LATENT, "0", Result, 'N', "null (0.05 % of cloud)") \
-    X(ATM_SEAM_PERIODIC, "1", Result, 'F', "09-24") \
     X(ATM_SEAM_Q_CONSERVE, "0", Result, 'R', "conserve water at the phi seam; 2 = also next to land (working branch 2)") \
     X(ATM_SEAM_Q_DIAG, "0", Diag, 'D', "print the seam water-conservation buckets") \
     X(ATM_SFC_FLUX, "0.0", Result, 'N', "null (timescale wall)") \
@@ -145,7 +139,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_T0_ATTRIB, "0", Diag, 'D', "print/dump only") \
     X(ATM_TAU_PBROAD, "0.0", Result, 'N', "refuted (lapse 3 %)") \
     X(ATM_TEQ_SKIN_ONLY, "0", Result, 'R', "instrument branch, must NOT be flipped") \
-    X(ATM_TURB_SIN_FLOOR, "1", Result, 'F', "09-28 (correctness flip; fx4_tsf connected, null)") \
     X(ATM_TW_BALANCE, "0.0", Result, 'R', "off; the only mid-lat jet IC") \
     X(ATM_TW_BALANCE_V, "0", Result, 'P', "sub-option of TW_BALANCE") \
     X(ATM_TW_LATMIN, "15.0", Result, 'P', "sub-parameter of TW_BALANCE") \
@@ -153,15 +146,12 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_T_FLOOR, "216.65", Result, 'P', "216.65 K since 08-31") \
     X(ATM_UBUD_BALANCE, "0", Diag, 'D', "print/dump only") \
     X(ATM_VTK_STRIDE, "5", Diag, 'I', "VTK cadence") \
-    X(ATM_V_MASSBAL, "1", Result, 'F', "08-28") \
-    X(ATM_V_MASSBAL_STRIDE, "1", Result, 'F', "09-12") \
     X(ATM_WATER_CLOSURE, "0", Result, 'R', "reverted 09-25; works with filter off (qh600)") \
     X(HYD_A_H, "0.0", Result, 'R', "Laplacian; biharmonic preferred") \
     X(HYD_A_H_BIHARM, "1.0e19", Result, 'F', "default 1.0e19 since 09-30 (OCN-METRIC, om_b1e19: noise 0.515, radial u 2400x below shipped; 3e19 ran away)") \
     X(HYD_A_H_BIHARM_SCALED, "1", Result, 'F', "default 1 since 09-30 (sin^4 scaling; unscaled 3e18 NaN'd at the pole with floor 0.26)") \
     X(HYD_BAROCLINIC_PGF, "0.0", Result, 'R', "pair with PHYDRO_SALT; HYDRO_SPLIT may supersede") \
     X(HYD_BC_DRAG, "0.0", Result, 'R', "numerical, not physical") \
-    X(HYD_BC_SECOND_ORDER, "1", Result, 'F', "09-23") \
     X(HYD_BUOY_CONSISTENT, "0.0", Result, 'R', "radial runaway; HYDRO_SPLIT") \
     X(HYD_DEEP_DRAG, "0.0", Result, 'N', "diagnosis only, 09-28 (user): IS the B.6 profile cause (1.268 -> 0.707 at tau 20 s), numerical strengths only") \
     X(HYD_HYDRO_SPLIT, "0.0", Result, 'N', "won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged)") \
@@ -175,11 +165,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(HYD_PHYDRO_SALT, "0", Result, 'R', "pair") \
     X(HYD_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic ocean restart file (default: only the latest)") \
     X(HYD_RUN_NEUMANN, "1", Result, 'F', "default 1 since 09-30, with METRIC_RADIUS") \
-    X(HYD_SEAM_PERIODIC, "1", Result, 'F', "09-28 (ocean seam blow-up 0.128 -> 79 m/s under HYD_BC_SECOND_ORDER=1; sp_ship)") \
     X(HYD_SFC_FLUX, "0.0", Result, 'R', "unmeasured") \
-    X(HYD_SSS_FILL, "1", Result, 'F', "SSS sentinel, 09-08") \
-    X(HYD_T_FREEZE, "1", Result, 'F', "09-05") \
-    X(HYD_T_FREEZE_SFC, "1", Result, 'F', "09-05") \
     X(HYD_VW_BOTTOM_ZG, "0", Result, 'N', "-17 % of the profile excess; refuted as cause")
 
 enum Id : int {

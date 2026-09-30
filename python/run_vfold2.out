@@ -1,0 +1,3 @@
+exit 0
+    DIFFERS: RUN_CONFIG.txt
+FOLD2  batch 1 + literal seam == full batch 2: identical 13 / differing 1  -> FAIL

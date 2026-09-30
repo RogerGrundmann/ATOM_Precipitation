@@ -272,9 +272,8 @@ void cHydrosphereModel::RunTimeSlice(int Ma){
     // warm the Arctic surface by four degrees.
     // ==================================================================================
     {
-        // DEFAULT ON since 2026-09-05, at the user's instruction. HYD_T_FREEZE_SFC=0
-        // restores the constant t_pole_salt floor.
-        if (knob::on(knob::HYD_T_FREEZE_SFC)){
+        // HYD_T_FREEZE_SFC (on since 2026-09-05) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+        {
             int    n_seen = 0, n_fresh = 0, n_raised = 0;
             double raise_max = 0.0;
             double t_sfc_min = 1.0e30;            // coldest prescribed SST, [C]

@@ -280,8 +280,7 @@ public:
         // saturation from cwp_cap_col sharing a column total among thinner layers) predates
         // ATM_CLOUD_TAU_MAX (layer bound, default on) and ATM_CWP_CAP being disabled (2026-08-31).
         // ATM_RAD_TOPO=0 restores the sea-level column exactly. See CLAUDE.md for the arm.
-        static const bool topo_rad = [](){
-            return knob::on(knob::ATM_RAD_TOPO); }();
+        // ATM_RAD_TOPO (the column starts at the local ground; on since 2026-09-24) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
         // ATM_SFC_COUPLED -- see the surface/column consistency block in the column loop.
         // (No `sfc_coupled` flag here: ATM_SFC_COUPLED was written, measured as a null and
         // REMOVED -- it solved the surface balance with a neutral-lapse constraint and never
@@ -342,9 +341,7 @@ public:
                 // ATM_RAD_TOPO=1 puts the column on the real ground. DEFAULT OFF because it moves
                 // the radiation over all land and this tree measures before it flips. Off-branch
                 // is bit-identical: i_mount is 0 and every loop below reduces to what it was.
-                const int i_mount = topo_rad
-                    ? std::min(std::max(m.i_topography[j][k], 0), i_trop - 3)
-                    : 0;
+                const int i_mount = std::min(std::max(m.i_topography[j][k], 0), i_trop - 3);
 
                 // Grey-body emission of each layer and its "original" reference.
                 for (int i = i_mount; i <= i_trop; i++) {
@@ -433,7 +430,7 @@ public:
                 // would silently move every recorded off-branch number.
                 const double tau_dry_full = -log(1.0 - eps_dry);     // Bignami, sea-level column
                 const double mass_frac    = (m.p_0 > 0.0) ? (sum_dp / m.p_0) : 1.0;
-                const double tau_dry = topo_rad ? tau_dry_full * mass_frac : tau_dry_full;
+                const double tau_dry = tau_dry_full * mass_frac;
                 const double tau_col = -log(1.0 - eps_col);
                 const double tau_wv  = (tau_col > tau_dry) ? (tau_col - tau_dry) : 0.0;
                 const double inv_dp  = (sum_wdp > 0.0) ? 1.0 / sum_wdp : 0.0;
