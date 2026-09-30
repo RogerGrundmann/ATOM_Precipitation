@@ -1008,25 +1008,6 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // HYD_HYDRO_SPLIT (HydBuoyancy.h): the horizontal gradient of the hydrostatic pressure of the
     // density anomaly, Earth metric. Added to bcl_the/bcl_phi so it reaches rhs_v/rhs_w, aux_v/aux_w
     // and the budgets' pgf bucket by the same route as HYD_BAROCLINIC_PGF.
-    const bool hyd_split = HydSplit::enabled();
-    if(hyd_split && is_water(h, i, j, k) && j > 0 && j < jm-1 && k > 0 && k < km-1){
-        auto dh = [&](int jm1, int km1, int jp1, int kp1) -> double {   // 2 x the one-sided or centred difference
-            const bool w_m = !is_land(h, i, jm1, km1);
-            const bool w_p = !is_land(h, i, jp1, kp1);
-            const double pc = HydSplit::at(i, j, k);
-            if(w_m && w_p) return HydSplit::at(i, jp1, kp1) - HydSplit::at(i, jm1, km1);
-            if(w_p)        return 2.0 * (HydSplit::at(i, jp1, kp1) - pc);
-            if(w_m)        return 2.0 * (pc - HydSplit::at(i, jm1, km1));
-            return 0.0;
-        };
-        const double eu_s = L_hyd / (r_Earth * 1.0e3);
-        double hs_the = eu_s * dh(j-1, k, j+1, k) * inv_2dthe;
-        double hs_phi = eu_s * dh(j, k-1, j, k+1) * inv_2dphi / sinthe;
-        if(!AtomUtils::is_finite_safe(hs_the)) hs_the = 0.0;
-        if(!AtomUtils::is_finite_safe(hs_phi)) hs_phi = 0.0;
-        bcl_the += hs_the;
-        bcl_phi += hs_phi;
-    }
 
     // ----- Shear (velocity-gradient) dissipation heating -----
     // Dissipation function Φ = ν|S|² built DIRECTLY from the RESOLVED strain-rate tensor
@@ -1159,19 +1140,8 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
         : -buoy_s * buoyancy * g * L_hyd / (u_0 * u_0)
             * (HydBuoy::rho_eos(t.x[i][j][k] * t_0 - t_0, c.x[i][j][k] * c_35)
                - HydBuoy::rho_ref[i]) / r_0_water;
-    // HYD_HYDRO_SPLIT: the buoyancy is balanced EXACTLY by dp_hb/dz, which is not formed, so
-    // rhs_u carries neither. The budget below records the consistent b in ubud_buoy and its
-    // hydrostatic balance in ubud_pgf, so sum(ubud_*) == rhs_u still holds.
-    double buoy_hb = 0.0;
-    double buoy_rhs = buoy_nd;
-    if(hyd_split){
-        buoy_hb = -HydSplit::strength() * buoyancy * g * L_hyd / (u_0 * u_0)
-                * (HydBuoy::rho_eos(t.x[i][j][k] * t_0 - t_0, c.x[i][j][k] * c_35)
-                   - HydBuoy::rho_ref[i]) / r_0_water;
-        buoy_rhs = 0.0;
-    }
     rhs_u.x[i][j][k] = -dpdr_exp - transport_u + diffusion_u
-        + buoy_rhs
+        + buoy_nd
         + Coriolis * Coriolis_rad + centrifugal * centrifugal_rad;
 
     // Radial (u) momentum-budget capture — the DEEP polar blow-up is a
@@ -1181,10 +1151,10 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // wherever the blow-up relocates (pole -> 84N -> 51S). The sum of the five
     // equals rhs_u. See project_hydro_polar_blowup.
     if (wbudget_capture) {
-        ubud_pgf.x[i][j][k]  = -dpdr_exp - buoy_hb;
+        ubud_pgf.x[i][j][k]  = -dpdr_exp;
         ubud_adv.x[i][j][k]  = -transport_u;
         ubud_diff.x[i][j][k] =  diffusion_u;
-        ubud_buoy.x[i][j][k] =  hyd_split ? buoy_hb : buoy_nd;
+        ubud_buoy.x[i][j][k] =  buoy_nd;
         ubud_cor.x[i][j][k]  =  Coriolis * Coriolis_rad
                               + centrifugal * centrifugal_rad;
     }
@@ -1259,13 +1229,7 @@ void cHydrosphereModel::RHS_Hydrosphere_Turb(int i, int j, int k, const CellGeom
     // iterations. NB apply_barotropic_mode_split re-pins each column's depth MEAN every iteration,
     // so this acts on the baroclinic deviation at the bottom -- which is where B.6's lower-column
     // rise lives.
-    static const double deep_drag_tau_d = [](){
-        return knob::real(knob::HYD_DEEP_DRAG); }();
-    if (deep_drag_tau_d > 0.0 && i == 1 && is_water(h, i, j, k)) {
-        const double r_nd = (L_hyd / u_0) / (deep_drag_tau_d * 86400.0);
-        rhs_v.x[i][j][k] -= r_nd * v_ijk;
-        rhs_w.x[i][j][k] -= r_nd * w_ijk;
-    }
+    // HYD_DEEP_DRAG -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
 
     // NB: the barotropic mode is NOT injected here as a force. The geostrophic PGF
     // f x u_bt is curl-free, so the divergence projection deletes it (verified

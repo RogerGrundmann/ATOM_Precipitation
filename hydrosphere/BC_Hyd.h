@@ -122,12 +122,7 @@ public:
                 // extrapolated value. Zero-gradient v[0] = v[1], w[0] = w[1] is the neutral
                 // truncation condition: no shear across the cut, no extrapolated trend. The
                 // surface (i = im-1) is untouched. u stays Dirichlet 0 either way.
-                static const bool vw_bottom_zg = [](){
-                    return knob::on(knob::HYD_VW_BOTTOM_ZG); }();
-                if (vw_bottom_zg) {
-                    m.v.x[0][j][k] = m.v.x[1][j][k];
-                    m.w.x[0][j][k] = m.w.x[1][j][k];
-                }
+                // HYD_VW_BOTTOM_ZG -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history.
             }
         }
     }

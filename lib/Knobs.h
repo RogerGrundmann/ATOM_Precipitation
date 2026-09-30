@@ -126,20 +126,14 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(HYD_BAROCLINIC_PGF, "0.0", Result, 'R', "pair with PHYDRO_SALT; HYDRO_SPLIT may supersede") \
     X(HYD_BC_DRAG, "0.0", Result, 'R', "numerical, not physical") \
     X(HYD_BUOY_CONSISTENT, "0.0", Result, 'R', "radial runaway; HYDRO_SPLIT") \
-    X(HYD_DEEP_DRAG, "0.0", Result, 'N', "diagnosis only, 09-28 (user): IS the B.6 profile cause (1.268 -> 0.707 at tau 20 s), numerical strengths only") \
-    X(HYD_HYDRO_SPLIT, "0.0", Result, 'N', "won't flip, 09-28: ohs_1 stable, no measurable effect (profile 1.268 unchanged)") \
     X(HYD_KE_SPLIT, "0", Diag, 'D', "print/dump only") \
-    X(HYD_LINE_FOLD, "1", Result, 'P', "sub-option of LINE_SOLVE") \
-    X(HYD_LINE_GAUGE, "1", Result, 'P', "sub-option of LINE_SOLVE") \
-    X(HYD_LINE_SOLVE, "0", Result, 'N', "not needed (w2 slightly worse)") \
     X(HYD_METRIC_RADIUS, "6370.0", Result, 'F', "default 6370 km since 09-30 (user); profile stays bottom-intensified (structural, OCN-PROF)") \
     X(HYD_METRIC_SIN_FLOOR, "0.26", Result, 'P', "0.26 since 09-28, was 0.4 (ro_osf26/40: 75-90 KE -7.5 %, equatorward null; matches the atmosphere)") \
     X(HYD_NUE_GRAD, "0.0", Result, 'R', "off; would inherit the broken metric") \
     X(HYD_PHYDRO_SALT, "0", Result, 'R', "pair") \
     X(HYD_RESTART_KEEP, "", Diag, 'I', "=all keeps every periodic ocean restart file (default: only the latest)") \
     X(HYD_RUN_NEUMANN, "1", Result, 'F', "default 1 since 09-30, with METRIC_RADIUS") \
-    X(HYD_SFC_FLUX, "0.0", Result, 'R', "unmeasured") \
-    X(HYD_VW_BOTTOM_ZG, "0", Result, 'N', "-17 % of the profile excess; refuted as cause")
+    X(HYD_SFC_FLUX, "0.0", Result, 'R', "unmeasured")
 
 enum Id : int {
 #define ATOM_KNOB_ID(n, d, k, c, doc) n,

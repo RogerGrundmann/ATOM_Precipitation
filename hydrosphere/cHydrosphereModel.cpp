@@ -508,21 +508,6 @@ cout << endl << endl << endl << "      OGCM: run_3D_loop .......................
         cout << "      OGCM: [SCALES] buoyancy coefficient: shipped g*dt/u_0 = " << g * dt / u_0
              << "   consistent g*L_hyd/u_0^2 = " << g * L_hyd / (u_0 * u_0)
              << "   ratio = " << (L_hyd / (u_0 * dt)) << endl;
-        {   // HYD_HYDRO_SPLIT + HYD_BAROCLINIC_PGF both add a hydrostatic horizontal pressure gradient
-            const bool split = knob::real(knob::HYD_HYDRO_SPLIT) != 0.0;
-            if (split && knob::real(knob::HYD_BAROCLINIC_PGF) != 0.0)
-                cout << "      OGCM: *** WARNING: HYD_HYDRO_SPLIT and HYD_BAROCLINIC_PGF are BOTH set -- the"
-                     << " baroclinic pressure gradient is counted twice ***" << endl;
-            if (split && knob::is_set(knob::HYD_BUOY_CONSISTENT))
-                cout << "      OGCM: note: HYD_HYDRO_SPLIT replaces the radial buoyancy; HYD_BUOY_CONSISTENT"
-                     << " only sets the budget's ubud_buoy then" << endl;
-        }
-        {   // HYD_DEEP_DRAG (B.7): the lowest-level coupling to a deep ocean at rest
-            const double tau_d = knob::real(knob::HYD_DEEP_DRAG);
-            if (tau_d > 0.0)
-                cout << "      OGCM: [SCALES] HYD_DEEP_DRAG tau = " << tau_d << " d -> e-folding "
-                     << tau_d * 86400.0 / (dt * L_hyd / u_0) << " iterations at i = 1" << endl;
-        }
 
         // Horizontal-mixing scales, printed unconditionally because every argument about
         // HYD_METRIC_RADIUS and HYD_A_H has had to re-derive them. dx is the equatorial

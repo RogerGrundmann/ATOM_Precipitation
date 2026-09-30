@@ -109,12 +109,7 @@ inline double rho_eos(double t_Celsius, double S_psu){
 // ======================================================================================
 namespace HydSplit {
 
-inline double strength(){
-    static const double s = [](){
-        return knob::real(knob::HYD_HYDRO_SPLIT); }();
-    return s;
-}
-inline bool enabled(){ return strength() != 0.0; }
+// HYD_HYDRO_SPLIT (won't flip, 2026-09-28) -- retired 2026-09-30 (KNOB-INV plan C, measured null / superseded); the switch and its branch are in git history. p_hb storage kept for the budget code below.
 
 inline std::vector<double> p_hb;             // im*jm*km, (i*jm + j)*km + k, non-dim p'/(r_0 u_0^2)
 inline int n_j = 0, n_k = 0;

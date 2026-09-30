@@ -1,0 +1,20 @@
+built -O0: cli/ret_b5_atm cli/ret_b5_hyd  from WORKTREE (91409f4 + working tree)
+  launched vretb5_a  (ret_b5_atm  clean)  pid 37166
+  launched vretb5_b  (ret_b4_atm  clean)  pid 37169
+  launched vretb5_c  (ret_b5_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 37172
+  launched vretb5_d  (ret_b4_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 37175
+  launched vretb5_e  (ret_b5_hyd  clean)  pid 37178
+  launched vretb5_f  (ret_b4_hyd  clean)  pid 37181
+=== waiting for arms: vretb5_a vretb5_b vretb5_c vretb5_d vretb5_e vretb5_f  (13:26:47)
+  vretb5_a exit 0
+  vretb5_b exit 0
+  vretb5_c exit 0
+  vretb5_d exit 0
+  vretb5_e exit 0
+  vretb5_f exit 0
+=== all arms done 13:41:36
+A  atm new clean == old clean: identical 14 / differing 0  -> PASS
+B  atm new+working branch == old+working branch: identical 14 / differing 0  -> PASS
+C  hyd new clean == old clean: identical 17 / differing 0  -> PASS
+E  CONTROL atm new+working branch vs old clean -- MUST differ: identical 1 / differing 13  -> PASS
+VERDICT: PASS
