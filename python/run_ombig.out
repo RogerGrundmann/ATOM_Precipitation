@@ -1,0 +1,73 @@
+start 08:17  hyd_omsc a2f49006
+om_b1e19 exit 0  NaN 0  09:19
+om_b3e19 exit 0  NaN 0  09:19
+### ship   iter 1000   full-depth columns 39689
+     depth    median       rms       p90   (horizontal speed, cm/s)
+      -0.0     0.983     2.955     4.273
+      -2.8     0.720     2.627     3.495
+     -13.9     0.391     2.125     2.407
+     -28.7     0.310     1.657     1.864
+     -64.8     0.242     1.333     1.481
+    -117.4     0.252     1.130     1.255
+    -200.0     0.242     1.027     1.383
+  rms |u| (radial, nondim) 2.356816e-02   |u|/|horiz| rms 3.634157e-01
+  grid-scale noise index 0.5494
+
+### met40   iter 1000   full-depth columns 39689
+     depth    median       rms       p90   (horizontal speed, cm/s)
+      -0.0     0.951     2.732     3.967
+      -2.8     0.644     2.443     3.194
+     -13.9     0.244     2.076     2.226
+     -28.7     0.203     1.721     1.851
+     -64.8     0.188     1.434     1.504
+    -117.4     0.203     1.345     1.493
+    -200.0     0.216     2.047     2.350
+  rms |u| (radial, nondim) 9.788611e-06   |u|/|horiz| rms 1.403725e-04
+  grid-scale noise index 0.5120
+
+### scl   iter 1000   full-depth columns 39689
+     depth    median       rms       p90   (horizontal speed, cm/s)
+      -0.0     0.947     2.814     4.033
+      -2.8     0.644     2.462     3.218
+     -13.9     0.244     2.074     2.232
+     -28.7     0.205     1.731     1.843
+     -64.8     0.189     1.448     1.512
+    -117.4     0.204     1.357     1.496
+    -200.0     0.215     2.036     2.172
+  rms |u| (radial, nondim) 1.026117e-05   |u|/|horiz| rms 1.461702e-04
+  grid-scale noise index 0.7965
+
+### b1e19   iter 1000   full-depth columns 39689
+     depth    median       rms       p90   (horizontal speed, cm/s)
+      -0.0     0.945     2.703     3.956
+      -2.8     0.642     2.420     3.185
+     -13.9     0.244     2.072     2.231
+     -28.7     0.207     1.735     1.870
+     -64.8     0.189     1.445     1.513
+    -117.4     0.202     1.346     1.495
+    -200.0     0.214     1.994     2.231
+  rms |u| (radial, nondim) 1.025196e-05   |u|/|horiz| rms 1.470254e-04
+  grid-scale noise index 0.5149
+
+### b3e19   iter 1000   full-depth columns 39689
+     depth    median       rms       p90   (horizontal speed, cm/s)
+      -0.0     0.943    22.687     3.922
+      -2.8     0.638     4.053     3.156
+     -13.9     0.248     2.083     2.240
+     -28.7     0.212     1.774     1.923
+     -64.8     0.194     1.462     1.538
+    -117.4     0.213     1.361     1.539
+    -200.0     0.229     2.017     2.311
+  rms |u| (radial, nondim) 1.742055e-05   |u|/|horiz| rms 9.782691e-05
+  grid-scale noise index 0.4155
+
+== om_ship conv: 1000,290.016,0.0110863,0.0321534,0.000122988,1.10116,0
+ max u-component ......... =     0.127928   m/s   25°N 120°E   -20 m           min 
+== om_met40 conv: 1000,290.073,0.00972819,0.0282198,0.000141861,1.62953,0
+ max u-component ......... =     0.000114   m/s   65°S 131°E  -105 m           min 
+== om_scl conv: 1000,290.073,0.00972824,0.0282199,0.000143414,1.60287,0
+ max u-component ......... =     0.000116   m/s   65°S 131°E  -105 m           min 
+== om_b1e19 conv: 1000,290.073,0.00972831,0.0282202,0.000141618,1.59438,0
+ max u-component ......... =     0.000117   m/s   65°S 131°E  -105 m           min 
+== om_b3e19 conv: 1000,290.073,0.00972485,0.0282101,0.000807337,63.5472,0
+ max u-component ......... =     0.000620   m/s    5°S 108°E   -15 m           min 
