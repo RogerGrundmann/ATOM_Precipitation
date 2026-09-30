@@ -1,6 +1,7 @@
 #ifndef _UTILS_
 #define _UTILS_
 
+#include "Knobs.h"
 #include <string>
 #include <set>
 #include <map>
@@ -65,8 +66,7 @@ namespace AtomUtils{
     // exactly the kind of thing that drifts apart.
     inline bool coriolis_nontraditional(){
         static const bool v = [](){
-            const char* e = getenv("ATOM_CORIOLIS_NONTRAD");
-            return e ? (atoi(e) != 0) : false; }();
+            return knob::on(knob::ATOM_CORIOLIS_NONTRAD); }();
         return v;
     }
 
@@ -103,14 +103,12 @@ namespace AtomUtils{
     // The hydrosphere has no radius knob yet, so there these are for measurement only.
     inline bool metric_curvature(){
         static const bool v = [](){
-            const char* e = getenv("ATOM_METRIC_CURVATURE");
-            return e ? (atoi(e) != 0) : false; }();
+            return knob::on(knob::ATOM_METRIC_CURVATURE); }();
         return v;
     }
     inline bool metric_divergence(){
         static const bool v = [](){
-            const char* e = getenv("ATOM_METRIC_DIVERGENCE");
-            return e ? (atoi(e) != 0) : false; }();
+            return knob::on(knob::ATOM_METRIC_DIVERGENCE); }();
         return v;
     }
 
