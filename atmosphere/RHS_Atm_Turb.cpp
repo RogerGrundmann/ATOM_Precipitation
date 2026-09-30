@@ -945,21 +945,20 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // maintaining the gradients it needs, in the manner of ATM_METRIC_SIN_FLOOR 0.55 -> 0.26.
     // The OCEAN's HYD_NUE_GRAD is deliberately NOT flipped with it -- it inherits the broken
     // 200-400 m horizontal metric, so its size there is a different question.
-    static const double nue_grad_s = [](){
-                                           return knob::real(knob::ATM_NUE_GRAD); }();
+    // ATM_NUE_GRAD (strength 1.0, on since 2026-09-21) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
     double cross_t = 0.0, cross_u = 0.0, cross_v = 0.0, cross_w = 0.0,
            cross_tke = 0.0, cross_dis = 0.0;
-    if(nue_grad_s != 0.0){
+    {
         auto nue_dot = [&](double dfdr, double dfdthe, double dfdphi){
             return dnuedr * dfdr * exp_2_rm + dnuedthe * dfdthe * inv_rm2
                  + dnuedphi * dfdphi * inv_rm2sinthe2;
         };
-        cross_t   = nue_grad_s * nue_grad_t   * nue_dot(dtdr,   dtdthe,   dtdphi);
-        cross_u   = nue_grad_s * nue_grad_vel * nue_dot(dudr,   dudthe,   dudphi);
-        cross_v   = nue_grad_s * nue_grad_vel * nue_dot(dvdr,   dvdthe,   dvdphi);
-        cross_w   = nue_grad_s * nue_grad_vel * nue_dot(dwdr,   dwdthe,   dwdphi);
-        cross_tke = nue_grad_s * nue_grad_tke * nue_dot(dtkedr, dtkedthe, dtkedphi);
-        cross_dis = nue_grad_s * nue_grad_dis * nue_dot(ddisdr, ddisdthe, ddisdphi);
+        cross_t   = nue_grad_t   * nue_dot(dtdr,   dtdthe,   dtdphi);
+        cross_u   = nue_grad_vel * nue_dot(dudr,   dudthe,   dudphi);
+        cross_v   = nue_grad_vel * nue_dot(dvdr,   dvdthe,   dvdphi);
+        cross_w   = nue_grad_vel * nue_dot(dwdr,   dwdthe,   dwdphi);
+        cross_tke = nue_grad_tke * nue_dot(dtkedr, dtkedthe, dtkedphi);
+        cross_dis = nue_grad_dis * nue_dot(ddisdr, ddisdthe, ddisdphi);
     }
 
     double diffusion_t = ((d2tdr2 - curv * dtdr) * exp_2_rm + dtdr * two_over_rm_exp
@@ -1139,8 +1138,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // budget's `pgf` bucket and `aux_v`/`aux_w` carry it -- the Poisson solve then sees its
     // divergence and supplies only the non-hydrostatic remainder. Air neighbours only: p_hb is
     // constant through rock and would fake a gradient at every plateau edge.
-    const bool hydro_split = AtmHydroSplit::enabled();
-    if(hydro_split && !land_ijk){
+    if(!land_ijk){
         auto dh = [&](int jm1, int km1, int jp1, int kp1, double inv2d) -> double {
             const bool a_m = AtomUtils::is_air(h, i, jm1, km1);
             const bool a_p = AtomUtils::is_air(h, i, jp1, kp1);
@@ -1317,18 +1315,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     //     the other 76 % integrates into `u`. See CLAUDE.md.
     static const bool buoy_tref = [](){
         return knob::on(knob::ATM_BUOY_TREF); }();
-    static const bool buoy_consistent = [](){
-        return knob::on(knob::ATM_BUOY_CONSISTENT);                         // DEFAULT OFF AGAIN since 2026-09-14
-    }();
-
+    // ATM_BUOY_CONSISTENT (reverted off 2026-09-14; superseded by ATM_HYDRO_SPLIT) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
     double buoyancy_term;
-    if(buoy_consistent){
-        // (a) + (b) together: fixing the dt without the reference temperature just rescales
-        // an incorrect force.
-        const double tref = (t_buoy_ref > 0.0) ? t_buoy_ref : 1.0;
-        buoyancy_term = buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
-                      * (t_buoy - t_buoy_ref) / tref;
-    }else if(buoy_tref){
+    if(buoy_tref){
         // (b) alone, on the shipped coefficient -- the arm that is measurable here.
         const double tref = (t_buoy_ref > 0.0) ? t_buoy_ref : 1.0;
         buoyancy_term = buoyancy_ramp * buoyancy * g * dt / u_0
@@ -1343,9 +1332,9 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // consistent b in `ubud_buoy` and its hydrostatic balance in `ubud_pgf` so the identity
     // sum(ubud_*) == rhs_u still holds.
     double buoy_hb = 0.0;
-    if(hydro_split){
+    {
         const double tref = (t_ref_level[i] > 0.0) ? t_ref_level[i] : 1.0;
-        buoy_hb = AtmHydroSplit::strength() * buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
+        buoy_hb = buoyancy_ramp * buoyancy * (g * L_atm / (u_0 * u_0))
                 * (tn.x[i][j][k] - t_ref_level[i]) / tref;
         buoyancy_term = 0.0;
     }
@@ -1531,13 +1520,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // climbing at 600 where the bands were not; and 1712 mm/a on a 30.7 mm reservoir is a
     // 5.8-day e-folding = 2.5e+06 iterations, so what is measured is the fast LOCAL response.
     // ==================================================================
-    static const double micro_ndim = [](){
-                                           return knob::real(knob::ATM_MICRO_NDIM); }();
-    double coeff_micro = r_humid.x[i][j][k];
-    if(micro_ndim != 0.0){
-        static const double L_over_u0 = metricShellLength() / u_0;   // fixed after init
-        coeff_micro += micro_ndim * (L_over_u0 - coeff_micro);
-    }
+    // ATM_MICRO_NDIM (coefficient L/u_0, on since 2026-09-21) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+    static const double coeff_micro = metricShellLength() / u_0;   // fixed after init
 
     rhs_c.x[i][j][k] = -transport_c + diffusion_c
         + coeff_trans * S_v.x[i][j][k] * coeff_micro

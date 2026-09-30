@@ -1602,9 +1602,7 @@ void findCloudBaseLFS() {
         // A STRENGTH rather than a flag, like ATM_MICRO_NDIM, because the endpoint is a factor
         // of 273 on a term that feeds rhs_t: 1.0 is the consistent value, 0.0 the shipped one,
         // and the blend is linear in the coefficient.
-        const double mc_t_ndim = [](){
-                                       return knob::real(knob::ATM_MC_T_NDIM); }();
-        const double mc_t_lat_scale = m.t_0 + mc_t_ndim * (1.0 - m.t_0);
+        // ATM_MC_T_NDIM (the latent half in K/s without the spare t_0, on since 2026-09-22) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
         long n_fluid = 0;
         long nt_cap = 0, nq_cap = 0, nv_cap = 0, nw_cap = 0;
         long nt_x2 = 0, nt_x10 = 0, nt_x100 = 0;
@@ -1679,9 +1677,7 @@ void findCloudBaseLFS() {
                     // t_0 inflates the latent half by t_0 = 273.15. Kept as-is here and measured
                     // by the census rather than repaired in place: it is not a knob yet.
                     double raw_t_flux   = -(flux_s_ip1 - flux_s_i) * inv_step_rh * m.t_0;               // K/s
-                    double raw_t_latent = (mc_t_ndim == 0.0)
-                        ? (L_latent / m.cp_l) * conv_src * m.t_0                  // SHIPPED, verbatim
-                        : (L_latent / m.cp_l) * conv_src * mc_t_lat_scale;        // 1.0 -> K/s
+                    double raw_t_latent = (L_latent / m.cp_l) * conv_src;       // K/s
                     double raw_t = raw_t_flux + raw_t_latent;
                     m.MC_t.x[i][j][k] = safe_cap(raw_t, MCt_max);
 

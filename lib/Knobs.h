@@ -39,20 +39,17 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATOM_METRIC_CURVATURE, "0", Result, 'S', "spherical curvature terms in the shared metric (both models)") \
     X(ATOM_METRIC_DIVERGENCE, "0", Result, 'S', "metric terms in the shared divergence (both models)") \
     X(ATM_ANELASTIC, "0", Result, 'N', "null on Psi (-0.006 %), structural") \
-    X(ATM_BUOY_CONSISTENT, "0", Result, 'X', "reverted 09-14 (radial u 390x); HYDRO_SPLIT supersedes") \
     X(ATM_BUOY_MOIST, "0", Result, 'N', "null unless BUOY_CONSISTENT") \
     X(ATM_BUOY_TREF, "0", Result, 'N', "measured +1.0 % on the term, null on the model") \
     X(ATM_CELLS_U_FROM_PSI, "0", Result, 'N', "off; not scored separately") \
     X(ATM_CELL_ROT_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_CLOUD_INIT_DIAG, "0", Diag, 'D', "print/dump only") \
-    X(ATM_CLOUD_TAU_MAX, "2.0", Result, 'F', "layer tau ceiling, 08-28") \
     X(ATM_CO2_BAND, "0.17", Result, 'P', "0.17") \
     X(ATM_CONV_ADJ, "0", Result, 'R', "off; palliative") \
     X(ATM_CONV_ADJ_LAPSE, "1.0", Result, 'P', "sub-parameter of CONV_ADJ") \
     X(ATM_CONV_ADJ_PASSES, "64", Result, 'P', "sub-parameter of CONV_ADJ") \
     X(ATM_CWB_BANDS, "0", Diag, 'D', "print/dump only") \
     X(ATM_CWB_DIAG, "0", Diag, 'D', "print/dump only") \
-    X(ATM_CWP_CAP, "1.0e9", Result, 'F', "08-31") \
     X(ATM_CWP_CENSUS, "0", Diag, 'D', "print/dump only") \
     X(ATM_DAMP_Q_HORIZ, "1", Result, 'R', "step A; qh600 scored") \
     X(ATM_DAMP_Q_MASS, "0", Result, 'R', "forced by WATER_CLOSURE") \
@@ -68,7 +65,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_HADLEY_SL, "4.0", Result, 'P', "IC 4.0N/3.0S") \
     X(ATM_HYDRO_PGF, "0.0", Result, 'N', "superseded by HYDRO_SPLIT") \
     X(ATM_HYDRO_PGF_RAW, "0", Result, 'N', "worse than HYDRO_PGF; superseded") \
-    X(ATM_HYDRO_SPLIT, "1.0", Result, 'F', "thermal wind, 09-24 (B.2)") \
     X(ATM_LAND_BUCKET, "0.0", Result, 'R', "20-iter evidence only") \
     X(ATM_LENGTH_NDIM, "0", Result, 'R', "the 40x L_atm defect (item 4 pending)") \
     X(ATM_LONGAL_J, "62", Diag, 'I', "output slice latitude") \
@@ -81,16 +77,12 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \
     X(ATM_MC_QVD, "0", Result, 'R', "B.10c") \
     X(ATM_MC_SGZ, "0", Result, 'R', "B.10b") \
-    X(ATM_MC_T_NDIM, "1.0", Result, 'F', "09-22") \
     X(ATM_METRIC_CHECK, "0", Diag, 'D', "print/dump only") \
     X(ATM_METRIC_EXACT, "0", Result, 'N', "null on integrated quantities; undecidable") \
     X(ATM_METRIC_NOCURV, "0", Result, 'N', "attribution arm, done") \
-    X(ATM_METRIC_RADIUS, "r_Earth", Result, 'F', "horizontal metric radius in km; default = the configured r_Earth, 0 = grid coordinate") \
     X(ATM_METRIC_SIN_FLOOR, "0.26", Result, 'P', "0.26 since 09-10") \
     X(ATM_METRIC_STRICT, "0", Diag, 'I', "abort on metric check") \
     X(ATM_MFC_DIAG, "0", Diag, 'D', "print/dump only") \
-    X(ATM_MICRO_NDIM, "1.0", Result, 'F', "09-21 (read at 3 sites)") \
-    X(ATM_NUE_GRAD, "1.0", Result, 'F', "09-21") \
     X(ATM_PDYN_CAP, "2.0", Result, 'P', "p_dyn source cap (non-dim)") \
     X(ATM_PDYN_CEILING, "0.0", Result, 'P', "p_dyn clamp; 0 = phase-dependent (10 before iteration 300, 3 after)") \
     X(ATM_POISSON_METRIC_FIX, "0", Result, 'N', "consistent horizontal Poisson metric; parsed as an integer at all sites since 2026-09-30 (was atof at one)") \
@@ -110,7 +102,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_PSI_SHAPE, "1", Result, 'P', "IC shape 1") \
     X(ATM_QC_CRIT, "0.05", Result, 'P', "0.05 g/kg since 08-31") \
     X(ATM_RADIAL_SHAPIRO_STRENGTH, "1.0", Result, 'P', "1.0 (u only)") \
-    X(ATM_RADIAL_SHAPIRO_STRENGTH_VW, "0.0", Result, 'F', "09-12") \
     X(ATM_RADIATION_MODE, "5", Result, 'S', "5 (radiation diagnostic)") \
     X(ATM_RAD_COLDIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_RAD_EQUIL, "0", Result, 'R', "pair with SW_INSOL; needs a prognostic T") \

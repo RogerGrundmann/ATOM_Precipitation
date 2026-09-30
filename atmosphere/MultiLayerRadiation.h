@@ -473,12 +473,8 @@ public:
                 // scheme does not have, so every column is treated as fully overcast with a thin
                 // cloud rather than 65 % of them with a thick one. The global mean is matched;
                 // the regional distribution is not.
-                static const double cwp_cap_col = [](){
-                    // DEFAULT DISABLED since 2026-08-31: the cap was compensating for a
-                    // condensate 20x too large and it INVERTS the geography (see CLAUDE.md).
-                    // ATM_CWP_CAP=20 restores the shipped cap.
-                    const double v = knob::real(knob::ATM_CWP_CAP);
-                    return v > 0.0 ? v : 1.0e9; }();
+                // ATM_CWP_CAP (disabled since 2026-08-31: it compensated a condensate 20x too large and
+                // inverted the geography) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
                 double cwp_raw = 0.0;
                 for (int i = i_mount; i <= i_trop; i++) {
                     const double dz_i   = (i < i_trop) ? (m.get_layer_height(i+1) - m.get_layer_height(i))
@@ -502,7 +498,6 @@ public:
                         cwp_prof[(size_t)j * m.im + i] += wj * (cwl + cwi) * rho_ii * dz_i * 1000.0;
                     }
                 }
-                const double cloud_scale = (cwp_raw > cwp_cap_col) ? (cwp_cap_col / cwp_raw) : 1.0;
 
                 double lwp_col = 0.0, iwp_col = 0.0;                  // accumulated (scaled) condensate paths [g/m2] (for the SW albedo bump)
                 double lwp_in_col = 0.0, iwp_in_col = 0.0;            // ATM_CLOUD_RAD_FRAC: the same paths IN-CLOUD (grid mean / f)
@@ -558,8 +553,8 @@ public:
                     const double rho_i = (T_i > 0.0) ? (m.p_stat.x[i][j][k] * 100.0) / (287.0 * T_i) : 0.0; // [kg/m3]
                     const double cw_l  = (m.cloud.x[i][j][k] > 0.0) ? m.cloud.x[i][j][k] : 0.0; // [kg/kg]
                     const double cw_i  = (m.ice.x[i][j][k]   > 0.0) ? m.ice.x[i][j][k]   : 0.0; // [kg/kg]
-                    const double LWP_gm = cloud_scale * cw_l * rho_i * dz * 1000.0;  // GRID-MEAN liquid water path [g/m2], capped
-                    const double IWP_gm = cloud_scale * cw_i * rho_i * dz * 1000.0;  // GRID-MEAN ice   water path [g/m2], capped
+                    const double LWP_gm = cw_l * rho_i * dz * 1000.0;  // GRID-MEAN liquid water path [g/m2], capped
+                    const double IWP_gm = cw_i * rho_i * dz * 1000.0;  // GRID-MEAN ice   water path [g/m2], capped
 
                     // ATM_CLOUD_RAD_FRAC: cloudy area fraction of this cell, from the SAME
                     // uniform-PDF closure that made the condensate (CloudFraction.h). The
@@ -612,10 +607,8 @@ public:
                     // (180.33882 W/m2 both ways) and cloudy OLR moves +0.053 (177.607 -> 177.660),
                     // while 1773 near-blackbody layers per latitude slice become zero. Removing a
                     // pathology the design already forbids, at 0.05 W/m2, is worth taking.
-                    static const double tau_cloud_max = [](){
-                        const double v = knob::real(knob::ATM_CLOUD_TAU_MAX);
-                        return v > 0.0 ? v : 0.0; }();
-                    if (tau_cloud_max > 0.0 && tau_cloud > tau_cloud_max) {
+                    constexpr double tau_cloud_max = 2.0;   // ATM_CLOUD_TAU_MAX retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history
+                    if (tau_cloud > tau_cloud_max) {
                         const double f = tau_cloud_max / tau_cloud;
                         LWP_i *= f;  IWP_i *= f;  tau_cloud = tau_cloud_max;
                     }
@@ -654,7 +647,7 @@ public:
                             eps_max.t_wv  = tau_wv * vpath_col[i] * pw_i * inv_vp;
                             eps_max.t_co2 = tau_co2;
                             eps_max.t_cld = tau_cloud;
-                            eps_max.cf = cf; eps_max.cloud_scale = cloud_scale;
+                            eps_max.cf = cf;
                             eps_max.LWP = LWP_i; eps_max.IWP = IWP_i;
                             eps_max.q_v = m.c.x[i][j][k] * 1000.0;
                             eps_max.q_c = cw_l * 1000.0;
@@ -1017,8 +1010,7 @@ public:
                 acc += v[n].second;
                 while (pi < 7 && acc >= pct[pi] * w_tot) q[pi++] = v[n].first;
             }
-            const double cap = [](){
-                                    const double x = knob::real(knob::ATM_CWP_CAP); return x > 0.0 ? x : 1.0e9; }();
+            constexpr double cap = 1.0e9;   // ATM_CWP_CAP retired (disabled)
             std::cout << "      AGCM: [CWP CENSUS] column condensate path g/m2, cos-lat weighted."
                       << "  mean=" << mean / w_tot
                       << "  cloudy(>5)=" << 100.0 * w_cloudy / w_tot << " %" << std::endl;

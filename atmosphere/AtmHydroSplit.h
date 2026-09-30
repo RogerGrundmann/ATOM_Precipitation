@@ -69,11 +69,7 @@ namespace AtmHydroSplit {
 // Coriolis in 96 %, the jet GENERATED (max|w| 27.1 -> 27.7 m/s where the control decays), climate null,
 // clean. Open at the flip: the non-hydrostatic p_dyn still grows (0.19 -> 0.27 over 600, slowing -35 %,
 // 11x below the 3.0 ceiling) and the jet has not levelled off. ATM_HYDRO_SPLIT=0 restores the old branch.
-inline double strength(){
-    static const double s = [](){ return knob::real(knob::ATM_HYDRO_SPLIT); }();
-    return s;
-}
-inline bool enabled(){ return strength() != 0.0; }
+// ATM_HYDRO_SPLIT (strength 1.0, on since 2026-09-24) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
 inline std::vector<double> p_hb;            // im*jm*km, (i*jm + j)*km + k
 inline int n_i = 0, n_j = 0, n_k = 0;

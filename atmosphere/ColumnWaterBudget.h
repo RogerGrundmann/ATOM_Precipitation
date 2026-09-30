@@ -439,8 +439,7 @@ private:
             // very coefficient it is meant to measure. Mirrors RHS_Atm_Turb.cpp exactly.
             // Default 1.0 since 2026-09-21 -- MUST track RHS_Atm_Turb.cpp's default exactly,
             // or this row reports the shipped coefficient while RK4 applies the corrected one.
-            static const double micro_s = [](){
-                                                return knob::real(knob::ATM_MICRO_NDIM); }();
+
             //
             // AND THE RAIN/SNOW RATES BESIDE THEM, AS A CONSERVATION CHECK ON THE SCHEME'S OWN
             // ARRAYS. A scheme that conserves has (S_v + S_c + S_i + S_g) + (S_r + S_s) = 0 at
@@ -469,7 +468,7 @@ private:
                         const double R = m.S_r.x[i][j][k] + m.S_s.x[i][j][k];
                         const double M = wj * mass[idx(m, i, j, k)];
                         double cm = m.r_humid.x[i][j][k];
-                        if(micro_s != 0.0) cm += micro_s * (L_over_u0 - cm);
+                        cm = L_over_u0;
                         s     += M * S * cm         * m.dt;   // as RK4 applies it
                         s_nd  += M * S * L_over_u0  * m.dt;   // the same rates at L/u_0
                         sp    += M * R * cm         * m.dt;
@@ -551,12 +550,8 @@ private:
                  << "   E = " << E_mm * per_year
                  << "   P - E = " << (P_mm - E_mm) * per_year
                  << " mm/a" << endl;
-            static const double micro_ndim = [](){
-                                                   return knob::real(knob::ATM_MICRO_NDIM); }();
             cout << "      AGCM: [CWB] microphysics rate arrays over the column [mm/a], NOT the"
-                 << " ground flux (different subset -- see the header);"
-                 << "  ATM_MICRO_NDIM = " << scientific << setprecision(3)
-                 << micro_ndim << fixed << endl;
+                 << " ground flux (different subset -- see the header)" << endl;
             cout << "      AGCM: [CWB]     as RK4 applies them (S*coeff):    vap+cld+ice+grp "
                  << setprecision(2) << Sq_mm * per_year << "   rain+snow " << Sp_mm * per_year
                  << "   sum " << (Sq_mm + Sp_mm) * per_year

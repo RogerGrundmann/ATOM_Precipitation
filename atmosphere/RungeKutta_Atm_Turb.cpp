@@ -71,7 +71,7 @@ void cAtmosphereModel::computeHydrostaticSplit(){
     // 1.9x weak at the ground, ~19x at 5 km, ~50x at the lid (exp_rm's 23x-spread defect again),
     // and it measured median |pgf|/|cor| 0.158 against ATM_HYDRO_PGF's 2.2 (output_hs_1rad).
     // rhs_u no longer contains b, so the radial cancellation holds whatever this scaling is.
-    const double coeff = HS::strength() * buoyancy_ramp * buoyancy * (g / (u_0 * u_0));   // per metre
+    const double coeff = buoyancy_ramp * buoyancy * (g / (u_0 * u_0));   // per metre
     std::vector<double> zh(im);
     for(int i = 0; i < im; i++) zh[i] = get_layer_height(i);                               // metres
 
@@ -105,7 +105,7 @@ void cAtmosphereModel::computeHydrostaticSplit(){
         }
     }
     if(checkpoint > 0 && iter_n % checkpoint == 0)
-        cout << "[HYDRO_SPLIT] s=" << HS::strength() << "  ramp=" << buoyancy_ramp
+        cout << "[HYDRO_SPLIT] ramp=" << buoyancy_ramp
              << "  coeff=" << coeff << "  max|p_hb| nd=" << pmax << endl;
 }
 
@@ -134,7 +134,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
     auto begin = std::chrono::high_resolution_clock::now();
 
     computeLevelMeanTemperature();   // refresh buoyancy base state t_ref_level[i]
-    if(AtmHydroSplit::enabled()) computeHydrostaticSplit();   // ATM_HYDRO_SPLIT, default off
+    computeHydrostaticSplit();   // ATM_HYDRO_SPLIT
 
     const double half_dt  = 0.5 * dt;
     const double dt_sixth = dt / 6.0;

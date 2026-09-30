@@ -233,14 +233,8 @@ void cAtmosphereModel::initGridCoordinates(){
 // A mean eddy viscosity of 6 m2/s with boundary-layer peaks near 280 is the right order for the
 // atmosphere; 1.45 was too small. The rise is a suppression being removed, not energy appearing.
 void cAtmosphereModel::initMetricRadius(){
-    static const double r_km = [this](){
-        return knob::is_set(knob::ATM_METRIC_RADIUS) ? knob::real(knob::ATM_METRIC_RADIUS) : r_Earth; }();
-    if(r_km <= 0.0){
-        m_metric_r0 = 0.0;
-        cout << "      AGCM: ATM_METRIC_RADIUS = 0 - horizontal metric left on the grid"
-             << " coordinate (pre-2026-07-28 behaviour)" << endl;
-        return;
-    }
+    // ATM_METRIC_RADIUS (= the configured r_Earth; 0 put the metric on the grid coordinate) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+    const double r_km = r_Earth;
 
     const double L_unit = metricShellLength();
     m_metric_r0 = (L_unit > 0.0) ? (r_km * 1.0e3 / L_unit) : 0.0;
@@ -2053,11 +2047,8 @@ cout << endl << endl << endl << "      AGCM: run_3D_loop atm ...................
         // alone, which is the component the CFL guard is actually for. Set _VW explicitly to
         // filter v/w. Every `ATM_RADIAL_SHAPIRO_STRENGTH` sweep recorded in CLAUDE.md was taken
         // under the INHERITING behaviour and its v/w half is not reproducible without _VW set.
-        static const double radial_shapiro_strength_vw = [](){
-            return knob::real(knob::ATM_RADIAL_SHAPIRO_STRENGTH_VW); }();
+        // ATM_RADIAL_SHAPIRO_STRENGTH_VW (0.0 = v and w unfiltered, since 2026-09-12) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
         AtomUtils::radial_shapiro_filter   (u, i_topography, /*passes=*/2, radial_shapiro_strength);
-        AtomUtils::radial_shapiro_filter_ho(v, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
-        AtomUtils::radial_shapiro_filter_ho(w, i_topography, /*passes=*/2, radial_shapiro_strength_vw);
         if(do_vbudget){ vb_diff(vb_radial); wb_diff(wb_radial);   // radial (vertical) Shapiro filter  [prime spin-down suspect]
             write_v_momentum_budget(iter_n, vb_dyn, vb_polar, vb_orog, vb_radial);
             write_w_momentum_budget(iter_n, wb_dyn, wb_polar, wb_orog, wb_radial);
