@@ -1,0 +1,7 @@
+  launched vxml3_y  (xml2_hyd  clean)  pid 46545
+=== waiting for arms: vxml3_y  (15:26:11)
+  vxml3_y exit 0
+=== all arms done 15:38:49
+D  hyd new with <knobs> == old+env: identical 17 / differing 0  -> PASS
+METRIC_RADIUS=0+
+RUN_NEUMANN=0+

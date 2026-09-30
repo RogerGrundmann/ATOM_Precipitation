@@ -14,6 +14,11 @@
 // TO ADD A KNOB: add one X(...) row, read it with knob::<accessor>(knob::NAME). It is in the banner automatically.
 // TO FLIP A DEFAULT: change the text in its row. Nothing else holds a copy.
 //
+// SOURCES, in order of precedence (plan D, 2026-09-30): the ENVIRONMENT, then the <knobs> section of the XML config
+// (<atom><knobs><ATM_RH_MIN_PTOP>482</ATM_RH_MIN_PTOP></knobs></atom>, loaded by each model's LoadConfig), then the
+// compiled default below. An unknown name in <knobs> is an error (a typo must not silently run the default), and so
+// is loading <knobs> after any knob has already been read (the value would be ignored). The banner marks the source.
+//
 // Parsing: on() = atoi(value) != 0; integer() = atoi; real() = atof; text() = the raw string. A default that is
 // not a number (ATM_METRIC_RADIUS = "r_Earth") must be read with is_set() first -- the site supplies the value --
 // and real()/integer() abort if asked to parse it. Values are read from the environment once, at first use, and
@@ -22,9 +27,14 @@
 // real("0.08538") is the same double as the literal 0.08538 it replaced.
 
 #include <array>
+#include <atomic>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>   // environ
 #include <initializer_list>
 #include <sstream>
 #include <string>
@@ -150,6 +160,36 @@ inline constexpr Spec specs[N_KNOBS] = {
 #undef ATOM_KNOB_SPEC
 };
 
+// The <knobs> section of the XML config (see SOURCES above).
+struct ConfigSource {
+    std::array<std::string, N_KNOBS> val;
+    std::array<bool, N_KNOBS> set{};
+    std::atomic<bool> reads_started{false};
+    std::string file;
+};
+inline ConfigSource& config() { static ConfigSource c; return c; }
+
+inline int find(const char* name) {
+    for (int i = 0; i < N_KNOBS; i++) if (std::strcmp(specs[i].name, name) == 0) return i;
+    return -1;
+}
+
+// Called by LoadConfig with the (name, text) pairs of <knobs>. Must run before any knob is read.
+inline void load_config(const std::vector<std::pair<std::string, std::string>>& kv, const std::string& file) {
+    if (kv.empty()) return;
+    ConfigSource& c = config();
+    if (c.reads_started.load())
+        throw std::logic_error("config " + file + ": <knobs> loaded after a knob was already read -- it would be ignored");
+    for (const auto& p : kv) {
+        const int i = find(p.first.c_str());
+        if (i < 0)
+            throw std::invalid_argument("config " + file + ": <knobs> names an unknown knob '" + p.first
+                                        + "' (retired, or a typo? the list is lib/Knobs.h)");
+        c.val[i] = p.second; c.set[i] = true;
+    }
+    c.file = file;
+}
+
 // The environment, read once for all knobs (thread-safe static init).
 inline const char* env(Id id) {
     static const std::array<const char*, N_KNOBS> cache = [](){
@@ -159,10 +199,23 @@ inline const char* env(Id id) {
     return cache[id];
 }
 
-inline bool is_set(Id id) { return env(id) != nullptr; }
+// Where the value in force comes from: 'e' environment, 'x' XML config, 'd' compiled default.
+inline char source(Id id) {
+    config().reads_started.store(true);
+    if (env(id)) return 'e';
+    return config().set[id] ? 'x' : 'd';
+}
 
-// The value in force as text: the environment's, else the registry default.
-inline const char* value(Id id) { const char* e = env(id); return e ? e : specs[id].dflt; }
+inline bool is_set(Id id) { return source(id) != 'd'; }
+
+// The value in force as text: the environment's, else the XML config's, else the registry default.
+inline const char* value(Id id) {
+    switch (source(id)) {
+        case 'e': return env(id);
+        case 'x': return config().val[id].c_str();
+        default:  return specs[id].dflt;
+    }
+}
 
 inline const char* numeric_value(Id id) {
     const char* v = value(id);
@@ -192,8 +245,11 @@ inline std::string banner(const char* tag, std::initializer_list<const char*> pr
         const char* n = specs[i].name;
         const char* s = std::strchr(n, '_');
         std::string e = std::string(s ? s + 1 : n) + "=";
-        const char* v = env(static_cast<Id>(i));
-        if (v) e += v; else e += std::string(specs[i].dflt[0] ? specs[i].dflt : "\"\"") + "*";
+        const Id id = static_cast<Id>(i);
+        const char* v = value(id);
+        e += v[0] ? v : "\"\"";
+        const char src = source(id);
+        if (src == 'd') e += "*"; else if (src == 'x') e += "+";
         return e; };
     std::ostringstream b;
     int n = 0;
@@ -206,9 +262,26 @@ inline std::string banner(const char* tag, std::initializer_list<const char*> pr
     b << "\n" << tag << "[RUN CONFIG] diagnostic/output knobs set:";
     int d = 0;
     for (int i = 0; i < N_KNOBS; i++)
-        if (want(specs[i].name) && specs[i].kind == Diag && env(static_cast<Id>(i))) { b << "  " << entry(i); d++; }
+        if (want(specs[i].name) && specs[i].kind == Diag && is_set(static_cast<Id>(i))) { b << "  " << entry(i); d++; }
     if (!d) b << "  none";
-    b << "\n" << tag << "[RUN CONFIG] (* = compiled-in default, not set in the environment; the list is lib/Knobs.h)\n";
+    // An environment variable that LOOKS like a knob but is not one -- retired in plan C, or a typo -- is otherwise
+    // ignored in silence, which is how a retired knob in an old run script would quietly run the default.
+    {
+        std::string unknown;
+        for (char** ev = environ; ev && *ev; ev++) {
+            const std::string kv(*ev);
+            const std::string name = kv.substr(0, kv.find('='));
+            if (!want(name.c_str()) || find(name.c_str()) >= 0) continue;
+            if (name.rfind("ATM_", 0) == 0 || name.rfind("HYD_", 0) == 0 || name.rfind("ATOM_", 0) == 0)
+                unknown += "  " + name;
+        }
+        if (!unknown.empty())
+            b << "\n" << tag << "[RUN CONFIG] *** WARNING: set in the environment but NOT a knob (retired or a typo;"
+              << " IGNORED):" << unknown;
+    }
+    b << "\n" << tag << "[RUN CONFIG] (* = compiled-in default, + = from <knobs> in "
+      << (config().file.empty() ? std::string("the XML config (none here)") : config().file)
+      << ", no mark = environment; the list is lib/Knobs.h)\n";
     return b.str();
 }
 

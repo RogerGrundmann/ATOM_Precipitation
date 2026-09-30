@@ -1,0 +1,33 @@
+built -O0: cli/xml_atm cli/xml_hyd  from WORKTREE (4401e8f + working tree)
+  launched vxml_a  (xml_atm  clean)  pid 41685
+  launched vxml_b  (ret_b5_atm  clean)  pid 41688
+  launched vxml_c  (xml_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 41691
+  launched vxml_d  (ret_b5_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 41694
+  launched vxml_x  (xml_atm  clean)  pid 41697
+  launched vxml_e  (xml_hyd  clean)  pid 41700
+  launched vxml_f  (ret_b5_hyd  clean)  pid 41703
+  launched vxml_y  (xml_hyd  clean)  pid 41706
+  launched vxml_z  (ret_b5_hyd  HYD_METRIC_RADIUS=0 HYD_RUN_NEUMANN=0 HYD_A_H_BIHARM=0 HYD_A_H_BIHARM_SCALED=0 HYD_T_FREEZE_SFC=1)  pid 41709
+=== waiting for arms: vxml_a vxml_b vxml_c vxml_d vxml_x vxml_e vxml_f vxml_y vxml_z  (14:14:39)
+./verify_lib.sh: Zeile 20: 41708 Abgebrochen             (Speicherabzug geschrieben) env "$@" "$bin" "$cfg" > "$tag.log" 2>&1
+  vxml_a exit 0
+  vxml_b exit 0
+  vxml_c exit 0
+  vxml_d exit 0
+  vxml_x exit 1
+  vxml_e exit 0
+  vxml_f exit 0
+  vxml_y exit 134
+  vxml_z exit 0
+=== all arms done 14:29:53
+    DIFFERS: RUN_CONFIG.txt
+A  atm new clean == old clean: identical 13 / differing 1  -> FAIL
+    DIFFERS: RUN_CONFIG.txt
+B  atm new+env == old+env: identical 13 / differing 1  -> FAIL
+    DIFFERS: *
+X  atm new with <knobs> == old+env: identical 0 / differing 1  -> FAIL
+C  hyd new clean == old clean: identical 17 / differing 0  -> PASS
+D  hyd new with <knobs> == old+env: identical 2 / differing 0  -> PASS
+E  CONTROL atm new+env vs old clean -- MUST differ: identical 1 / differing 13  -> PASS
+T  typo in <knobs>: exit 1 -> PASS; 
+--- banner of the XML arm:

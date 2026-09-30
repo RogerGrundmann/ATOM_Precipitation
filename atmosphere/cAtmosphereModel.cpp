@@ -160,6 +160,13 @@ void cAtmosphereModel::LoadConfig(const char *filename){
         throw std::invalid_argument(std::string("config ") + filename
             + ": no <atmosphere> section (is this a hydrosphere config?) -- nothing would be applied");
 #include "AtmosphereLoadConfig.cpp.inc"
+    // <knobs>: environment knobs set from the config file (lib/Knobs.h, plan D). The environment still overrides.
+    if (XMLElement* kn = atom->FirstChildElement("knobs")) {
+        std::vector<std::pair<std::string, std::string>> kv;
+        for (XMLElement* e = kn->FirstChildElement(); e; e = e->NextSiblingElement())
+            kv.emplace_back(e->Name(), e->GetText() ? e->GetText() : "");
+        knob::load_config(kv, filename);
+    }
     refuseRetiredIceScheme(CategoryIceScheme, (std::string("config ") + filename).c_str());
 }
 /*

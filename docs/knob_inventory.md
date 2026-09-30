@@ -35,7 +35,12 @@ switches until decided, D = 18 stay as diagnostic switches.
 > **Kept on purpose:** the four ocean-metric knobs flipped on 2026-09-30 (class F, still switchable: every older ocean
 > comparison lives on the branch they turn off), and four N knobs kept as documented experiments (class E):
 > `ATM_POISSON_METRIC_FIX`, `ATM_METRIC_EXACT`, `ATM_PROJECT_IN_LOOP`, `ATM_PRESS_LINE_SOLVE`. The tables below are the
-> 2026-09-26 inventory, kept as history; `lib/Knobs.h` is the current list. Next: plan D (P / S / I into the XML config).
+> 2026-09-26 inventory, kept as history; `lib/Knobs.h` is the current list.
+>
+> **Plan D DONE (2026-09-30), in the form the user chose: the registry reads a `<knobs>` section of the XML config**
+> rather than moving the P/S/I knobs into `param.py` (that would have split the defaults across two files and changed
+> `sizeof(cAtmosphereModel)`). Any knob can be set there; environment > XML > default; banner marks the source; an
+> unknown name in `<knobs>` is an error and one in the environment a banner warning. Verified by `python/run_vxml*.sh`.
 
 ## Defects found by the inventory itself
 

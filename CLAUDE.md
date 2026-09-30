@@ -42,6 +42,10 @@ the model no longer reads it; the branch is in git history before the retirement
 `docs/knob_inventory.md`). **Byte-check lesson:** when a retired switch fed arithmetic it becomes a literal, and
 `-ffast-math` folds it (`a + 1.0*(b - a)` -> `b`) EVEN AT -O0, flipping last bits and signed zeros although the logic is
 identical; a "fold test" (old code with only that literal changed) separates the two (`python/run_vfold*.sh`).
+**Knobs can also be set in the XML config (plan D, 2026-09-30)**: `<atom><knobs><ATM_RH_STORM>1.15</ATM_RH_STORM></knobs></atom>`.
+Precedence ENVIRONMENT > XML > compiled default; the banner marks the source (`*` default, `+` XML, none = environment).
+An unknown or retired name in `<knobs>` stops the run; one in the ENVIRONMENT is ignored but named in a banner WARNING.
+A knob must not be read before LoadConfig (the loader refuses `<knobs>` then) -- no namespace-scope or static-init reads.
 
 ## READ THIS BEFORE QUOTING ANY NUMBER FROM THIS TREE
 

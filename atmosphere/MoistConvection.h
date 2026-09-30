@@ -30,9 +30,11 @@ namespace AtomMoistConvection {
     // beside it matches his 1/alpha_2 = 196.5). With the updraft repaired and a saturated downdraft
     // (ATM_MC_SGZ + ATM_MC_ENTR + ATM_MC_BASE_SAT + ATM_MC_QVD=2, qvd2) e_p evaporates 82 % of ~1.1e4
     // mm/a of convective rain and P_conv is 2.7 mm/a. Only the e_p site reads it.
-    inline const double alf_1 = [](){
-                                      const double v = knob::real(knob::ATM_MC_ALF1);
-                                      return (v > 0.0) ? v : 0.05; }();   // evaporation rate coefficient [1/s]
+    // Read lazily (first use, after LoadConfig) so a <knobs> config value reaches it -- plan D.
+    inline double alf_1(){ static const double v = [](){
+                                      const double x = knob::real(knob::ATM_MC_ALF1);
+                                      return (x > 0.0) ? x : 0.05; }();   // evaporation rate coefficient [1/s]
+                           return v; }
     constexpr double alf_2 = 0.05;                                      // evaporation rate coefficient [1/s]
     constexpr double bet_p = 2.0e-3;                                    // in [1/s]
     constexpr double R_cloud = 100.0;                                   // cloud radius in [m] by ECMWF
@@ -40,10 +42,11 @@ namespace AtomMoistConvection {
     // Tiedtke (1989) uses 1.0e-4 for deep convection; at 2e-3 the per-level mixing fraction
     // D_u*dz/M_u is 0.66-1.67 (MEASURED, def600 iter 120, 87E), so the "updraft" is the
     // environment one level below and never carries its own buoyancy. Sets eps_u = del_u.
-    double eps_u = [](){
-                        const double v = knob::real(knob::ATM_MC_ENTR);
-                         return (v > 0.0) ? v : 0.2 / R_cloud; }();         // in [1/m]
-    double del_u = eps_u;                                               // in [1/m] by ECMWF
+    inline double eps_u(){ static const double v = [](){                // read lazily, as alf_1()
+                        const double x = knob::real(knob::ATM_MC_ENTR);
+                         return (x > 0.0) ? x : 0.2 / R_cloud; }();         // in [1/m]
+                           return v; }
+    inline double del_u(){ return eps_u(); }                            // in [1/m] by ECMWF
 //    double eps_u = 1.0e-4;                                              // in [1/m] by COSMO for penetrative (deep) and midlevel clouds
 //    double del_u = eps_u;                                               // in [1/m] by COSMO for penetrative (deep) and midlevel clouds
 //    constexpr double eps_u = 1.0e-4;                                    // in [1/m] by COSMO for shallow clouds
@@ -940,7 +943,7 @@ void findCloudBaseLFS() {
                                 * (m.u.x[i][j][k] * dcdr
                                 +  m.v.x[i][j][k] * dcdthe
                                 +  m.w.x[i][j][k] * dcdphi)
-                                + eps_u * m.M_u.x[i][j][k];
+                                + eps_u() * m.M_u.x[i][j][k];
                         } else  m.E_u.x[i][j][k] = 0.0;
 
                         if(t_u <= t_00_minus2) m.E_u.x[i][j][k] = 0.0;
@@ -950,15 +953,15 @@ void findCloudBaseLFS() {
                         // Detrainment
                         // Turbulent detrainment: applies on all iterations below LFS
                         m.D_u.x[i][j][k] = (i <= i_lfs)
-                            ? eps_u * m.M_u.x[i][j][k] : 0.0;           // turbulent detrainment [kg/(m³s)]
+                            ? eps_u() * m.M_u.x[i][j][k] : 0.0;           // turbulent detrainment [kg/(m³s)]
                             
 
                         if(iter_prec > 1 && i == i_lfs)
-                            m.D_u.x[i][j][k] = del_u * m.M_u.x[i][j][k] // turbulent detrainment
+                            m.D_u.x[i][j][k] = del_u() * m.M_u.x[i][j][k] // turbulent detrainment
                                 + b_u * m.M_u.x[i][j][k]/step[i];       // dynamic detrainment
 
                         if(iter_prec > 1 && i == i_lfs-1)
-                            m.D_u.x[i][j][k] = del_u * m.M_u.x[i][j][k] // turbulent detrainment
+                            m.D_u.x[i][j][k] = del_u() * m.M_u.x[i][j][k] // turbulent detrainment
                                 + (1.0 - b_u) * m.M_u.x[i][j][k]/step[i];// dynamic detrainment
 
                         if(t_u <= t_00_minus2) m.D_u.x[i][j][k] = 0.0;
@@ -1101,7 +1104,7 @@ void findCloudBaseLFS() {
                         else{
                             double precip_i = m.P_conv.x[i][j][k];
                             if(precip_i > 0.0 && sigma_p > 0.0)
-                                m.e_p.x[i][j][k] = sigma_p * alf_1      // in [(kg/kg)/s]
+                                m.e_p.x[i][j][k] = sigma_p * alf_1()      // in [(kg/kg)/s]
                                     * (q_sat - m.q_v_d.x[i][j][k])
                                     * sqrt(1e1 / alf_2 * precip_i / sigma_p);
                             if(m.e_p.x[i][j][k] <= 0.0) m.e_p.x[i][j][k] = 0.0;

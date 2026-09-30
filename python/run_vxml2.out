@@ -1,0 +1,15 @@
+built -O0: cli/xml2_atm cli/xml2_hyd  from WORKTREE (4401e8f + working tree)
+  launched vxml2_x  (xml2_atm  clean)  pid 44636
+  launched vxml2_y  (xml2_hyd  clean)  pid 44639
+=== waiting for arms: vxml2_x vxml2_y  (14:54:07)
+./verify_lib.sh: Zeile 20: 44641 Abgebrochen             (Speicherabzug geschrieben) env "$@" "$bin" "$cfg" > "$tag.log" 2>&1
+  vxml2_x exit 0
+  vxml2_y exit 134
+=== all arms done 15:08:14
+    DIFFERS: RUN_CONFIG.txt
+X  atm new with <knobs> == old+env: identical 13 / differing 1  -> FAIL
+D  hyd new with <knobs> == old+env: identical 2 / differing 0  -> PASS
+T  typo in <knobs>: exit 1; message: config config_vxml2_t.xml: <knobs> names an unknown knob 'ATM_NOT_A_KNOB' (retired, or a typo? the list is lib/Knobs.h)
+--- banner of the XML arm:
+      AGCM: [RUN CONFIG] knobs:  RADIAL_SHAPIRO_STRENGTH=1.0*  RADIATION_MODE=5*  RAD_EQUIL=0*  RAIN_AREA=0.10*  RH_CRIT=0.30*  RH_MIN=0.65*  RH_MIN_PTOP=482.0*  RH_STORM=1.15+
+      AGCM: [RUN CONFIG] (* = compiled-in default, + = from <knobs> in config_vxml2_x.xml, no mark = environment; the list is lib/Knobs.h)

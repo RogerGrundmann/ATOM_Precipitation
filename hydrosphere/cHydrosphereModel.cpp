@@ -107,6 +107,13 @@ void cHydrosphereModel::LoadConfig(const char *filename){
             }
         }
         #include "HydrosphereLoadConfig.cpp.inc"
+        // <knobs>: environment knobs set from the config file (lib/Knobs.h, plan D). The environment still overrides.
+        if (XMLElement* kn = atom->FirstChildElement("knobs")) {
+            std::vector<std::pair<std::string, std::string>> kv;
+            for (XMLElement* e = kn->FirstChildElement(); e; e = e->NextSiblingElement())
+                kv.emplace_back(e->Name(), e->GetText() ? e->GetText() : "");
+            knob::load_config(kv, filename);
+        }
     }catch(const std::exception &exc){
         std::cerr << exc.what() << std::endl;
         abort();

@@ -31,7 +31,7 @@ namespace TwoCatIce {
     // q_c_crit reservoir threshold is kept, so only excess cloud drains (no return to the
     // immediate-rain-out over-precipitation). project_snow_overproduction.
     constexpr double c_c_au   = 1.0e-3;                                 // 1/s (COSMO original 4.0e-4)
-    const double q_c_crit = IceSchemeCommon::qcCrit();                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
+    inline double q_c_crit(){ return IceSchemeCommon::qcCrit(); }   // lazy: read after LoadConfig (plan D)                                 // [kg/kg] Kessler autoconversion threshold (~0.5 g/kg): cloud must accumulate before raining (project_overprecip_saturation_injection)
     constexpr double c_i_au   = 1.0e-3;                                 // 1/s COSMO
     constexpr double c_ac     = 0.24;                                   // m2/kg
     constexpr double c_rim    = 18.6;                                   // m2/kg
@@ -519,8 +519,8 @@ private:
                         // the threshold ANY cloud autoconverted instantly at c_c_au, so saturated
                         // columns rained out the moment they condensed (cloud~0 yet huge P_rain)
                         // -> gross precip ~30x NASA. See project_overprecip_saturation_injection.
-                        if(cloud_in > q_c_crit)                         // c_c_au = 4.0e-4, in 1/s
-                            S_c_au = f_cld * c_c_au * (cloud_in - q_c_crit); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
+                        if(cloud_in > q_c_crit())                         // c_c_au = 4.0e-4, in 1/s
+                            S_c_au = f_cld * c_c_au * (cloud_in - q_c_crit()); // cloud water to rain, cloud droplet collection, < IV > in kg/(kg*s)
                         else  S_c_au = 0.0;
 
 
@@ -553,8 +553,8 @@ private:
                         // that fix closed. Rain is left as the GRID MEAN -- scaling it too needs
                         // an assumption about precipitation fraction versus cloud fraction, which
                         // is a separate modelling choice and not implied by this closure.
-                        if((t_u >= m.t_0)&&(cloud_in > q_c_crit))
-                            S_ac = f_cld * c_ac * (cloud_in - q_c_crit)  // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
+                        if((t_u >= m.t_0)&&(cloud_in > q_c_crit()))
+                            S_ac = f_cld * c_ac * (cloud_in - q_c_crit())  // c_ac = 0.24, in m²/kg, < VII > in kg/(kg*s)
                                    * Rain_pow_7_9;                      // in kg/(m² * s)
                         else  S_ac = 0.0;
 
