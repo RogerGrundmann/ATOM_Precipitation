@@ -712,7 +712,7 @@ void findCloudBaseLFS() {
                     // which is positive exactly where f > 0, i.e. exactly where the cloud-base
                     // test below now fires. The two stay consistent by construction.
                     m.q_v_u.x[i][j][k] = m.c.x[i][j][k] + q_v_u_add;
-                    if (CloudFraction::enabled()) {
+                    {
                         const double q_t_u = std::max(0.0, m.c.x[i][j][k])
                                            + std::max(0.0, m.cloud.x[i][j][k])
                                            + std::max(0.0, m.ice.x[i][j][k]);
@@ -720,9 +720,7 @@ void findCloudBaseLFS() {
                                            * q_sat_col[i];
                         if (q_t_u + D_u > q_sat_col[i] && t_u >= t_00)
                             m.q_c_u.x[i][j][k] = q_t_u + D_u - q_sat_col[i];
-                    } else
-                    if(m.q_v_u.x[i][j][k] >= scale * q_sat_col[i] && t_u >= t_00)
-                        m.q_c_u.x[i][j][k] = m.q_v_u.x[i][j][k] - scale * q_sat_col[i];
+                    }
                     if(m.q_v_u.x[i][j][k] <= 0.0) m.q_v_u.x[i][j][k] = 0.0;
                     if(m.q_c_u.x[i][j][k] <= 0.0) m.q_c_u.x[i][j][k] = 0.0;
 
@@ -750,14 +748,12 @@ void findCloudBaseLFS() {
                     // the microphysics now use. Off-branch f is not consulted at all and the
                     // shipped `q_v_u >= scale*q_sat` stands, bit for bit.
                     bool at_cloud_base;
-                    if (CloudFraction::enabled()) {
+                    {
                         const double q_t = std::max(0.0, m.c.x[i][j][k])
                                          + std::max(0.0, m.cloud.x[i][j][k])
                                          + std::max(0.0, m.ice.x[i][j][k]);
                         at_cloud_base = CloudFraction::fraction(q_t, q_sat_col[i],
                                                                 m.p_stat.x[i][j][k]) > 0.0;
-                    } else {
-                        at_cloud_base = (m.q_v_u.x[i][j][k] >= scale * q_sat_col[i]);
                     }
 
                     if (at_cloud_base && cloud_t_weight > 0.01
@@ -918,9 +914,7 @@ void findCloudBaseLFS() {
                             const double q_t  = m.c.x[i_base][j][k] + m.cloud.x[i_base][j][k]
                                               + m.ice.x[i_base][j][k];
                             const double q_sg = CloudFraction::qSat(t_base, p_b, m.t_0, m.hp, m.ep);
-                            const double f    = CloudFraction::enabled()
-                                              ? CloudFraction::fraction(q_t, q_sg, p_b)
-                                              : ((q_t > q_sg) ? 1.0 : 0.0);
+                            const double f    = CloudFraction::fraction(q_t, q_sg, p_b);
                             const double q_0  = m.q_v_u.x[i_base][j][k];
                             q_seed = q_0 + f * std::max(q_sb - q_0, 0.0);
                         }
@@ -1415,9 +1409,8 @@ void findCloudBaseLFS() {
                     // charge the level's evaporation against the rain ARRIVING plus the rain MADE
                     // there, scaling e_d and e_p together. At i = 0 the recurrence passes the flux
                     // through unchanged, so nothing evaporated there is backed: both are zeroed.
-                    static const bool mc_evap_limit = [](){
-                                                            return knob::on(knob::ATM_MC_EVAP_LIMIT); }();
-                    if(mc_evap_limit){
+                    // ATM_MC_EVAP_LIMIT (on since 2026-09-22) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
+                    {
                         if(i == 0){
                             m.e_d.x[i][j][k] = 0.0;
                             m.e_p.x[i][j][k] = 0.0;

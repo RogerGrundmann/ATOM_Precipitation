@@ -431,10 +431,7 @@ void cAtmosphereModel::debug_vapor_output(int i, int j, int k,
 // section builds. The two calls are now sequential (cAtmosphereModel.cpp) -- two O(im)/O(jm)
 // loops, so the parallelism bought nothing and the race would have been real.
 double cAtmosphereModel::tropopause_index(double h_m){
-    static const bool fix = [](){
-        // DEFAULT ON SINCE 2026-09-12 (was 0). `=0` restores round(h/L_atm) exactly.
-        return knob::on(knob::ATM_TROPO_INDEX_FIX); }();
-    if(!fix) return round(h_m / L_atm);                 // shipped: L_atm as if it were a grid step
+    // ATM_TROPO_INDEX_FIX (on since 2026-09-12) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
     if(m_layer_heights.size() < (std::size_t)im) return round(h_m / L_atm);   // not built yet
     int best = 1; double bd = 1.0e30;
     for(int i = 1; i <= im - 2; i++){                   // clamp: always leave one level above
@@ -1223,9 +1220,7 @@ void cAtmosphereModel::initWaterWapour() {
             // at the top, introducing no constant beyond the surface value already here. The
             // 1.25 multiplier goes with it: its own comment says it exists to give "a nice cloud
             // around 1 km height", i.e. a cloud deck manufactured by a fudge factor.
-            static const bool rh_profile = [](){
-                // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                return knob::on(knob::ATM_RH_PROFILE); }();
+            // ATM_RH_PROFILE (Manabe-Wetherald profile, on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
             const double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
@@ -1284,11 +1279,9 @@ void cAtmosphereModel::initWaterWapour() {
                 // answer in by hand, and the tell is that these Gaussians know nothing about
                 // where THIS model's ITCZ actually is. Read any cloud-cover agreement it buys as
                 // assumed, not predicted.
-                static const bool rh_min_lat = [](){
-                    // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                    return knob::on(knob::ATM_RH_MIN_LAT); }();
+                // ATM_RH_MIN_LAT (on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
                 double rh_floor = rh_min;
-                if (rh_min_lat && rh_min > 0.0) {
+                if (rh_min > 0.0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
                     constexpr double phi_itcz = 12.0, w_itcz = 14.0;   // ITCZ centre / width [deg]
                     constexpr double phi_storm = 55.0, w_storm = 15.0; // storm track centre/width
@@ -1341,7 +1334,7 @@ void cAtmosphereModel::initWaterWapour() {
                     rh_floor *= u;
                 }
                 double rh_i = RH_init;
-                if (rh_profile) {
+                {
                     const double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
                     if (rh_i < rh_floor) rh_i = rh_floor;
@@ -1363,8 +1356,6 @@ void cAtmosphereModel::initWaterWapour() {
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes
-                if (!rh_profile)
-                    c.x[i][j][k] = 1.25 * c.x[i][j][k];             // gives a nice cloud around 1 km height
                 cloud.x[i][j][k] = 0.0;
             }
         }
@@ -1399,26 +1390,9 @@ void cAtmosphereModel::initCloudIce() {
     auto begin = std::chrono::high_resolution_clock::now();
 
     const double alfa_s    = 1.5;
-    const double Hu_cr_max = 1.0;
-    // ATM_RH_CRIT -- the critical-humidity midpoint. Default 0.8 = shipped, bit-identical.
-    // H_crit and the initial RH are a TUNED PAIR: the shipped H_crit runs 0.80-0.98 and only a
-    // near-saturated column ever exceeds it, which is exactly what the shipped constant-RH
-    // 0.9375 column provides. Give the humidity a realistic profile (ATM_RH_PROFILE) without
-    // touching this and the condensate collapses 1584 -> 0.0006 g/m2: no cell reaches threshold.
-    // The two must move together, which is why this is a knob and not a constant.
-    const double Hu_cr_mid = [](){
-        const double v = knob::real(knob::ATM_RH_CRIT);           // default 0.30 since 2026-08-31
-        return (v > 0.0 && v < 1.0) ? v : 0.30; }();
-    const double Hu_diff   = Hu_cr_max - Hu_cr_mid;
+    // H_crit is CloudFraction::hCrit() (ATM_RH_CRIT); the inline parabola went with ATM_CLOUD_FRAC, 2026-09-30.
 //    const double det_T_0   = t_0 - 3.0;
     const double det_T_0   = t_0;
-    // Parabola H_crit(p): roots at p=0 and p=p_crit, minimum Hu_cr_mid at p=p_mid.
-    // H_crit = Hu_cr_max - Hu_curv * x * (1 - x),  x = p / p_crit
-    const double p_crit     = 1000.0;
-    const double p_mid      = 550.0;
-    const double x_mid      = p_mid / p_crit;                           // 0.55
-    const double Hu_curv    = Hu_diff / (x_mid * (1.0 - x_mid));        // ~0.808
-    const double inv_p_crit = 1.0 / p_crit;
 
     // ========================================================================
     // Pass 1: cloud_max[i] — parallel over i, sum thread-local
@@ -1480,16 +1454,13 @@ void cAtmosphereModel::initCloudIce() {
                     : hp * AtomUtils::exp_func(t_u, MAGNUS_A_ICE,   MAGNUS_B_ICE);
                 const double q_sat = ep * E_sat / (p_u - E_sat);
 
-                const double x_norm = p_u * inv_p_crit;
                 // ONE H_crit CURVE, NOT TWO. The parabola is duplicated here and in
                 // CloudFraction.h, and the header's own note says a third copy is where the
                 // three modules would drift apart -- they already had, because the flattening
                 // above p_mid that lets cloud exist aloft went into the header only. On the
                 // fractional branch take the header's curve; the shipped branch keeps its own,
                 // bit for bit.
-                double H_crit = CloudFraction::enabled()
-                    ? CloudFraction::hCrit(p_u)
-                    : Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);
+                double H_crit = CloudFraction::hCrit(p_u);
                 if (H_crit > 1.0)  H_crit = 1.0;
 
                 // ---- ATM_CLOUD_FRAC: sub-grid cloud fraction (default 0 = shipped) ----
@@ -1513,12 +1484,9 @@ void cAtmosphereModel::initCloudIce() {
                 // One parameter, H_crit, which already exists. No new field: f is recomputed
                 // where needed rather than stored, so sizeof(cAtmosphereModel) is untouched and
                 // the stack-canary hazard in the README does not apply.
-                static const bool cloud_frac = [](){
-                    // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-                    return knob::on(knob::ATM_CLOUD_FRAC); }();
-                const double del_q_ls = std::max(0.0, c.x[i][j][k] - H_crit * q_sat);
+                // ATM_CLOUD_FRAC retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
                 double cloud_ls;
-                if (cloud_frac) {
+                {
                     const double D = (1.0 - H_crit) * q_sat;
                     if (D > 0.0) {
                         const double sfrac = c.x[i][j][k] + D - q_sat;
@@ -1526,8 +1494,7 @@ void cAtmosphereModel::initCloudIce() {
                         if (f < 0.0) f = 0.0; else if (f > 1.0) f = 1.0;
                         cloud_ls = (f >= 1.0) ? std::max(0.0, c.x[i][j][k] - q_sat) : f * f * D;
                     } else cloud_ls = std::max(0.0, c.x[i][j][k] - q_sat);
-                } else
-                cloud_ls = cloud_max[i] * (1.0 - exp(-alfa_over_cmax[i] * del_q_ls));
+                }
 
                 double cloud_conv = 0.0;
                 if (P_rain.x[i][j][k] > 0.0 && i < im - 1) {
@@ -1552,16 +1519,10 @@ void cAtmosphereModel::initCloudIce() {
  
                 if (t_u <= t_00) {
                     // ATM_ICE_COLD: liquid cannot exist below the homogeneous-freezing point;
-                    // ice can, and must -- this is the cirrus range. Default off.
-                    if (ColdCloud::enabled()) {
-                        ice.x[i][j][k]  += cloud.x[i][j][k];
-                        gr.x[i][j][k]    = 0.1 * ice.x[i][j][k];
-                        cloud.x[i][j][k] = 0.0;
-                    } else {
+                    // ice can, and must -- this is the cirrus range.
+                    ice.x[i][j][k]  += cloud.x[i][j][k];
+                    gr.x[i][j][k]    = 0.1 * ice.x[i][j][k];
                     cloud.x[i][j][k] = 0.0;
-                    ice.x[i][j][k]   = 0.0;
-                    gr.x[i][j][k]    = 0.0;
-                    }
                 }
             }  // i
         }  // k
@@ -1619,10 +1580,7 @@ void cAtmosphereModel::initCloudIce() {
                         ? hp * AtomUtils::exp_func(t_u, MAGNUS_A_WATER, MAGNUS_B_WATER)
                         : hp * AtomUtils::exp_func(t_u, MAGNUS_A_ICE,   MAGNUS_B_ICE);
                     const double q_sat  = ep * E_sat / (p_u - E_sat);
-                    const double x_norm = p_u * inv_p_crit;
-                    double H_crit = CloudFraction::enabled()          // the diagnostic must
-                        ? CloudFraction::hCrit(p_u)                   // report the curve the
-                        : Hu_cr_max - Hu_curv * x_norm * (1.0 - x_norm);  // field was built with
+                    double H_crit = CloudFraction::hCrit(p_u);        // the curve the field was built with
                     if (H_crit > 1.0) H_crit = 1.0;
                     if (q_sat > 0.0) { sum_rh += w * (c.x[i][j][k] / q_sat);
                                        if (c.x[i][j][k] > 0.8 * q_sat) n_rh80++; }

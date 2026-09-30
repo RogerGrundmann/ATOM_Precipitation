@@ -254,22 +254,11 @@ public:
                     if (m.ice.x[i][j][k]   <  0.0)   m.ice.x[i][j][k]   = 0.0;
 
                     double t_u = m.t.x[i][j][k] * m.t_0;
-                    if (t_u <= m.t_00 && ColdCloud::enabled()) {
+                    if (t_u <= m.t_00) {
                         // ATM_ICE_COLD: freeze the liquid, keep the ice and the VAPOUR.
                         // Zeroing c here deletes water from the column outright.
                         m.ice.x[i][j][k]  += m.cloud.x[i][j][k];
                         m.cloud.x[i][j][k] = 0.0;
-                    } else if (t_u <= m.t_00) {
-                        m.c.x[i][j][k]     = 0.0;
-                        m.cloud.x[i][j][k] = 0.0;
-                        m.ice.x[i][j][k]   = 0.0;
-                        m.gr.x[i][j][k]    = 0.0;
-
-                        m.S_c_c.x[i][j][k] = 0.0;
-                        m.S_c.x[i][j][k]   = 0.0;
-                        m.S_v.x[i][j][k]   = 0.0;
-                        m.S_r.x[i][j][k]   = 0.0;
-                        m.S_s.x[i][j][k]   = 0.0;
                     }
 
                     if (m.P_rain.x[i][j][k]        < 0.0)  m.P_rain.x[i][j][k]        = 0.0;

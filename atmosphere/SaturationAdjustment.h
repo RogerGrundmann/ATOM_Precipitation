@@ -36,7 +36,6 @@ public:
     // The closure itself now lives in CloudFraction.h, because initCloudIce, this
     // adjustment and MultiLayerRadiation all need the SAME f and the same H_crit.
     // These stay as thin forwards so the call sites below read unchanged.
-    static bool   cloudFrac(){ return CloudFraction::enabled(); }
     static double hCrit(double p_hPa){ return CloudFraction::hCrit(p_hPa); }
     static double qcEquilibrium(double q_t, double q_s, double p_hPa){
         return CloudFraction::qcEquilibrium(q_t, q_s, p_hPa); }
@@ -98,12 +97,7 @@ public:
     // read it by this tree's own rule (quote r, sigma and the four bands, or quote nothing).
     // ATM_RH_MIN_PTOP was swept 475/500/525 in the same step and NOT moved: raising it buys
     // the mean back and hands the shape gain straight back with it (sigma 2.25 -> 2.48).
-    static bool satadjPhase(){
-        static const bool v = [](){
-                                    return knob::on(knob::ATM_SATADJ_PHASE);   // DEFAULT ON 2026-09-09
-                                  }();
-        return v;
-    }
+    // ATM_SATADJ_PHASE (on since 2026-09-09) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
     // ==================================================================
     // ATM_SATADJ_FADE=<0|1|2> -- what clampAndFade's cold fade does with the liquid it takes.
     // DEFAULT 0 = SHIPPED and bit-identical: mode 0 executes `cloud_row[k] *= alpha;` verbatim.
@@ -327,14 +321,12 @@ private:
                     // deposition stops exactly where the CND/DEP split below sends 100 % of the
                     // condensation to the ice branch. With ice allowed to exist there, the
                     // adjustment has to be allowed to make it.
-                    const double alpha_entry = ColdCloud::enabled() ? 1.0
-                        : 1.0 / (1.0 + std::exp(-(T - m.t_00) / fade_K));
+                    const double alpha_entry = 1.0;
 
                     // Under ATM_CLOUD_FRAC a cell can be cloudy while the GRID MEAN is
                     // subsaturated, so entry cannot be conditioned on q_v > q_sat alone: a cell
                     // above the critical humidity must be admitted even with no condensate yet.
-                    const bool frac_active = cloudFrac()
-                        && (q_v_old + q_c_old + q_i_old) > hCrit(p_local) * q_sat;
+                    const bool frac_active = (q_v_old + q_c_old + q_i_old) > hCrit(p_local) * q_sat;
                     if ((q_v_old > q_sat && alpha_entry > 0.01) || frac_active ||
                         (q_v_old < q_sat &&
                         (q_c_old > 1e-12 || q_i_old > 1e-12))) {
@@ -379,7 +371,7 @@ private:
                             // and then sets d_q_v to what was actually taken. The latent-heat
                             // line below consumes the same corrected pair, so the energy follows
                             // the mass: evaporating ice absorbs ls, not lv.
-                            if (satadjPhase() && d_q_v > 0.0) {
+                            if (d_q_v > 0.0) {
                                 if (d_cnd > q_c_b) { d_dep += d_cnd - q_c_b; d_cnd = q_c_b; }
                                 if (d_dep > q_i_b) {
                                     const double back = d_dep - q_i_b;
@@ -415,7 +407,7 @@ private:
                             // the shipped scheme drives to; under ATM_CLOUD_FRAC the cell is
                             // allowed to retain the condensate the sub-grid closure supports at
                             // that saturation, rather than being dried to it.
-                            if (cloudFrac()) {
+                            {
                                 const double q_t_b = q_v_b + q_c_b + q_i_b;
                                 const double q_c_eq = qcEquilibrium(q_t_b, q_v_target, p_local);
                                 q_v_target = std::max(0.0, q_t_b - q_c_eq);
@@ -469,8 +461,8 @@ private:
                         if (T < m.t_00) {
                             // ATM_ICE_COLD: below the homogeneous-freezing point LIQUID cannot
                             // exist -- but ice must, and this is where cirrus lives. Freeze it
-                            // instead of deleting it. Default off, shipped branch unchanged.
-                            if (ColdCloud::enabled()) {
+                            // instead of deleting it.
+                            {
                                 const double frozen = cloud_row[k];
                                 ice_row[k]  += frozen;
                                 cloud_row[k] = 0.0;
@@ -483,9 +475,6 @@ private:
                                     if (T_frz > T_max) T_frz = T_max;
                                     t_row[k] = T_frz * inv_t_0;
                                 }
-                            } else {
-                            cloud_row[k] = 0.0;
-                            ice_row[k]   = 0.0;
                             }
                         }
                         if (diag) {
@@ -614,7 +603,7 @@ private:
                     // must never be faded at all -- doing so deletes mass from the column --
                     // and fading the ice is what forbids cirrus.
                     const double alpha = 1.0 / (1.0 + std::exp(-(T_dim - m.t_00) / fade_K));
-                    if (ColdCloud::enabled()) {
+                    {
                         const int fade_mode = fadeMode();
                         if (fade_mode == 0) {
                         cloud_row[k] *= alpha;              // SHIPPED: deleted, not moved
@@ -638,10 +627,6 @@ private:
                         }
                         // fade_mode == 2: no fade at all. Below t_00 adjustSaturation has already
                         // frozen the liquid, so what this drops is the sigmoid's warm tail.
-                    } else {
-                    c_row[k]     *= alpha;
-                    cloud_row[k] *= alpha;
-                    ice_row[k]   *= alpha;
                     }
                     if (diag) {
                         const double q_t_out = c_row[k] + cloud_row[k] + ice_row[k];

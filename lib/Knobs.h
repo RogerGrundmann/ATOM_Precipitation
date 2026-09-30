@@ -46,9 +46,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_CELLS_FROM_PSI, "1", Result, 'F', "closed-cell IC, 09-12") \
     X(ATM_CELLS_U_FROM_PSI, "0", Result, 'N', "off; not scored separately") \
     X(ATM_CELL_ROT_DIAG, "0", Diag, 'D', "print/dump only") \
-    X(ATM_CLOUD_FRAC, "1", Result, 'F', "sub-grid cloud, 08-31") \
     X(ATM_CLOUD_INIT_DIAG, "0", Diag, 'D', "print/dump only") \
-    X(ATM_CLOUD_RAD_FRAC, "1", Result, 'F', "08-31") \
     X(ATM_CLOUD_TAU_MAX, "2.0", Result, 'F', "layer tau ceiling, 08-28") \
     X(ATM_CO2_BAND, "0.17", Result, 'P', "0.17") \
     X(ATM_CONV_ADJ, "0", Result, 'R', "off; palliative") \
@@ -66,7 +64,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_EPS_DRY, "0.684", Result, 'P', "0.684") \
     X(ATM_EVAP_FLUX, "0", Result, 'N', "superseded by WATER_CLOSURE") \
     X(ATM_EVAP_SPREAD, "0", Result, 'N', "null on a spun-up field (0.2 %)") \
-    X(ATM_EVAP_STRIDE_FIX, "1", Result, 'F', "09-24 (acts only under the closure)") \
     X(ATM_GRID_BETA, "3.988", Result, 'P', "3.988 (with GRID_PRESSURE)") \
     X(ATM_GRID_PRESSURE, "0", Result, 'N', "~1 %, sign against it") \
     X(ATM_GRID_PTOP, "0.08538", Result, 'P', "0.08538 (with GRID_PRESSURE)") \
@@ -74,8 +71,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_HYDRO_PGF, "0.0", Result, 'N', "superseded by HYDRO_SPLIT") \
     X(ATM_HYDRO_PGF_RAW, "0", Result, 'N', "worse than HYDRO_PGF; superseded") \
     X(ATM_HYDRO_SPLIT, "1.0", Result, 'F', "thermal wind, 09-24 (B.2)") \
-    X(ATM_ICE_COLD, "1", Result, 'F', "08-31") \
-    X(ATM_ICE_LIMIT_ARRIVING, "1", Result, 'F', "with RAIN_AREA, 09-01") \
     X(ATM_LAND_BUCKET, "0.0", Result, 'R', "20-iter evidence only") \
     X(ATM_LENGTH_NDIM, "0", Result, 'R', "the 40x L_atm defect (item 4 pending)") \
     X(ATM_LONGAL_J, "62", Diag, 'I', "output slice latitude") \
@@ -85,7 +80,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
     X(ATM_MC_ENTR, "0.0", Result, 'R', "updraft entrainment 1/m; 0 = the shipped 0.2/R_cloud") \
-    X(ATM_MC_EVAP_LIMIT, "1", Result, 'F', "drift removed, 09-22") \
     X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \
     X(ATM_MC_QVD, "0", Result, 'R', "B.10c") \
     X(ATM_MC_SGZ, "0", Result, 'R', "B.10b") \
@@ -133,15 +127,12 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_CRIT, "0.30", Result, 'P', "0.30 since 08-31") \
     X(ATM_RH_CRIT_ICE, "0.0", Result, 'N', "off; global cirrus -- superseded by RH_MIN_LAT/PTOP") \
     X(ATM_RH_MIN, "0.65", Result, 'P', "0.65") \
-    X(ATM_RH_MIN_LAT, "1", Result, 'F', "08-31") \
     X(ATM_RH_MIN_PTOP, "482.0", Result, 'P', "482 hPa (fitted)") \
-    X(ATM_RH_PROFILE, "1", Result, 'F', "08-31") \
     X(ATM_RH_STORM, "1.0", Result, 'R', "initial storm-track RH factor at 55 deg (working branch 1.15)") \
     X(ATM_RK_SCALAR_SYNC, "0", Result, 'R', "forced by WATER_CLOSURE") \
     X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
     X(ATM_SATADJ_FREEZE_LATENT, "0", Result, 'N', "null (0.05 % of cloud)") \
-    X(ATM_SATADJ_PHASE, "1", Result, 'F', "09-09") \
     X(ATM_SEAM_PERIODIC, "1", Result, 'F', "09-24") \
     X(ATM_SEAM_Q_CONSERVE, "0", Result, 'R', "conserve water at the phi seam; 2 = also next to land (working branch 2)") \
     X(ATM_SEAM_Q_DIAG, "0", Diag, 'D', "print the seam water-conservation buckets") \
@@ -154,7 +145,6 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_T0_ATTRIB, "0", Diag, 'D', "print/dump only") \
     X(ATM_TAU_PBROAD, "0.0", Result, 'N', "refuted (lapse 3 %)") \
     X(ATM_TEQ_SKIN_ONLY, "0", Result, 'R', "instrument branch, must NOT be flipped") \
-    X(ATM_TROPO_INDEX_FIX, "1", Result, 'F', "09-12") \
     X(ATM_TURB_SIN_FLOOR, "1", Result, 'F', "09-28 (correctness flip; fx4_tsf connected, null)") \
     X(ATM_TW_BALANCE, "0.0", Result, 'R', "off; the only mid-lat jet IC") \
     X(ATM_TW_BALANCE_V, "0", Result, 'P', "sub-option of TW_BALANCE") \

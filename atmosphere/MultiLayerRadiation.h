@@ -156,12 +156,7 @@ public:
     // the eps mixture collapsing to its second term), so the off-branch is unchanged
     // by CONSTRUCTION. It is also a null unless ATM_CLOUD_FRAC is on, because the
     // shipped grid-mean closure does not produce an f -- hence the warning below.
-    static bool cloudRadFrac(){
-        static const bool v = [](){
-            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            return knob::on(knob::ATM_CLOUD_RAD_FRAC); }();
-        return v;
-    }
+    // ATM_CLOUD_RAD_FRAC (on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
     // ATM_RAD_COLDIAG=1 -- print the COLUMN DECOMPOSITION at the cell of maximum layer
     // emissivity. Print-only, default off.
@@ -208,15 +203,6 @@ public:
             std::cout << "      AGCM: [RADIATION WARNING] ATM_RAD_EQUIL and ATM_SW_INSOL are a PAIR"
                       << " and only one is set. A warm-biased solver and a 2.25x-too-weak shortwave"
                       << " have been cancelling; either alone is worse than neither." << std::endl;
-
-        // The radiation's cloud fraction is the SAME f the condensate was made with. Read
-        // without ATM_CLOUD_FRAC it would be diagnosed from a humidity field the grid-mean
-        // closure never consulted, so it would rescale a condensate that does not correspond
-        // to it -- a fraction invented after the fact rather than the one in use.
-        if (cloudRadFrac() && !CloudFraction::enabled())
-            std::cout << "      AGCM: [RADIATION WARNING] ATM_CLOUD_RAD_FRAC is set without"
-                      << " ATM_CLOUD_FRAC. The radiation is weighting by a fraction that did not"
-                      << " make the condensate it is weighting; set both or neither." << std::endl;
     }
 
     void run()
@@ -584,7 +570,7 @@ public:
                     // grid mean over the whole cell. f = 1 off-branch, so LWP_i is unchanged
                     // bit for bit and every expression below collapses to the shipped one.
                     double cf = 1.0;
-                    if (cloudRadFrac()) {
+                    {
                         const double p_hPa = m.p_stat.x[i][j][k];
                         const double q_s   = CloudFraction::qSat(T_i, p_hPa, m.t_0, m.hp, m.ep);
                         const double q_t   = std::max(0.0, m.c.x[i][j][k]) + cw_l + cw_i;
@@ -729,9 +715,8 @@ public:
                     // ATM_CLOUD_RAD_FRAC: the reflecting sub-column carries the IN-CLOUD path
                     // and covers cf_col of the column (maximum overlap), so the bump is
                     // refl*cover rather than refl. Both reduce to the shipped values at f = 1.
-                    const double cwp_sw = cloudRadFrac() ? (lwp_in_col + f_ice_sw * iwp_in_col)
-                                                         : (lwp_col + f_ice_sw * iwp_col);
-                    const double cover  = cloudRadFrac() ? cf_col : 1.0;
+                    const double cwp_sw = lwp_in_col + f_ice_sw * iwp_in_col;
+                    const double cover  = cf_col;
                     const double tau    = cwp_sw / cwp_tau;
                     const double refl   = tau / (tau + 2.0);                     // gentle saturation (0.5 at tau=2)
                     const double a0     = m.albedo.y[j][k];                      // surface (ice-feedback) albedo

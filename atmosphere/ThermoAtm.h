@@ -214,12 +214,9 @@ public:
             return knob::on(knob::ATM_EVAP_FLUX); }();
         // Seconds of physical time per CALL. FIXED 2026-09-24: this was per ITERATION, while the
         // time loop calls the routine only every moist_stride = 2 iterations, so ATM_EVAP_FLUX and
-        // ATM_WATER_CLOSURE (default on since 5c7b001) delivered HALF of E. ATM_EVAP_STRIDE_FIX=0
-        // restores the half-rate branch exactly (default 1).
-        static const bool evap_stride_fix = [](){
-            return knob::on(knob::ATM_EVAP_STRIDE_FIX); }();
+        // ATM_WATER_CLOSURE delivered HALF of E. ATM_EVAP_STRIDE_FIX retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
         const double sec_per_iter = m.dt * m.metricShellLength() / m.u_0
-                                  * (evap_stride_fix ? (double)calls_per : 1.0);
+                                  * (double)calls_per;
 
         // ==================================================================
         // ATM_WATER_CLOSURE=<0|1> -- the B+3 surface flux PAIRED with the RK4 scalar sync.

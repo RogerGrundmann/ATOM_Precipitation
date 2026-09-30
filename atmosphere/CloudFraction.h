@@ -36,15 +36,7 @@
 
 namespace CloudFraction {
 
-    // ATM_CLOUD_FRAC=1 — use the sub-grid closure instead of the grid-mean
-    // supersaturation. Default 0 = shipped. See CLAUDE.md: this knob is one of
-    // a set (ATM_RH_PROFILE, ATM_RH_CRIT, ATM_CWP_CAP) that must move together.
-    inline bool enabled(){
-        static const bool v = [](){
-            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            return knob::on(knob::ATM_CLOUD_FRAC); }();
-        return v;
-    }
+    // ATM_CLOUD_FRAC (the sub-grid closure is always used; on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
     // ATM_RH_CRIT — the critical-humidity midpoint. Default 0.8 = shipped.
     inline double critMid(){
@@ -139,11 +131,9 @@ namespace CloudFraction {
     // real condensate by a zero fraction is not physical, so the floor is the fraction that
     // would hold this much water under the same closure: q_c = f^2*D, hence f = sqrt(q_c/D).
     //
-    // Returns 1 when the closure is off, when there is no condensate, or when D degenerates, so
-    // every caller reduces EXACTLY to its grid-mean form on the shipped branch. That is the
-    // property that keeps the off-branch bit-identical without a guard at each call site.
+    // Returns 1 when there is no condensate or when D degenerates.
     inline double effectiveFraction(double q_t, double q_s, double p_hPa, double q_cond){
-        if (!enabled() || !(q_cond > 0.0)) return 1.0;
+        if (!(q_cond > 0.0)) return 1.0;
         double f = fraction(q_t, q_s, p_hPa);
         if (f > 0.0) return (f > 1.0) ? 1.0 : f;
         const double D = (1.0 - hCrit(p_hPa)) * q_s;
@@ -189,12 +179,4 @@ namespace CloudFraction {
 // the ice branch there); and vapour is not a condensate and must never be zeroed at all.
 // Default 0 = shipped, every site unchanged.
 // ============================================================================
-namespace ColdCloud {
-
-    inline bool enabled(){
-        static const bool v = [](){
-            // DEFAULT ON since 2026-08-31 (the accepted configuration). Set the variable to 0 to restore the old branch.
-            return knob::on(knob::ATM_ICE_COLD); }();
-        return v;
-    }
-}
+// ATM_ICE_COLD (freeze, do not delete, below t_00; on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.

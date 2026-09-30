@@ -199,12 +199,7 @@ private:
     //
     // `ATM_ICE_LIMIT_ARRIVING=0` restores the shipped three inline clips exactly; with
     // `ATM_RAIN_AREA=0` beside it, the whole shipped branch.
-    static bool limitArriving(){
-        static const bool v = [](){
-            return knob::on(knob::ATM_ICE_LIMIT_ARRIVING);              // DEFAULT ON since 2026-09-01
-        }();
-        return v;
-    }
+    // ATM_ICE_LIMIT_ARRIVING (on since 2026-09-01) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
 
     static bool srDiag(){
         static const bool v = [](){
@@ -310,7 +305,6 @@ private:
 
         // Per-column slots for the final iter_prec pass; each (j,k) is owned by one thread.
         const bool srd_on = srDiag();
-        const bool arriving = limitArriving();
         const double f_rain = IceSchemeCommon::rainArea();
 
         // Floor audit, unconditional: one column slot, reset per iter_prec pass.
@@ -583,8 +577,6 @@ private:
                                 S_s_melt = c_s_melt
                                     * (1.0 + b_s_melt * pow(Snow_w, exp_5_26))
                                     * (t_u - m.t_0) * pow(Snow_w, exp_1_3);
-                                if(!arriving)
-                                    S_s_melt = std::min(S_s_melt, Snow_w/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                             }else S_s_melt = 0.0;
 
                             // melting of cloud ice to cloud water/rain
@@ -620,16 +612,12 @@ private:
                             const double w_ev = (f_rain > 0.0) ? f_rain : 1.0;
                             S_ev = w_ev * a_ev * (1.0 + b_ev * pow(R_ev, exp_1_6))
                                    * (q_sat - m.c.x[i][j][k]) * pow(R_ev, exp_4_9);
-                            if(!arriving)                              // see limitArriving()
-                                S_ev = std::min(S_ev, Rain / mass_layer);   // Rain[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_ev = 0.0;
 
                         // snow deposition/sublimation (at T < 0°C)
                         if(t_u < m.t_0 && Snow > 1e-12){
                             S_s_dep = c_s_dep * (1.0 + b_s_dep * pow(Snow, exp_5_26))
                                       * (m.c.x[i][j][k] - q_Ice) * pow(Snow, exp_8_13);
-                            if(S_s_dep < 0.0 && !arriving)              // sublimation limiting
-                                S_s_dep = max(S_s_dep, -Snow/mass_layer); // Snow[kg/(m2*s)] / mass_layer[kg/m2] -> [1/s]
                         }else S_s_dep = 0.0;                            // no deposition above freezing or without snow
 
                         // freezing of rain to form snow
@@ -649,7 +637,7 @@ private:
                         // Clipping against the arriving flux alone would forbid rain that
                         // condenses and evaporates inside one layer, which is a real process.
                         // Rain is limited before snow, because S_r_frz is a snow source.
-                        if(arriving){
+                        {
                             const double P_r = m.P_rain.x[i+1][j][k] / mass_layer;
                             const double P_s = m.P_snow.x[i+1][j][k] / mass_layer;
 

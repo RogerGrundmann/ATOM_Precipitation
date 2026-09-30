@@ -1,0 +1,35 @@
+built -O0: cli/ret_b1_atm cli/ret_b1_hyd  from WORKTREE (e79baa9 + working tree)
+  launched vretb1_a  (ret_b1_atm  clean)  pid 20990
+  launched vretb1_b  (knob_new_atm  clean)  pid 20993
+  launched vretb1_c  (ret_b1_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 20996
+  launched vretb1_d  (knob_new_atm  ATM_WATER_CLOSURE=1 ATM_DAMP_Q_VERT=0 ATM_DAMP_Q_HORIZ=0 ATM_DAMP_T_VERT=0 ATM_PRECIP_UPWIND=1 ATM_SNOW_WINDOW=2 ATM_MC_QVD=2 ATM_MC_ED_AREA=1 ATM_MC_ALF1=5.44e-4 ATM_MC_BASE_SAT=2 ATM_SEAM_Q_CONSERVE=2 ATM_RH_STORM=1.15)  pid 20999
+  launched vretb1_e  (ret_b1_hyd  clean)  pid 21002
+  launched vretb1_f  (knob_new_hyd  clean)  pid 21005
+=== waiting for arms: vretb1_a vretb1_b vretb1_c vretb1_d vretb1_e vretb1_f  (10:42:38)
+  vretb1_a exit 0
+  vretb1_b exit 0
+  vretb1_c exit 0
+  vretb1_d exit 0
+  vretb1_e exit 0
+  vretb1_f exit 0
+=== all arms done 11:12:41
+    DIFFERS: 0Ma_smooth_Atm_longal_62_20.vtk
+    DIFFERS: 0Ma_smooth_Atm_radial_0_0.vtk
+    DIFFERS: 0Ma_smooth_Atm_radial_0_20.vtk
+    DIFFERS: 0Ma_smooth_Atm_zonal_87_0.vtk
+    DIFFERS: 0Ma_smooth_Atm_zonal_87_20.vtk
+    DIFFERS: 0Ma_smooth_Transfer_Atm_0.vwtp
+    DIFFERS: RUN_CONFIG.txt
+    DIFFERS: v_momentum_budget_20.csv
+    DIFFERS: w_momentum_budget_20.csv
+A  atm new clean == old clean: identical 5 / differing 9  -> FAIL
+    DIFFERS: 0Ma_smooth_Atm_longal_62_20.vtk
+    DIFFERS: 0Ma_smooth_Atm_radial_0_20.vtk
+    DIFFERS: 0Ma_smooth_Atm_zonal_87_20.vtk
+    DIFFERS: RUN_CONFIG.txt
+    DIFFERS: v_momentum_budget_20.csv
+    DIFFERS: w_momentum_budget_20.csv
+B  atm new+working branch == old+working branch: identical 8 / differing 6  -> FAIL
+C  hyd new clean == old clean: identical 17 / differing 0  -> PASS
+E  CONTROL atm new+working branch vs old clean -- MUST differ: identical 1 / differing 13  -> PASS
+VERDICT: FAIL
