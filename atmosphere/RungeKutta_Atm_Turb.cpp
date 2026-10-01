@@ -244,6 +244,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 double disn_ijk = disn.x[i][j][k];
 
                 // --- Stage 1 ---
+                if(cwb_fl) ColumnWaterBudget::rk_stage() = 0;
                 cAtmosphereModel::RHS_Atmosphere_Turb(i, j, k, geo);
 
                 double kt1   = rhs_t.x[i][j][k];
@@ -276,6 +277,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 dis.x[i][j][k]   = std::max(1.0e-10, disn_ijk + kdis1 * half_dt);
 
                 // --- Stage 2 ---
+                if(cwb_fl) ColumnWaterBudget::rk_stage() = 1;
                 cAtmosphereModel::RHS_Atmosphere_Turb(i, j, k, geo);
 
                 double kt2   = rhs_t.x[i][j][k];
@@ -303,6 +305,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis2 * half_dt);
 
                 // --- Stage 3 ---
+                if(cwb_fl) ColumnWaterBudget::rk_stage() = 2;
                 cAtmosphereModel::RHS_Atmosphere_Turb(i, j, k, geo);
 
                 double kt3   = rhs_t.x[i][j][k];
@@ -330,6 +333,7 @@ void cAtmosphereModel::solveRungeKutta_Atmosphere_Turb(){
                 dis.x[i][j][k]   = std::max(1.0e-10,  disn_ijk + kdis3 * dt);
 
                 // --- Stage 4 + Final combination ---
+                if(cwb_fl) ColumnWaterBudget::rk_stage() = 3;
                 cAtmosphereModel::RHS_Atmosphere_Turb(i, j, k, geo);
 
                 double kt4   = rhs_t.x[i][j][k];

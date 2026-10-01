@@ -16,6 +16,7 @@
 #include "cAtmosphereModel.h"
 #include "Utils.h"
 #include "AtmHydroSplit.h"
+#include "ColumnWaterBudget.h"
 
 using namespace std;
 using namespace AtomUtils;
@@ -1475,6 +1476,29 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
 
     rhs_g.x[i][j][k] = -transport_g + diffusion_g
         + coeff_trans * S_g.x[i][j][k] * coeff_micro;
+
+    // ATM_CWB_DIAG only: the transport/diffusion split of the total-water tendency (see
+    // ColumnWaterBudget.h, "TRANSPORT/DIFFUSION SPLIT"). Print-only; reads, never writes, the RHS.
+    static const bool cwb_td = ColumnWaterBudget::enabled();
+    if (cwb_td && i >= i_topography[j][k]) {
+        const double q_tot = c.x[i][j][k] + cloud.x[i][j][k] + ice.x[i][j][k] + gr.x[i][j][k];
+        const double adv_c = u_exp * (dcdr + dclouddr + dicedr + dgdr)
+                           + v_invrm * (dcdthe + dclouddthe + dicedthe + dgdthe)
+                           + w_invrs * (dcdphi + dclouddphi + dicedphi + dgdphi);
+        const double div_u = dudr * exp_rm + dvdthe * inv_rm + dwdphi * inv_rmsinthe;
+        const double dif   = diffusion_c + diffusion_cloud + diffusion_ice + diffusion_g;
+        const int    i0    = i_topography[j][k];
+        const bool   land  = i0 > 0;
+        double tt[ColumnWaterBudget::NREST] = {
+            -(transport_c + transport_cloud + transport_ice + transport_g),
+            -adv_c,
+            -q_tot * div_u,
+            (land && i == i0)       ? dif : 0.0,
+            (land && i == i0 + 1)   ? dif : 0.0,
+            (!land && i == i0 + 1)  ? dif : 0.0,
+            (i > i0 + 1 || (!land && i == i0)) ? dif : 0.0 };
+        ColumnWaterBudget::rest_hit(*this, i, j, k, tt);
+    }
 
     rhs_co2.x[i][j][k] = -transport_co2 + diffusion_co2;
 

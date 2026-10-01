@@ -191,6 +191,21 @@ public:
     }
     // Called immediately before solveRungeKutta_Atmosphere_Turb(). Measures INT M*(cn - c),
     // the pre-RK4 stage increments the integrator is about to discard by starting from `cn`.
+    // ---- TRANSPORT/DIFFUSION SPLIT (2026-10-01, the +208 mm/a remainder) -------------------
+    // The RK4 loop sets the stage (0..3) before each RHS call; the RHS hands over, per cell, the
+    // total-water (c+cloud+ice+gr) tendency pieces in non-dimensional time. Weighted 1,2,2,1 /6 x dt
+    // exactly as RK4 combines its stages, so the rows add up to what the integrator applied.
+    //   0 advection AS APPLIED   -(u.grad q), minmod gradients (RHS_Atm_Turb.cpp:865)
+    //   1 advection, CENTRED     -(u.grad q) with the centred gradients (isolates the limiter)
+    //   2 -q div(u)              the model's own divergence (PressureSolverAtm div_src form);
+    //                            row 1 + row 2 ~ minus the flux form in the model's metric
+    //   3 diffusion, land, level i0      4 diffusion, land, level i0+1
+    //   5 diffusion, ocean, level i0+1   6 diffusion, everywhere else
+    static constexpr int NREST = 7;
+    static int& rk_stage(){ static thread_local int s = 0; return s; }
+    static void rest_hit(cAtmosphereModel& m, int i, int j, int k, const double* tt){
+        state().rest_hit(m, i, j, k, tt);
+    }
     static void mark_leapfrog(cAtmosphereModel& m){
         if(enabled()) state().mark_leapfrog(m);
     }
@@ -232,6 +247,7 @@ private:
         std::vector<long long> flr_cnt;    // clip events,    per species/stage
         double lf_s = 0.0, lf_a = 0.0;     // INT M*(cn - c) at RK4 entry, sfc / aloft  [mm*wj]
         int    rk_calls = 0;               // RK4 sweeps in this window
+        std::vector<double>    rst_buf;    // transport/diffusion split, (t*im + i)*jm + j  [kg/m2 * wj]
 
         // The stages, in the order the time loop executes them, so the table reads in execution
         // order however the moist stride falls. A stage that did not run this window prints
@@ -333,11 +349,24 @@ private:
                    std::fill(flr_cnt.begin(), flr_cnt.end(), 0LL); }
             lf_s = lf_a = 0.0;
             rk_calls = 0;
+            const size_t nr = (size_t)NREST * m.im * m.jm;
+            if(rst_buf.size() != nr) rst_buf.assign(nr, 0.0);
+            else std::fill(rst_buf.begin(), rst_buf.end(), 0.0);
         }
 
         // ---- the RungeKutta split -------------------------------------------------------
         size_t fidx(cAtmosphereModel& m, int sp, int st, int i, int j) const {
             return (((size_t)st * 4 + sp) * m.im + i) * m.jm + j;
+        }
+
+        void rest_hit(cAtmosphereModel& m, int i, int j, int k, const double* tt){
+            if(!open || mass.empty() || rst_buf.empty()) return;
+            const double M = lat_weight(j) * mass[idx(m, i, j, k)];   // 0 in rock and at the lid
+            if(M == 0.0) return;
+            static const double wst[4] = {1.0/6.0, 2.0/6.0, 2.0/6.0, 1.0/6.0};
+            const double f = M * wst[rk_stage() & 3] * m.dt;
+            for(int t = 0; t < NREST; t++)
+                rst_buf[((size_t)t * m.im + i) * m.jm + j] += f * tt[t];
         }
 
         void floor_hit(cAtmosphereModel& m, int sp, int st, int i, int j, int k, double inj){
@@ -659,6 +688,25 @@ private:
                 cout << "      AGCM: [CWB]     rest = MC_q " << scientific << setprecision(4) << mcq
                      << " + transport/diffusion " << (rest - mcq) << " mm/a;   closure needs MC_q = -P_conv = "
                      << -Pc_mm * per_year << " mm/a" << endl;
+                if(!rst_buf.empty()){
+                    double r[NREST];
+                    for(int t = 0; t < NREST; t++){
+                        double acc = 0.0;                    // serial, fixed order: thread-count independent
+                        for(int i = 0; i < m.im; i++)
+                            for(int j = 0; j < m.jm; j++) acc += rst_buf[((size_t)t * m.im + i) * m.jm + j];
+                        r[t] = acc * inv_w * per_year;
+                    }
+                    const double diff = r[3] + r[4] + r[5] + r[6];
+                    cout << "      AGCM: [CWB-TD] transport/diffusion split [mm/a], total water, RK4-weighted:" << endl;
+                    cout << "      AGCM: [CWB-TD]   advection as applied (minmod) " << scientific << setprecision(4) << r[0]
+                         << "   centred " << r[1] << "   (limiter part " << (r[0] - r[1]) << ")" << endl;
+                    cout << "      AGCM: [CWB-TD]   -q div(u) " << r[2] << "   -> centred flux form, model metric ~ "
+                         << (r[1] + r[2]) << "   (should be ~0 if transport were conservative)" << endl;
+                    cout << "      AGCM: [CWB-TD]   diffusion: land i0 " << r[3] << "   land i0+1 " << r[4]
+                         << "   ocean i0+1 " << r[5] << "   rest " << r[6] << "   total " << diff << endl;
+                    cout << "      AGCM: [CWB-TD]   advection + diffusion " << (r[0] + diff) << "   vs the remainder "
+                         << (rest - mcq) << "   residual " << (r[0] + diff - (rest - mcq)) << endl;
+                }
             }
 
             // The reservoir, and the part of its change that is density rather than water.
