@@ -1495,6 +1495,13 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         const double d2t_s = d2cdthe2 + d2clouddthe2 + d2icedthe2 + d2gdthe2;
         const double d2p_s = d2cdphi2 + d2clouddphi2 + d2icedphi2 + d2gdphi2;
         const double interior = (i > i0 + 1) ? dif : 0.0;
+        const double rad2  = (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv;
+        const double dz_f  = get_layer_height(i+1) - get_layer_height(i);
+        const double dz_c  = (i > i0) ? 0.5 * (get_layer_height(i+1) - get_layer_height(i-1)) : dz_f;
+        double rho_w = r_humid.x[i][j][k];
+        if (!AtomUtils::is_finite_safe(rho_w) || rho_w <= 0.0) rho_w = r_air;   // as the CWB's layer mass
+        const double w_c   = (dz_f > 0.0) ? dz_c / dz_f : 1.0;
+        const double w_r   = r_air / rho_w;
         const double alat = std::fabs(90.0 - j * 180.0 / (double)(jm - 1));
         const int    lb   = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
         double tt[ColumnWaterBudget::NREST] = {
@@ -1514,7 +1521,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             (i > i0 + 5 && i < im - 4) ? interior : 0.0,
             (i >= im - 4) ? interior : 0.0,
             lb == 0 ? interior : 0.0, lb == 1 ? interior : 0.0,
-            lb == 2 ? interior : 0.0, lb == 3 ? interior : 0.0 };
+            lb == 2 ? interior : 0.0, lb == 3 ? interior : 0.0,
+            rad2 * w_c, rad2 * w_r, rad2 * w_c * w_r };
         ColumnWaterBudget::rest_hit(*this, i, j, k, tt);
     }
 

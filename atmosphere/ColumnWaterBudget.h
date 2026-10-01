@@ -208,7 +208,11 @@ public:
     // and rows 6's interior diffusion (levels > i0+1) by place, as contributions to the GLOBAL mean:
     //  12 levels i0+2..i0+5   13 i0+6 .. im-5   14 the top three levels im-4..im-2
     //  15..18 |latitude| 0-15 / 15-35 / 35-65 / 65-90
-    static constexpr int NREST = 19;
+    // and the DISCRIMINATOR for row 7 (instrument weighting vs operator), the same radial 2nd-derivative
+    // term re-weighted inside the RHS so that rest_hit's M = rho*(z[i+1]-z[i]) becomes:
+    //  19 rho * CENTRED thickness (z[i+1]-z[i-1])/2      20 r_air * forward thickness (no density)
+    //  21 r_air * centred thickness
+    static constexpr int NREST = 22;
     static int& rk_stage(){ static thread_local int s = 0; return s; }
     static void rest_hit(cAtmosphereModel& m, int i, int j, int k, const double* tt){
         state().rest_hit(m, i, j, k, tt);
@@ -720,6 +724,9 @@ private:
                     cout << "      AGCM: [CWB-TD]   interior diffusion (> i0+1) by height: i0+2..i0+5 " << r[12]
                          << "   middle " << r[13] << "   top 3 levels " << r[14] << "   (sum " << (r[12]+r[13]+r[14])
                          << " vs " << r[6] << ")" << endl;
+                    cout << "      AGCM: [CWB-TD]   DISCRIMINATOR, radial 2nd-derivative term re-weighted:  rho*dz_fwd (as above) "
+                         << r[7] << "   rho*dz_centred " << r[19] << "   const-rho*dz_fwd " << r[20]
+                         << "   const-rho*dz_centred " << r[21] << endl;
                     cout << "      AGCM: [CWB-TD]   interior diffusion by |lat|, share of the global mean: 0-15 " << r[15]
                          << "   15-35 " << r[16] << "   35-65 " << r[17] << "   65-90 " << r[18] << endl;
                 }
