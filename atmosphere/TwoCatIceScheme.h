@@ -236,6 +236,25 @@ private:
         return v;
     }
 
+    // ATM_SNOW_DEP_FLUX=<0|1> -- SNOW-SUBL (2026-10-01). Default 0 = shipped, unchanged.
+    // S_s_dep (snow deposition > 0 / sublimation < 0) is charged to VAPOUR in S_v and to SNOW in S_s, but
+    // dP_snow has omitted it since the initial commit, with no stated reason. So sublimation ADDS vapour while
+    // the falling snow never loses that mass, and the sublimation clip compares each level against an arriving
+    // flux nothing has depleted: the same snow sublimates again at every level. Measured (run_sprb.sh, 600 -> 640
+    // from output_rhst_115, working branch): sublimation -5781 mm/a global (0-15 deg -16877), deposition 0,
+    // against 251 mm/a of stratiform ground precipitation -- the ice scheme's rate arrays were a net vapour
+    // SOURCE of ~5.5e3 mm/a. S_i_cri (cloud ice collected by rain, frozen to snow in S_s) is the same omission
+    // in the other direction: ice debited, flux never credited (7.6 mm/a).
+    // =1 adds both to dP_snow, so SUM(S_r+S_s) = ground + clip/window removal exactly, and the snow-side limiter
+    // counts as sources only what the FLUX carries (S_r_cri is moved rain->snow in the arrays but stays in the
+    // rain flux, so it is not a snow-flux source on this branch). S_r_cri's own rain/snow partition is NOT
+    // touched here: it is mass-neutral in the sum and is a separate question.
+    static bool snowDepFlux(){
+        static const bool v = [](){
+            return knob::on(knob::ATM_SNOW_DEP_FLUX); }();
+        return v;
+    }
+
     // ATM_SNOW_DIAG=1 -- print-only, default off. Per |latitude| band (0-15/15-35/35-65/65-90, each on
     // its own cos-lat weight, as the precipitation score prints them), in mm/a: the rain and snow
     // flux at the local ground, the snow the window DELETES on its warm and on its cold side, the
@@ -318,6 +337,7 @@ private:
         const double w_rel  = precipRelax();
         const bool   damped = (n_pass != iter_prec_end) || (w_rel != 1.0);
         const int  snow_win = snowWindow();
+        const bool dep_flux = snowDepFlux();
         const bool sdd_on   = snowDiag();
         // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev,
         // then (2026-10-01, RAIN-CONV probe) the terms in which the RATE ARRAYS and the FLUXES
@@ -652,9 +672,14 @@ private:
                                 const double f = (P_r + src_r) / snk_r;
                                 S_ev *= f; S_r_frz *= f; S_r_cri *= f;
                             }
-                            const double src_s = S_i_au + S_d_au + S_rim + S_agg
-                                               + std::max(0.0, S_s_dep) + S_i_cri + S_r_cri
-                                               + S_r_frz;
+                            // ATM_SNOW_DEP_FLUX: only what the snow FLUX carries can back a snow sink;
+                            // S_r_cri stays in the rain flux. Unset: the shipped sum, verbatim.
+                            const double src_s = dep_flux
+                                ? S_i_au + S_d_au + S_rim + S_agg
+                                  + std::max(0.0, S_s_dep) + S_i_cri + S_r_frz
+                                : S_i_au + S_d_au + S_rim + S_agg
+                                  + std::max(0.0, S_s_dep) + S_i_cri + S_r_cri
+                                  + S_r_frz;
                             double snk_s = S_s_melt + max(0.0, -S_s_dep);
                             if(snk_s > P_s + src_s && snk_s > 0.0){
                                 const double f = (P_s + src_s) / snk_s;
@@ -766,6 +791,7 @@ private:
                         // the falling snow flux.
                         double dP_snow = (S_i_au + S_d_au + S_rim + S_agg
                             + S_r_frz - S_s_melt) * mass_layer;
+                        if (dep_flux) dP_snow += (S_s_dep + S_i_cri) * mass_layer;   // SNOW-SUBL
 
                         {
                             const double raw = m.P_snow.x[i+1][j][k] + dP_snow;

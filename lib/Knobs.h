@@ -115,6 +115,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
     X(ATM_SEAM_Q_CONSERVE, "0", Result, 'R', "conserve water at the phi seam; 2 = also next to land (working branch 2)") \
     X(ATM_SEAM_Q_DIAG, "0", Diag, 'D', "print the seam water-conservation buckets") \
+    X(ATM_SNOW_DEP_FLUX, "0", Result, 'R', "snow deposition/sublimation and S_i_cri also move the snow FLUX (SNOW-SUBL)") \
     X(ATM_SNOW_DIAG, "0", Diag, 'D', "print the snow budget") \
     X(ATM_SNOW_WINDOW, "0", Result, 'R', "snow kept on the cold side of -20 C (working branch 2)") \
     X(ATM_SR_DIAG, "0", Diag, 'D', "print/dump only") \
