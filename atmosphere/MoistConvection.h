@@ -2408,6 +2408,51 @@ void findCloudBaseLFS() {
                        pct(grow, 0.5), pct(grow, 0.9), grow.size(),
                        ur_nr ? std::exp(ur_lnr / ur_nr) : 0.0, ur_nr ? 1e2 * ur_amp / ur_nr : 0.0, ur_nr);
             }
+            {   // ---- MC-LO (2026-10-01): the convection split by surface type -- why does the ocean not convect?
+                // Groups: 0 ocean, 1 land, 2 ocean |lat|<30, 3 land |lat|<30. cos-lat weights; heights over active cols.
+                double W[4]={}, Wa[4]={}, cape[4]={}, mub[4]={}, hb[4]={}, hl[4]={}, gp[4]={}, ed[4]={}, ep[4]={},
+                       pc[4]={}, rhs[4]={}, rhsw[4]={}, rha[4]={}, rhaw[4]={}, ts[4]={}, qcb[4]={};
+                for(int j = 1; j < m.jm-1; j++){
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                    for(int k = 1; k < m.km-1; k++){
+                        const int land = land_surf[j * m.km + k] ? 1 : 0;
+                        const int gs[2] = { land, (alat < 30.0) ? 2 + land : -1 };
+                        const int i0 = m.i_topography[j][k];
+                        const int ib = i_Base_local[j][k], il = i_LFS_local[j][k];
+                        const bool act = (ib >= 0 && il > ib);
+                        double cgp = 0.0, ced = 0.0, cep = 0.0, rs = 0.0, rsw = 0.0, ra = 0.0, raw = 0.0;
+                        for(int i = i0; i < m.im - 1; i++){
+                            const double mass = step[i] * m.r_humid.x[i][j][k];
+                            cgp += mass * m.g_p.x[i][j][k]; ced += mass * m.e_d.x[i][j][k]; cep += mass * m.e_p.x[i][j][k];
+                            const double E_sat = m.hp * AtomUtils::exp_func(m.t.x[i][j][k] * m.t_0, 17.2694, 35.86);
+                            const double qs = safe_q_sat(m.ep, E_sat, m.p_stat.x[i][j][k]);
+                            if(qs <= 0.0) continue;
+                            ra += m.c.x[i][j][k] / qs; raw += 1.0;
+                            if(act && i < ib){ rs += m.c.x[i][j][k] / qs; rsw += 1.0; }
+                        }
+                        for(int g : gs){ if(g < 0) continue;
+                            W[g] += w; cape[g] += w * cape_col[j][k]; gp[g] += w * cgp; ed[g] += w * ced; ep[g] += w * cep;
+                            pc[g] += w * m.P_conv.x[std::max(i0,0)][j][k]; ts[g] += w * (m.t.x[std::max(i0,0)][j][k] * m.t_0 - m.t_0);
+                            if(raw > 0){ rha[g] += w * ra / raw; rhaw[g] += w; }
+                            if(act){ Wa[g] += w; mub[g] += w * m.M_u.x[ib][j][k]; hb[g] += w * height_table[ib];
+                                     hl[g] += w * height_table[il]; qcb[g] += w * m.q_c_u.x[ib][j][k];
+                                     if(rsw > 0){ rhs[g] += w * rs / rsw; rhsw[g] += w; } }
+                        }
+                    }
+                }
+                const char* gn[4] = {"ocean", "land", "ocean<30", "land<30"};
+                for(int g = 0; g < 4; g++){
+                    if(W[g] <= 0.0) continue;
+                    const double y = s_per_year / W[g], a = Wa[g] > 0 ? 1.0 / Wa[g] : 0.0;
+                    printf("      AGCM: [MC-LO] %-8s active %5.1f %%  CAPE %7.1f J/kg  base %5.0f m  LFS %5.0f m  M_u(base) %.4f"
+                           "  q_c_u(base) %.3f g/kg  sub-cloud RH %.3f  column RH %.3f  T_sfc %5.1f C  |  g_p %7.1f  e_d %7.1f"
+                           "  e_p %7.1f  P_conv %7.1f mm/a\n",
+                           gn[g], 1e2 * Wa[g] / W[g], cape[g] / W[g], hb[g] * a, hl[g] * a, mub[g] * a, 1e3 * qcb[g] * a,
+                           rhsw[g] > 0 ? rhs[g] / rhsw[g] : 0.0, rhaw[g] > 0 ? rha[g] / rhaw[g] : 0.0, ts[g] / W[g],
+                           gp[g] * y, ed[g] * y, ep[g] * y, pc[g] * y);
+                }
+            }
             printf("      AGCM: [MC-TV] WHY, where MC_w acts: |M_u| p50/p90 %.4f / %.4f kg/m2/s;  |w_u - w|"
                    " p50/p90/p99 %.2f / %.2f / %.2f m/s;  layer mass rho*dz p50 %.1f kg/m2\n",
                    pct(mu_s, 0.5), pct(mu_s, 0.9), pct(dw_s, 0.5), pct(dw_s, 0.9), pct(dw_s, 0.99),
