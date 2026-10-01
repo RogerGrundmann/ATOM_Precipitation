@@ -1225,6 +1225,18 @@ void findCloudBaseLFS() {
                         + step_prev * m.E_u.x[i-1][j][k] * m.v.x[i-1][j][k];
                     double dummy_vel_w_u = M_u_prev * m.w_u.x[i-1][j][k]
                         + step_prev * m.E_u.x[i-1][j][k] * m.w.x[i-1][j][k];
+                    // ATM_MC_UV_DETRAIN=<0|1> -- MC-TV (2026-10-01). Default 0 = shipped, unchanged.
+                    // The two momentum recurrences above have carried no detrainment term since the initial
+                    // commit, where q_v_u and s_u (and q_c_u, via cloud) subtract D_u*scalar_u. Divided by
+                    // M_u[i] = M_u[i-1] + dz*(E_u - D_u), every detraining level multiplies v_u/w_u by
+                    // M_u[i-1]/M_u[i] -- the B.11 amplifier. Measured (run_tv1.sh): |w_u - w| p50/p99 15.5 / 68
+                    // m/s, the scheme's |MC_w| p50 112 m/s/day where it acts, held to 2.8 by coeff_MC_vel's
+                    // 0.025 (a cancelling pair). =1 subtracts step*D_u*v_u / w_u, as the scalars do.
+                    static const bool uv_detrain = knob::on(knob::ATM_MC_UV_DETRAIN);
+                    if (uv_detrain) {
+                        dummy_vel_v_u -= step_prev * m.D_u.x[i-1][j][k] * m.v_u.x[i-1][j][k];
+                        dummy_vel_w_u -= step_prev * m.D_u.x[i-1][j][k] * m.w_u.x[i-1][j][k];
+                    }
 
                     // ATM_MC_S_NDIM=<0|1>, DEFAULT 1 SINCE 2026-09-24 at the user's instruction (was 0;
                     // =0 restores the double division). B.10 remainder.
@@ -2300,7 +2312,8 @@ void findCloudBaseLFS() {
         //  WHY      the ingredients of MC_w = -d[M_u(w_u-w) + M_d(w_d-w)]/dz/rho * u_0 where it acts.
         // Print-only; reads the arrays rhsForcing wrote this call.
         {
-            const double ratio = m.ndimLength() / m.metricShellLength();     // applied / correct
+            const double ratio   = m.ndimLength() / m.metricShellLength();   // applied / correct, coeff_MC_vel
+            const double ratio_t = knob::on(knob::ATM_MC_T_COEFF) ? 1.0 : ratio;   // mirrors RHS_Atm_Turb.cpp
             constexpr double MCv_cap = 0.01, MCt_cap = 0.01;                  // as in rhsForcing
             double Eh = 0.0, El = 0.0, wsum = 0.0;                            // W/m2 * w, cos-lat
             long n_fl = 0, nv = 0, nw = 0, nv_cap = 0, nw_cap = 0, nt_cap = 0;
@@ -2339,7 +2352,7 @@ void findCloudBaseLFS() {
             printf("      AGCM: [MC-TV] iter %d.  ENERGY, cos-lat global W/m2:  cp*rho*MC_t column (scheme) %.3f,"
                    " as applied (x %.4f) %.3f;  its latent half L*conv_src %.3f;  L*P_conv %.3f;  MC_t at the"
                    " MCt_max cap in %.4f %% of cells\n",
-                   m.iter_n, Ehw, ratio, Ehw * ratio, Elw, LP, n_fl ? 1e2 * nt_cap / n_fl : 0.0);
+                   m.iter_n, Ehw, ratio_t, Ehw * ratio_t, Elw, LP, n_fl ? 1e2 * nt_cap / n_fl : 0.0);
             const double v50 = pct(av, 0.5) * day, v90 = pct(av, 0.9) * day, v99 = pct(av, 0.99) * day;
             const double w50 = pct(aw, 0.5) * day, w90 = pct(aw, 0.9) * day, w99 = pct(aw, 0.99) * day;
             printf("      AGCM: [MC-TV] MOMENTUM where it acts, m/s/day (scheme = the correct coefficient):"

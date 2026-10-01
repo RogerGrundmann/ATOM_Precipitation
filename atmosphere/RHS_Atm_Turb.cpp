@@ -386,6 +386,14 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     static const bool mc_q_ndim = knob::on(knob::ATM_MC_Q_NDIM);
     if (mc_q_ndim) coeff_MC_q = metricShellLength() / u_0;
     double coeff_MC_t     = ndimLength() / (u_0 * t_0);
+    // ATM_MC_T_COEFF=<0|1> -- MC-TV (2026-10-01). Default 0 = shipped, unchanged.
+    // MC_t is in K/s and t is carried as T/t_0, so the tendency in non-dimensional time needs (L/u_0)/t_0 with
+    // L = metricShellLength(), the same L/u_0 as coeff_micro and (ATM_MC_Q_NDIM) coeff_MC_q. ndimLength() is L_atm
+    // = 400 m, 0.025 x that. Measured (run_tv1.sh): the scheme's column heating 24.92 W/m2 equals L*P_conv exactly,
+    // and RK4 applied 0.62 -- 97.5 % of the convective rain's latent heat never reached the atmosphere.
+    // =1 uses metricShellLength(). coeff_MC_vel is ATM_MC_UV_DETRAIN's partner and is NOT moved here.
+    static const bool mc_t_coeff = knob::on(knob::ATM_MC_T_COEFF);
+    if (mc_t_coeff) coeff_MC_t = metricShellLength() / (u_0 * t_0);
 
     // Coriolis
     double coriolis = 1.0;
