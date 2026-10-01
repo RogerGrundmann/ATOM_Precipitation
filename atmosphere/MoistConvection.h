@@ -212,6 +212,8 @@ private:
     // supersaturated at the condensation check, and the condensation c_u written (mass-weighted).
     long   ur_n = 0, ur_mu[3] = {0, 0, 0}, ur_dq = 0, ur_dq_small = 0, ur_land = 0;
     double ur_cu = 0.0, ur_dq_small_sum = 0.0;
+    long   ur_nr = 0, ur_amp = 0;       // levels with both M_u > coeff_recurr; of those M_u[i-1]/M_u[i] > 1
+    double ur_lnr = 0.0;                // sum of ln(M_u[i-1]/M_u[i]) over them
     std::vector<int8_t> land_surf;
     std::vector<int8_t> air_surf;
 
@@ -1182,10 +1184,10 @@ void findCloudBaseLFS() {
         using namespace AtomMoistConvection;
 
         const bool urd = mcDiag();
-        long n_ = 0, mu0 = 0, mu1 = 0, mu2 = 0, ndq = 0, ndqs = 0, nland = 0;
-        double cu_ = 0.0, dqs_ = 0.0;
+        long n_ = 0, mu0 = 0, mu1 = 0, mu2 = 0, ndq = 0, ndqs = 0, nland = 0, nr_ = 0, namp = 0;
+        double cu_ = 0.0, dqs_ = 0.0, lnr_ = 0.0;
         #pragma omp parallel for collapse(2) schedule(static) \
-            reduction(+:n_,mu0,mu1,mu2,ndq,ndqs,nland,cu_,dqs_)
+            reduction(+:n_,mu0,mu1,mu2,ndq,ndqs,nland,cu_,dqs_,nr_,namp,lnr_)
         for(int j = 1; j < m.jm-1; j++){
             for(int k = 1; k < m.km-1; k++){
 
@@ -1220,6 +1222,15 @@ void findCloudBaseLFS() {
                     double dummy_q_c_u = M_u_prev * m.q_c_u.x[i-1][j][k]
                         + step_prev * (-m.D_u.x[i-1][j][k] * cloud.x[i-1][j][k]
                         - r_h_prev * m.g_p.x[i-1][j][k]);
+                    // ATM_MC_QC_DETRAIN=<0|1> -- MC-TV (2026-10-01). Default 0 = shipped, unchanged.
+                    // The updraft condensate detrains `cloud` -- bound to model.cloud, the ENVIRONMENT's cloud water
+                    // (~0.009 g/kg at 2.4 km in the tropics) -- instead of its own q_c_u (0.1-0.2 g/kg). So detrainment
+                    // removes 5-10 % of what it should, and dividing by M_u[i] multiplies q_c_u by M_u[i-1]/M_u[i] at
+                    // every detraining level: with c_u = 0 the condensate still grows 25-45x from cloud base to 2.7 km
+                    // (wb3 / sdx_both, 87E). The twin of ATM_MC_UV_DETRAIN. =1 detrains the updraft's own q_c_u.
+                    static const bool qc_detrain = knob::on(knob::ATM_MC_QC_DETRAIN);
+                    if (qc_detrain)
+                        dummy_q_c_u += step_prev * m.D_u.x[i-1][j][k] * (cloud.x[i-1][j][k] - m.q_c_u.x[i-1][j][k]);
 
                     double dummy_vel_v_u = M_u_prev * m.v_u.x[i-1][j][k]
                         + step_prev * m.E_u.x[i-1][j][k] * m.v.x[i-1][j][k];
@@ -1254,6 +1265,10 @@ void findCloudBaseLFS() {
                            - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k]);
 
                     double M_u_i = m.M_u.x[i][j][k];
+                    if(urd && fabs(M_u_i) > coeff_recurr && fabs(M_u_prev) > coeff_recurr){
+                        const double r = fabs(M_u_prev) / fabs(M_u_i);
+                        nr_++; lnr_ += std::log(r); if(r > 1.0) namp++;
+                    }
                     if(fabs(M_u_i) > coeff_recurr){
                         double inv_M_u = 1.0 / M_u_i;
                         m.q_v_u.x[i][j][k] = dummy_q_v_u * inv_M_u;
@@ -1347,7 +1362,8 @@ void findCloudBaseLFS() {
             }
         }
         if(urd){ ur_n = n_; ur_mu[0] = mu0; ur_mu[1] = mu1; ur_mu[2] = mu2; ur_dq = ndq;
-                 ur_dq_small = ndqs; ur_land = nland; ur_cu = cu_; ur_dq_small_sum = dqs_; }
+                 ur_dq_small = ndqs; ur_land = nland; ur_cu = cu_; ur_dq_small_sum = dqs_;
+                 ur_nr = nr_; ur_amp = namp; ur_lnr = lnr_; }
     }
 /*
 *
@@ -2312,8 +2328,10 @@ void findCloudBaseLFS() {
         //  WHY      the ingredients of MC_w = -d[M_u(w_u-w) + M_d(w_d-w)]/dz/rho * u_0 where it acts.
         // Print-only; reads the arrays rhsForcing wrote this call.
         {
-            const double ratio   = m.ndimLength() / m.metricShellLength();   // applied / correct, coeff_MC_vel
-            const double ratio_t = knob::on(knob::ATM_MC_T_COEFF) ? 1.0 : ratio;   // mirrors RHS_Atm_Turb.cpp
+            const double ratio   = knob::on(knob::ATM_MC_VEL_COEFF) ? 1.0      // applied / correct, coeff_MC_vel
+                                 : m.ndimLength() / m.metricShellLength();      // (mirrors RHS_Atm_Turb.cpp)
+            const double ratio_t = knob::on(knob::ATM_MC_T_COEFF) ? 1.0          // mirrors RHS_Atm_Turb.cpp
+                                 : m.ndimLength() / m.metricShellLength();
             constexpr double MCv_cap = 0.01, MCt_cap = 0.01;                  // as in rhsForcing
             double Eh = 0.0, El = 0.0, wsum = 0.0;                            // W/m2 * w, cos-lat
             long n_fl = 0, nv = 0, nw = 0, nv_cap = 0, nw_cap = 0, nt_cap = 0;
@@ -2362,6 +2380,24 @@ void findCloudBaseLFS() {
                    v50, v90, v99, n_fl ? 1e2 * nv / n_fl : 0.0, nv ? 1e2 * nv_cap / nv : 0.0,
                    w50, w90, w99, n_fl ? 1e2 * nw / n_fl : 0.0, nw ? 1e2 * nw_cap / nw : 0.0,
                    ratio, w50 * ratio);
+            {   // condensate growth above cloud base, per active column with a seed at the base
+                std::vector<double> grow; double qb_sum = 0.0, qm_sum = 0.0; long nc = 0;
+                for(int j = 1; j < m.jm-1; j++) for(int k = 1; k < m.km-1; k++){
+                    const int ib = i_Base_local[j][k], il = i_LFS_local[j][k];
+                    if(ib < 0 || il <= ib + 1) continue;
+                    const double qb = m.q_c_u.x[ib][j][k];
+                    double qm = 0.0;
+                    for(int i = ib + 1; i < il; i++) qm = std::max(qm, m.q_c_u.x[i][j][k]);
+                    qb_sum += qb; qm_sum += qm; nc++;
+                    if(qb > 1e-9) grow.push_back(qm / qb);
+                }
+                printf("      AGCM: [MC-QC] condensate: mean q_c_u at cloud base %.4f g/kg, mean max above it %.4f g/kg"
+                       " over %ld columns;  growth max/base p50/p90 %.2f / %.2f (%zu seeded columns);"
+                       "  recurrence M_u[i-1]/M_u[i]: geometric mean %.4f, > 1 at %.1f %% of %ld levels\n",
+                       nc ? 1e3 * qb_sum / nc : 0.0, nc ? 1e3 * qm_sum / nc : 0.0, nc,
+                       pct(grow, 0.5), pct(grow, 0.9), grow.size(),
+                       ur_nr ? std::exp(ur_lnr / ur_nr) : 0.0, ur_nr ? 1e2 * ur_amp / ur_nr : 0.0, ur_nr);
+            }
             printf("      AGCM: [MC-TV] WHY, where MC_w acts: |M_u| p50/p90 %.4f / %.4f kg/m2/s;  |w_u - w|"
                    " p50/p90/p99 %.2f / %.2f / %.2f m/s;  layer mass rho*dz p50 %.1f kg/m2\n",
                    pct(mu_s, 0.5), pct(mu_s, 0.9), pct(dw_s, 0.5), pct(dw_s, 0.9), pct(dw_s, 0.99),

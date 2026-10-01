@@ -394,6 +394,14 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     // =1 uses metricShellLength(). coeff_MC_vel is ATM_MC_UV_DETRAIN's partner and is NOT moved here.
     static const bool mc_t_coeff = knob::on(knob::ATM_MC_T_COEFF);
     if (mc_t_coeff) coeff_MC_t = metricShellLength() / (u_0 * t_0);
+    // ATM_MC_VEL_COEFF=<0|1> -- MC-TV (2026-10-01). Default 0 = shipped, unchanged.
+    // MC_v / MC_w are in m/s^2 and v, w are carried as v/u_0, so the tendency needs L/u_0^2 with
+    // L = metricShellLength(); ndimLength() = L_atm makes it 0.025x. That shortfall was the cancelling partner of
+    // the updraft momentum recurrence's missing detrainment (ATM_MC_UV_DETRAIN): without it the scheme's |MC_w| was
+    // p50/p99 112/864 m/s/day (run_tv1.sh), with it 0.11/24 (run_tv2.sh). USE THIS ONLY TOGETHER WITH
+    // ATM_MC_UV_DETRAIN=1 -- alone it applies the amplified updraft momentum at full strength.
+    static const bool mc_vel_coeff = knob::on(knob::ATM_MC_VEL_COEFF);
+    if (mc_vel_coeff) coeff_MC_vel = metricShellLength() / (u_0 * u_0);
 
     // Coriolis
     double coriolis = 1.0;
