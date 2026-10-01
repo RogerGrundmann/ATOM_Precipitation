@@ -1003,6 +1003,56 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         + d2gdthe2 * inv_rm2 + dgdthe * cos_rm2sin
         + d2gdphi2 * inv_rm2sinthe2) * diff_prec_re_inv;
 
+    // ATM_Q_DIFF_FLUX=<0|1> -- DIFF-LEAK (2026-10-01). Default 0 = shipped, unchanged.
+    // The radial part of the moisture diffusion above, K*e^2*(q[i+1] - 2q[i] + q[i-1])/dr^2 (+ the curv and
+    // 2/r terms), is not in flux form. With the legacy metric (ATM_METRIC_EXACT=0) e = exp_rm = 1/(rm+1) is
+    // not the Jacobian of the exponential grid -- the implied length unit runs 806 m at the ground to 18.7 km
+    // at the lid -- so in metres it is a height-dependent diffusivity applied as K(z)*d2q/dz2, and its column
+    // integral does not vanish. Measured (run_td2/td3.sh, working branch): +222 mm/a of total water created by
+    // this term, +680 with constant density and centred volumes; it is the whole of the +206 mm/a RK4
+    // transport/diffusion remainder.
+    // =1 replaces the radial part for c, cloud, ice and gr by the SAME local diffusivity in conservative form:
+    //   F[i+1/2] = rho_f * K * e_f^2 * g_f * (q[i+1] - q[i]) / dr^2,   g_f = z[i+1] - z[i],  e_f = exp_rm at the face,
+    //   tendency = (F[i+1/2] - F[i-1/2]) / (rho[i] * (z[i+1] - z[i]))
+    // whose column sum, weighted by the column water budget's own layer mass rho*(z[i+1]-z[i]), telescopes to
+    // the boundary fluxes, and those are ZERO: at the lid, and at the ground (over ocean the face between the
+    // level-0 skin and level 1; surface evaporation enters through the closure, not through this operator).
+    // On a uniform grid with constant rho and e it is the shipped stencil. Horizontal parts (~0 in the budget)
+    // and the -2 mm/a 2/r term are not touched / dropped respectively.
+    static const bool q_diff_flux = knob::on(knob::ATM_Q_DIFF_FLUX);
+    double rad_applied = (((d2cdr2 + d2clouddr2 + d2icedr2 + d2gdr2) - curv * (dcdr + dclouddr + dicedr + dgdr))
+                          * exp_2_rm + (dcdr + dclouddr + dicedr + dgdr) * two_over_rm_exp) * diff_prec_re_inv;
+    {
+        const int i_top = i_topography[j][k];
+        const int i_bot = (i_top > 0) ? i_top : 1;     // lowest level with a zero-flux lower face
+        if (q_diff_flux && i >= i_bot && i <= im - 2) {
+            auto rho_at = [&](int ii){ double r = r_humid.x[ii][j][k];
+                                       return (AtomUtils::is_finite_safe(r) && r > 0.0) ? r : r_air; };
+            const double dr2   = 1.0 / inv_dr2;
+            const double z_i   = get_layer_height(i), z_ip = get_layer_height(i+1), z_im = get_layer_height(i-1);
+            const double mass  = rho_at(i) * (z_ip - z_i);
+            double cup = 0.0, cdn = 0.0;                 // face coefficients rho_f*K*e_f^2*g_f/dr^2 (no q)
+            if (i < im - 2) {
+                const double ef = metricExpRm(0.5 * (rad.z[i] + rad.z[i+1]));
+                cup = 0.5 * (rho_at(i) + rho_at(i+1)) * diff_prec_re_inv * ef * ef * (z_ip - z_i) / dr2;
+            }
+            if (i > i_bot) {
+                const double ef = metricExpRm(0.5 * (rad.z[i-1] + rad.z[i]));
+                cdn = 0.5 * (rho_at(i-1) + rho_at(i)) * diff_prec_re_inv * ef * ef * (z_i - z_im) / dr2;
+            }
+            auto flux_div = [&](const Array& q){
+                return (cup * (q.x[i+1][j][k] - q.x[i][j][k]) - cdn * (q.x[i][j][k] - q.x[i-1][j][k])) / mass; };
+            auto shipped_r = [&](double d2, double d1){
+                return ((d2 - curv * d1) * exp_2_rm + d1 * two_over_rm_exp) * diff_prec_re_inv; };
+            const double fc = flux_div(c), fcl = flux_div(cloud), fi = flux_div(ice), fg = flux_div(gr);
+            diffusion_c     += fc  - shipped_r(d2cdr2, dcdr);
+            diffusion_cloud += fcl - shipped_r(d2clouddr2, dclouddr);
+            diffusion_ice   += fi  - shipped_r(d2icedr2, dicedr);
+            diffusion_g     += fg  - shipped_r(d2gdr2, dgdr);
+            rad_applied = fc + fcl + fi + fg;
+        }
+    }
+
     double diffusion_co2 = ((d2codr2 - curv * dcodr) * exp_2_rm + dcodr * two_over_rm_exp
         + d2codthe2 * inv_rm2 + dcodthe * cos_rm2sin
         + d2codphi2 * inv_rm2sinthe2) * diff_co2_re_inv;
@@ -1495,7 +1545,7 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         const double d2t_s = d2cdthe2 + d2clouddthe2 + d2icedthe2 + d2gdthe2;
         const double d2p_s = d2cdphi2 + d2clouddphi2 + d2icedphi2 + d2gdphi2;
         const double interior = (i > i0 + 1) ? dif : 0.0;
-        const double rad2  = (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv;
+        const double rad2  = q_diff_flux ? rad_applied : (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv;
         const double dz_f  = get_layer_height(i+1) - get_layer_height(i);
         const double dz_c  = (i > i0) ? 0.5 * (get_layer_height(i+1) - get_layer_height(i-1)) : dz_f;
         double rho_w = r_humid.x[i][j][k];
@@ -1512,8 +1562,8 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             (land && i == i0 + 1)   ? dif : 0.0,
             (!land && i == i0 + 1)  ? dif : 0.0,
             (i > i0 + 1 || (!land && i == i0)) ? dif : 0.0,
-            (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv,
-            dr_s * two_over_rm_exp * diff_prec_re_inv,
+            q_diff_flux ? rad_applied : (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv,
+            q_diff_flux ? 0.0 : dr_s * two_over_rm_exp * diff_prec_re_inv,
             d2t_s * inv_rm2 * diff_prec_re_inv,
             dt_s * cos_rm2sin * diff_prec_re_inv,
             d2p_s * inv_rm2sinthe2 * diff_prec_re_inv,

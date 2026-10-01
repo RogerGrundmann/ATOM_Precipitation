@@ -99,6 +99,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_PSI_POLAR, "26.0", Result, 'P', "polar cell amplitude for ATM_CELLS_FROM_PSI, 1e9 kg/s") \
     X(ATM_PSI_PROJ_DUMP, "0", Diag, 'D', "print/dump only") \
     X(ATM_PSI_SHAPE, "1", Result, 'P', "IC shape 1") \
+    X(ATM_Q_DIFF_FLUX, "0", Result, 'R', "conservative (flux-form, rho-weighted) vertical diffusion of c/cloud/ice/gr (DIFF-LEAK)") \
     X(ATM_QC_CRIT, "0.05", Result, 'P', "0.05 g/kg since 08-31") \
     X(ATM_RADIAL_SHAPIRO_STRENGTH, "1.0", Result, 'P', "1.0 (u only)") \
     X(ATM_RADIATION_MODE, "5", Result, 'S', "5 (radiation diagnostic)") \
