@@ -465,7 +465,9 @@ private:
             // is L_over_u0 below. Split out of `rest` (2026-10-01, RAIN-CONV probe): closure needs
             // its column integral to be -P_conv.
             const double L_u0_q = (m.dt != 0.0) ? sec_per_iter / m.dt : 0.0;
-            const double coeff_MC_q = (knob::on(knob::ATM_LENGTH_NDIM) ? L_u0_q
+            // ATM_MC_Q_NDIM: MUST mirror RHS_Atm_Turb.cpp, or this row reports a coefficient RK4 does not apply.
+            const double coeff_MC_q = knob::on(knob::ATM_MC_Q_NDIM) ? L_u0_q
+                                    : (knob::on(knob::ATM_LENGTH_NDIM) ? L_u0_q
                                                                         : m.L_atm / m.u_0) / m.c_0;
             #pragma omp parallel for schedule(static)
             for(int j = 0; j < m.jm; j++){

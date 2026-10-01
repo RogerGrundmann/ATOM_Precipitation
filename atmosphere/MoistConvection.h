@@ -2272,7 +2272,8 @@ void findCloudBaseLFS() {
                 Raw += w * raw; App += w * app; Gp += w * gp; Fgnd += w * fg; Ftop += w * ft;
             }
             const double f = s_per_year / w_tot;
-            const double coeff_ratio = (m.ndimLength() / m.c_0) / m.metricShellLength();
+            const double coeff_ratio = knob::on(knob::ATM_MC_Q_NDIM) ? 1.0      // mirrors RHS_Atm_Turb.cpp
+                                     : (m.ndimLength() / m.c_0) / m.metricShellLength();
             printf("      AGCM: [MC-Q] iter %d.  column MC_q, cos-lat GLOBAL mean, mm/a (physical, before coeff_MC_q):"
                    "  flux div %.2f  - c_u %.2f  + e_d %.2f  + e_l %.2f  + e_p %.2f  =  raw %.2f;"
                    "  after the MCq_max cap %.2f (cap moved %.2f)\n",

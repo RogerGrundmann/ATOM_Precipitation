@@ -72,6 +72,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_CAP_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_MC_COND_DEBIT, "0", Result, 'R', "charge the convective condensate to the environment: c_u = g_p + e_l (MC-Q-LEAK)") \
     X(ATM_MC_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_MC_Q_NDIM, "0", Result, 'R', "coeff_MC_q = metricShellLength()/u_0, as the microphysics (was L_atm/(u_0*c_0), 0.713x)") \
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
     X(ATM_MC_ENTR, "0.0", Result, 'R', "updraft entrainment 1/m; 0 = the shipped 0.2/R_cloud") \
     X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \

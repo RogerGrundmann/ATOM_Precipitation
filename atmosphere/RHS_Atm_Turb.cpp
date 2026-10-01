@@ -374,6 +374,16 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
     double coeff_trans    = 1.0;
     double coeff_MC_vel   = ndimLength() / (u_0 * u_0);
     double coeff_MC_q     = ndimLength() / (u_0 * c_0);
+    // ATM_MC_Q_NDIM=<0|1> -- MC-Q-LEAK remainder (2026-10-01). Default 0 = shipped, unchanged.
+    // MC_q is a rate in (kg/kg)/s and `c` is carried in kg/kg (set as RH*q_sat, read so by SaturationAdjustment,
+    // the ice schemes and the column water budget), so reaching a tendency in non-dimensional time needs L/u_0
+    // and nothing else -- exactly coeff_micro on the S_v term of the same rhs_c line. The shipped coefficient
+    // divides by c_0 = 0.035, a normalisation `c` does not carry, and uses ndimLength() = L_atm = 400 m (the 40x
+    // defect, ATM_LENGTH_NDIM); the two errors nearly cancel to 0.7132 x L/u_0 (run_cdb1.sh: MC_q applied -200.6
+    // where the closed scheme asks -281.3 mm/a). =1 uses metricShellLength()/u_0. coeff_MC_t and coeff_MC_vel
+    // keep their ndimLength() (40x weak) and are a separate question.
+    static const bool mc_q_ndim = knob::on(knob::ATM_MC_Q_NDIM);
+    if (mc_q_ndim) coeff_MC_q = metricShellLength() / u_0;
     double coeff_MC_t     = ndimLength() / (u_0 * t_0);
 
     // Coriolis
