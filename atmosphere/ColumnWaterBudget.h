@@ -43,8 +43,14 @@
  *
  * The column starts at `i_topography`, not at level 0. Below it the cells are rock; they carry a
  * barometric `p_stat` and receive copied-down surface values from `BC_Atm` Pass 3, and counting
- * them would charge the budget for water that is not in the atmosphere. Over ocean
- * `i_topography == 0` and nothing changes.
+ * them would charge the budget for water that is not in the atmosphere.
+ *
+ * AND OVER OCEAN THE COLUMN STARTS AT LEVEL 1, NOT LEVEL 0 (2026-10-01). Ocean level 0 is the prescribed
+ * SST skin (decided 2026-09-06): RK4 never integrates it, and under ATM_WATER_CLOSURE waterVapourEvaporation
+ * sets c[0] = c[1] every call. Counting it charged the evaporation stage with level 1's moistening mirrored
+ * into a 38.9 m layer no flux feeds -- measured on wb3: evaporation row 1116.5 = the applied bulk E 706 +
+ * the skin copy 404 (its own print, 0.573 x the E print). Land is unchanged (rock below i_topography).
+ * Precipitable water keeps summing from level 0 (user, 2026-10-01); this budget's true water path does not.
  *
  * Each stage is split into the SURFACE BAND (i_top .. i_top+3, exactly the levels
  * `waterVapourEvaporation` writes) and everything above it, because "the manufactured water
@@ -286,6 +292,12 @@ private:
             const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
             return (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
         }
+        // The lowest level the budget counts: i_topography over land, 1 over ocean (level 0 = the SST skin).
+        static int col_bottom(cAtmosphereModel& m, int j, int k){
+            const int it = m.i_topography[j][k];
+            return (it > 0) ? it : 1;
+        }
+
         static double q_total(cAtmosphereModel& m, int i, int j, int k){
             return m.c.x[i][j][k] + m.cloud.x[i][j][k] + m.ice.x[i][j][k] + m.gr.x[i][j][k];
         }
@@ -299,7 +311,7 @@ private:
                 double s = 0.0;
                 const double wj = lat_weight(j);
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
-                    const int i0 = m.i_topography[j][k];
+                    const int i0 = col_bottom(m, j, k);
                     for(int i = i0; i < m.im - 1; i++){
                         double rho = m.r_humid.x[i][j][k];
                         if(!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
@@ -328,7 +340,7 @@ private:
             #pragma omp parallel for collapse(2) schedule(static)
             for(int j = 0; j < m.jm; j++){
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
-                    const int i0 = m.i_topography[j][k];
+                    const int i0 = col_bottom(m, j, k);
                     for(int i = 0; i < m.im; i++){
                         const size_t p = idx(m, i, j, k);
                         q_prev[p] = q_total(m, i, j, k);
@@ -405,7 +417,7 @@ private:
                 double ss = 0.0, sa = 0.0;
                 const double wj = lat_weight(j);
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
-                    const int i0 = m.i_topography[j][k];
+                    const int i0 = col_bottom(m, j, k);
                     for(int i = i0; i < m.im - 1; i++){
                         const double qn = m.cn.x[i][j][k] + m.cloudn.x[i][j][k]
                                         + m.icen.x[i][j][k] + m.grn.x[i][j][k];
@@ -429,7 +441,7 @@ private:
                 double ss = 0.0, sa = 0.0;
                 const double wj = lat_weight(j);
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
-                    const int i0 = m.i_topography[j][k];
+                    const int i0 = col_bottom(m, j, k);
                     for(int i = i0; i < m.im - 1; i++){
                         const size_t p = idx(m, i, j, k);
                         const double q = q_total(m, i, j, k);
@@ -514,7 +526,7 @@ private:
                 double s = 0.0, s_nd = 0.0, sp = 0.0, sp_nd = 0.0, sq = 0.0;
                 const double wj = lat_weight(j);
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
-                    const int i0 = m.i_topography[j][k];
+                    const int i0 = col_bottom(m, j, k);
                     for(int i = i0; i < m.im - 1; i++){
                         const double S = m.S_v.x[i][j][k] + m.S_c.x[i][j][k]
                                        + m.S_i.x[i][j][k] + m.S_g.x[i][j][k];
@@ -558,7 +570,7 @@ private:
             cout << "      AGCM: [CWB] column water budget, iterations " << it_start + 1
                  << ".." << iter << "  (" << fixed << setprecision(2) << elapsed
                  << " s of physical time; layer mass frozen at iteration " << it_start
-                 << "; total water = vapour + cloud + ice + graupel, from i_topography up)" << endl;
+                 << "; total water = vapour + cloud + ice + graupel, from i_topography up, level 1 over ocean)" << endl;
             cout << "      AGCM: [CWB] " << left << setw(22) << "stage" << right
                  << setw(15) << "total mm/a" << setw(15) << "sfc i0..i0+3"
                  << setw(15) << "aloft" << endl;
