@@ -215,6 +215,8 @@ private:
         double P_mm = 0.0, E_mm = 0.0;
         double Sq_mm = 0.0, Sq_nd = 0.0;   // S_v+S_c+S_i+S_g, as shipped / at L/u_0
         double Sp_mm = 0.0, Sp_nd = 0.0;   // S_r+S_s,         as shipped / at L/u_0
+        double Mq_mm = 0.0;                 // coeff_MC_q*MC_q over the column, as RK4 applies it
+        double Pc_mm = 0.0;                 // P_conv through the model's own mean (reference)
         double W_start = 0.0;               // true water path at the window start    [mm]
         int    it_start = 0;
         bool   it_valid = false;
@@ -320,6 +322,7 @@ private:
             elapsed = 0.0;
             P_mm = E_mm = 0.0;
             Sq_mm = Sq_nd = Sp_mm = Sp_nd = 0.0;
+            Mq_mm = Pc_mm = 0.0;
             W_start  = water_path(m);
             it_start = iter;
             open     = true;
@@ -455,10 +458,18 @@ private:
             // is the pair of magnitudes: the microphysical exchange as RK4 APPLIES it, against
             // the same rates read as the kg/(kg*s) their assignment says they are.
             std::vector<double> row(m.jm, 0.0), row_nd(m.jm, 0.0),
-                                rowp(m.jm, 0.0), rowp_nd(m.jm, 0.0);
+                                rowp(m.jm, 0.0), rowp_nd(m.jm, 0.0), rowq(m.jm, 0.0);
+            // The convective moisture source exactly as RK4 adds it (RHS_Atm_Turb.cpp:
+            // `coeff_MC_q * MC_q`, coeff_MC_q = ndimLength()/(u_0*c_0)). ndimLength() is
+            // metricShellLength() under ATM_LENGTH_NDIM and L_atm otherwise; metricShellLength()/u_0
+            // is L_over_u0 below. Split out of `rest` (2026-10-01, RAIN-CONV probe): closure needs
+            // its column integral to be -P_conv.
+            const double L_u0_q = (m.dt != 0.0) ? sec_per_iter / m.dt : 0.0;
+            const double coeff_MC_q = (knob::on(knob::ATM_LENGTH_NDIM) ? L_u0_q
+                                                                        : m.L_atm / m.u_0) / m.c_0;
             #pragma omp parallel for schedule(static)
             for(int j = 0; j < m.jm; j++){
-                double s = 0.0, s_nd = 0.0, sp = 0.0, sp_nd = 0.0;
+                double s = 0.0, s_nd = 0.0, sp = 0.0, sp_nd = 0.0, sq = 0.0;
                 const double wj = lat_weight(j);
                 for(int k = 0; k < m.km - 1; k++){   // k = km-1 IS k = 0 (the seam): count it once
                     const int i0 = m.i_topography[j][k];
@@ -473,21 +484,26 @@ private:
                         s_nd  += M * S * L_over_u0  * m.dt;   // the same rates at L/u_0
                         sp    += M * R * cm         * m.dt;
                         sp_nd += M * R * L_over_u0  * m.dt;
+                        sq    += M * m.MC_q.x[i][j][k] * coeff_MC_q * m.dt;
                     }
                 }
                 row[j]     = s;
                 row_nd[j]  = s_nd;
                 rowp[j]    = sp;
                 rowp_nd[j] = sp_nd;
+                rowq[j]    = sq;
             }
-            double tot = 0.0, tot_nd = 0.0, totp = 0.0, totp_nd = 0.0;
+            double tot = 0.0, tot_nd = 0.0, totp = 0.0, totp_nd = 0.0, totq = 0.0;
             for(int j = 0; j < m.jm; j++){
                 tot  += row[j];  tot_nd  += row_nd[j];
                 totp += rowp[j]; totp_nd += rowp_nd[j];
+                totq += rowq[j];
             }
             const double iw = (w_lat > 0.0) ? 1.0 / w_lat : 0.0;
             Sq_mm += tot * iw;  Sq_nd += tot_nd * iw;
             Sp_mm += totp * iw; Sp_nd += totp_nd * iw;
+            Mq_mm += totq * iw;
+            Pc_mm += AtomUtils::GetMean_3D(m.jm, m.km, m.P_conv) * sec_per_iter;   // [mm/s]
         }
 
         void report(cAtmosphereModel& m, int iter){
@@ -637,6 +653,10 @@ private:
                 cout << "      AGCM: [CWB]     |rest| / largest named term = " << fixed
                      << setprecision(4) << ((big > 0.0) ? std::abs(rest) / big : 0.0)
                      << "   <- small means the split accounts for the bucket" << endl;
+                const double mcq = Mq_mm * per_year;
+                cout << "      AGCM: [CWB]     rest = MC_q " << scientific << setprecision(4) << mcq
+                     << " + transport/diffusion " << (rest - mcq) << " mm/a;   closure needs MC_q = -P_conv = "
+                     << -Pc_mm * per_year << " mm/a" << endl;
             }
 
             // The reservoir, and the part of its change that is density rather than water.

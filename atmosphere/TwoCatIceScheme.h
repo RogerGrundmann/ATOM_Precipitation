@@ -319,8 +319,13 @@ private:
         const bool   damped = (n_pass != iter_prec_end) || (w_rel != 1.0);
         const int  snow_win = snowWindow();
         const bool sdd_on   = snowDiag();
-        // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev
-        const int  NSD = 8;
+        // rain gnd, snow gnd, deleted warm, deleted cold, snow src, S_s_melt, rain src, S_ev,
+        // then (2026-10-01, RAIN-CONV probe) the terms in which the RATE ARRAYS and the FLUXES
+        // differ: S_s_dep deposition / sublimation and S_i_cri (in S_s, not in dP_snow), S_r_cri
+        // (moved rain->snow in the arrays, in neither flux), the column (S_r+S_s), and what the
+        // floor / cap / window / relaxation removed from the two fluxes. Identity, per column:
+        //   SUM (S_r+S_s) = rain gnd + snow gnd + removed + SUM (S_s_dep + S_i_cri)
+        const int  NSD = 14;
         std::vector<double> sdd;
         if (sdd_on) sdd.assign((size_t)NSD * m.jm * m.km, 0.0);
 
@@ -788,6 +793,17 @@ private:
                                 ? w_rel * ps_new + (1.0 - w_rel) * m.P_snow.x[i][j][k] : ps_new;
                         }
 
+                        if (sdd_on) {
+                            const size_t b = (size_t)j * m.km + k, N = (size_t)m.jm * m.km;
+                            sdd[8*N+b]  += std::max(0.0, S_s_dep) * mass_layer;   // vapour -> snow array
+                            sdd[9*N+b]  += std::min(0.0, S_s_dep) * mass_layer;   // snow array -> vapour
+                            sdd[10*N+b] += S_i_cri * mass_layer;
+                            sdd[11*N+b] += S_r_cri * mass_layer;
+                            sdd[12*N+b] += (m.S_r.x[i][j][k] + m.S_s.x[i][j][k]) * mass_layer;
+                            sdd[13*N+b] += (m.P_rain.x[i+1][j][k] + dP_rain - m.P_rain.x[i][j][k])
+                                         + (m.P_snow.x[i+1][j][k] + dP_snow - m.P_snow.x[i][j][k]);
+                        }
+
                         m.Precipitation.x[i][j][k] = std::min(P_max,
                             m.P_rain.x[i][j][k] + m.P_snow.x[i][j][k]);  // in mm/s, total capped at 50 mm/d
 
@@ -899,25 +915,42 @@ private:
             // only (j, k interior), each band on its own cos-lat weight.
             const double yr = 365.0 * 8.64e4;
             const size_t N = (size_t)m.jm * m.km;
-            double acc[4][8] = {}, wb[4] = {0, 0, 0, 0};
+            double acc[4][NSD] = {}, wb[4] = {0, 0, 0, 0};
             for (int j = 1; j < m.jm-1; j++) {
                 const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
                 const int bnd = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
                 const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
                 for (int k = 1; k < m.km-1; k++) {
                     wb[bnd] += w;
-                    for (int q = 0; q < 8; q++) acc[bnd][q] += w * sdd[(size_t)q * N + (size_t)j * m.km + k];
+                    for (int q = 0; q < NSD; q++) acc[bnd][q] += w * sdd[(size_t)q * N + (size_t)j * m.km + k];
                 }
             }
-            const char* lab[8] = {"rain at ground", "snow at ground", "snow DELETED warm (>=0C)",
+            const char* lab[NSD] = {"rain at ground", "snow at ground", "snow DELETED warm (>=0C)",
                                   "snow DELETED cold (<-20C)", "snow-flux sources", "S_s_melt (snow->rain)",
-                                  "rain-flux sources", "S_ev"};
+                                  "rain-flux sources", "S_ev",
+                                  "S_s_dep>0 deposition", "S_s_dep<0 sublimation", "S_i_cri (not in flux)",
+                                  "S_r_cri (rain->snow arr)", "SUM rate arrays S_r+S_s", "flux removed (clip/win)"};
             printf("      AGCM: [SNOW DIAG] iter %d.  ATM_SNOW_WINDOW=%d.  band means, mm/a"
                    "                0-15        15-35        35-65        65-90\n", m.iter_n, snow_win);
-            for (int q = 0; q < 8; q++) {
+            for (int q = 0; q < NSD; q++) {
                 printf("      AGCM: [SNOW DIAG] %-28s", lab[q]);
                 for (int b = 0; b < 4; b++) printf(" %12.3f", wb[b] > 0.0 ? acc[b][q] * yr / wb[b] : 0.0);
                 printf("\n");
+            }
+            printf("      AGCM: [SNOW DIAG] %-28s", "identity residual");
+            for (int b = 0; b < 4; b++) {
+                const double r = acc[b][12] - (acc[b][0] + acc[b][1] + acc[b][13] + acc[b][8] + acc[b][9] + acc[b][10]);
+                printf(" %12.3e", wb[b] > 0.0 ? r * yr / wb[b] : 0.0);
+            }
+            printf("   <- SUM(S_r+S_s) - (ground + removed + S_s_dep + S_i_cri)\n");
+            {   // the same rows as cos-lat GLOBAL means, on the weights the band split uses
+                double g[NSD] = {}, wg = wb[0] + wb[1] + wb[2] + wb[3];
+                for (int q = 0; q < NSD; q++) for (int b = 0; b < 4; b++) g[q] += acc[b][q];
+                for (int q = 0; q < NSD; q++) g[q] *= (wg > 0.0) ? yr / wg : 0.0;
+                printf("      AGCM: [SNOW DIAG] GLOBAL mm/a: ground rain %.1f + snow %.1f;  rate arrays S_r+S_s %.1f;"
+                       "  deposition %.1f  sublimation %.1f  S_i_cri %.1f  S_r_cri %.1f;  flux removed %.1f"
+                       " (warm-deleted %.1f, cold-deleted %.1f)\n",
+                       g[0], g[1], g[12], g[8], g[9], g[10], g[11], g[13], g[2], g[3]);
             }
         }
 
