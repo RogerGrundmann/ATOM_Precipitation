@@ -2289,6 +2289,71 @@ void findCloudBaseLFS() {
                    ur_n, ur_mu[0], coeff_recurr, ur_mu[1], coeff_recurr, ur_mu[2], ur_dq, ur_dq_small,
                    ur_dq_small > 0 ? ur_dq_small_sum / ur_dq_small : 0.0, ur_cu * f, ur_land);
         }
+
+        // ---- MC-TV (2026-10-01): coeff_MC_t and coeff_MC_vel, before anyone changes them -------------
+        // RK4 applies MC_t [K/s] and MC_v/MC_w [m/s^2] with ndimLength() = L_atm, 2.5 % of the L/u_0 the
+        // microphysics and (since ATM_MC_Q_NDIM) the convective moisture use. Three questions:
+        //  ENERGY   column-integrated cp*rho*MC_t (the scheme's value and as applied) against L*P_conv, the
+        //           latent heat of the convective rain whose vapour ATM_MC_COND_DEBIT now removes;
+        //  MOMENTUM the convective momentum tendencies in m/s/day as the scheme forms them (= the tendency at
+        //           the correct coefficient) and as applied, with the MCv_max cap census;
+        //  WHY      the ingredients of MC_w = -d[M_u(w_u-w) + M_d(w_d-w)]/dz/rho * u_0 where it acts.
+        // Print-only; reads the arrays rhsForcing wrote this call.
+        {
+            const double ratio = m.ndimLength() / m.metricShellLength();     // applied / correct
+            constexpr double MCv_cap = 0.01, MCt_cap = 0.01;                  // as in rhsForcing
+            double Eh = 0.0, El = 0.0, wsum = 0.0;                            // W/m2 * w, cos-lat
+            long n_fl = 0, nv = 0, nw = 0, nv_cap = 0, nw_cap = 0, nt_cap = 0;
+            std::vector<double> av, aw, mu_s, dw_s, rdz_s;
+            for(int j = 0; j < m.jm; j++){
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                for(int k = 0; k < m.km; k++){
+                    wsum += w;
+                    const int i0 = m.i_topography[j][k];
+                    for(int i = i0; i < m.im - 1; i++){
+                        const double rho = std::max(m.r_humid.x[i][j][k], 0.01);
+                        const double mass = step[i] * rho;
+                        const double L_latent = (m.t.x[i][j][k] * m.t_0 >= m.t_0) ? m.lv : m.ls;
+                        Eh += w * mass * m.cp_l * m.MC_t.x[i][j][k];
+                        El += w * mass * L_latent * (m.c_u.x[i][j][k] - m.e_d.x[i][j][k]
+                                                    - m.e_l.x[i][j][k] - m.e_p.x[i][j][k]);
+                        n_fl++;
+                        if(std::fabs(m.MC_t.x[i][j][k]) >= MCt_cap * (1.0 - 1e-12)) nt_cap++;
+                        const double mv = m.MC_v.x[i][j][k], mw = m.MC_w.x[i][j][k];
+                        if(mv != 0.0){ nv++; av.push_back(std::fabs(mv));
+                                       if(std::fabs(mv) >= MCv_cap * (1.0 - 1e-12)) nv_cap++; }
+                        if(mw != 0.0){ nw++; aw.push_back(std::fabs(mw));
+                                       if(std::fabs(mw) >= MCv_cap * (1.0 - 1e-12)) nw_cap++;
+                                       mu_s.push_back(std::fabs(m.M_u.x[i][j][k]));
+                                       dw_s.push_back(std::fabs(m.w_u.x[i][j][k] - m.w.x[i][j][k]) * m.u_0);
+                                       rdz_s.push_back(mass); }
+                    }
+                }
+            }
+            auto pct = [](std::vector<double>& v, double q){
+                if(v.empty()) return 0.0;
+                const size_t n = std::min(v.size() - 1, (size_t)(q * (v.size() - 1)));
+                std::nth_element(v.begin(), v.begin() + n, v.end()); return v[n]; };
+            const double day = 86400.0;
+            const double Ehw = Eh / wsum, Elw = El / wsum, LP = m.lv * Pfy / s_per_year;  // W/m2
+            printf("      AGCM: [MC-TV] iter %d.  ENERGY, cos-lat global W/m2:  cp*rho*MC_t column (scheme) %.3f,"
+                   " as applied (x %.4f) %.3f;  its latent half L*conv_src %.3f;  L*P_conv %.3f;  MC_t at the"
+                   " MCt_max cap in %.4f %% of cells\n",
+                   m.iter_n, Ehw, ratio, Ehw * ratio, Elw, LP, n_fl ? 1e2 * nt_cap / n_fl : 0.0);
+            const double v50 = pct(av, 0.5) * day, v90 = pct(av, 0.9) * day, v99 = pct(av, 0.99) * day;
+            const double w50 = pct(aw, 0.5) * day, w90 = pct(aw, 0.9) * day, w99 = pct(aw, 0.99) * day;
+            printf("      AGCM: [MC-TV] MOMENTUM where it acts, m/s/day (scheme = the correct coefficient):"
+                   "  |MC_v| p50/p90/p99 %.2f / %.2f / %.2f in %.2f %% of cells, at the cap %.3f %%;"
+                   "  |MC_w| p50/p90/p99 %.2f / %.2f / %.2f in %.2f %%, at the cap %.3f %%;  as applied x %.4f"
+                   " (|MC_w| p50 %.3f m/s/day)\n",
+                   v50, v90, v99, n_fl ? 1e2 * nv / n_fl : 0.0, nv ? 1e2 * nv_cap / nv : 0.0,
+                   w50, w90, w99, n_fl ? 1e2 * nw / n_fl : 0.0, nw ? 1e2 * nw_cap / nw : 0.0,
+                   ratio, w50 * ratio);
+            printf("      AGCM: [MC-TV] WHY, where MC_w acts: |M_u| p50/p90 %.4f / %.4f kg/m2/s;  |w_u - w|"
+                   " p50/p90/p99 %.2f / %.2f / %.2f m/s;  layer mass rho*dz p50 %.1f kg/m2\n",
+                   pct(mu_s, 0.5), pct(mu_s, 0.9), pct(dw_s, 0.5), pct(dw_s, 0.9), pct(dw_s, 0.99),
+                   pct(rdz_s, 0.5));
+        }
     }
 };
 /*
