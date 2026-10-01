@@ -2183,6 +2183,57 @@ void findCloudBaseLFS() {
                "  mean (q_sat - q_v_d) = %.4f g/kg;  whole-column mean RH = %.4f\n",
                rh_w > 0.0 ? rh_sub / rh_w : 0.0, rh_w > 0.0 ? 1e3 * dq_sub / rh_w : 0.0,
                rh_all_w > 0.0 ? rh_all / rh_all_w : 0.0);
+
+        // ---- MC-Q-LEAK (2026-10-01): the convective MOISTURE tendency, term by term ------------
+        // MC_q = -d(flux_q)/dz / rho - (c_u - e_d - e_l - e_p), capped at MCq_max (rhsForcing). Its
+        // column integral must be -P_conv for the scheme to conserve water: the flux part telescopes
+        // to its boundary values (zero if no mass flux leaves the column), and the source part is
+        // -(c_u - e_l) + e_d + e_p, which equals -(g_p - e_d - e_p) only if every gram the updraft
+        // condenses is either rained (g_p) or re-evaporated on detrainment (e_l). The CWB measured
+        // +383 mm/a against -P_conv = -284 (run_sprb.sh). Same layer mass as rhsForcing's
+        // inv_step_rh, step*max(rho, 0.01), so the flux part telescopes exactly. Physical units
+        // (kg/kg/s); RK4 applies coeff_MC_q = ndimLength()/(u_0*c_0) where the microphysics uses
+        // metricShellLength()/u_0 -- the ratio is printed.
+        {
+            double Fdiv = 0.0, Cu = 0.0, Edq = 0.0, El = 0.0, Epq = 0.0, Raw = 0.0, App = 0.0, Gp = 0.0;
+            double Fgnd = 0.0, Ftop = 0.0;
+            for(int j = 0; j < m.jm; j++){
+                const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                double fdiv = 0.0, cu = 0.0, ed = 0.0, el = 0.0, ep = 0.0, raw = 0.0, app = 0.0, gp = 0.0;
+                double fg = 0.0, ft = 0.0;
+                for(int k = 0; k < m.km; k++){
+                    const int i0 = m.i_topography[j][k];
+                    auto fq = [&](int i){
+                        return m.M_u.x[i][j][k] * (m.q_v_u.x[i][j][k] - m.c.x[i][j][k])
+                             + m.M_d.x[i][j][k] * (m.q_v_d.x[i][j][k] - m.c.x[i][j][k]); };
+                    fg += fq(i0); ft += fq(m.im - 1);
+                    for(int i = i0; i < m.im - 1; i++){
+                        const double mass = step[i] * std::max(m.r_humid.x[i][j][k], 0.01);
+                        const double div  = -(fq(i+1) - fq(i));                          // kg/(m2 s)
+                        const double src  = m.c_u.x[i][j][k] - m.e_d.x[i][j][k]
+                                          - m.e_l.x[i][j][k] - m.e_p.x[i][j][k];
+                        fdiv += div;
+                        cu += mass * m.c_u.x[i][j][k];  ed += mass * m.e_d.x[i][j][k];
+                        el += mass * m.e_l.x[i][j][k];  ep += mass * m.e_p.x[i][j][k];
+                        gp += step[i] * m.r_humid.x[i][j][k] * m.g_p.x[i][j][k];        // as convDiag walks it
+                        raw += div - mass * src;
+                        app += mass * m.MC_q.x[i][j][k];
+                    }
+                }
+                Fdiv += w * fdiv; Cu += w * cu; Edq += w * ed; El += w * el; Epq += w * ep;
+                Raw += w * raw; App += w * app; Gp += w * gp; Fgnd += w * fg; Ftop += w * ft;
+            }
+            const double f = s_per_year / w_tot;
+            const double coeff_ratio = (m.ndimLength() / m.c_0) / m.metricShellLength();
+            printf("      AGCM: [MC-Q] iter %d.  column MC_q, cos-lat GLOBAL mean, mm/a (physical, before coeff_MC_q):"
+                   "  flux div %.2f  - c_u %.2f  + e_d %.2f  + e_l %.2f  + e_p %.2f  =  raw %.2f;"
+                   "  after the MCq_max cap %.2f (cap moved %.2f)\n",
+                   m.iter_n, Fdiv * f, Cu * f, Edq * f, El * f, Epq * f, Raw * f, App * f, (App - Raw) * f);
+            printf("      AGCM: [MC-Q] closure needs MC_q = -P_conv = %.2f:  g_p %.2f;  c_u - e_l - g_p %.2f"
+                   " (condensed, neither rained nor re-evaporated);  boundary flux ground %.2f / top %.2f;"
+                   "  RK4 applies coeff_MC_q = %.4f x the microphysics' L/u_0, so applied = %.2f\n",
+                   -Pfy, Gp * f, (Cu - El - Gp) * f, Fgnd * f, Ftop * f, coeff_ratio, App * f * coeff_ratio);
+        }
     }
 };
 /*
