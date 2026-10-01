@@ -70,6 +70,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_ALF1, "0.05", Result, 'R', "sub-cloud rain evaporation rate 1/s (Tiedtke 5.44e-4; working branch)") \
     X(ATM_MC_BASE_SAT, "0", Result, 'R', "=2 in gpa_* today") \
     X(ATM_MC_CAP_DIAG, "0", Diag, 'D', "print/dump only") \
+    X(ATM_MC_COND_DEBIT, "0", Result, 'R', "charge the convective condensate to the environment: c_u = g_p + e_l (MC-Q-LEAK)") \
     X(ATM_MC_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
     X(ATM_MC_ENTR, "0.0", Result, 'R', "updraft entrainment 1/m; 0 = the shipped 0.2/R_cloud") \

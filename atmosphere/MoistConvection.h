@@ -171,6 +171,25 @@ private:
                                                     return knob::integer(knob::ATM_MC_SGZ); }(); return v; }
     double gz(int i) const { return m.g * height_table[i] / m.s_0; }
 
+    // ATM_MC_COND_DEBIT=<0|1> -- MC-Q-LEAK (2026-10-01). Default 0 = shipped, unchanged.
+    // The environment pays for convective rain only through c_u, the parcel condensation that
+    // updraftRecurrence writes. On the working branch c_u is IDENTICALLY ZERO (run_cuz.sh: the step runs
+    // in 59 % of recurrence cells and the parcel is supersaturated in none -- with s = cp*T and the shipped
+    // entrainment it tracks the environment 1.6-3 K warm, B.10b). The condensate the updraft carries is
+    // findCloudBaseLFS's diagnostic seed q_t + D - q_sat, which nothing debits. So MC_q's column integral
+    // is -c_u + e_d + e_l + e_p = +561 mm/a where conservation needs -P_conv = -305 (run_mcq.sh): the
+    // scheme rains g_p and re-evaporates e_l out of water no term removed.
+    // =1 sets c_u = g_p + e_l at every level in rhsForcing: the condensate that LEAVES the updraft at a
+    // level (as rain, or detrained and evaporated) is condensed from that level's vapour. Then
+    // conv_src = g_p - e_d - e_p, whose column integral is exactly P_conv, and MC_q integrates to the
+    // flux boundary term minus P_conv. MC_t's latent half reads the same conv_src, so the latent heat of
+    // the rain is released where it forms -- energy follows the mass (the shipped branch releases none).
+    // Approximation, stated: the debit is taken where the condensate leaves the updraft, not where it
+    // formed, and from vapour, not from the cloud/ice the seed partly counted. Overwrites any parcel c_u
+    // (a branch with ATM_MC_SGZ would then not double-count it: its condensate also ends as g_p or e_l).
+    static bool mcCondDebit() { static const bool v = [](){
+                                                    return knob::on(knob::ATM_MC_COND_DEBIT); }(); return v; }
+
     // ATM_MC_QVD=<0|1|2>, default 0 = shipped (2026-09-25). The downdraft humidity that e_d and e_p
     // evaluate against is set to 0.5*(cloud + 0.98*q_sat): half the CLOUD-WATER array plus half
     // saturation, i.e. ~50 % RH whatever has evaporated. With the parcel repaired (ATM_MC_SGZ +
@@ -1541,6 +1560,8 @@ void findCloudBaseLFS() {
         // clips the runaway while leaving realistic convection untouched.
         constexpr double MCv_max = 0.01;       // [m/s²]      convective momentum transport  (was 0.05)
 
+        const bool cond_debit = mcCondDebit();   // MC-Q-LEAK, see the accessor
+
         auto safe_cap = [](double v, double mag) -> double {
             std::uint64_t bits;
             std::memcpy(&bits, &v, sizeof(bits));
@@ -1692,6 +1713,8 @@ void findCloudBaseLFS() {
                     double flux_s_i   = m.M_u.x[i][j][k] * (m.s_u.x[i][j][k] - m.s.x[i][j][k])          // kg/(m²s)    s non-dimensional
                                     + m.M_d.x[i][j][k] * (m.s_d.x[i][j][k] - m.s.x[i][j][k]);
 
+                    if(cond_debit)                                                                       // MC-Q-LEAK
+                        m.c_u.x[i][j][k] = m.g_p.x[i][j][k] + m.e_l.x[i][j][k];
                     double conv_src = m.c_u.x[i][j][k] - m.e_d.x[i][j][k]                               // (kg/kg)/s
                                   - m.e_l.x[i][j][k] - m.e_p.x[i][j][k];
 
