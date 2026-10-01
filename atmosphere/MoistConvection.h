@@ -188,6 +188,11 @@ private:
         }
     }
     std::vector<double> step;
+    // MC-Q-LEAK census of updraftRecurrence's LAST pass (ATM_MC_DIAG only; printed by convDiag):
+    // cells walked, |M_u| bins (<0.01, 0.01..coeff_recurr, >coeff_recurr), cells whose parcel is
+    // supersaturated at the condensation check, and the condensation c_u written (mass-weighted).
+    long   ur_n = 0, ur_mu[3] = {0, 0, 0}, ur_dq = 0, ur_dq_small = 0, ur_land = 0;
+    double ur_cu = 0.0, ur_dq_small_sum = 0.0;
     std::vector<int8_t> land_surf;
     std::vector<int8_t> air_surf;
 
@@ -1157,7 +1162,11 @@ void findCloudBaseLFS() {
     void updraftRecurrence() {
         using namespace AtomMoistConvection;
 
-        #pragma omp parallel for collapse(2) schedule(static)
+        const bool urd = mcDiag();
+        long n_ = 0, mu0 = 0, mu1 = 0, mu2 = 0, ndq = 0, ndqs = 0, nland = 0;
+        double cu_ = 0.0, dqs_ = 0.0;
+        #pragma omp parallel for collapse(2) schedule(static) \
+            reduction(+:n_,mu0,mu1,mu2,ndq,ndqs,nland,cu_,dqs_)
         for(int j = 1; j < m.jm-1; j++){
             for(int k = 1; k < m.km-1; k++){
 
@@ -1244,6 +1253,17 @@ void findCloudBaseLFS() {
                     // and releasing latent heat into s_u. Adaptive 1/(1+G) damping (G = latent
                     // gain L/cp·dq_sat/dT) stops the warm-cell overshoot (cf. SaturationAdjustment).
                     m.c_u.x[i][j][k] = 0.0;
+                    if(urd){   // census only: classify the cell, and test the parcel for supersaturation
+                        n_++;
+                        const double amu = fabs(m.M_u.x[i][j][k]);
+                        if(amu < 0.01) mu0++; else if(amu <= coeff_recurr) mu1++; else mu2++;
+                        const double T_c = mcSgz() ? (m.s_u.x[i][j][k] - gz(i)) * m.s_0 / m.cp_l
+                                                   : m.s_u.x[i][j][k] * m.s_0 / m.cp_l;
+                        const double qs  = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T_c, 17.2694, 35.86),
+                                                      m.p_stat.x[i][j][k]);
+                        const double dq0 = m.q_v_u.x[i][j][k] - qs;
+                        if(dq0 > 0.0){ if(amu > coeff_recurr) ndq++; else { ndqs++; dqs_ += dq0; } }
+                    }
                     if(fabs(m.M_u.x[i][j][k]) > coeff_recurr){
                         double T_u       = mcSgz() ? (m.s_u.x[i][j][k] - gz(i)) * m.s_0 / m.cp_l
                                                    : m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
@@ -1271,6 +1291,8 @@ void findCloudBaseLFS() {
                         m.c_u.x[i][j][k] = dcond_tot * m.M_u.x[i][j][k]
                                            / (std::max(r_h_i, 0.01) * step[i]);
                     }
+                    if(urd) cu_ += m.c_u.x[i][j][k] * std::max(r_h_i, 0.01) * step[i]
+                                   * cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
 
                     double inv_a_u = 1.0 / (a_u * m.u_0);
                     m.u_u.x[i][j][k] = m.u.x[i][j][k] + m.M_u.x[i][j][k] * inv_a_u / safe_r_humid(r_h_i);
@@ -1283,6 +1305,7 @@ void findCloudBaseLFS() {
                     if(m.s_u.x[i][j][k] <= 0.0)   m.s_u.x[i][j][k]   = 0.0;
 
                     if(is_land(m.h, i, j, k) || t_u <= t_00){
+                        if(urd && m.c_u.x[i][j][k] != 0.0) nland++;
                         m.E_u.x[i][j][k]   = 0.0; m.D_u.x[i][j][k] = 0.0; m.M_u.x[i][j][k] = 0.0;
                         m.q_v_u.x[i][j][k] = 0.0; m.q_c_u.x[i][j][k] = 0.0;
                         m.u_u.x[i][j][k]   = 0.0; m.v_u.x[i][j][k] = 0.0; m.w_u.x[i][j][k] = 0.0;
@@ -1292,6 +1315,8 @@ void findCloudBaseLFS() {
                 } // end i
             }
         }
+        if(urd){ ur_n = n_; ur_mu[0] = mu0; ur_mu[1] = mu1; ur_mu[2] = mu2; ur_dq = ndq;
+                 ur_dq_small = ndqs; ur_land = nland; ur_cu = cu_; ur_dq_small_sum = dqs_; }
     }
 /*
 *
@@ -2233,6 +2258,12 @@ void findCloudBaseLFS() {
                    " (condensed, neither rained nor re-evaporated);  boundary flux ground %.2f / top %.2f;"
                    "  RK4 applies coeff_MC_q = %.4f x the microphysics' L/u_0, so applied = %.2f\n",
                    -Pfy, Gp * f, (Cu - El - Gp) * f, Fgnd * f, Ftop * f, coeff_ratio, App * f * coeff_ratio);
+            printf("      AGCM: [MC-Q] updraftRecurrence, last pass:  %ld cells walked;  |M_u| < 0.01: %ld,"
+                   "  0.01..%.2f: %ld,  > %.2f (condensation step runs): %ld;  parcel supersaturated where the"
+                   " step runs %ld, where it is skipped %ld (mean excess %.3e kg/kg);  c_u written %.4f mm/a;"
+                   "  c_u later zeroed (land / T<=t_00) in %ld cells\n",
+                   ur_n, ur_mu[0], coeff_recurr, ur_mu[1], coeff_recurr, ur_mu[2], ur_dq, ur_dq_small,
+                   ur_dq_small > 0 ? ur_dq_small_sum / ur_dq_small : 0.0, ur_cu * f, ur_land);
         }
     }
 };
