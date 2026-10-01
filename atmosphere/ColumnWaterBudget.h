@@ -201,7 +201,14 @@ public:
     //                            row 1 + row 2 ~ minus the flux form in the model's metric
     //   3 diffusion, land, level i0      4 diffusion, land, level i0+1
     //   5 diffusion, ocean, level i0+1   6 diffusion, everywhere else
-    static constexpr int NREST = 7;
+    // and the DIFFUSION split (2026-10-01, DIFF-LEAK), every level from i0:
+    //   7 radial 2nd derivative  (d2q/dr2 - curv dq/dr) exp_2_rm     8 radial metric  dq/dr * two_over_rm_exp
+    //   9 meridional 2nd derivative  d2q/dthe2 inv_rm2              10 meridional metric  dq/dthe cos_rm2sin
+    //  11 zonal  d2q/dphi2 inv_rm2sinthe2
+    // and rows 6's interior diffusion (levels > i0+1) by place, as contributions to the GLOBAL mean:
+    //  12 levels i0+2..i0+5   13 i0+6 .. im-5   14 the top three levels im-4..im-2
+    //  15..18 |latitude| 0-15 / 15-35 / 35-65 / 65-90
+    static constexpr int NREST = 19;
     static int& rk_stage(){ static thread_local int s = 0; return s; }
     static void rest_hit(cAtmosphereModel& m, int i, int j, int k, const double* tt){
         state().rest_hit(m, i, j, k, tt);
@@ -706,6 +713,15 @@ private:
                          << "   ocean i0+1 " << r[5] << "   rest " << r[6] << "   total " << diff << endl;
                     cout << "      AGCM: [CWB-TD]   advection + diffusion " << (r[0] + diff) << "   vs the remainder "
                          << (rest - mcq) << "   residual " << (r[0] + diff - (rest - mcq)) << endl;
+                    cout << "      AGCM: [CWB-TD]   diffusion by term: radial 2nd " << r[7] << "   radial metric (2/r dq/dr) "
+                         << r[8] << "   merid 2nd " << r[9] << "   merid metric (cot dq/dthe) " << r[10]
+                         << "   zonal " << r[11] << "   sum " << (r[7]+r[8]+r[9]+r[10]+r[11])
+                         << " (vs total " << diff << ")" << endl;
+                    cout << "      AGCM: [CWB-TD]   interior diffusion (> i0+1) by height: i0+2..i0+5 " << r[12]
+                         << "   middle " << r[13] << "   top 3 levels " << r[14] << "   (sum " << (r[12]+r[13]+r[14])
+                         << " vs " << r[6] << ")" << endl;
+                    cout << "      AGCM: [CWB-TD]   interior diffusion by |lat|, share of the global mean: 0-15 " << r[15]
+                         << "   15-35 " << r[16] << "   35-65 " << r[17] << "   65-90 " << r[18] << endl;
                 }
             }
 

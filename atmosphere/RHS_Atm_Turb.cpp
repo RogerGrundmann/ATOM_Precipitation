@@ -1489,6 +1489,14 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
         const double dif   = diffusion_c + diffusion_cloud + diffusion_ice + diffusion_g;
         const int    i0    = i_topography[j][k];
         const bool   land  = i0 > 0;
+        const double dr_s  = dcdr + dclouddr + dicedr + dgdr;
+        const double d2r_s = d2cdr2 + d2clouddr2 + d2icedr2 + d2gdr2;
+        const double dt_s  = dcdthe + dclouddthe + dicedthe + dgdthe;
+        const double d2t_s = d2cdthe2 + d2clouddthe2 + d2icedthe2 + d2gdthe2;
+        const double d2p_s = d2cdphi2 + d2clouddphi2 + d2icedphi2 + d2gdphi2;
+        const double interior = (i > i0 + 1) ? dif : 0.0;
+        const double alat = std::fabs(90.0 - j * 180.0 / (double)(jm - 1));
+        const int    lb   = (alat < 15.0) ? 0 : (alat < 35.0) ? 1 : (alat < 65.0) ? 2 : 3;
         double tt[ColumnWaterBudget::NREST] = {
             -(transport_c + transport_cloud + transport_ice + transport_g),
             -adv_c,
@@ -1496,7 +1504,17 @@ void cAtmosphereModel::RHS_Atmosphere_Turb(int i, int j, int k, const CellGeomet
             (land && i == i0)       ? dif : 0.0,
             (land && i == i0 + 1)   ? dif : 0.0,
             (!land && i == i0 + 1)  ? dif : 0.0,
-            (i > i0 + 1 || (!land && i == i0)) ? dif : 0.0 };
+            (i > i0 + 1 || (!land && i == i0)) ? dif : 0.0,
+            (d2r_s - curv * dr_s) * exp_2_rm * diff_prec_re_inv,
+            dr_s * two_over_rm_exp * diff_prec_re_inv,
+            d2t_s * inv_rm2 * diff_prec_re_inv,
+            dt_s * cos_rm2sin * diff_prec_re_inv,
+            d2p_s * inv_rm2sinthe2 * diff_prec_re_inv,
+            (i <= i0 + 5) ? interior : 0.0,
+            (i > i0 + 5 && i < im - 4) ? interior : 0.0,
+            (i >= im - 4) ? interior : 0.0,
+            lb == 0 ? interior : 0.0, lb == 1 ? interior : 0.0,
+            lb == 2 ? interior : 0.0, lb == 3 ? interior : 0.0 };
         ColumnWaterBudget::rest_hit(*this, i, j, k, tt);
     }
 
