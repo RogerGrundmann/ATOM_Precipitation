@@ -1170,6 +1170,16 @@ void findCloudBaseLFS() {
                           m.e_d.x[i][j][k] = 0.0;
                         }
                         if(m.e_d.x[i][j][k] <= 0.0) m.e_d.x[i][j][k] = 0.0;
+                        // ATM_MC_ED_ABOVE_BASE=<0|1> -- 2026-10-01. Default 0 = shipped, unchanged.
+                        // At and below cloud base (i <= i_base) e_p above already evaporates the falling
+                        // convective rain, with the same shaft area sigma_p and the same deficit q_sat - q_v_d;
+                        // e_d then evaporates the same flux a second time. Measured (pcd1, parcel condensing via
+                        // ATM_MC_SGZ + ATM_MC_ENTR): e_d below cloud base 16-24 % of generation on top of e_p's
+                        // 34-44 %; 92 % of the convective rain evaporated in all. =1 keeps e_d strictly above
+                        // cloud base, so every level has exactly one convective-rain evaporation term.
+                        static const bool ed_above_base = [](){
+                            return knob::on(knob::ATM_MC_ED_ABOVE_BASE); }();
+                        if(ed_above_base && i <= i_base) m.e_d.x[i][j][k] = 0.0;
                     }
 
                 } // end i downdraft
