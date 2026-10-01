@@ -2441,6 +2441,36 @@ void findCloudBaseLFS() {
                         }
                     }
                 }
+                // t and the prescribed relaxation target t_eq at fixed heights, per group (air levels only)
+                const double zt[4] = {2000.0, 5000.0, 8000.0, 11000.0};
+                int iz[4];
+                for(int q = 0; q < 4; q++){ iz[q] = 0; for(int i = 0; i < m.im; i++) if(height_table[i] <= zt[q]) iz[q] = i; }
+                double Tz[4][4] = {}, Ez[4][4] = {}, Wz[4][4] = {};
+                for(int j = 1; j < m.jm-1; j++){
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                    for(int k = 1; k < m.km-1; k++){
+                        const int land = land_surf[j * m.km + k] ? 1 : 0;
+                        const int gs[2] = { land, (alat < 30.0) ? 2 + land : -1 };
+                        for(int q = 0; q < 4; q++){
+                            const int i = iz[q];
+                            if(i <= m.i_topography[j][k]) continue;
+                            for(int g : gs){ if(g < 0) continue;
+                                Tz[g][q] += w * m.t.x[i][j][k] * m.t_0; Ez[g][q] += w * m.t_eq.x[i][j][k] * m.t_0; Wz[g][q] += w; }
+                        }
+                    }
+                }
+                for(int pair = 0; pair < 2; pair++){
+                    const int go = 2 * pair, gl = 2 * pair + 1;
+                    printf("      AGCM: [MC-LO] T and t_eq, land minus ocean (%s), K:", pair ? "|lat|<30" : "global");
+                    for(int q = 0; q < 4; q++){
+                        if(Wz[go][q] <= 0 || Wz[gl][q] <= 0) continue;
+                        printf("  z %.0f km: T %+.2f  t_eq %+.2f  (ocean T %.1f C)", height_table[iz[q]] / 1000.0,
+                               Tz[gl][q] / Wz[gl][q] - Tz[go][q] / Wz[go][q], Ez[gl][q] / Wz[gl][q] - Ez[go][q] / Wz[go][q],
+                               Tz[go][q] / Wz[go][q] - m.t_0);
+                    }
+                    printf("\n");
+                }
                 const char* gn[4] = {"ocean", "land", "ocean<30", "land<30"};
                 for(int g = 0; g < 4; g++){
                     if(W[g] <= 0.0) continue;
