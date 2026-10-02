@@ -190,6 +190,7 @@ private:
     // is then not applied. Cloud-base detection is unchanged. No buoyant level -> CAPE 0 -> M_u 0 -> no convection.
     static int mcMlParcel() { static const int v = [](){
                                                     return knob::integer(knob::ATM_MC_ML_PARCEL); }(); return v; }
+    static int mcDepthRamp() { static const int v = [](){ return knob::integer(knob::ATM_MC_DEPTH_RAMP); }(); return v; }
     static int mcMlLcl() { static const int v = [](){ return knob::integer(knob::ATM_MC_ML_LCL); }(); return v; }
     static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
         const double L = (T >= mm.t_0) ? mm.lv : mm.ls;
@@ -973,6 +974,19 @@ void findCloudBaseLFS() {
 //                                  : (is_land_surf_jk ? 3000.0 : 1500.0); // Tiedtke (1989)
                                   : (is_land_surf_jk ? 1000.0 : 500.0); // Bechtold (2001)
                 double height_base = height_table[i_base];
+                // ATM_MC_DEPTH_RAMP=<0|1> (2026-10-02), default 0 = shipped. The shallow rule above is a SWITCH: a cloud
+                // shallower than p_stat_diff = 200 hPa makes no rain at all, a deeper one rains fully. With the mixed-layer
+                // parcel most tropical-ocean clouds sit near that depth, so 0.03 of initial ocean RH (wb10a 0.82 -> wb11 0.79)
+                // moved the mean cloud top 5.6 -> 4.0 km and the updraft rain generation 3111 -> 18 mm/a: a cliff. =1 lets
+                // shallow columns precipitate through the normal delta_i_c and scales K_p by the cloud depth instead,
+                // linearly from 0 at 100 hPa to 1 at 300 hPa (deep columns of 200-300 hPa now rain partially).
+                // Midlevel columns (convection_mode 2) keep the switch.
+                double f_depth = 1.0;
+                if (mcDepthRamp() && !is_midlevel) {
+                    const double dp = m.p_stat.x[i_base][j][k] - m.p_stat.x[i_lfs][j][k];
+                    f_depth   = std::clamp((dp - 100.0) / 200.0, 0.0, 1.0);
+                    delta_i_c = is_land_surf_jk ? 1000.0 : 500.0;
+                }
 
                 // Cause #1: initUpdraft left non-zero M_u in [0..i_base-1].  Those cells
                 // are never touched by this function, so their values create a flux
@@ -1116,6 +1130,7 @@ void findCloudBaseLFS() {
 
                         // Precipitation formation
                         double K_p = (height_i > height_base + delta_i_c) ? bet_p : 0.0;
+                        if (mcDepthRamp()) K_p *= f_depth;
 
                         // ATM_MC_GP_AREA=<0|1>, default 0 = shipped (2026-09-26). g_p is a rate per kg of
                         // GRID air (the q_c_u recurrence debits rho*g_p*dz from the flux M_u*q_c_u, and
@@ -2660,6 +2675,41 @@ void findCloudBaseLFS() {
                            gn[g], t_ml[g] * a, 1e3 * q_ml[g] * a, rh_ml[g] * a, the_ml[g] * a, thes_min[g] * a,
                            z_min[g] * a, dthe[g] * a, 1e2 * pos[g] * a, cape_ml[g] * a, the_b[g] * b, cape_b[g] * b,
                            cape_s[g] * b);
+                }
+            }
+            {   // ---- MC-GATE (2026-10-02): is the updraft recurrence's |M_u| > coeff_recurr (0.1 kg/m2/s) gate the rain cliff?
+                // Below it the updraft scalars are reset to the environment (q_c_u = 0), so no condensate and no g_p. With
+                // M_u(base) = rho*c_mb*sqrt(2 CAPE), c_mb = 0.003, the gate needs CAPE > (0.1/(rho c_mb))^2/2 ~ 460 J/kg.
+                // Per group (ocean<30, land<30), over active columns: CAPE p25/p50/p90, share with M_u(base) > 0.1, share with
+                // any level base..LFS above it, and the share of the group's column g_p carried by the gated-open columns.
+                std::vector<double> cp[2]; double Wa[2] = {}, wb[2] = {}, wl[2] = {}, gt[2] = {}, go[2] = {};
+                for(int j = 1; j < m.jm-1; j++){
+                    const double lat = 90.0 - j * 180.0 / (double)(m.jm - 1);
+                    if(fabs(lat) >= 30.0) continue;
+                    const double w = cos(lat * M_PI / 180.0);
+                    for(int k = 1; k < m.km-1; k++){
+                        const int ib = i_Base_local[j][k], il = i_LFS_local[j][k];
+                        if(ib <= 0 || il <= ib) continue;
+                        const int g = land_surf[j * m.km + k] ? 1 : 0;
+                        bool open_any = false; double gp = 0.0;
+                        for(int i = ib; i <= il && i < m.im - 1; i++){
+                            if(fabs(m.M_u.x[i][j][k]) > coeff_recurr) open_any = true;
+                            gp += step[i] * m.r_humid.x[i][j][k] * m.g_p.x[i][j][k];
+                        }
+                        Wa[g] += w; cp[g].push_back(cape_col[j][k]);
+                        if(fabs(m.M_u.x[ib][j][k]) > coeff_recurr) wb[g] += w;
+                        if(open_any){ wl[g] += w; go[g] += w * gp; }
+                        gt[g] += w * gp;
+                    }
+                }
+                for(int g = 0; g < 2; g++){
+                    if(Wa[g] <= 0) continue;
+                    std::sort(cp[g].begin(), cp[g].end());
+                    auto pc = [&](double q){ return cp[g][std::min(cp[g].size() - 1, (size_t)(q * cp[g].size()))]; };
+                    printf("      AGCM: [MC-GATE] %s<30 active cols: CAPE p25/p50/p90 %6.1f / %6.1f / %6.1f J/kg | M_u(base) > %.1f in %5.1f %%,"
+                           " any level open in %5.1f %% | share of column g_p from open columns %5.1f %%\n",
+                           g ? "land " : "ocean", pc(0.25), pc(0.5), pc(0.9), coeff_recurr, 1e2 * wb[g] / Wa[g], 1e2 * wl[g] / Wa[g],
+                           gt[g] > 0 ? 1e2 * go[g] / gt[g] : 0.0);
                 }
             }
             {   // ---- MC-RG (2026-10-02): why do the rain forests not convect with the mixed-layer parcel? Per region box

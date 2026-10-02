@@ -77,6 +77,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_QC_DETRAIN, "0", Result, 'R', "updraft q_c_u recurrence detrains q_c_u, not the environment's cloud (MC-TV)") \
     X(ATM_MC_UV_DETRAIN, "0", Result, 'R', "updraft v_u/w_u recurrence loses -D_u*v_u, -D_u*w_u like q_v_u and s_u (MC-TV)") \
     X(ATM_MC_Q_NDIM, "0", Result, 'R', "coeff_MC_q = metricShellLength()/u_0, as the microphysics (was L_atm/(u_0*c_0), 0.713x)") \
+    X(ATM_MC_DEPTH_RAMP, "0", Result, 'R', "convective precipitation scaled by cloud depth (0 at 100 hPa -> 1 at 300 hPa) instead of the 200 hPa shallow switch") \
     X(ATM_MC_ED_ABOVE_BASE, "0", Result, 'R', "downdraft evaporation e_d only above cloud base; e_p is the single sub-cloud term") \
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
     X(ATM_MC_ML_LCL, "0", Result, 'R', "with ATM_MC_ML_PARCEL: convective base = the mixed-layer parcel's LCL (not the stratiform-cloud base)") \
