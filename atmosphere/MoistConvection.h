@@ -2662,6 +2662,62 @@ void findCloudBaseLFS() {
                            cape_s[g] * b);
                 }
             }
+            {   // ---- MC-RG (2026-10-02): why do the rain forests not convect with the mixed-layer parcel? Per region box
+                // (land only, except the ocean row): the 0-500 m parcel (excess included when ATM_MC_ML_PARCEL is on),
+                // the environment it must clear (theta_es minimum above 500 m over the ground, and T at 5 km), the
+                // scheme's CAPE and base, and the convective rain. theta_e / theta_es as in [MC-PB] (env q_sat at T + t_add_u).
+                struct Box { const char* n; double la0, la1, lo0, lo1; int ocean; };
+                const Box B[6] = {{"Amazon", -15, 5, 285, 315, 0}, {"Congo", -10, 5, 10, 30, 0}, {"Sahara", 15, 32, 345, 392, 0},
+                                  {"Arabia", 12, 32, 35, 60, 0}, {"SE Asia", -10, 20, 95, 150, 0}, {"ocean<15", -15, 15, 0, 360, 1}};
+                const double kappa = m.R_Air / m.cp_l;
+                auto the = [&](double T, double p, double q){ const double L = (T >= m.t_0) ? m.lv : m.ls;
+                    return T * std::pow(1000.0 / p, kappa) * std::exp(L * q / (m.cp_l * T)); };
+                int i5 = 0; for(int i = 0; i < m.im; i++) if(height_table[i] <= 5000.0) i5 = i;
+                for(int b = 0; b < 6; b++){
+                    double W = 0, Tm = 0, qm = 0, rh = 0, te = 0, tmin = 0, zmin = 0, zg = 0, cape = 0, zb = 0, wa = 0, pc = 0, T5 = 0, pos = 0;
+                    for(int j = 1; j < m.jm-1; j++){
+                        const double lat = 90.0 - j * 180.0 / (double)(m.jm - 1);
+                        if(lat < B[b].la0 || lat > B[b].la1) continue;
+                        const double w = cos(lat * M_PI / 180.0);
+                        for(int k = 1; k < m.km-1; k++){
+                            double lon = k; if(B[b].lo1 > 360 && lon < B[b].lo1 - 360) lon += 360;
+                            if(lon < B[b].lo0 || lon > B[b].lo1) continue;
+                            const bool land = land_surf[j * m.km + k];
+                            if(land == (bool)B[b].ocean) continue;
+                            const int i0 = std::max(m.i_topography[j][k], 0);
+                            double ms = 0, Ts = 0, qs = 0, ps = 0;
+                            for(int i = i0 + 1; i < m.im - 1 && (ms == 0 || height_table[i] - height_table[i0] <= 500.0); i++){
+                                const double mass = step[i] * m.r_humid.x[i][j][k];
+                                ms += mass; Ts += mass * m.t.x[i][j][k] * m.t_0; qs += mass * m.c.x[i][j][k]; ps += mass * m.p_stat.x[i][j][k];
+                            }
+                            if(ms <= 0) continue;
+                            double T = Ts / ms, q = qs / ms; const double p = ps / ms;
+                            const double qsm = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T, 17.2694, 35.86), p);
+                            const double r = q / std::max(qsm, 1e-12);
+                            if(mcMlParcel() && ml_T.size() && ml_T[j][k] > 0){ T = ml_T[j][k]; q = ml_q[j][k]; }
+                            const double tep = the(T, p, q);
+                            double mn = 1e30, zm = 0;
+                            for(int i = i0 + 1; i < m.im - 1; i++){
+                                if(height_table[i] - height_table[i0] <= 500.0) continue;
+                                const double Te = m.t.x[i][j][k] * m.t_0;
+                                const double tes = the(Te, m.p_stat.x[i][j][k],
+                                    safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(Te + t_add_u(), 17.2694, 35.86), m.p_stat.x[i][j][k]));
+                                if(tes < mn){ mn = tes; zm = height_table[i]; }
+                            }
+                            W += w; Tm += w * (T - m.t_0); qm += w * q; rh += w * r; te += w * tep; tmin += w * mn; zmin += w * zm;
+                            zg += w * height_table[i0]; cape += w * cape_col[j][k]; pc += w * m.P_conv.x[i0][j][k];
+                            T5 += w * (m.t.x[std::max(i5, i0)][j][k] * m.t_0 - m.t_0); if(tep > mn) pos += w;
+                            if(i_Base_local[j][k] > 0 && i_LFS_local[j][k] > i_Base_local[j][k]){ wa += w; zb += w * height_table[i_Base_local[j][k]]; }
+                        }
+                    }
+                    if(W <= 0) continue;
+                    const double a = 1.0 / W;
+                    printf("      AGCM: [MC-RG] %-8s ground %5.0f m | parcel T %5.1f C q %5.2f g/kg (RH %.2f) theta_e %6.1f K | env theta_es min %6.1f K"
+                           " at %5.0f m, T(5 km) %6.1f C | theta_e - min %+5.1f K, > 0 in %5.1f %% | CAPE %6.1f J/kg, base %5.0f m in %5.1f %%"
+                           " | P_conv %7.1f mm/a\n", B[b].n, zg * a, Tm * a, 1e3 * qm * a, rh * a, te * a, tmin * a, zmin * a, T5 * a,
+                           (te - tmin) * a, 1e2 * pos * a, cape * a, wa > 0 ? zb / wa : 0.0, 1e2 * wa * a, pc * a * s_per_year);
+                }
+            }
             {   // ---- BL-Q (2026-10-02): what sets the marine boundary-layer humidity? Tropical ocean (|lat| < 30) only.
                 // Layer A = air levels up to 500 m above the ground, B = 500-2000 m. Vapour budget per layer in mm/a
                 // (kg/m2/s * s/a), cos-lat weighted: E (enters levels 1..3, all in A), MC_q and its e_p + e_d part,
