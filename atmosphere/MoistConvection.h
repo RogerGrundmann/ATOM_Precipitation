@@ -190,6 +190,7 @@ private:
     // is then not applied. Cloud-base detection is unchanged. No buoyant level -> CAPE 0 -> M_u 0 -> no convection.
     static int mcMlParcel() { static const int v = [](){
                                                     return knob::integer(knob::ATM_MC_ML_PARCEL); }(); return v; }
+    static int mcMlLcl() { static const int v = [](){ return knob::integer(knob::ATM_MC_ML_LCL); }(); return v; }
     static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
         const double L = (T >= mm.t_0) ? mm.lv : mm.ls;
         return T * std::pow(1000.0 / p, mm.R_Air / mm.cp_l) * std::exp(L * q / (mm.cp_l * T)); }
@@ -838,6 +839,32 @@ void findCloudBaseLFS() {
                         i_Base_local[j][k]     = i;
                         m.CloudBase.x[i][j][k] = height_table[i] * cloud_t_weight;
                         break;
+                    }
+                }
+
+                // ATM_MC_ML_LCL=<0|1> (2026-10-02), default 0 = shipped; acts only with ATM_MC_ML_PARCEL. The base found
+                // above is the first level with STRATIFORM cloud fraction > 0 and p <= 900 hPa (~2 km over the tropical
+                // ocean), far above the mixed-layer parcel's own condensation level, so the parcel arrives there carrying
+                // 1.9-2.4 g/kg of condensate made by a dry lift through ~1.5 km (rho2_82ml: q_c_u(base) 2.4 g/kg, P_conv
+                // max 1.2e5 mm/a, sigma 9.4). =1 puts the convective base at the parcel's LCL: the first air level at
+                // which the parcel lifted dry from its mass-weighted height saturates. None below 500 hPa -> no deep
+                // convection in the column (base 0, the "not found" value).
+                if (mcMlParcel() && mcMlLcl()) {
+                    if (i_Base_local[j][k] > 0) m.CloudBase.x[i_Base_local[j][k]][j][k] = 0.0;
+                    i_Base_local[j][k] = 0;
+                    mlParcel(j, k);
+                    if (ml_T[j][k] > 0.0) {
+                        for (int i = std::max(m.i_topography[j][k], 0) + 1; i < m.im - 2; i++) {
+                            if (m.p_stat.x[i][j][k] < 500.0) break;
+                            const double T_p = ml_T[j][k] - m.g * (height_table[i] - ml_z[j][k]) / m.cp_l;
+                            const double qs  = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T_p, 17.2694, 35.86),
+                                                          m.p_stat.x[i][j][k]);
+                            if (ml_q[j][k] >= qs) {
+                                i_Base_local[j][k] = i;
+                                m.CloudBase.x[i][j][k] = height_table[i];
+                                break;
+                            }
+                        }
                     }
                 }
 
