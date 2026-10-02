@@ -1,3 +1,4 @@
+#include <queue>
 #include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "CloudFraction.h"
@@ -1193,6 +1194,59 @@ void cAtmosphereModel::initWaterWapour() {
     // Main Computation Loop: water vapour field
     // ========================================================================
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
+    // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
+    // note below). [MC-LO]/radial-slice census (lcl_1, rho2_82ml, wb7): desert boundary layers start as humid as rain
+    // forests (Arabia / Sahara q 17.5 g/kg at the ground, Amazon 16.2) and nothing changes that on an affordable run, so
+    // the hot deserts out-rain the Amazon and Congo. =1 dries land from quantities the model knows at ANY time slice --
+    // no vegetation or desert map: the subtropical DESCENT of the Hadley cell (a property of rotation, prescribed by the
+    // model at every Ma) and the distance to the nearest ocean of the loaded land mask (continentality):
+    //   RH = RH_wet - (RH_wet - RH_dry) * s(lat) * (0.5 + 0.5 * c(d)),
+    //   s = exp(-((|lat| - 25)/10)^2),  c = 1 - exp(-d / L),  RH_wet 0.75 (today's value), RH_dry = ATM_RH_LAND_DRY,
+    //   L = ATM_RH_LAND_L km.
+    // Known miss: dry regions outside 15-35 deg made by monsoon dynamics (the Horn of Africa) stay moist.
+    const int    rh_land_mode = knob::integer(knob::ATM_RH_LAND);
+    const double rh_land_dry  = knob::real(knob::ATM_RH_LAND_DRY);
+    const double rh_land_L    = knob::real(knob::ATM_RH_LAND_L) * 1.0e3;     // [m]
+    std::vector<double> d_ocean;                                              // distance to the nearest ocean [m]
+    if (rh_land_mode) {
+        // multi-source Dijkstra on the lat-lon grid (8 neighbours, periodic in longitude), ocean columns = sources
+        const double a = 6.371e6, dlat = M_PI / (jm - 1), dlon = 2.0 * M_PI / (km - 1);
+        d_ocean.assign((size_t)jm * km, 1e30);
+        using QE = std::pair<double, int>;
+        std::priority_queue<QE, std::vector<QE>, std::greater<QE>> pq;
+        for (int j = 0; j < jm; j++) for (int k = 0; k < km; k++)
+            if (i_topography[j][k] == 0) { d_ocean[(size_t)j * km + k] = 0.0; pq.push({0.0, j * km + k}); }
+        while (!pq.empty()) {
+            auto [dd, id] = pq.top(); pq.pop();
+            if (dd > d_ocean[id]) continue;
+            const int j = id / km, k = id % km;
+            for (int dj = -1; dj <= 1; dj++) for (int dk = -1; dk <= 1; dk++) {
+                if (!dj && !dk) continue;
+                const int jj = j + dj; if (jj < 0 || jj >= jm) continue;
+                const int kk = ((k + dk) % (km - 1) + (km - 1)) % (km - 1);
+                const double cl = cos((90.0 - 0.5 * (j + jj) * 180.0 / (jm - 1)) * M_PI / 180.0);
+                const double step = a * std::sqrt((dj * dlat) * (dj * dlat) + (dk * dlon * cl) * (dk * dlon * cl));
+                const size_t nid = (size_t)jj * km + kk;
+                if (dd + step < d_ocean[nid]) { d_ocean[nid] = dd + step; pq.push({d_ocean[nid], (int)nid}); }
+            }
+        }
+        for (int j = 0; j < jm; j++) d_ocean[(size_t)j * km + km - 1] = d_ocean[(size_t)j * km];   // seam copy
+    }
+    auto rh_land_of = [&](int j, int k) {
+        const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+        const double sdesc = std::exp(-((alat - 25.0) / 10.0) * ((alat - 25.0) / 10.0));
+        const double c = 1.0 - std::exp(-d_ocean[(size_t)j * km + k] / rh_land_L);
+        return 0.75 - (0.75 - rh_land_dry) * sdesc * (0.5 + 0.5 * c); };
+    if (rh_land_mode) {
+        double s = 0, w = 0, dmax = 0; long n_dry = 0, n_land = 0;
+        for (int j = 0; j < jm; j++) for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) {
+            const double wt = cos((90.0 - j * 180.0 / (jm - 1)) * M_PI / 180.0), r = rh_land_of(j, k);
+            s += wt * r; w += wt; n_land++; if (r < 0.5) n_dry++; dmax = std::max(dmax, d_ocean[(size_t)j * km + k]);
+        }
+        printf("      AGCM: [RH-LAND] land initial surface RH: mean %.3f, below 0.5 in %.1f %% of land cells, max distance to ocean %.0f km"
+               "  (RH_dry %.2f, L %.0f km)\n", w > 0 ? s / w : 0.0, n_land ? 1e2 * n_dry / n_land : 0.0, dmax / 1e3,
+               rh_land_dry, rh_land_L / 1e3);
+    }
     #pragma omp parallel for collapse(2)
     for (int j = 0; j < jm; j++) {
         for (int k = 0; k < km; k++) {
@@ -1238,6 +1292,7 @@ void cAtmosphereModel::initWaterWapour() {
                 const double f = (alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0;
                 RH_init += f * (rh_ocean - 0.75);
             }
+            if (rh_land_mode && i_topography[j][k] > 0) RH_init = rh_land_of(j, k);
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];
