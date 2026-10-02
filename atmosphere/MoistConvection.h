@@ -2635,6 +2635,73 @@ void findCloudBaseLFS() {
                            cape_s[g] * b);
                 }
             }
+            {   // ---- BL-Q (2026-10-02): what sets the marine boundary-layer humidity? Tropical ocean (|lat| < 30) only.
+                // Layer A = air levels up to 500 m above the ground, B = 500-2000 m. Vapour budget per layer in mm/a
+                // (kg/m2/s * s/a), cos-lat weighted: E (enters levels 1..3, all in A), MC_q and its e_p + e_d part,
+                // microphysics S_v, and the upward fluxes through each layer top: diffusive (the ATM_Q_DIFF_FLUX face
+                // form, constant diffusivity 1/(Sc re_turb)) and resolved vertical (rho w q, upwind). Rates are taken
+                // as physical, i.e. MC_q and S_v at L/u_0 -- true on the working branch (ATM_MC_Q_NDIM=1,
+                // ATM_MICRO_NDIM=1). "rest" = -(sum) = horizontal convergence + everything not named, IF steady.
+                const double T_unit = m.metricShellLength() / m.u_0, yr = s_per_year;
+                const double dr = m.rad.z[1] - m.rad.z[0], dr2 = dr * dr;
+                const double dpre = 1.0 / (m.sc_WaterVapour * m.re_turb);
+                const double zp[7] = {40, 130, 250, 500, 1000, 1500, 2000};
+                double W = 0, E = 0, mq[2] = {}, mqe[2] = {}, sv[2] = {}, fd[2] = {}, fa[2] = {}, sst = 0;
+                double qz[7] = {}, rz[7] = {}, wz[7] = {}, Kq = 0, Kn = 0, wK = 0;
+                for(int j = 1; j < m.jm-1; j++){
+                    const double lat = 90.0 - j * 180.0 / (double)(m.jm - 1);
+                    if(fabs(lat) >= 30.0) continue;
+                    const double w = cos(lat * M_PI / 180.0);
+                    for(int k = 1; k < m.km-1; k++){
+                        if(land_surf[j * m.km + k] || m.i_topography[j][k] != 0) continue;
+                        W += w; E += w * std::max(0.0, m.Evaporation.y[j][k]) / 8.64e4;
+                        sst += w * (m.t.x[0][j][k] * m.t_0 - m.t_0);
+                        int itop[2] = {1, 1};
+                        for(int i = 1; i < m.im - 2; i++){
+                            const double z = height_table[i];
+                            const int L = (z <= 500.0) ? 0 : (z <= 2000.0) ? 1 : -1;
+                            if(L < 0) break;
+                            itop[L] = i;
+                            const double mass = step[i] * m.r_humid.x[i][j][k];
+                            mq[L]  += w * mass * m.MC_q.x[i][j][k];
+                            mqe[L] += w * mass * (m.e_p.x[i][j][k] + m.e_d.x[i][j][k]);
+                            sv[L]  += w * mass * m.S_v.x[i][j][k];
+                        }
+                        for(int L = 0; L < 2; L++){        // upward fluxes through the top face of layer L
+                            const int i = itop[L];
+                            const double rf = 0.5 * (m.r_humid.x[i][j][k] + m.r_humid.x[i+1][j][k]);
+                            const double ef = m.metricExpRm(0.5 * (m.rad.z[i] + m.rad.z[i+1]));
+                            const double g  = height_table[i+1] - height_table[i];
+                            const double K  = dpre * ef * ef * g * g / dr2 / T_unit;          // [m2/s]
+                            fd[L] += w * rf * K * (m.c.x[i][j][k] - m.c.x[i+1][j][k]) / g;
+                            const double wv = 0.5 * (m.u.x[i][j][k] + m.u.x[i+1][j][k]) * m.u_0;
+                            fa[L] += w * rf * wv * ((wv > 0) ? m.c.x[i][j][k] : m.c.x[i+1][j][k]);
+                            if(L == 0){ Kq += w * K; Kn += w * m.nue.x[i][j][k] * ef * ef * g * g / dr2 / T_unit; wK += w; }
+                        }
+                        for(int q = 0; q < 7; q++){
+                            int iz = 1; for(int i = 1; i < m.im; i++) if(height_table[i] <= zp[q]) iz = i;
+                            const double T = m.t.x[iz][j][k] * m.t_0;
+                            const double qs = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T, 17.2694, 35.86), m.p_stat.x[iz][j][k]);
+                            qz[q] += w * m.c.x[iz][j][k]; rz[q] += w * (qs > 0 ? m.c.x[iz][j][k] / qs : 0.0); wz[q] += w;
+                        }
+                    }
+                }
+                if(W > 0){
+                    const double a = yr / W;
+                    printf("      AGCM: [BL-Q] ocean |lat|<30, SST %.1f C. profile q [g/kg] / RH:", sst / W);
+                    for(int q = 0; q < 7; q++) printf("  %.0f m %.2f/%.2f", zp[q], 1e3 * qz[q] / wz[q], rz[q] / wz[q]);
+                    printf("\n      AGCM: [BL-Q] diffusivity at the 500 m face: moisture K_q %.3e m2/s, eddy viscosity nue %.3e m2/s"
+                           " (same metric scaling)\n", Kq / wK, Kn / wK);
+                    for(int L = 0; L < 2; L++){
+                        const double bot = (L == 0) ? E * a : (fd[0] + fa[0]) * a;
+                        const double sum = bot + (mq[L] + sv[L] - fd[L] - fa[L]) * a;
+                        printf("      AGCM: [BL-Q] layer %s mm/a:  in at bottom %+8.1f%s  MC_q %+8.1f (e_p+e_d %+8.1f)  S_v %+7.1f"
+                               "  out top: diffusive %+8.1f  resolved w %+8.1f  | sum %+8.1f  rest (horiz. if steady) %+8.1f\n",
+                               L ? "B 0.5-2 km" : "A 0-500 m ", bot, L ? " (A's top)" : " (E)", mq[L] * a, mqe[L] * a, sv[L] * a,
+                               fd[L] * a, fa[L] * a, sum, -sum);
+                    }
+                }
+            }
             printf("      AGCM: [MC-TV] WHY, where MC_w acts: |M_u| p50/p90 %.4f / %.4f kg/m2/s;  |w_u - w|"
                    " p50/p90/p99 %.2f / %.2f / %.2f m/s;  layer mass rho*dz p50 %.1f kg/m2\n",
                    pct(mu_s, 0.5), pct(mu_s, 0.9), pct(dw_s, 0.5), pct(dw_s, 0.9), pct(dw_s, 0.99),
