@@ -63,8 +63,11 @@ namespace AtomMoistConvection {
     constexpr double p_stat_base = 800.0;                               // in [hPa]
     constexpr double p_stat_diff = 200.0;                               // in [hPa]
     constexpr double p_stat_midlevel = 700.0;                           // cloud-base pressure threshold for midlevel convection [hPa] (Bechtold 2001)
-    constexpr double t_add_u = 0.2;                                     // in [K]
-    constexpr double q_v_u_add = 1.0e-4;                                // in [kg/kg]
+    // ATM_MC_T_ADD / ATM_MC_Q_ADD (2026-10-02) -- the parcel temperature and moisture excess, default 0.2 K and
+    // 1e-4 kg/kg = the shipped constants (Bechtold's ECMWF lecture values, chosen to start convective precipitation).
+    // Read once, at first use (after LoadConfig).
+    inline double t_add_u()   { static const double v = knob::real(knob::ATM_MC_T_ADD); return v; }   // in [K]
+    inline double q_v_u_add() { static const double v = knob::real(knob::ATM_MC_Q_ADD); return v; }   // in [kg/kg]
     constexpr double coeff_recurr = 0.1; 
     constexpr double scale = 0.98;                                      // this value creates deep cloud initial values q_c_u because of t_add_u and t_add_u
     constexpr double q_c_u_max  = 1.0e-2;                               // [kg/kg] physical ceiling on updraft cloud water (~10 g/kg); stops the q_c_u recurrence runaway
@@ -171,6 +174,45 @@ private:
                                                     return knob::integer(knob::ATM_MC_SGZ); }(); return v; }
     double gz(int i) const { return m.g * height_table[i] / m.s_0; }
 
+    // ATM_MC_ML_PARCEL=<0|1|2> (2026-10-02), default 0 = shipped. [MC-PB] (pb1, restart wb7): the deep-convection
+    // parcel is the ENVIRONMENT at cloud base, saturated at its own T + t_add_u -- theta_e 348.2 K over the tropical
+    // ocean, 358.5 K over tropical land -- while the boundary layer below it holds 338.7 / 343.7 K, and a parcel lifted
+    // from the 0-500 m layer is buoyant in < 1 % (ocean) / 6 % (land) of columns. So convection runs on a parcel
+    // nothing in the column supplies. >0 lifts the MIXED-LAYER parcel instead: mass-weighted T, q, p, z over the air
+    // levels from i_topography+1 to 500 m above the ground, plus an excess dT = ATM_MC_T_ADD and
+    //   1: dq = ATM_MC_Q_ADD
+    //   2: dq = sigma_q of the model's own sub-grid total-water PDF at that level -- uniform, half-width
+    //      D = (1 - H_crit(p)) q_sat (CloudFraction, the closure the stratiform scheme and the updraft condensate seed
+    //      already use), so sigma_q = D / sqrt(3): the updraft draws from the moist tail the model itself assumes.
+    // Used (a) for theta_e in the CAPE / cloud-top search (environment theta_es at the env T, without t_add_u), and
+    // (b) as the cloud-base seed: lifted dry (s = cp T + g z conserved with ATM_MC_SGZ, -g/cp otherwise) to the base
+    // and saturation-adjusted there, so q_v_u, q_c_u and s_u start from what the parcel actually carries. ATM_MC_BASE_SAT
+    // is then not applied. Cloud-base detection is unchanged. No buoyant level -> CAPE 0 -> M_u 0 -> no convection.
+    static int mcMlParcel() { static const int v = [](){
+                                                    return knob::integer(knob::ATM_MC_ML_PARCEL); }(); return v; }
+    static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
+        const double L = (T >= mm.t_0) ? mm.lv : mm.ls;
+        return T * std::pow(1000.0 / p, mm.R_Air / mm.cp_l) * std::exp(L * q / (mm.cp_l * T)); }
+    // the mixed-layer parcel of column (j,k), excess included; fills ml_* (call inside the column loop)
+    void mlParcel(int j, int k) {
+        const int i0 = std::max(m.i_topography[j][k], 0);
+        const double zg = height_table[i0];
+        double ms = 0, Ts = 0, qs = 0, ps = 0, zs = 0;
+        for (int i = i0 + 1; i < m.im - 1 && (ms == 0 || height_table[i] - zg <= 500.0); i++) {
+            const double mass = step[i] * m.r_humid.x[i][j][k];
+            ms += mass; Ts += mass * m.t.x[i][j][k] * m.t_0; qs += mass * std::max(m.c.x[i][j][k], 0.0);
+            ps += mass * m.p_stat.x[i][j][k]; zs += mass * height_table[i];
+        }
+        if (ms <= 0) { ml_T[j][k] = 0; return; }
+        const double T = Ts / ms, q = qs / ms, p = ps / ms;
+        double dq = AtomMoistConvection::q_v_u_add();
+        if (mcMlParcel() == 2) {
+            const double qs_ml = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T, 17.2694, 35.86), p);
+            dq = (1.0 - CloudFraction::hCrit(p)) * qs_ml / std::sqrt(3.0);
+        }
+        ml_T[j][k] = T + AtomMoistConvection::t_add_u(); ml_q[j][k] = q + dq; ml_p[j][k] = p; ml_z[j][k] = zs / ms;
+    }
+
     // ATM_MC_COND_DEBIT=<0|1> -- MC-Q-LEAK (2026-10-01). Default 0 = shipped, unchanged.
     // The environment pays for convective rain only through c_u, the parcel condensation that
     // updraftRecurrence writes. On the working branch c_u is IDENTICALLY ZERO (run_cuz.sh: the step runs
@@ -226,6 +268,8 @@ private:
     std::vector<std::vector<double>> cape_col;        // parcel CAPE per column [m²/s²]  (fix #3, seeds M_u)
     std::vector<std::vector<double>> delta_T_sfp;    // surface-flux T perturbation per column [K]      (Bechtold 2008)
     std::vector<std::vector<double>> delta_q_sfp;    // surface-flux q perturbation per column [kg/kg]  (Bechtold 2008)
+    // ATM_MC_ML_PARCEL: the mixed-layer parcel per column (0-500 m above ground, mass-weighted), perturbation included
+    std::vector<std::vector<double>> ml_T, ml_q, ml_p, ml_z;   // [K], [kg/kg], [hPa], [m]
 
 
 // ==================== NaN-SAFE HELPERS ====================
@@ -378,6 +422,10 @@ private:
         cape_col.assign(m.jm, std::vector<double>(m.km, 0.0));
         delta_T_sfp.assign(m.jm, std::vector<double>(m.km, 0.0));
         delta_q_sfp.assign(m.jm, std::vector<double>(m.km, 0.0));
+        if (mcMlParcel()) {
+            ml_T.assign(m.jm, std::vector<double>(m.km, 0.0)); ml_q.assign(m.jm, std::vector<double>(m.km, 0.0));
+            ml_p.assign(m.jm, std::vector<double>(m.km, 0.0)); ml_z.assign(m.jm, std::vector<double>(m.km, 0.0));
+        }
 
         m.K_u = std::vector<double>(m.im, 0.0);
         m.K_d = std::vector<double>(m.im, 0.0);
@@ -440,7 +488,7 @@ private:
     // Populates delta_T_sfp / delta_q_sfp for every column, controlled by
     // m.convection_perturbation (set in param.py / config XML):
     //
-    //   0 – fixed offsets: δT = t_add_u, δq = q_v_u_add  for all columns
+    //   0 – fixed offsets: δT = t_add_u(), δq = q_v_u_add()  for all columns
     //   1 – Bechtold (2008) for shallow columns (cloud depth < p_stat_diff):
     //           δT = α · H_s / (ρ · c_p · w*)
     //           δq = α · E  / (ρ · w*)
@@ -460,8 +508,8 @@ private:
 
                 if(m.convection_perturbation == 0){
                     // switch 0: fixed offsets for all columns (original behaviour)
-                    delta_T_sfp[j][k] = t_add_u;
-                    delta_q_sfp[j][k] = q_v_u_add;
+                    delta_T_sfp[j][k] = t_add_u();
+                    delta_q_sfp[j][k] = q_v_u_add();
                     continue;
                 }
 
@@ -485,14 +533,14 @@ private:
                 // Scaling the cap by q_sat(T_sfc)/q_sat(T_ref) lets warmer columns
                 // inject proportionally more updraft moisture so convective precip
                 // follows CC. Applied to both the midlevel and shallow moisture seeds.
-                double q_cap = q_v_u_add * cc_factor(T_sfc, m.p_stat.x[0][j][k]);
+                double q_cap = q_v_u_add() * cc_factor(T_sfc, m.p_stat.x[0][j][k]);
 
                 // Midlevel convection (Bechtold 2001): triggered by free tropospheric
                 // instability, not surface fluxes → fixed T offset, CC-scaled moisture.
                 // convection_mode controls whether midlevel clouds are non-precipitating
                 // (updraftEntrainment), not how they are triggered.
                 if(m.p_stat.x[i_base][j][k] < p_stat_midlevel){
-                    delta_T_sfp[j][k] = t_add_u;
+                    delta_T_sfp[j][k] = t_add_u();
                     delta_q_sfp[j][k] = q_cap;
                     continue;
                 }
@@ -529,7 +577,7 @@ private:
                 // Cap at the CC-scaled ceiling: Bechtold gives smaller values for strong
                 // BL (w* ~ 2 m/s → δq ~ 5e-6 kg/kg); the cap prevents blow-up when w* is
                 // near zero but positive (weak-flux edge case).
-                delta_T_sfp[j][k] = std::min(alpha_sfp * H_s * inv_rho_w / m.cp_l, t_add_u);
+                delta_T_sfp[j][k] = std::min(alpha_sfp * H_s * inv_rho_w / m.cp_l, t_add_u());
                 delta_q_sfp[j][k] = std::min(alpha_sfp * E  * inv_rho_w, q_cap);
             }
         }
@@ -717,7 +765,7 @@ void findCloudBaseLFS() {
 
                 for (int i = i_deep_beg_local[j][k]; i < m.im; i++) {
                     const double t_u     = m.t.x[i][j][k] * m.t_0;
-                    const double t_u_add = t_u + t_add_u;
+                    const double t_u_add = t_u + t_add_u();
                     const double p_u     = m.p_stat.x[i][j][k];
 
                     double E_sat_add = m.hp * AtomUtils::exp_func(t_u_add, 17.2694, 35.86);
@@ -740,7 +788,7 @@ void findCloudBaseLFS() {
                     // over q_sat defines f. So the parcel's condensate is (q_t + D) - q_sat,
                     // which is positive exactly where f > 0, i.e. exactly where the cloud-base
                     // test below now fires. The two stay consistent by construction.
-                    m.q_v_u.x[i][j][k] = m.c.x[i][j][k] + q_v_u_add;
+                    m.q_v_u.x[i][j][k] = m.c.x[i][j][k] + q_v_u_add();
                     {
                         const double q_t_u = std::max(0.0, m.c.x[i][j][k])
                                            + std::max(0.0, m.cloud.x[i][j][k])
@@ -811,13 +859,18 @@ void findCloudBaseLFS() {
                     if (i_base_col > 0) {
                         const double p0    = 1000.0;                          // reference pressure [hPa]
                         const double kappa = m.R_Air / m.cp_l;                // R/cp  (Poisson exponent)
-                        const double T_b   = m.t.x[i_base_col][j][k] * m.t_0 + t_add_u;
+                        const double T_b   = m.t.x[i_base_col][j][k] * m.t_0 + t_add_u();
                         const double p_b   = m.p_stat.x[i_base_col][j][k];
                         const double qsb   = q_sat_col[i_base_col];
                         const double L_b   = (T_b >= m.t_0) ? m.lv : m.ls;
-                        const double thetae_parcel =
+                        double thetae_parcel =
                             T_b * std::pow(p0 / p_b, kappa)
                                 * std::exp(L_b * qsb / (m.cp_l * T_b));
+                        const bool ml = mcMlParcel() != 0;
+                        if (ml) {
+                            mlParcel(j, k);
+                            thetae_parcel = (ml_T[j][k] > 0) ? thetaE(ml_T[j][k], ml_p[j][k], ml_q[j][k], m) : 0.0;
+                        }
 
                         bool became_buoyant = false;
                         int  i_top = i_base_col;                              // never buoyant → shallow
@@ -825,7 +878,8 @@ void findCloudBaseLFS() {
                         for (int i = i_base_col + 1; i < m.im; i++) {
                             const double T_e = m.t.x[i][j][k] * m.t_0;
                             const double p_e = m.p_stat.x[i][j][k];
-                            const double qse = q_sat_col[i];
+                            const double qse = ml ? safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T_e, 17.2694, 35.86), p_e)
+                                                  : q_sat_col[i];
                             const double L_e = (T_e >= m.t_0) ? m.lv : m.ls;
                             const double thetaes_env =
                                 T_e * std::pow(p0 / p_e, kappa)
@@ -949,6 +1003,27 @@ void findCloudBaseLFS() {
                         }
                         m.q_v_u.x[i_base][j][k] = std::max(m.q_v_u.x[i_base][j][k], q_seed);
                     }
+                }
+
+                // ATM_MC_ML_PARCEL: replace the seed by the mixed-layer parcel, lifted dry to the base and
+                // saturation-adjusted there (same damped 2-pass adjustment as the in-ascent condensation).
+                if (mcMlParcel() && ml_T[j][k] > 0.0) {
+                    const double z_b = height_table[i_base];
+                    double T_u = ml_T[j][k] - m.g * (z_b - ml_z[j][k]) / m.cp_l;   // dry adiabat (cp T + g z conserved)
+                    double q_v = ml_q[j][k], q_c = 0.0;
+                    const double p_u = m.p_stat.x[i_base][j][k];
+                    for (int it = 0; it < 2; ++it) {
+                        const double q_sat_u = safe_q_sat(m.ep, m.hp * AtomUtils::exp_func(T_u, 17.2694, 35.86), p_u);
+                        const double dq = q_v - q_sat_u;
+                        if (dq <= 0.0) break;
+                        const double L_u   = (T_u >= m.t_0) ? m.lv : m.ls;
+                        const double dqsdT = q_sat_u * 17.2694 * (273.15 - 35.86) / ((T_u - 35.86) * (T_u - 35.86));
+                        const double dcond = dq / (1.0 + (L_u / m.cp_l) * dqsdT);
+                        q_v -= dcond; q_c += dcond; T_u += (L_u / m.cp_l) * dcond;
+                    }
+                    m.s_u.x[i_base][j][k]   = mcSgz() ? m.cp_l * T_u / m.s_0 + gz(i_base) : m.cp_l * T_u / m.s_0;
+                    m.q_v_u.x[i_base][j][k] = q_v;
+                    m.q_c_u.x[i_base][j][k] = std::min(q_c, q_c_u_max);
                 }
 
                 M_d_LFS_local[j][k] = clamp_M(gam_d * m.M_u.x[i_base][j][k]);
@@ -1530,7 +1605,7 @@ void findCloudBaseLFS() {
                 // cloud base contribution (mirrors findCloudBase() in MoistConvShall)
                 {
                     double t_u       = m.t.x[i_base][j][k] * m.t_0;
-                    double t_u_add   = t_u + t_add_u;
+                    double t_u_add   = t_u + t_add_u();
                     double t_vir     = t_u_add * (1.0 + alf * m.q_v_u.x[i_base][j][k]
                                        - m.q_c_u.x[i_base][j][k]);
                     double t_vir_env = std::max(t_u * (1.0 + alf * m.c.x[i_base][j][k]
@@ -1544,7 +1619,7 @@ void findCloudBaseLFS() {
                 // accumulate CAPE upward through the cloud layer (mirrors convectiveUpdraft() in MoistConvShall)
                 for(int i = i_base; i < i_lfs && i < m.im-1; i++){
                     double t_u       = m.t.x[i][j][k] * m.t_0;
-                    double t_u_add   = t_u + t_add_u;
+                    double t_u_add   = t_u + t_add_u();
                     double t_vir     = t_u_add * (1.0 + alf * m.q_v_u.x[i][j][k]
                                        - m.q_c_u.x[i][j][k]);
                     double t_vir_env = std::max(t_u * (1.0 + alf * m.c.x[i][j][k]
@@ -2494,7 +2569,7 @@ void findCloudBaseLFS() {
                     const double L = (T >= m.t_0) ? m.lv : m.ls;
                     return T * std::pow(p0 / p, kappa) * std::exp(L * q / (m.cp_l * T)); };
                 auto qsat_add = [&](int i, int j, int k){
-                    const double E = m.hp * AtomUtils::exp_func(m.t.x[i][j][k] * m.t_0 + t_add_u, 17.2694, 35.86);
+                    const double E = m.hp * AtomUtils::exp_func(m.t.x[i][j][k] * m.t_0 + t_add_u(), 17.2694, 35.86);
                     return safe_q_sat(m.ep, E, m.p_stat.x[i][j][k]); };
                 double W[4]={}, Wa[4]={}, the_ml[4]={}, the_b[4]={}, thes_min[4]={}, z_min[4]={}, cape_ml[4]={},
                        cape_b[4]={}, cape_s[4]={}, t_ml[4]={}, q_ml[4]={}, rh_ml[4]={}, dthe[4]={}, pos[4]={};
@@ -2530,7 +2605,7 @@ void findCloudBaseLFS() {
                         const int ib = i_Base_local[j][k];
                         double teb = 0, cb = 0; const bool act = (ib > 0 && i_LFS_local[j][k] > ib);
                         if(act){
-                            const double Tb = m.t.x[ib][j][k] * m.t_0 + t_add_u;
+                            const double Tb = m.t.x[ib][j][k] * m.t_0 + t_add_u();
                             teb = thetae(Tb, m.p_stat.x[ib][j][k], qsat_add(ib, j, k));
                             bool bu = false;
                             for(int i = ib + 1; i < m.im; i++){
