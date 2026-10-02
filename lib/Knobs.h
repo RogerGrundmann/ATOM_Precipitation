@@ -131,6 +131,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_SW_INSOL, "0.0", Result, 'R', "pair with RAD_EQUIL") \
     X(ATM_T0_ATTRIB, "0", Diag, 'D', "print/dump only") \
     X(ATM_TEQ_SKIN_ONLY, "0", Result, 'R', "instrument branch, must NOT be flipped") \
+    X(ATM_TEQ_WTG, "0", Result, 'R', "blend the initial free troposphere (1.5-3 km above ground up, |lat|<30, taper to 45) to the zonal mean; t_eq inherits it") \
     X(ATM_TW_BALANCE, "0.0", Result, 'R', "off; the only mid-lat jet IC") \
     X(ATM_TW_BALANCE_V, "0", Result, 'P', "sub-option of TW_BALANCE") \
     X(ATM_TW_LATMIN, "15.0", Result, 'P', "sub-parameter of TW_BALANCE") \

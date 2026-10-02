@@ -490,6 +490,66 @@ void cAtmosphereModel::RunTimeSlice(int Ma){
     read_Hydrosphere_SST(Ma);                                           // reverse coupling: blend a prior hydrosphere run's SST into t.x[0] (Picard loop; no-op unless sst_coupling_alpha > 0). Before damp_wiggles + t_eq snapshot so the blend is smoothed and becomes the H-S target.
     AtomUtils::damp_wiggles(t, &i_topography, true, true, true);
 
+    // ATM_TEQ_WTG=<strength> -- weak-temperature-gradient initial free troposphere (default 0 = shipped,
+    // block skipped). [MC-LO] (lo1/lo2, restart from wb7): in |lat| < 30 the land free troposphere is
+    // +2.3..+2.8 K warmer than the ocean at 2-11 km, T and t_eq agreeing to 0.07 K, because each column
+    // is built from ITS OWN surface temperature projected to sea level (initTemperatureData Step 8), and
+    // radiation_mode 5 holds T on that snapshot. Ocean deep convection then sees half the land CAPE
+    // (638 vs 1252 J/kg). The real tropics carry < 1 K of horizontal contrast aloft. Here every air cell
+    // is blended toward the ZONAL MEAN of the air cells at its level and latitude:
+    //     T <- T + s * f_lat * f_z * (T_zonal - T)
+    // f_z ramps 0 -> 1 from 1.5 to 3 km ABOVE THE LOCAL GROUND (the boundary layer keeps its own column);
+    // f_lat = 1 for |lat| <= 30, linear to 0 at 45 deg (extratropical land-sea contrast aloft is partly
+    // real). Applied to t before the lid snapshot, the vapour init and the t_eq snapshot, so all three
+    // inherit it; on a restart t_eq is rebuilt from this baseline at the next teq_refresh_stride.
+    if (const double s_wtg = knob::real(knob::ATM_TEQ_WTG); s_wtg > 0.0) {
+        std::vector<double> t_zm((size_t)im * jm, 0.0);
+        std::vector<int>    n_zm((size_t)im * jm, 0);
+        for (int j = 0; j < jm; j++)
+            for (int k = 0; k < km; k++)
+                for (int i = i_topography[j][k] + 1; i < im; i++) {
+                    t_zm[(size_t)i * jm + j] += t.x[i][j][k]; n_zm[(size_t)i * jm + j]++; }
+        // land-ocean contrast aloft, |lat| < 30, before and after (cos-lat weighted, K)
+        auto contrast = [&](double z_target) {
+            int iz = 0; for (int i = 0; i < im; i++) if (get_layer_height(i) <= z_target) iz = i;
+            double sl = 0, wl = 0, so = 0, wo = 0;
+            for (int j = 0; j < jm; j++) {
+                const double lat = 90.0 - j * 180.0 / (double)(jm - 1);
+                if (fabs(lat) >= 30.0) continue;
+                const double w = cos(lat * M_PI / 180.0);
+                for (int k = 0; k < km; k++) {
+                    if (iz <= i_topography[j][k]) continue;
+                    if (AtomUtils::is_land(h, 0, j, k)) { sl += w * t.x[iz][j][k]; wl += w; }
+                    else                                { so += w * t.x[iz][j][k]; wo += w; }
+                }
+            }
+            return (wl > 0 && wo > 0) ? (sl / wl - so / wo) * t_0 : 0.0; };
+        const double c5_pre = contrast(5000.0), c8_pre = contrast(8000.0);
+        double dmax = 0.0; long n_changed = 0;
+        #pragma omp parallel for reduction(max:dmax) reduction(+:n_changed)
+        for (int j = 0; j < jm; j++) {
+            const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+            const double f_lat = (alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0;
+            if (f_lat <= 0.0) continue;
+            for (int k = 0; k < km; k++) {
+                const int ig = i_topography[j][k];
+                const double z_g = get_layer_height(ig);
+                for (int i = ig + 1; i < im; i++) {
+                    const int n = n_zm[(size_t)i * jm + j];
+                    if (n == 0) continue;
+                    const double f_z = std::clamp((get_layer_height(i) - z_g - 1500.0) / 1500.0, 0.0, 1.0);
+                    if (f_z <= 0.0) continue;
+                    const double dT = s_wtg * f_lat * f_z * (t_zm[(size_t)i * jm + j] / n - t.x[i][j][k]);
+                    t.x[i][j][k] += dT;
+                    dmax = std::max(dmax, fabs(dT) * t_0); n_changed++;
+                }
+            }
+        }
+        printf("      AGCM: [TEQ-WTG] s = %.3f  cells blended %ld  max |dT| %.2f K  | |lat|<30 land-ocean T at"
+               " 5 km %+.2f -> %+.2f K, 8 km %+.2f -> %+.2f K\n",
+               s_wtg, n_changed, dmax, c5_pre, contrast(5000.0), c8_pre, contrast(8000.0));
+    }
+
     // Snapshot the lid temperature (i=im-1) from the IC. bcRadius pins t at the lid
     // to this fixed reference so the isothermal stratospheric top stays constant
     // instead of drifting up via the former cubic top extrapolation.
