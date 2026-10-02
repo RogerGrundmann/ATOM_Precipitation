@@ -2483,6 +2483,83 @@ void findCloudBaseLFS() {
                            gp[g] * y, ed[g] * y, ep[g] * y, pc[g] * y);
                 }
             }
+            {   // ---- MC-PB (2026-10-02): the parcel's OWN buoyancy. The scheme's CAPE lifts the ENVIRONMENT at
+                // cloud base, saturated at its own T (+t_add_u), so it measures the environment's conditional
+                // instability above the base and never sees the boundary layer. Here, beside it, a MIXED-LAYER
+                // parcel: mass-weighted T, q over the air levels from i0+1 to 500 m above the ground, lifted at
+                // constant theta_e. theta_e and theta_es use the scheme's own formula (T (p0/p)^kappa exp(L q/(cp T)),
+                // env q_sat at T + t_add_u), so CAPE_base must reproduce the [MC-LO] CAPE -- the check.
+                const double p0 = 1000.0, kappa = m.R_Air / m.cp_l;
+                auto thetae = [&](double T, double p, double q){
+                    const double L = (T >= m.t_0) ? m.lv : m.ls;
+                    return T * std::pow(p0 / p, kappa) * std::exp(L * q / (m.cp_l * T)); };
+                auto qsat_add = [&](int i, int j, int k){
+                    const double E = m.hp * AtomUtils::exp_func(m.t.x[i][j][k] * m.t_0 + t_add_u, 17.2694, 35.86);
+                    return safe_q_sat(m.ep, E, m.p_stat.x[i][j][k]); };
+                double W[4]={}, Wa[4]={}, the_ml[4]={}, the_b[4]={}, thes_min[4]={}, z_min[4]={}, cape_ml[4]={},
+                       cape_b[4]={}, cape_s[4]={}, t_ml[4]={}, q_ml[4]={}, rh_ml[4]={}, dthe[4]={}, pos[4]={};
+                for(int j = 1; j < m.jm-1; j++){
+                    const double w = cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
+                    const double alat = fabs(90.0 - j * 180.0 / (double)(m.jm - 1));
+                    for(int k = 1; k < m.km-1; k++){
+                        const int land = land_surf[j * m.km + k] ? 1 : 0;
+                        const int gs[2] = { land, (alat < 30.0) ? 2 + land : -1 };
+                        const int i0 = std::max(m.i_topography[j][k], 0);
+                        const double zg = height_table[i0];
+                        double ms = 0, Ts = 0, qs = 0, ps = 0;
+                        for(int i = i0 + 1; i < m.im - 1 && height_table[i] - zg <= 500.0; i++){
+                            const double mass = step[i] * m.r_humid.x[i][j][k];
+                            ms += mass; Ts += mass * m.t.x[i][j][k] * m.t_0; qs += mass * m.c.x[i][j][k];
+                            ps += mass * m.p_stat.x[i][j][k];
+                        }
+                        if(ms <= 0) continue;
+                        const double Tm = Ts / ms, qm = qs / ms, pm = ps / ms;
+                        const double E_m = m.hp * AtomUtils::exp_func(Tm, 17.2694, 35.86);
+                        const double rhm = qm / std::max(safe_q_sat(m.ep, E_m, pm), 1e-12);
+                        const double te_ml = thetae(Tm, pm, qm);
+                        // ML parcel CAPE: positive part above 500 m over ground; env theta_es minimum
+                        double cml = 0, tmin = 1e30, zmn = 0;
+                        for(int i = i0 + 1; i < m.im - 1; i++){
+                            const double Te = m.t.x[i][j][k] * m.t_0;
+                            const double tes = thetae(Te, m.p_stat.x[i][j][k], qsat_add(i, j, k));
+                            if(height_table[i] - zg > 500.0 && tes < tmin){ tmin = tes; zmn = height_table[i]; }
+                            if(height_table[i] - zg > 500.0 && te_ml > tes)
+                                cml += m.g * (te_ml - tes) / tes * (height_table[i] - height_table[i-1]);
+                        }
+                        // base parcel (the scheme's), recomputed
+                        const int ib = i_Base_local[j][k];
+                        double teb = 0, cb = 0; const bool act = (ib > 0 && i_LFS_local[j][k] > ib);
+                        if(act){
+                            const double Tb = m.t.x[ib][j][k] * m.t_0 + t_add_u;
+                            teb = thetae(Tb, m.p_stat.x[ib][j][k], qsat_add(ib, j, k));
+                            bool bu = false;
+                            for(int i = ib + 1; i < m.im; i++){
+                                const double Te = m.t.x[i][j][k] * m.t_0;
+                                const double tes = thetae(Te, m.p_stat.x[i][j][k], qsat_add(i, j, k));
+                                if(teb > tes){ bu = true; cb += m.g * (teb - tes) / tes * (height_table[i] - height_table[i-1]); }
+                                else if(bu) break;
+                            }
+                        }
+                        for(int g : gs){ if(g < 0) continue;
+                            W[g] += w; the_ml[g] += w * te_ml; thes_min[g] += w * tmin; z_min[g] += w * zmn;
+                            cape_ml[g] += w * cml; t_ml[g] += w * (Tm - m.t_0); q_ml[g] += w * qm; rh_ml[g] += w * rhm;
+                            dthe[g] += w * (te_ml - tmin); if(te_ml > tmin) pos[g] += w;
+                            if(act){ Wa[g] += w; the_b[g] += w * teb; cape_b[g] += w * cb; cape_s[g] += w * cape_col[j][k]; }
+                        }
+                    }
+                }
+                const char* gn[4] = {"ocean", "land", "ocean<30", "land<30"};
+                for(int g = 0; g < 4; g++){
+                    if(W[g] <= 0.0) continue;
+                    const double a = 1.0 / W[g], b = Wa[g] > 0 ? 1.0 / Wa[g] : 0.0;
+                    printf("      AGCM: [MC-PB] %-8s ML parcel (0-500 m): T %5.1f C  q %5.2f g/kg  RH %.3f  theta_e %6.1f K"
+                           "  | env theta_es min %6.1f K at %5.0f m  theta_e - min %+6.1f K (> 0 in %5.1f %%)  CAPE_ML %7.1f J/kg"
+                           "  | base parcel theta_e %6.1f K  CAPE_base %7.1f (scheme %7.1f) J/kg\n",
+                           gn[g], t_ml[g] * a, 1e3 * q_ml[g] * a, rh_ml[g] * a, the_ml[g] * a, thes_min[g] * a,
+                           z_min[g] * a, dthe[g] * a, 1e2 * pos[g] * a, cape_ml[g] * a, the_b[g] * b, cape_b[g] * b,
+                           cape_s[g] * b);
+                }
+            }
             printf("      AGCM: [MC-TV] WHY, where MC_w acts: |M_u| p50/p90 %.4f / %.4f kg/m2/s;  |w_u - w|"
                    " p50/p90/p99 %.2f / %.2f / %.2f m/s;  layer mass rho*dz p50 %.1f kg/m2\n",
                    pct(mu_s, 0.5), pct(mu_s, 0.9), pct(dw_s, 0.5), pct(dw_s, 0.9), pct(dw_s, 0.99),
