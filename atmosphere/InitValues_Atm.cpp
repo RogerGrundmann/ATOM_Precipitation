@@ -1236,7 +1236,12 @@ void cAtmosphereModel::initWaterWapour() {
         const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
         const double sdesc = std::exp(-((alat - 25.0) / 10.0) * ((alat - 25.0) / 10.0));
         const double c = 1.0 - std::exp(-d_ocean[(size_t)j * km + k] / rh_land_L);
-        return 0.75 - (0.75 - rh_land_dry) * sdesc * (0.5 + 0.5 * c); };
+        // =2: the humid end follows ATM_RH_OCEAN with the same tropical taper (full |lat| <= 30, none from 45), so wet
+        // tropical land (Amazon, Congo, SE Asia) starts like the tropical ocean. [MC-RG] (rg1, mode 1): the Amazon parcel was
+        // 5.7 K theta_e poorer than the tropical ocean's (q 15.0 vs 18.3 g/kg) because only the ocean got the boost.
+        double wet = 0.75;
+        if (rh_land_mode == 2) wet += ((alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0) * (rh_ocean - 0.75);
+        return wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c); };
     if (rh_land_mode) {
         double s = 0, w = 0, dmax = 0; long n_dry = 0, n_land = 0;
         for (int j = 0; j < jm; j++) for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) {
