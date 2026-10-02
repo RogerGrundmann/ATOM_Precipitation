@@ -1192,6 +1192,7 @@ void cAtmosphereModel::initWaterWapour() {
     // ========================================================================
     // Main Computation Loop: water vapour field
     // ========================================================================
+    const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     #pragma omp parallel for collapse(2)
     for (int j = 0; j < jm; j++) {
         for (int k = 0; k < km; k++) {
@@ -1221,7 +1222,22 @@ void cAtmosphereModel::initWaterWapour() {
             // 1.25 multiplier goes with it: its own comment says it exists to give "a nice cloud
             // around 1 km height", i.e. a cloud deck manufactured by a fudge factor.
             // ATM_RH_PROFILE (Manabe-Wetherald profile, on since 2026-08-31) -- retired 2026-09-30 (KNOB-INV plan C); the switch and its old branch are in git history.
-            const double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
+            // ⚠ LATENT DEFECT, NOT REPAIRED HERE (found 2026-10-02): i_mount = i_topography is the FIRST AIR level
+            // (FileIO_Atm.cpp: the air cell above the land transition), so is_land(h, i_mount, j, k) is false in EVERY
+            // column and the 0.60 land branch has never fired -- land starts at 0.75 like the ocean. Fixing it is a
+            // separate, larger change (land 0.75 -> 0.60); the expression is left verbatim.
+            double RH_init = is_land(h, i_mount, j, k) ? 0.60 : 0.75;
+            // ATM_RH_OCEAN=<RH> (2026-10-02), default 0.75 = shipped: the initial surface RH over TROPICAL OCEAN
+            // (i_topography == 0, full for |lat| <= 30, linear to the shipped 0.75 at 45). [BL-Q] (blq1): the tropical
+            // marine BL (0-500 m, RH 0.71-0.74) is still this initial value at iteration 640 -- evaporation (~1400 mm/a)
+            // needs ~2.3 days (~1e6 iterations) to change it -- and it is ~4 K theta_e short of a real tropical sounding,
+            // so no surface parcel is buoyant ([MC-PB]). A scaffold in the sense ATM_RH_STORM is one. Applied as an
+            // offset on the shipped value, so the default adds exactly 0.
+            if (i_topography[j][k] == 0) {
+                const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+                const double f = (alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0;
+                RH_init += f * (rh_ocean - 0.75);
+            }
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];

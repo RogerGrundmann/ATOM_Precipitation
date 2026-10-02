@@ -120,6 +120,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_CRIT, "0.30", Result, 'P', "0.30 since 08-31") \
     X(ATM_RH_MIN, "0.65", Result, 'P', "0.65") \
     X(ATM_RH_MIN_PTOP, "482.0", Result, 'P', "482 hPa (fitted)") \
+    X(ATM_RH_OCEAN, "0.75", Result, 'R', "initial surface RH over tropical ocean (|lat|<=30, taper to 45); the marine BL keeps it on affordable runs") \
     X(ATM_RH_STORM, "1.0", Result, 'R', "initial storm-track RH factor at 55 deg (working branch 1.15)") \
     X(ATM_RK_SCALAR_SYNC, "0", Result, 'R', "forced by WATER_CLOSURE") \
     X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
