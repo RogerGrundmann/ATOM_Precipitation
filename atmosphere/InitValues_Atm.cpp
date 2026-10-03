@@ -1437,6 +1437,51 @@ void cAtmosphereModel::initWaterWapour() {
         }
     }
 
+    // ATM_RH_LAND_QCAP=<0|1> (2026-10-03), default 0 = shipped (code skipped). Land air gets its vapour from the ocean, so a
+    // land boundary layer cannot hold more vapour than the marine one it is fed from; prescribing RH on land that is
+    // HOTTER than the sea does exactly that. Found on the Horn of Africa (output_rg1 = wb9 state): 3-4N 42E, NASA surface
+    // T 32.5 C x wet-end RH -> 22.9-23.4 g/kg against 20.1 over the adjacent ocean (28.7 C); these two cells alone
+    // convect, at 96-98 mm/d (global maximum, neighbours 0); with ATM_RH_LAND=2 the whole Horn rains 75-130 mm/d
+    // (wb10a/wb11/wb12a). =1 caps the initial land vapour, at each height ABOVE THE LOCAL GROUND, at the zonal-mean
+    // ocean value of the same latitude at that height above the sea: q_land(i) <= <q_ocean>(i - i_topography, j).
+    // RH then falls where land is hotter than the sea; land cooler than the sea, and elevated (cold) land, is untouched.
+    // Paleo-safe: needs only the land mask and the model's own initial ocean column. Rows without ocean are not capped.
+    if (knob::on(knob::ATM_RH_LAND_QCAP)) {
+        std::vector<double> q_ocn((size_t)jm * im, -1.0);
+        for (int j = 0; j < jm; j++) {
+            int n = 0;
+            for (int k = 0; k < km - 1; k++) if (i_topography[j][k] == 0) n++;
+            if (!n) continue;
+            for (int i = 0; i < im; i++) {
+                double sum = 0.0;
+                for (int k = 0; k < km - 1; k++) if (i_topography[j][k] == 0) sum += c.x[i][j][k];
+                q_ocn[(size_t)j * im + i] = sum / n;
+            }
+        }
+        long n_land = 0, n_cap = 0; double dq_sum = 0.0, w_sum = 0.0, dq_max = 0.0; int j_max = -1, k_max = -1;
+        for (int j = 0; j < jm; j++) {
+            if (q_ocn[(size_t)j * im] < 0.0) continue;
+            const double wt = cos((90.0 - j * 180.0 / (jm - 1)) * M_PI / 180.0);
+            for (int k = 0; k < km; k++) {
+                const int i_mount = i_topography[j][k];
+                if (i_mount <= 0 || i_mount >= im) continue;
+                bool capped = false;
+                for (int i = i_mount; i < im; i++) {
+                    const double cap = q_ocn[(size_t)j * im + (i - i_mount)];
+                    if (c.x[i][j][k] > cap) {
+                        if (i == i_mount) { const double dq = c.x[i][j][k] - cap; capped = true;
+                            if (k < km - 1) { dq_sum += wt * dq; if (dq > dq_max) { dq_max = dq; j_max = j; k_max = k; } } }
+                        c.x[i][j][k] = cap;
+                    }
+                }
+                if (k < km - 1) { n_land++; w_sum += wt; if (capped) n_cap++; }
+            }
+        }
+        printf("      AGCM: [RH-LAND-QCAP] land surface vapour capped at the zonal-mean ocean value in %.1f %% of land columns;"
+               " mean reduction %.2f g/kg (all land), max %.2f g/kg at %dN %dE\n", n_land ? 1e2 * n_cap / n_land : 0.0,
+               w_sum > 0 ? 1e3 * dq_sum / w_sum : 0.0, 1e3 * dq_max, 90 - j_max, k_max <= 180 ? k_max : k_max - 360);
+    }
+
     // ========================================================================
     // Surface Boundary Condition (copy topography values to surface)
     // ========================================================================
