@@ -1210,6 +1210,8 @@ void cAtmosphereModel::initWaterWapour() {
     std::vector<double> d_ocean;                                              // distance to the nearest ocean [m]
     if (rh_land_mode) {
         // multi-source Dijkstra on the lat-lon grid (8 neighbours, periodic in longitude), ocean columns = sources
+        // (AtomLand::distanceToOcean in LandDistance.h is a copy for MoistConvection; calling it from here instead flipped
+        // last bits at -O0 in the byte check run_vct.sh, so this block stays in place)
         const double a = 6.371e6, dlat = M_PI / (jm - 1), dlon = 2.0 * M_PI / (km - 1);
         d_ocean.assign((size_t)jm * km, 1e30);
         using QE = std::pair<double, int>;

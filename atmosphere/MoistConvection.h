@@ -3,6 +3,7 @@
 #include "Knobs.h"
 #include "cAtmosphereModel.h"
 #include "CloudFraction.h"
+#include "LandDistance.h"
 
 #include <vector>
 #include <cmath>
@@ -203,6 +204,18 @@ private:
     static double gateWeight(double M) {
         const double x = (std::fabs(M) - gate_lo) / (AtomMoistConvection::coeff_recurr - gate_lo);
         return x <= 0.0 ? 0.0 : (x >= 1.0 ? 1.0 : x * x * (3.0 - 2.0 * x)); }
+    // ATM_MC_MB_SAT_LAND=<kg/(m2 s)> (2026-10-03), default 0 = off (the seed is returned untouched). The cloud-base mass
+    // flux M_b = rho*c_mb*sqrt(2 CAPE) has no ceiling below clamp_M's 3.0, and on a run this short nothing consumes the CAPE,
+    // so a land column whose parcel is a few K over its environment rains ~100 mm/d for as long as the run lasts. wb20b
+    // (ATM_MC_T_ADD_LAND 2.6 K): 86 % of tropical land does not convect, 2.0 % of the cells rain > 50 mm/d and carry 43 % of
+    // the tropical-land convective rain; convection sits on surface q > ~17.5 g/kg (the hot lowland), inland as well as
+    // coastal (2-4S 75-76W, 6-7N 32-33E). The ocean, whose parcels differ little, rains a near-uniform 31-32 mm/d at a mean
+    // M_b of 0.037. >0 saturates the seed over LAND columns: M_b -> M_s*tanh(M_b/M_s) -- unchanged for M_b << M_s, never
+    // above M_s. A scaffold for the missing CAPE consumption (a relaxation closure would do this by itself).
+    double mbSat(double M_b, int j, int k) const {
+        static const double M_s = knob::real(knob::ATM_MC_MB_SAT_LAND);
+        if (M_s <= 0.0 || m.i_topography[j][k] <= 0) return M_b;
+        return M_s * std::tanh(M_b / M_s); }
     static int mcDepthRamp() { static const int v = [](){ return knob::integer(knob::ATM_MC_DEPTH_RAMP); }(); return v; }
     static int mcMlLcl() { static const int v = [](){ return knob::integer(knob::ATM_MC_ML_LCL); }(); return v; }
     static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
@@ -226,6 +239,27 @@ private:
             dq = (1.0 - CloudFraction::hCrit(p)) * qs_ml / std::sqrt(3.0);
         }
         ml_T[j][k] = T + AtomMoistConvection::t_add_u(); ml_q[j][k] = q + dq; ml_p[j][k] = p; ml_z[j][k] = zs / ms;
+        // ATM_MC_T_ADD_LAND=<K> (2026-10-03), default 0 = off: an ADDITIONAL temperature excess of the mixed-layer parcel over
+        // LAND columns (i_topography > 0). Land heats from below -- its thermals leave a superadiabatic surface layer with a
+        // 1-3 K excess where marine ones carry a few tenths -- and no sensible heat flux reaches the air in this model
+        // (credited to nothing). wb14 [MC-RG]: land<30 CAPE 2.3 J/kg, P_conv 0.1 mm/a; parcel theta_e - env theta_es min
+        // Amazon -2.5 K, Congo -3.8, SE Asia -2.9, Sahara -14.4, Arabia -12.1 (ocean<15 +2.3); theta_e gains ~1.16 K per K.
+        // The ocean parcel is untouched (ATM_TEQ_WTG, the other route, raised ocean CAPE 124 -> 261 and made deserts rain).
+        // Only with ATM_MC_ML_PARCEL. Paleo-safe: land mask only. A scaffold for the missing surface heat flux.
+        static const double t_add_land = knob::real(knob::ATM_MC_T_ADD_LAND);
+        // ATM_MC_T_ADD_LAND_L=<km> (2026-10-03), default 0 = no taper (the line below as it was). One land value cannot fit
+        // coast and interior: coastal lowland starts with the ocean's moisture, so its parcel is already as buoyant as the
+        // marine one and the full excess puts it ~5 K over the environment -- wb19b (3.0 K): 40 of 173 Maritime-Continent
+        // land cells above 50 mm/d, coastal cells at 39 m 96-113 mm/d beside ocean at 32, interior Borneo / New Guinea 0-3.
+        // The coastal boundary layer IS marine air (sea breeze); the heated continental one builds inland. >0 scales the
+        // excess by 1 - exp(-d / L), d the distance to the nearest ocean column (the ATM_RH_LAND continentality measure).
+        static const double t_add_land_L = knob::real(knob::ATM_MC_T_ADD_LAND_L) * 1.0e3;   // [m]
+        if (t_add_land != 0.0 && m.i_topography[j][k] > 0) {
+            if (t_add_land_L > 0.0) {
+                static const std::vector<double> d_oc = AtomLand::distanceToOcean(m.i_topography, m.jm, m.km);
+                ml_T[j][k] += t_add_land * (1.0 - std::exp(-d_oc[(size_t)j * m.km + k] / t_add_land_L));
+            } else ml_T[j][k] += t_add_land;
+        }
     }
 
     // ATM_MC_COND_DEBIT=<0|1> -- MC-Q-LEAK (2026-10-01). Default 0 = shipped, unchanged.
@@ -621,8 +655,8 @@ private:
 
                 // Cloud-base mass-flux seed from parcel buoyancy (fix #3): M_u = ρ·c_mb·√(2·CAPE).
                 // Replaces the old ρ·u (resolved w) seed that left M_u below coeff_recurr everywhere.
-                m.M_u.x[local_i_beg][j][k] = clamp_M(
-                    m.r_humid.x[local_i_beg][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]));
+                m.M_u.x[local_i_beg][j][k] = clamp_M(mbSat(
+                    m.r_humid.x[local_i_beg][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]), j, k));
 
                 for(int i = local_i_beg+1; i <= local_i_end; i++){
 
@@ -1008,8 +1042,8 @@ void findCloudBaseLFS() {
                 for (int ii = 0; ii < i_base; ii++)
                     m.M_u.x[ii][j][k] = 0.0;
 
-                m.M_u.x[i_base][j][k] = clamp_M(                        // fix #3: CAPE-based seed (was ρ·u)
-                    m.r_humid.x[i_base][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]));  // [kg/(m²s)]
+                m.M_u.x[i_base][j][k] = clamp_M(mbSat(                  // fix #3: CAPE-based seed (was ρ·u)
+                    m.r_humid.x[i_base][j][k] * c_mb * std::sqrt(2.0 * cape_col[j][k]), j, k));  // [kg/(m²s)]
                 if(is_land(m.h, i_base, j, k)) m.M_u.x[i_base][j][k] = 0.0;
 
                 // Causes #2 and #3: updraftRecurrence starts at i_base+1 and reads

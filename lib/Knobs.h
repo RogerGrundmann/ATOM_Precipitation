@@ -81,9 +81,12 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_GATE_BLEND, "0", Result, 'R', "smoothstep blend env->parcel over |M| 0.01..0.1 instead of the recurrence gate switch (1 updraft, 2 also downdraft)") \
     X(ATM_MC_ED_ABOVE_BASE, "0", Result, 'R', "downdraft evaporation e_d only above cloud base; e_p is the single sub-cloud term") \
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
+    X(ATM_MC_MB_SAT_LAND, "0", Result, 'P', "land columns: cloud-base mass flux saturates, M_b -> M_s*tanh(M_b/M_s), M_s in kg/(m2 s) (0 = off)") \
     X(ATM_MC_ML_LCL, "0", Result, 'R', "with ATM_MC_ML_PARCEL: convective base = the mixed-layer parcel's LCL (not the stratiform-cloud base)") \
     X(ATM_MC_ML_PARCEL, "0", Result, 'R', "deep-convection parcel from the 0-500 m mixed layer (1: dq = ATM_MC_Q_ADD, 2: dq = sub-grid sigma_q) instead of the saturated cloud-base env") \
     X(ATM_MC_Q_ADD, "1.0e-4", Result, 'P', "parcel moisture excess kg/kg (shipped constant q_v_u_add)") \
+    X(ATM_MC_T_ADD_LAND, "0", Result, 'P', "with ATM_MC_ML_PARCEL: additional parcel temperature excess over land columns, K (surface heating; ocean parcel unchanged)") \
+    X(ATM_MC_T_ADD_LAND_L, "0", Result, 'P', "ATM_MC_T_ADD_LAND: coastal taper, excess x (1 - exp(-d/L)), d = distance to the ocean, L in km (0 = no taper)") \
     X(ATM_MC_T_ADD, "0.2", Result, 'P', "parcel temperature excess K (shipped constant t_add_u)") \
     X(ATM_MC_ENTR, "0.0", Result, 'R', "updraft entrainment 1/m; 0 = the shipped 0.2/R_cloud") \
     X(ATM_MC_GP_AREA, "0", Result, 'R', "gpa_* today") \
