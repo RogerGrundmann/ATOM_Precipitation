@@ -1232,6 +1232,34 @@ void cAtmosphereModel::initWaterWapour() {
         }
         for (int j = 0; j < jm; j++) d_ocean[(size_t)j * km + km - 1] = d_ocean[(size_t)j * km];   // seam copy
     }
+    // ATM_RH_LAND_EAST=<strength 0..1> (2026-10-03), default 0 = off (factor exactly 1). The descent drying above is
+    // symmetric in longitude, so it also dries the subtropical EAST sides of the continents (India, south China, the
+    // south-eastern US, eastern Australia, south-east Africa / Brazil): wb14 land 15-35 deg rains 1 mm/a against NASA 643.
+    // Equatorward of ~30 deg the surface wind is the trade easterly at ANY time slice -- a property of the rotation, like
+    // the descent itself -- so land with open ocean to its EAST is fed marine air and land with a continent to its east
+    // is not (the west-coast deserts). m_east = exponentially weighted ocean fraction of the fetch to the east along the
+    // latitude circle (e-folding 2000 km, summed to 6000 km), so a narrow sea (Red Sea, Persian Gulf) counts for little.
+    // The drying is multiplied by (1 - strength * m_east). Needs only the land mask. Known miss: east coasts kept dry by
+    // a coast-parallel monsoon jet (Oman / Somalia).
+    const double rh_land_east = knob::real(knob::ATM_RH_LAND_EAST);
+    std::vector<double> m_east;
+    if (rh_land_mode && rh_land_east > 0.0) {
+        const double a = 6.371e6, dlon = 2.0 * M_PI / (km - 1), Le = 2.0e6;
+        m_east.assign((size_t)jm * km, 0.0);
+        for (int j = 1; j < jm - 1; j++) {
+            const double dx = a * dlon * cos((90.0 - j * 180.0 / (jm - 1)) * M_PI / 180.0);
+            const int n = std::min(km - 2, (int)(3.0 * Le / dx));
+            for (int k = 0; k < km; k++) {
+                double so = 0.0, sw = 0.0;
+                for (int q = 1; q <= n; q++) {
+                    const int kk = (k % (km - 1) + q) % (km - 1);
+                    const double wq = std::exp(-q * dx / Le);
+                    sw += wq; if (i_topography[j][kk] == 0) so += wq;
+                }
+                m_east[(size_t)j * km + k] = sw > 0.0 ? so / sw : 0.0;
+            }
+        }
+    }
     auto rh_land_of = [&](int j, int k) {
         const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
         const double sdesc = std::exp(-((alat - 25.0) / 10.0) * ((alat - 25.0) / 10.0));
@@ -1241,7 +1269,8 @@ void cAtmosphereModel::initWaterWapour() {
         // 5.7 K theta_e poorer than the tropical ocean's (q 15.0 vs 18.3 g/kg) because only the ocean got the boost.
         double wet = 0.75;
         if (rh_land_mode == 2) wet += ((alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0) * (rh_ocean - 0.75);
-        return wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c); };
+        const double east = m_east.empty() ? 1.0 : 1.0 - rh_land_east * m_east[(size_t)j * km + k];
+        return wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c) * east; };
     if (rh_land_mode) {
         double s = 0, w = 0, dmax = 0; long n_dry = 0, n_land = 0;
         for (int j = 0; j < jm; j++) for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) {
@@ -1251,6 +1280,13 @@ void cAtmosphereModel::initWaterWapour() {
         printf("      AGCM: [RH-LAND] land initial surface RH: mean %.3f, below 0.5 in %.1f %% of land cells, max distance to ocean %.0f km"
                "  (RH_dry %.2f, L %.0f km)\n", w > 0 ? s / w : 0.0, n_land ? 1e2 * n_dry / n_land : 0.0, dmax / 1e3,
                rh_land_dry, rh_land_L / 1e3);
+        if (!m_east.empty()) {
+            double se = 0, we = 0;
+            for (int j = 0; j < jm; j++) { const double al = fabs(90.0 - j * 180.0 / (jm - 1)); if (al < 15.0 || al >= 35.0) continue;
+                for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) { se += m_east[(size_t)j * km + k]; we += 1.0; } }
+            printf("      AGCM: [RH-LAND-EAST] strength %.2f: mean ocean fetch to the east over 15-35 deg land %.3f\n",
+                   rh_land_east, we > 0 ? se / we : 0.0);
+        }
     }
     #pragma omp parallel for collapse(2)
     for (int j = 0; j < jm; j++) {
@@ -1298,6 +1334,15 @@ void cAtmosphereModel::initWaterWapour() {
                 RH_init += f * (rh_ocean - 0.75);
             }
             if (rh_land_mode && i_topography[j][k] > 0) RH_init = rh_land_of(j, k);
+            // ATM_RH_SIGMA_SFC=<0|1> (2026-10-03), default 0 = shipped. The Manabe-Wetherald profile below is
+            // RH_s*(sigma - 0.02)/0.98 with sigma = p/p_0, p_0 the SEA-LEVEL reference -- so RH_s is reached only by ground
+            // at sea level, and elevated ground starts drier by its own pressure: 5 % at 400 m, 7 % at 640 m. [MC-RG] (wb14):
+            // Amazon / Congo / SE Asia are given the tropical ocean's surface RH (0.805) and their mixed-layer parcels hold
+            // 0.72 against the ocean's 0.78; they fall 2.5 / 3.8 / 2.9 K theta_e short of the environment and do not convect
+            // (land<30 CAPE 2.3 J/kg, P_conv 0.1 mm/a). MW's sigma is p over the SURFACE pressure. =1 uses the column's own
+            // ground pressure p_stat(i_topography) on land; ocean columns are unchanged.
+            static const bool rh_sigma_sfc = [](){ return knob::on(knob::ATM_RH_SIGMA_SFC); }();
+            const double p_sfc = (rh_sigma_sfc && i_mount > 0 && i_mount < im) ? p_stat.x[i_mount][j][k] : 0.0;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];
@@ -1411,7 +1456,8 @@ void cAtmosphereModel::initWaterWapour() {
                 }
                 double rh_i = RH_init;
                 {
-                    const double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
+                    double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
+                    if (p_sfc > 0.0) sig = std::min(1.0, p_u / p_sfc);   // ATM_RH_SIGMA_SFC, land columns only
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
                     if (rh_i < rh_floor) rh_i = rh_floor;
                 }
