@@ -190,6 +190,19 @@ private:
     // is then not applied. Cloud-base detection is unchanged. No buoyant level -> CAPE 0 -> M_u 0 -> no convection.
     static int mcMlParcel() { static const int v = [](){
                                                     return knob::integer(knob::ATM_MC_ML_PARCEL); }(); return v; }
+    // ATM_MC_GATE_BLEND=<0|1|2> (2026-10-03), default 0 = shipped. The recurrence gate |M| > coeff_recurr (0.1 kg/m2/s) is a
+    // SWITCH: below it the updraft scalars are reset to the environment, q_c_u = 0 and the parcel never condenses, so a
+    // column rains fully or not at all. With M_u(base) = rho*c_mb*sqrt(2 CAPE), c_mb = 0.003, it opens at CAPE ~460 J/kg:
+    // ocean<30 open in 18.1 % of columns at ATM_RH_OCEAN 0.82 and 0.1 % at 0.79, and the open columns carry 100 % of
+    // g_p ([MC-GATE]) -- the 1148 -> 103 mm/a cliff (wb10a / wb11). >0 replaces the switch by a smoothstep weight
+    // g_w(|M|) from 0 at gate_lo = 0.01 to 1 at coeff_recurr: the parcel is advanced and condensed as in an open cell,
+    // then every updraft scalar is env + g_w*(parcel - env), q_c_u and c_u are scaled by g_w. Cells above coeff_recurr
+    // and below gate_lo are untouched. 1 = updraft only, 2 = also the downdraft gate.
+    static int mcGateBlend() { static const int v = [](){ return knob::integer(knob::ATM_MC_GATE_BLEND); }(); return v; }
+    static constexpr double gate_lo = 0.01;
+    static double gateWeight(double M) {
+        const double x = (std::fabs(M) - gate_lo) / (AtomMoistConvection::coeff_recurr - gate_lo);
+        return x <= 0.0 ? 0.0 : (x >= 1.0 ? 1.0 : x * x * (3.0 - 2.0 * x)); }
     static int mcDepthRamp() { static const int v = [](){ return knob::integer(knob::ATM_MC_DEPTH_RAMP); }(); return v; }
     static int mcMlLcl() { static const int v = [](){ return knob::integer(knob::ATM_MC_ML_LCL); }(); return v; }
     static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
@@ -1392,11 +1405,21 @@ void findCloudBaseLFS() {
                            - m.D_u.x[i-1][j][k] * m.s_u.x[i-1][j][k]);
 
                     double M_u_i = m.M_u.x[i][j][k];
+                    double g_w = -1.0;   // ATM_MC_GATE_BLEND weight; < 0 = cell not blended
                     if(urd && fabs(M_u_i) > coeff_recurr && fabs(M_u_prev) > coeff_recurr){
                         const double r = fabs(M_u_prev) / fabs(M_u_i);
                         nr_++; lnr_ += std::log(r); if(r > 1.0) namp++;
                     }
                     if(fabs(M_u_i) > coeff_recurr){
+                        double inv_M_u = 1.0 / M_u_i;
+                        m.q_v_u.x[i][j][k] = dummy_q_v_u * inv_M_u;
+                        m.q_c_u.x[i][j][k] = dummy_q_c_u * inv_M_u;
+                        m.v_u.x[i][j][k]   = dummy_vel_v_u * inv_M_u;
+                        m.w_u.x[i][j][k]   = dummy_vel_w_u * inv_M_u;
+                        m.s_u.x[i][j][k]   = dummy_s_u * inv_M_u;
+                    } else if(mcGateBlend() && fabs(M_u_i) > gate_lo){
+                        // ATM_MC_GATE_BLEND: the full parcel here; blended toward the environment after it has condensed
+                        g_w = gateWeight(M_u_i);
                         double inv_M_u = 1.0 / M_u_i;
                         m.q_v_u.x[i][j][k] = dummy_q_v_u * inv_M_u;
                         m.q_c_u.x[i][j][k] = dummy_q_c_u * inv_M_u;
@@ -1437,7 +1460,7 @@ void findCloudBaseLFS() {
                         const double dq0 = m.q_v_u.x[i][j][k] - qs;
                         if(dq0 > 0.0){ if(amu > coeff_recurr) ndq++; else { ndqs++; dqs_ += dq0; } }
                     }
-                    if(fabs(m.M_u.x[i][j][k]) > coeff_recurr){
+                    if(fabs(m.M_u.x[i][j][k]) > coeff_recurr || g_w >= 0.0){
                         double T_u       = mcSgz() ? (m.s_u.x[i][j][k] - gz(i)) * m.s_0 / m.cp_l
                                                    : m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
                         const double p_u = m.p_stat.x[i][j][k];
@@ -1463,6 +1486,16 @@ void findCloudBaseLFS() {
                         // (MC_t heating / MC_q drying) in rhsForcing — no longer the s_u/q_v_u budgets.
                         m.c_u.x[i][j][k] = dcond_tot * m.M_u.x[i][j][k]
                                            / (std::max(r_h_i, 0.01) * step[i]);
+                    }
+                    if(g_w >= 0.0){
+                        if(m.q_v_u.x[i][j][k] <= 0.0) m.q_v_u.x[i][j][k] = 0.0;
+                        if(m.q_c_u.x[i][j][k] <= 0.0) m.q_c_u.x[i][j][k] = 0.0;
+                        m.s_u.x[i][j][k]   = m.s.x[i][j][k] + g_w * (m.s_u.x[i][j][k]   - m.s.x[i][j][k]);
+                        m.q_v_u.x[i][j][k] = m.c.x[i][j][k] + g_w * (m.q_v_u.x[i][j][k] - m.c.x[i][j][k]);
+                        m.v_u.x[i][j][k]   = m.v.x[i][j][k] + g_w * (m.v_u.x[i][j][k]   - m.v.x[i][j][k]);
+                        m.w_u.x[i][j][k]   = m.w.x[i][j][k] + g_w * (m.w_u.x[i][j][k]   - m.w.x[i][j][k]);
+                        m.q_c_u.x[i][j][k] *= g_w;
+                        m.c_u.x[i][j][k]   *= g_w;
                     }
                     if(urd) cu_ += m.c_u.x[i][j][k] * std::max(r_h_i, 0.01) * step[i]
                                    * cos((j / (double)(m.jm - 1) - 0.5) * M_PI);
@@ -1547,6 +1580,12 @@ void findCloudBaseLFS() {
                         m.v_d.x[i][j][k]   = dummy_v_d   * inv_M_d;
                         m.w_d.x[i][j][k]   = dummy_w_d   * inv_M_d;
                         m.s_d.x[i][j][k]   = dummy_s_d   * inv_M_d;
+                    } else if(mcGateBlend() == 2 && fabs(M_d_i) > gate_lo){
+                        const double g_w = gateWeight(M_d_i), inv_M_d = 1.0 / M_d_i;
+                        m.q_v_d.x[i][j][k] = m.c.x[i][j][k] + g_w * (dummy_q_v_d * inv_M_d - m.c.x[i][j][k]);
+                        m.v_d.x[i][j][k]   = m.v.x[i][j][k] + g_w * (dummy_v_d   * inv_M_d - m.v.x[i][j][k]);
+                        m.w_d.x[i][j][k]   = m.w.x[i][j][k] + g_w * (dummy_w_d   * inv_M_d - m.w.x[i][j][k]);
+                        m.s_d.x[i][j][k]   = m.s.x[i][j][k] + g_w * (dummy_s_d   * inv_M_d - m.s.x[i][j][k]);
                     } else {
                         // Mirrors the updraft else-branch above. When |M_d| ≤ coeff_recurr
                         // the downdraft is negligible, but skipping the assignment leaves
