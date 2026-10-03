@@ -199,6 +199,12 @@ private:
     // g_w(|M|) from 0 at gate_lo = 0.01 to 1 at coeff_recurr: the parcel is advanced and condensed as in an open cell,
     // then every updraft scalar is env + g_w*(parcel - env), q_c_u and c_u are scaled by g_w. Cells above coeff_recurr
     // and below gate_lo are untouched. 1 = updraft only, 2 = also the downdraft gate.
+    // 3 (2026-10-03) = NO blend: the updraft gate threshold itself is gate_lo, the parcel is carried UNDILUTED above it.
+    // Modes 1/2 store the blended parcel and the recurrence carries it upward, so the dilution compounds level by level:
+    // a column only rains if |M_u| stays above coeff_recurr all the way up (wb22: capping land M_b at 0.06 took land<30
+    // g_p 739 -> 9 mm/a where the weight alone would leave ~60 %). With the parcel undiluted the rain scales with M_u by
+    // itself -- the q_c_u recurrence debits rho*g_p*dz from the flux M_u*q_c_u, so a weak updraft cannot rain more
+    // condensate than it carries. The downdraft gate is unchanged in mode 3.
     static int mcGateBlend() { static const int v = [](){ return knob::integer(knob::ATM_MC_GATE_BLEND); }(); return v; }
     static constexpr double gate_lo = 0.01;
     static double gateWeight(double M) {
@@ -1444,14 +1450,16 @@ void findCloudBaseLFS() {
                         const double r = fabs(M_u_prev) / fabs(M_u_i);
                         nr_++; lnr_ += std::log(r); if(r > 1.0) namp++;
                     }
-                    if(fabs(M_u_i) > coeff_recurr){
+                    // gate threshold: coeff_recurr, or gate_lo with ATM_MC_GATE_BLEND=3 (the parcel carried undiluted)
+                    const double gate_thr = (mcGateBlend() == 3) ? gate_lo : coeff_recurr;
+                    if(fabs(M_u_i) > gate_thr){
                         double inv_M_u = 1.0 / M_u_i;
                         m.q_v_u.x[i][j][k] = dummy_q_v_u * inv_M_u;
                         m.q_c_u.x[i][j][k] = dummy_q_c_u * inv_M_u;
                         m.v_u.x[i][j][k]   = dummy_vel_v_u * inv_M_u;
                         m.w_u.x[i][j][k]   = dummy_vel_w_u * inv_M_u;
                         m.s_u.x[i][j][k]   = dummy_s_u * inv_M_u;
-                    } else if(mcGateBlend() && fabs(M_u_i) > gate_lo){
+                    } else if(mcGateBlend() && mcGateBlend() != 3 && fabs(M_u_i) > gate_lo){
                         // ATM_MC_GATE_BLEND: the full parcel here; blended toward the environment after it has condensed
                         g_w = gateWeight(M_u_i);
                         double inv_M_u = 1.0 / M_u_i;
@@ -1494,7 +1502,7 @@ void findCloudBaseLFS() {
                         const double dq0 = m.q_v_u.x[i][j][k] - qs;
                         if(dq0 > 0.0){ if(amu > coeff_recurr) ndq++; else { ndqs++; dqs_ += dq0; } }
                     }
-                    if(fabs(m.M_u.x[i][j][k]) > coeff_recurr || g_w >= 0.0){
+                    if(fabs(m.M_u.x[i][j][k]) > gate_thr || g_w >= 0.0){
                         double T_u       = mcSgz() ? (m.s_u.x[i][j][k] - gz(i)) * m.s_0 / m.cp_l
                                                    : m.s_u.x[i][j][k] * m.s_0 / m.cp_l;   // parcel temp [K]
                         const double p_u = m.p_stat.x[i][j][k];
