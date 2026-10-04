@@ -1194,6 +1194,7 @@ void cAtmosphereModel::initWaterWapour() {
     // Main Computation Loop: water vapour field
     // ========================================================================
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
+    const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
     // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
     // note below). [MC-LO]/radial-slice census (lcl_1, rho2_82ml, wb7): desert boundary layers start as humid as rain
     // forests (Arabia / Sahara q 17.5 g/kg at the ground, Amazon 16.2) and nothing changes that on an affordable run, so
@@ -1345,6 +1346,21 @@ void cAtmosphereModel::initWaterWapour() {
             // ground pressure p_stat(i_topography) on land; ocean columns are unchanged.
             static const bool rh_sigma_sfc = [](){ return knob::on(knob::ATM_RH_SIGMA_SFC); }();
             const double p_sfc = (rh_sigma_sfc && i_mount > 0 && i_mount < im) ? p_stat.x[i_mount][j][k] : 0.0;
+            // ATM_RH_OCEAN_ML=<depth m> (2026-10-04), default 0 = off (block skipped, byte-identical). A well-mixed marine boundary
+            // layer over EXTRATROPICAL ocean: below <depth> the vapour is the surface value carried upward (constant q), so RH
+            // RISES with height to the 0.98 cap, instead of Manabe-Wetherald's fall with pressure. Weight 0 for |lat| <= 30,
+            // smoothstep to 1 at 40 deg, ocean columns only -- the tropics, where the convection stack is tuned, are untouched.
+            // WHY (STORM, wb27 at 87E): ocean 35-65 rains 138 mm/a against NASA 1107 while evaporating 579. The stratiform deck sits
+            // at 1.5-4 km (RH > H_crit there); below ~1.2 km the prescribed RH falls 0.76 -> 0.67 while H_crit(p) rises to 0.91, so the
+            // layer is cloud-free and evaporates the rain: 30 % reaches the sea at 40-56S, 6 % at 36S. Land at 1200 m, where the deck
+            // touches the ground, keeps 96 %. A global cut of the evaporation (ATM_RAIN_AREA 0.05 / 0.02, wb28) floods the tropics.
+            // A scaffold for the missing boundary-layer mixing, like ATM_RH_OCEAN: evaporation cannot build this layer in 120 s.
+            double q_ml0 = -1.0, ml_w = 0.0;
+            if (rh_ocean_ml > 0.0 && i_mount == 0) {
+                const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+                const double x = (alat - 30.0) / 10.0;
+                ml_w = (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
+            }
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];
@@ -1477,6 +1493,13 @@ void cAtmosphereModel::initWaterWapour() {
                     const double b = (phi_deg - 55.0) / 15.0;
                     rh_i *= 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
                     if (rh_i > 0.98) rh_i = 0.98;
+                }
+                if (ml_w > 0.0) {                                    // ATM_RH_OCEAN_ML, see above the loop
+                    if (i == 0) q_ml0 = rh_i * q_sat;
+                    else if (q_ml0 >= 0.0 && get_layer_height(i) <= rh_ocean_ml) {
+                        const double rh_ml = std::min(0.98, q_ml0 / q_sat);
+                        if (rh_ml > rh_i) rh_i += ml_w * (rh_ml - rh_i);
+                    }
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
 //                c.x[i][j][k]     = 1.5 * c.x[i][j][k];                  // a very big cloud at 2 km and tends to reach the ground in higher latitudes
