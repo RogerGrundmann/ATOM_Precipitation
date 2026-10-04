@@ -1195,6 +1195,7 @@ void cAtmosphereModel::initWaterWapour() {
     // ========================================================================
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
+    const double rh_ocean_ml_s = knob::real(knob::ATM_RH_OCEAN_ML_STRENGTH);   // 0..1 partial mixing, default 1
     // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
     // note below). [MC-LO]/radial-slice census (lcl_1, rho2_82ml, wb7): desert boundary layers start as humid as rain
     // forests (Arabia / Sahara q 17.5 g/kg at the ground, Amazon 16.2) and nothing changes that on an affordable run, so
@@ -1360,6 +1361,11 @@ void cAtmosphereModel::initWaterWapour() {
                 const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
                 const double x = (alat - 30.0) / 10.0;
                 ml_w = (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
+                // ATM_RH_OCEAN_ML_STRENGTH=<0..1>, default 1 (x1.0, the ON branch unchanged bit for bit): PARTIAL mixing -- RH moves
+                // this fraction of the way from the Manabe-Wetherald value to the well-mixed one. Fully mixed (wb32a/b, 1000 / 1500 m)
+                // the layer sits 0.13-0.22 above H_crit, holds 0.14-0.35 g/kg of cloud and drizzles 10 / 31 mm/d at 40-56S (ocean 35-65
+                // 2984 / 9732 mm/a against NASA 1107); depth is too coarse a dose (one model level ~ +3 mm/d).
+                ml_w *= rh_ocean_ml_s;
             }
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
