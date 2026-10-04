@@ -1196,6 +1196,8 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
     const double rh_ocean_ml_s = knob::real(knob::ATM_RH_OCEAN_ML_STRENGTH);   // 0..1 partial mixing, default 1
+    const double rh_sigma_lat = knob::real(knob::ATM_RH_SIGMA_LAT);             // deg, 0 = off; read once, outside the parallel region
+    const bool   rh_sigma_lat_ocean = knob::on(knob::ATM_RH_SIGMA_LAT_OCEAN);
     // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
     // note below). [MC-LO]/radial-slice census (lcl_1, rho2_82ml, wb7): desert boundary layers start as humid as rain
     // forests (Arabia / Sahara q 17.5 g/kg at the ground, Amazon 16.2) and nothing changes that on an affordable run, so
@@ -1347,6 +1349,22 @@ void cAtmosphereModel::initWaterWapour() {
             // ground pressure p_stat(i_topography) on land; ocean columns are unchanged.
             static const bool rh_sigma_sfc = [](){ return knob::on(knob::ATM_RH_SIGMA_SFC); }();
             const double p_sfc = (rh_sigma_sfc && i_mount > 0 && i_mount < im) ? p_stat.x[i_mount][j][k] : 0.0;
+            // ATM_RH_SIGMA_LAT=<deg> (2026-10-04), default 0 = off (block skipped, byte-identical): poleward of <deg> (smoothstep
+            // over 10 deg) the Manabe-Wetherald sigma is p over the COLUMN'S OWN surface pressure instead of p/p_0 -- land columns,
+            // and ocean columns too with ATM_RH_SIGMA_LAT_OCEAN=1. WHY (LAND-POLAR, wb34): this model's surface pressure follows the
+            // surface temperature (p_sl = rho_0 R T_s), so cold columns stand at 903-911 hPa AT SEA LEVEL and p/p_0 reads them as
+            // elevated: the initial surface RH is 0.76 at 60N land, 0.71 at 68N land, 0.68 at 76N ocean -- at or below H_crit(p)
+            // (0.76 / 0.74 / 0.74), so the lowest 1-1.5 km is cloud-free; land 56-64N rains 0.08-0.7 mm/d against NASA 1.6-1.9,
+            // land 65-90 8 mm/a against 295, ocean 65-90 62 against 428. With the column's own pressure: 0.84 / 0.80 / 0.76.
+            // NOT the continentality term: ATM_RH_LAND's drying is multiplied by the descent Gaussian (25 +- 10 deg) and vanishes here.
+            // The latitude limit keeps it off elevated land equatorward of it (ATM_RH_SIGMA_SFC on every land column flooded
+            // the Tibetan and tropical highlands, wb15).
+            double sig_lat_w = 0.0, p_col_sfc = 0.0;
+            if (rh_sigma_lat > 0.0 && i_mount < im && (i_mount > 0 || rh_sigma_lat_ocean)) {
+                const double x = (fabs(90.0 - j * 180.0 / (double)(jm - 1)) - rh_sigma_lat) / 10.0;
+                sig_lat_w = (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
+                p_col_sfc = p_stat.x[i_mount][j][k];
+            }
             // ATM_RH_OCEAN_ML=<depth m> (2026-10-04), default 0 = off (block skipped, byte-identical). A well-mixed marine boundary
             // layer over EXTRATROPICAL ocean: below <depth> the vapour is the surface value carried upward (constant q), so RH
             // RISES with height to the 0.98 cap, instead of Manabe-Wetherald's fall with pressure. Weight 0 for |lat| <= 30,
@@ -1482,6 +1500,7 @@ void cAtmosphereModel::initWaterWapour() {
                 {
                     double sig = (p_0 > 0.0) ? p_u / p_0 : 1.0;
                     if (p_sfc > 0.0) sig = std::min(1.0, p_u / p_sfc);   // ATM_RH_SIGMA_SFC, land columns only
+                    if (sig_lat_w > 0.0 && p_col_sfc > 0.0) sig += sig_lat_w * (std::min(1.0, p_u / p_col_sfc) - sig);   // ATM_RH_SIGMA_LAT
                     rh_i = RH_init * std::max(0.0, (sig - 0.02) / 0.98);
                     if (rh_i < rh_floor) rh_i = rh_floor;
                 }
