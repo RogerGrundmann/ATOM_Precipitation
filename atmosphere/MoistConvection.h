@@ -218,10 +218,16 @@ private:
     // coastal (2-4S 75-76W, 6-7N 32-33E). The ocean, whose parcels differ little, rains a near-uniform 31-32 mm/d at a mean
     // M_b of 0.037. >0 saturates the seed over LAND columns: M_b -> M_s*tanh(M_b/M_s) -- unchanged for M_b << M_s, never
     // above M_s. A scaffold for the missing CAPE consumption (a relaxation closure would do this by itself).
+    // ATM_MC_MB_SAT_OCEAN=<kg/(m2 s)> (2026-10-04), default 0 = off: the same saturation for OCEAN columns. wb27 (600 from scratch):
+    // tropical-ocean rain is far too peaked -- |lat| <= 30 ocean p50/p90/p99 2.1 / 18.3 / 28.6 mm/d against NASA 2.6 / 6.5 / 8.4;
+    // 24 % of the area rains > 8 mm/d and carries 77 % of the rain (NASA 2 % / 7 %); ocean 0-15 3377 mm/a against 1440. Mean
+    // M_b 0.032 at 5.6 mm/d, so M_s ~0.035-0.045 is a ceiling of ~6-8 mm/d. Separate from the land knob: the two surfaces differ.
     double mbSat(double M_b, int j, int k) const {
         static const double M_s = knob::real(knob::ATM_MC_MB_SAT_LAND);
-        if (M_s <= 0.0 || m.i_topography[j][k] <= 0) return M_b;
-        return M_s * std::tanh(M_b / M_s); }
+        static const double M_o = knob::real(knob::ATM_MC_MB_SAT_OCEAN);
+        const double S = (m.i_topography[j][k] > 0) ? M_s : M_o;
+        if (S <= 0.0) return M_b;
+        return S * std::tanh(M_b / S); }
     static int mcDepthRamp() { static const int v = [](){ return knob::integer(knob::ATM_MC_DEPTH_RAMP); }(); return v; }
     static int mcMlLcl() { static const int v = [](){ return knob::integer(knob::ATM_MC_ML_LCL); }(); return v; }
     static double thetaE(double T, double p, double q, const cAtmosphereModel& mm) {
