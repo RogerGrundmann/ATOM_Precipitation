@@ -139,6 +139,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_SIGMA_LAT, "0", Result, 'R', "poleward of this latitude (deg, 10 deg taper) the initial RH profile uses sigma = p / the column's own surface pressure, land columns (0 = off)") \
     X(ATM_RH_SIGMA_LAT_OCEAN, "0", Result, 'R', "ATM_RH_SIGMA_LAT also on ocean columns") \
     X(ATM_RH_LAND_EAST, "0", Result, 'P', "ATM_RH_LAND: strength (0..1) by which open ocean to the EAST (trade-wind fetch, 2000 km) cancels the subtropical descent drying") \
+    X(ATM_RH_LAND_EAST_MAX, "-1", Result, 'P', "ATM_RH_LAND_EAST: largest initial land surface RH above the wet end that the east fetch may give (0 = clamp at the wet end; -1 = no clamp)") \
     X(ATM_RH_LAND_DRY, "0.35", Result, 'P', "ATM_RH_LAND: driest land surface RH (descent core, far inland)") \
     X(ATM_RH_LAND_L, "1500", Result, 'P', "ATM_RH_LAND: continentality e-folding distance from the ocean, km") \
     X(ATM_RH_OCEAN, "0.75", Result, 'R', "initial surface RH over tropical ocean (|lat|<=30, taper to 45); the marine BL keeps it on affordable runs") \

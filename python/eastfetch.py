@@ -38,10 +38,12 @@ while pq:
 d[:,km-1]=d[:,0]
 al=np.abs(lat)[:,None]*np.ones((1,km)); sdesc=np.exp(-((al-25)/10)**2); c=1-np.exp(-d/L_C)
 wet=0.75+np.clip((45-al)/15,0,1)*(RH_OCEAN-0.75)
-def rhs(strength,clamp=False):
+def rhs(strength,clamp=False,over=None):
     east=1-strength*me
     if clamp: east=np.maximum(east,0.)
-    return wet-(wet-RH_DRY)*sdesc*(0.5+0.5*c)*east, east
+    v=wet-(wet-RH_DRY)*sdesc*(0.5+0.5*c)*east
+    if over is not None: v=np.minimum(v,wet+over)   # ATM_RH_LAND_EAST_MAX
+    return v, east
 r,east=rhs(S); rc,_=rhs(S,True); r0,_=rhs(0.)
 P,C,N=o['Precipitation'],o['PrecipitationConv'],o['Precipitation_NASA']
 reg={'E Australia':(-35,-18,145,153),'Madagascar':(-25,-13,43,50),'E Mexico coast':(18,26,-100,-96),'S Brazil':(-30,-18,-55,-42),'SE Africa':(-28,-15,28,38),'S China':(20,32,102,120),'SE US':(27,36,-95,-78),'India':(10,28,72,88),'Arabia':(16,28,42,56),'Sahara':(18,30,-10,25),'W Australia':(-30,-20,115,128)}
@@ -69,3 +71,7 @@ for s_,cl in[(1.35,False),(1.35,True),(1.6,True),(2.0,True),(3.0,True)]:
     rr,_=rhs(s_,cl); R=resp(rr)
     print(f'   {s_:4.2f} {"clamp" if cl else "     "} | {(R*w)[low].sum()/w[low].sum():5.2f} | '+' | '.join(f'{regm(R,n):5.2f}' for n in('E Australia','S China','SE US','S Brazil','Madagascar','Arabia'))+f' | {100*w[low&(R>1)].sum()/w[low].sum():4.1f}')
 print('   NASA            | '+f'{(N*w)[low].sum()/w[low].sum():5.2f} | '+' | '.join(f'{regm(N,n):5.2f}' for n in('E Australia','S China','SE US','S Brazil','Madagascar','Arabia'))+f' | {100*w[low&(N>1)].sum()/w[low].sum():4.1f}')
+print('   with ATM_RH_LAND_EAST_MAX (cap = wet end + dRH):')
+for s_,ov in[(1.35,0.0),(1.35,0.01),(1.35,0.015),(1.35,0.02),(1.6,0.01),(1.6,0.015),(1.8,0.01),(1.8,0.015)]:
+    rr,_=rhs(s_,False,ov); R=resp(rr)
+    print(f'   {s_:4.2f} +{ov:.3f} | {(R*w)[low].sum()/w[low].sum():5.2f} | '+' | '.join(f'{regm(R,n):5.2f}' for n in('E Australia','S China','SE US','S Brazil','Madagascar','Arabia'))+f' | {100*w[low&(R>1)].sum()/w[low].sum():4.1f}')

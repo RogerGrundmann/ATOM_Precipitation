@@ -1252,6 +1252,13 @@ void cAtmosphereModel::initWaterWapour() {
     // The drying is multiplied by (1 - strength * m_east). Needs only the land mask. Known miss: east coasts kept dry by
     // a coast-parallel monsoon jet (Oman / Somalia).
     const double rh_land_east = knob::real(knob::ATM_RH_LAND_EAST);
+    // ATM_RH_LAND_EAST_MAX=<dRH> (2026-10-05), default -1 = no clamp (the value returned untouched). The factor (1 - strength*m_east)
+    // goes NEGATIVE once strength > 1 where the fetch is nearly complete, so the land starts MOISTER than the wet end it is fed from:
+    // at 1.35 (working branch, wb45) E Australia has m_east 0.85, factor -0.15, surface RH 0.846 (max 0.908) against the wet end 0.82
+    // and rains 6.07 mm/d against NASA 1.86 (5.04 of it stratiform); Madagascar 7.3 / 4.3. Rain on subtropical lowland is a cliff in
+    // this RH (0.80-0.84: 2.5 mm/d, 0.84-0.88: 6.7, above: 10.5; NASA 3.1-3.7), and the 16 % of the 15-35 deg land area with a
+    // negative factor carries 87 % of the band's rain (python/eastfetch.py). With the knob the RH is at most wet + <dRH>.
+    const double rh_land_east_max = knob::real(knob::ATM_RH_LAND_EAST_MAX);
     std::vector<double> m_east;
     if (rh_land_mode && rh_land_east > 0.0) {
         const double a = 6.371e6, dlon = 2.0 * M_PI / (km - 1), Le = 2.0e6;
@@ -1280,7 +1287,8 @@ void cAtmosphereModel::initWaterWapour() {
         double wet = 0.75;
         if (rh_land_mode == 2) wet += ((alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0) * (rh_ocean - 0.75);
         const double east = m_east.empty() ? 1.0 : 1.0 - rh_land_east * m_east[(size_t)j * km + k];
-        return wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c) * east; };
+        const double v = wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c) * east;
+        return (rh_land_east_max >= 0.0) ? std::min(v, wet + rh_land_east_max) : v; };
     if (rh_land_mode) {
         double s = 0, w = 0, dmax = 0; long n_dry = 0, n_land = 0;
         for (int j = 0; j < jm; j++) for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) {
