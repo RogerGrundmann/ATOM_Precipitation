@@ -12,7 +12,7 @@ for f in sys.argv[1:]:
         m=land&((abs(lat)>=a)&(abs(lat)<b))[:,None]; g=lambda A:(A*w)[m].sum()/w[m].sum()*365
         print(f'  land {a:2d}-{b}: model {g(P):6.0f}  NASA {g(N):6.0f}')
     reg={'India':(10,28,72,88),'S China':(20,32,102,120),'SE US':(27,36,-95,-78),'E Austral':(-35,-18,145,153),'SE Africa':(-28,-15,28,38),'S Brazil':(-30,-18,-55,-42),
-         'Sahara':(18,30,-10,25),'Arabia':(16,28,42,56),'Oman':(17,24,52,59),'W Austral':(-30,-20,115,128),'Namib':(-28,-18,12,18),'Amazon':(-10,2,-70,-52),'Congo':(-5,5,15,28)}
+         'Sahara':(18,30,-10,25),'Arabia':(16,28,42,56),'Oman':(17,24,52,59),'W Austral':(-30,-20,115,128),'Namib':(-28,-18,12,18),'Amazon':(-10,2,-70,-52),'Congo':(-5,5,15,28),'Mexico plt':(18,30,-108,-96),'Highveld':(-32,-22,24,32)}
     for nm,(a,b,c,d) in reg.items():
         m=land&((lat>=a)&(lat<=b))[:,None]&((lon>=c)&(lon<=d))[None,:]; g=lambda A:(A*w)[m].sum()/w[m].sum()
         print(f'  {nm:10s} model {g(P):6.2f} mm/d   NASA {g(N):5.2f}   max cell {P[m].max():6.1f}')

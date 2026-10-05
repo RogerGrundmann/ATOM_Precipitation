@@ -127,6 +127,9 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_CRIT, "0.30", Result, 'P', "0.30 since 08-31") \
     X(ATM_RH_MIN, "0.65", Result, 'P', "0.65") \
     X(ATM_RH_MIN_PTOP, "482.0", Result, 'P', "482 hPa (fitted)") \
+    X(ATM_RH_OCEAN_SST, "0", Result, 'P', "initial ocean surface RH follows the sea-surface temperature: ATM_RH_OCEAN at ATM_RH_OCEAN_SST_REF, lower by this much per K colder (1/K; 0 = off, one RH on every tropical ocean column)") \
+    X(ATM_RH_OCEAN_SST_REF, "29.5", Result, 'P', "ATM_RH_OCEAN_SST: sea-surface temperature at and above which the surface RH is ATM_RH_OCEAN, deg C") \
+    X(ATM_RH_OCEAN_SST_MAX, "0.03", Result, 'P', "ATM_RH_OCEAN_SST: largest RH reduction (cold-water floor)") \
     X(ATM_RH_LAND, "0", Result, 'R', "land initial surface RH from subtropical descent x continentality (paleo-safe; 0 = every land column 0.75; 2 = wet end follows ATM_RH_OCEAN in the tropics)") \
     X(ATM_RH_LAND_QCAP, "0", Result, 'R', "cap initial land vapour at the zonal-mean ocean value at the same height above the surface (land hotter than the sea cannot be moister)") \
     X(ATM_RH_SIGMA_SFC, "0", Result, 'R', "initial RH profile sigma = p / local ground pressure on land (was p/p_0: elevated ground starts drier)") \

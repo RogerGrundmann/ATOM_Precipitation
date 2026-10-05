@@ -1196,6 +1196,9 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
     const double rh_ocean_ml_s = knob::real(knob::ATM_RH_OCEAN_ML_STRENGTH);   // 0..1 partial mixing, default 1
+    const double rh_ocean_sst     = knob::real(knob::ATM_RH_OCEAN_SST);       // 1/K, 0 = off
+    const double rh_ocean_sst_ref = knob::real(knob::ATM_RH_OCEAN_SST_REF);   // deg C
+    const double rh_ocean_sst_max = knob::real(knob::ATM_RH_OCEAN_SST_MAX);
     const double rh_sigma_lat = knob::real(knob::ATM_RH_SIGMA_LAT);             // deg, 0 = off; read once, outside the parallel region
     const bool   rh_sigma_lat_ocean = knob::on(knob::ATM_RH_SIGMA_LAT_OCEAN);
     // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
@@ -1338,6 +1341,20 @@ void cAtmosphereModel::initWaterWapour() {
                 const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
                 const double f = (alat <= 30.0) ? 1.0 : (alat >= 45.0) ? 0.0 : (45.0 - alat) / 15.0;
                 RH_init += f * (rh_ocean - 0.75);
+                // ATM_RH_OCEAN_SST=<1/K> (2026-10-05, user: "humidity must follow the surface temperature"), default 0 = off (block
+                // skipped, byte-identical). ATM_RH_OCEAN puts ONE relative humidity on every tropical ocean column: wb35b at 220 has
+                // surface RH 0.81 +- 0.01 from 18S to 18N, evaporation flat at 2.7-3.0 mm/d with no trade-wind maximum, and rain bands
+                // 30-43 deg wide with no centre line against NASA's 9-30 (the equatorial cold tongue rains 2.5-4 mm/d against 1).
+                // Here the surface RH is ATM_RH_OCEAN where the sea is at least ATM_RH_OCEAN_SST_REF warm and falls by <slope> per K
+                // below it, by at most ATM_RH_OCEAN_SST_MAX; same tropical taper f, so the extratropical ocean (STORM) is untouched.
+                // FIT (wb35b, |lat| <= 30, by SST): model / NASA rain 1.77 / 1.53 / 1.35 / 1.07 at 26-27 / 27-28 / 28-29 / 29-30 C and
+                // ~0.5 below 25 C; 0.02 in RH is a factor ~1.65 in tropical-ocean rain (wb29a vs wb31a) -> slope ~0.007 /K from
+                // 29.5 C, floor 0.03. A scaffold like ATM_RH_OCEAN: the real pattern also needs moisture convergence, which no
+                // affordable run has (rain follows SST with r 0.88 here, 0.60 in NASA).
+                if (rh_ocean_sst > 0.0) {
+                    const double dT = rh_ocean_sst_ref - (t.x[0][j][k] * t_0 - 273.15);
+                    if (dT > 0.0) RH_init -= f * std::min(rh_ocean_sst_max, rh_ocean_sst * dT);
+                }
             }
             if (rh_land_mode && i_topography[j][k] > 0) RH_init = rh_land_of(j, k);
             // ATM_RH_SIGMA_SFC=<0|1> (2026-10-03), default 0 = shipped. The Manabe-Wetherald profile below is
