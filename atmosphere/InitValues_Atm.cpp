@@ -1199,6 +1199,7 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean_sst     = knob::real(knob::ATM_RH_OCEAN_SST);       // 1/K, 0 = off
     const double rh_ocean_sst_ref = knob::real(knob::ATM_RH_OCEAN_SST_REF);   // deg C
     const double rh_ocean_sst_max = knob::real(knob::ATM_RH_OCEAN_SST_MAX);
+    const double rh_ocean_sst_cold = knob::real(knob::ATM_RH_OCEAN_SST_COLD); // deg C, -99 = no cut-off
     const double rh_sigma_lat = knob::real(knob::ATM_RH_SIGMA_LAT);             // deg, 0 = off; read once, outside the parallel region
     const bool   rh_sigma_lat_ocean = knob::on(knob::ATM_RH_SIGMA_LAT_OCEAN);
     // ATM_RH_LAND=<0|1> (2026-10-02), default 0 = shipped (every land column starts at 0.75 -- see the LATENT DEFECT
@@ -1351,9 +1352,24 @@ void cAtmosphereModel::initWaterWapour() {
                 // ~0.5 below 25 C; 0.02 in RH is a factor ~1.65 in tropical-ocean rain (wb29a vs wb31a) -> slope ~0.007 /K from
                 // 29.5 C, floor 0.03. A scaffold like ATM_RH_OCEAN: the real pattern also needs moisture convergence, which no
                 // affordable run has (rain follows SST with r 0.88 here, 0.60 in NASA).
+                // ATM_RH_OCEAN_SST_COLD=<deg C> (2026-10-05), default -99 = no cut-off (factor exactly skipped): the reduction is
+                // ramped linearly from 0 at <cold> to its full value at <cold> + 1 K. WHY (wb41, slope 0.007, max 0.02): the
+                // response is a cliff on cool water -- rain at 25-26 C 2.31 -> 0.16 mm/d (NASA 1.77), the all-stratiform rain below
+                // 25 C 0.9 -> 0.05-0.09 (NASA 1.5-1.7), rainless tropical ocean 1 % -> 38 % (NASA 7 %), ocean 15-35 741 -> 305 --
+                // where 0.02 in RH is a factor 14, not the 1.65 of the warm ocean. The excess to remove sits at 26-29 C only.
+                // A FIT to this model's rain, though real surface RH is also lowest in the trade-wind belts and higher over both
+                // the warm pool and the cool stratus regions.
                 if (rh_ocean_sst > 0.0) {
-                    const double dT = rh_ocean_sst_ref - (t.x[0][j][k] * t_0 - 273.15);
-                    if (dT > 0.0) RH_init -= f * std::min(rh_ocean_sst_max, rh_ocean_sst * dT);
+                    const double T_s = t.x[0][j][k] * t_0 - 273.15;
+                    const double dT = rh_ocean_sst_ref - T_s;
+                    if (dT > 0.0) {
+                        double red = std::min(rh_ocean_sst_max, rh_ocean_sst * dT);
+                        if (rh_ocean_sst_cold > -90.0) {
+                            const double x = T_s - rh_ocean_sst_cold;
+                            red *= (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x;
+                        }
+                        RH_init -= f * red;
+                    }
                 }
             }
             if (rh_land_mode && i_topography[j][k] > 0) RH_init = rh_land_of(j, k);

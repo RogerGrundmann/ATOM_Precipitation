@@ -1,4 +1,5 @@
-import sys,numpy as np
+import sys,os,numpy as np
+IT=os.environ.get('ITER','220')   # checkpoint to read; falls back to 220 (screens run nm 60 since 2026-10-05)
 # tropical-ocean rain structure from radial VTK slices at 220: Pacific band width / peak by sector, rain binned by initial SST,
 # and ocean surface RH / evaporation by latitude.  usage: pacband.py <run> [<run> ...]   (reads output_<run>/)
 W=('Temperature','WaterVapour','PressureStatic','Evaporation','Topography','Precipitation','PrecipitationConv','Precipitation_NASA')
@@ -11,9 +12,10 @@ def rd(f):
     return o
 lat=90-np.arange(181); lon=np.where(np.arange(361)<=180,np.arange(361),np.arange(361)-360); w=np.cos(np.radians(lat))[:,None]*np.ones((1,361))
 for n in sys.argv[1:]:
-    o=rd(f'output_{n}/0Ma_smooth_Atm_radial_0_220.vtk'); T0=rd(f'output_{n}/0Ma_smooth_Atm_radial_0_0.vtk')['Temperature']
+    it=IT if os.path.exists(f'output_{n}/0Ma_smooth_Atm_radial_0_{IT}.vtk') else '220'
+    o=rd(f'output_{n}/0Ma_smooth_Atm_radial_0_{it}.vtk'); T0=rd(f'output_{n}/0Ma_smooth_Atm_radial_0_0.vtk')['Temperature']
     P,C,N=o['Precipitation'],o['PrecipitationConv'],o['Precipitation_NASA']; oc=o['Topography']==0
-    print(f'== {n}')
+    print(f'== {n} (iteration {it})')
     for nm,(a,b) in {'E Pacific 150W-100W':(-150,-100),'C Pacific 180-150W':(-180,-150),'W Pacific 150E-180':(150,180)}.items():
         k=(lon>=a)&(lon<=b); pm=np.array([P[j,k&oc[j]].mean() for j in range(60,121)]); nn=np.array([N[j,k&oc[j]].mean() for j in range(60,121)])
         eq=lambda A:A[25:36].mean()   # 5N..5S

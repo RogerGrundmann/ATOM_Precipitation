@@ -7,7 +7,9 @@ def rd(f):
             if nm in('Precipitation','PrecipitationConv','Precipitation_NASA','Topography','Landscape') and nm not in o: o[nm]=np.array(L[n+2:n+2+65341],float).reshape(181,361)
     return o
 lat=90-np.arange(181); lon=np.where(np.arange(361)<=180,np.arange(361),np.arange(361)-360); w=np.cos(np.radians(lat))[:,None]*np.ones((1,361))
-R={n:rd(f'output_{n}/0Ma_smooth_Atm_radial_0_220.vtk') for n in sys.argv[1:]}
+import os
+IT=os.environ.get('ITER','220')   # checkpoint to read (screens run nm 60 since 2026-10-05)
+R={n:rd(f'output_{n}/0Ma_smooth_Atm_radial_0_{IT if os.path.exists(f"output_{n}/0Ma_smooth_Atm_radial_0_{IT}.vtk") else 220}.vtk') for n in sys.argv[1:]}
 T=R[sys.argv[1]]['Topography']; land=T>0; N=R[sys.argv[1]]['Precipitation_NASA']
 print('land rain by latitude, mm/d: total (conv) per run | NASA')
 for c in range(-22,23,4):
