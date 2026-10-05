@@ -549,7 +549,7 @@ void cAtmosphereModel::paraview_vtk_radial(string &Name_Bathymetry_File,
 
 //    dump_radial("r_dry", r_dry, 1.0, i_radial, Atmosphere_vtk_radial_File);
     dump_radial("r_humid", r_humid, 1.0, i_radial, Atmosphere_vtk_radial_File);
-//    dump_radial("HumidityRel", HumidityRel, 1.0, i_radial, Atmosphere_vtk_radial_File);
+    dump_radial("HumidityRel", HumidityRel, 1.0, i_radial, Atmosphere_vtk_radial_File);   // relative humidity, % (r_humid above is the moist-air DENSITY)
 //    dump_radial("TempDewPoint", TempDewPoint, 1.0, i_radial, Atmosphere_vtk_radial_File);
 //    dump_radial("TempStand", TempStand, 1.0, i_radial, Atmosphere_vtk_radial_File);
 
@@ -1024,7 +1024,7 @@ void cAtmosphereModel::paraview_vtk_longal(string &Name_Bathymetry_File,
 
 //    dump_longal("r_dry", r_dry, 1.0, j_longal, Atmosphere_vtk_longal_File);
     dump_longal("r_humid", r_humid, 1.0, j_longal, Atmosphere_vtk_longal_File);
-//    dump_longal("HumidityRel", HumidityRel, 1.0, j_longal, Atmosphere_vtk_longal_File);
+    dump_longal("HumidityRel", HumidityRel, 1.0, j_longal, Atmosphere_vtk_longal_File);   // relative humidity, % (r_humid above is the moist-air DENSITY)
 //    dump_longal("TempDewPoint", TempDewPoint, 1.0, j_longal, Atmosphere_vtk_longal_File);
 //    dump_longal("TempStand", TempStand, 1.0, j_longal, Atmosphere_vtk_longal_File);
 
