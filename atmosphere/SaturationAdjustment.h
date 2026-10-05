@@ -321,7 +321,8 @@ private:
                     // Under ATM_CLOUD_FRAC a cell can be cloudy while the GRID MEAN is
                     // subsaturated, so entry cannot be conditioned on q_v > q_sat alone: a cell
                     // above the critical humidity must be admitted even with no condensate yet.
-                    const bool frac_active = (q_v_old + q_c_old + q_i_old) > hCrit(p_local) * q_sat;
+                    const double p_cf = CloudFraction::pEff(m, p_local, j, k);   // ATM_HCRIT_SFC; == p_local when off
+                    const bool frac_active = (q_v_old + q_c_old + q_i_old) > hCrit(p_cf) * q_sat;
                     if ((q_v_old > q_sat && alpha_entry > 0.01) || frac_active ||
                         (q_v_old < q_sat &&
                         (q_c_old > 1e-12 || q_i_old > 1e-12))) {
@@ -404,7 +405,7 @@ private:
                             // that saturation, rather than being dried to it.
                             {
                                 const double q_t_b = q_v_b + q_c_b + q_i_b;
-                                const double q_c_eq = qcEquilibrium(q_t_b, q_v_target, p_local);
+                                const double q_c_eq = qcEquilibrium(q_t_b, q_v_target, p_cf);
                                 q_v_target = std::max(0.0, q_t_b - q_c_eq);
                             }
 

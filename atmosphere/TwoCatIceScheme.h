@@ -535,7 +535,7 @@ private:
                                               + std::max(0.0, m.cloud.x[i][j][k])
                                               + std::max(0.0, m.ice.x[i][j][k]);
                         const double f_cld = CloudFraction::effectiveFraction(
-                                q_t_frac, q_sat, p_u,
+                                q_t_frac, q_sat, CloudFraction::pEff(m, p_u, j, k),
                                 std::max(0.0, m.cloud.x[i][j][k]) + std::max(0.0, m.ice.x[i][j][k]));
                         const double cloud_in = m.cloud.x[i][j][k] / f_cld;   // in-cloud water
 

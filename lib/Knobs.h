@@ -130,6 +130,8 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_LAND, "0", Result, 'R', "land initial surface RH from subtropical descent x continentality (paleo-safe; 0 = every land column 0.75; 2 = wet end follows ATM_RH_OCEAN in the tropics)") \
     X(ATM_RH_LAND_QCAP, "0", Result, 'R', "cap initial land vapour at the zonal-mean ocean value at the same height above the surface (land hotter than the sea cannot be moister)") \
     X(ATM_RH_SIGMA_SFC, "0", Result, 'R', "initial RH profile sigma = p / local ground pressure on land (was p/p_0: elevated ground starts drier)") \
+    X(ATM_HCRIT_SFC, "0", Result, 'P', "land columns: the stratiform cloud threshold H_crit is evaluated at sigma = p / the column's own surface pressure (H_crit -> 1 at the ground on a plateau as at sea level); not the convection scheme") \
+    X(ATM_HCRIT_SFC_LAT, "0", Result, 'P', "ATM_HCRIT_SFC: full weight equatorward of this latitude, none from 10 deg poleward of it (deg; 0 = every latitude)") \
     X(ATM_RH_SIGMA_LAT, "0", Result, 'R', "poleward of this latitude (deg, 10 deg taper) the initial RH profile uses sigma = p / the column's own surface pressure, land columns (0 = off)") \
     X(ATM_RH_SIGMA_LAT_OCEAN, "0", Result, 'R', "ATM_RH_SIGMA_LAT also on ocean columns") \
     X(ATM_RH_LAND_EAST, "0", Result, 'P', "ATM_RH_LAND: strength (0..1) by which open ocean to the EAST (trade-wind fetch, 2000 km) cancels the subtropical descent drying") \

@@ -94,6 +94,41 @@ namespace CloudFraction {
         return (h > 1.0) ? 1.0 : ((h < 0.0) ? 0.0 : h);
     }
 
+    // ATM_HCRIT_SFC=<0|1> (2026-10-05), default 0 = off (pEff returns its argument untouched, byte-identical), with
+    // ATM_HCRIT_SFC_LAT=<deg> (0 = every latitude; else full weight equatorward of <deg>, smoothstep to none at <deg>+10).
+    // The pressure handed to hCrit()/fraction()/qcEquilibrium()/effectiveFraction() on LAND columns becomes
+    // 1000 hPa * p / (the column's own surface pressure), so H_crit reaches 1 at the ground of a plateau as it does at sea level.
+    // Columns whose ground is at or above 1000 hPa are left alone (see the guard below).
+    // WHY (LAND-POLAR step 3, wb37a/wb38 at 220): hCrit is a function of pressure alone -- 1.0 at 1000 hPa, 0.64 at 850, 0.55 at
+    // 800 -- while the initial surface RH on a tropical plateau is ~0.69 at 850 hPa. So lowland air forms no cloud near the ground
+    // and rain evaporates beneath the deck, but elevated ground carries cloud AT the ground with nothing below it: tropical land
+    // above 800 m (20 % of the area) does not convect and rains 5-8 mm/d stratiform (E Africa 10.4 vs NASA 2.58 mm/d), and the
+    // land mass-flux ceiling cannot reach it (wb38b: stratiform ~1020 mm/a unchanged, land 0-15 2354 vs 1653).
+    // SCOPE: the stratiform path only -- initCloudIce, SaturationAdjustment, the TwoCat in-cloud fraction and the radiation's
+    // cloud fraction, which must share one curve. MoistConvection's four uses (parcel spread, cloud-base test) are NOT changed.
+    // Ocean columns (i_topography == 0) are never touched: their surface pressure follows T_s (cold columns ~905 hPa).
+    template <class Model>
+    inline double pEff(const Model &m, double p_hPa, int j, int k){
+        static const bool   on  = [](){ return knob::on(knob::ATM_HCRIT_SFC); }();
+        if (!on) return p_hPa;
+        static const double lim = [](){ return knob::real(knob::ATM_HCRIT_SFC_LAT); }();
+        const int i_g = m.i_topography[j][k];
+        if (i_g <= 0 || i_g >= m.im) return p_hPa;
+        double w = 1.0;
+        if (lim > 0.0) {
+            const double x = (std::fabs(90.0 - j * 180.0 / (double)(m.jm - 1)) - lim) / 10.0;
+            w = (x <= 0.0) ? 1.0 : (x >= 1.0) ? 0.0 : 1.0 - x * x * (3.0 - 2.0 * x);
+            if (w <= 0.0) return p_hPa;
+        }
+        const double p_g = m.p_stat.x[i_g][j][k];
+        // Only ground BELOW 1000 hPa is lifted to it. A warm lowland column stands at ~1040 hPa, and scaling it by 1000/p_g
+        // LOWERS the threshold aloft (0.87 -> 0.78 at 950 hPa): wb39 (first form, no guard) raised the stratiform rain on tropical
+        // land below 150 m from 1.4 to 5.3 mm/d (Amazon 7.25 -> 9.81) while removing it above 800 m (5.9 -> 0.03).
+        if (!(p_g > 0.0) || p_g >= 1000.0) return p_hPa;
+        const double p_s = 1000.0 * std::min(1.0, p_hPa / p_g);
+        return p_hPa + w * (p_s - p_hPa);
+    }
+
     // Cloudy area fraction of the cell, from TOTAL water q_t = q_v + q_c + q_i.
     inline double fraction(double q_t, double q_s, double p_hPa){
         const double D = (1.0 - hCrit(p_hPa)) * q_s;

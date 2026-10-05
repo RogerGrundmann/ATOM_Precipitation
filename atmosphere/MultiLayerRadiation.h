@@ -562,7 +562,7 @@ public:
                         const double p_hPa = m.p_stat.x[i][j][k];
                         const double q_s   = CloudFraction::qSat(T_i, p_hPa, m.t_0, m.hp, m.ep);
                         const double q_t   = std::max(0.0, m.c.x[i][j][k]) + cw_l + cw_i;
-                        cf = CloudFraction::effectiveFraction(q_t, q_s, p_hPa, cw_l + cw_i);
+                        cf = CloudFraction::effectiveFraction(q_t, q_s, CloudFraction::pEff(m, p_hPa, j, k), cw_l + cw_i);
                     }
                     double LWP_i = LWP_gm / cf;                               // IN-CLOUD paths [g/m2]
                     double IWP_i = IWP_gm / cf;

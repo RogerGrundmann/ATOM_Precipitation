@@ -1677,7 +1677,7 @@ void cAtmosphereModel::initCloudIce() {
                 // above p_mid that lets cloud exist aloft went into the header only. On the
                 // fractional branch take the header's curve; the shipped branch keeps its own,
                 // bit for bit.
-                double H_crit = CloudFraction::hCrit(p_u);
+                double H_crit = CloudFraction::hCrit(CloudFraction::pEff(*this, p_u, j, k));   // pEff: ATM_HCRIT_SFC, == p_u when off
                 if (H_crit > 1.0)  H_crit = 1.0;
 
                 // ---- ATM_CLOUD_FRAC: sub-grid cloud fraction (default 0 = shipped) ----
@@ -1797,7 +1797,7 @@ void cAtmosphereModel::initCloudIce() {
                         ? hp * AtomUtils::exp_func(t_u, MAGNUS_A_WATER, MAGNUS_B_WATER)
                         : hp * AtomUtils::exp_func(t_u, MAGNUS_A_ICE,   MAGNUS_B_ICE);
                     const double q_sat  = ep * E_sat / (p_u - E_sat);
-                    double H_crit = CloudFraction::hCrit(p_u);        // the curve the field was built with
+                    double H_crit = CloudFraction::hCrit(CloudFraction::pEff(*this, p_u, j, k));        // the curve the field was built with
                     if (H_crit > 1.0) H_crit = 1.0;
                     if (q_sat > 0.0) { sum_rh += w * (c.x[i][j][k] / q_sat);
                                        if (c.x[i][j][k] > 0.8 * q_sat) n_rh80++; }
