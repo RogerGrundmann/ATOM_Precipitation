@@ -305,9 +305,26 @@ public:
             LandBucket::initialised = true;
         }
         double lb_wsum = 0.0, lb_W = 0.0, lb_beta = 0.0, lb_E = 0.0, lb_P = 0.0, lb_ro = 0.0;   // cos-lat means, land
+        // ==================================================================
+        // ATM_LAND_EVAP=<0|1> (2026-10-06, RC-RESID: P/E), DEFAULT 0 = OFF (land E = 0, shipped; block skipped, byte-identical).
+        // Land evaporation from the BUDYKO curve on the model's OWN rain:
+        //     E = P * sqrt(phi * tanh(1/phi) * (1 - exp(-phi))),   phi = E_pot / P,
+        // E_pot the active bulk formula at the land surface exactly as ATM_LAND_BUCKET forms it. E <= P and E <= E_pot by construction:
+        // dry land returns what falls on it (E -> P), wet land is limited by the potential rate (E -> E_pot).
+        // WHY NOT THE BUCKET (python/landevap.py on wb53c, ATM_LAND_BUCKET=150): the bucket starts from the OBSERVED rain (full where
+        // NASA > 750 mm/a) and its memory is weeks, so on a 120 s run it evaporates at the open-water rate wherever NASA is wet --
+        // land E 728 mm/a against land P 653; at 15-35 deg E 911 against P 218, E > P in 92 % of the cells; India 2311, Australia 1175.
+        // It is also not paleo-safe (it reads the present-day rain). Budyko on the same fields: land E 326 mm/a (E/P 0.50; Earth ~0.62),
+        // global E 868, P/E 1.12; Amazon 1004 (obs ~1250), W Europe 525 (~500), Sahara 0.
+        // No state, no observed field. Deposited like the bucket's E (first three air levels of the ground column). Only on the
+        // ATM_WATER_CLOSURE branch; ATM_LAND_BUCKET takes precedence. Evaporation writes no t, over land as over ocean.
+        // ==================================================================
+        static const bool land_evap_knob = [](){ return knob::on(knob::ATM_LAND_EVAP); }();
+        const bool land_evap = water_closure && land_evap_knob && !bucket_on;
+        double le_wsum = 0.0, le_E = 0.0, le_P = 0.0, le_Ep = 0.0;                              // cos-lat means, land [mm/d]
 
         #pragma omp parallel for collapse(2) schedule(static) \
-                reduction(+:inj_pw,wsum,n_cap,n_cell,wc_skin,lb_wsum,lb_W,lb_beta,lb_E,lb_P,lb_ro)
+                reduction(+:inj_pw,wsum,n_cap,n_cell,wc_skin,lb_wsum,lb_W,lb_beta,lb_E,lb_P,lb_ro,le_wsum,le_E,le_P,le_Ep)
         for (int j = 0; j < m.jm; j++) {
             for (int k = 0; k < m.km; k++) {
 
@@ -360,6 +377,56 @@ public:
                     const double cw = sin(m.the.z[j]);
                     lb_wsum += cw; lb_W += cw * W; lb_beta += cw * beta;
                     lb_E += cw * E_mm; lb_P += cw * P_mm; lb_ro += cw * ro;
+                    continue;
+                }
+
+                if (land_evap && is_land(m.h, 0, j, k)) {                                       // ATM_LAND_EVAP, see above the loop
+                    const int i0 = m.i_topography[j][k];
+                    m.Evaporation_Dalton.y[j][k] = 0.0;
+                    m.Evaporation_Meyer.y[j][k]  = 0.0;
+                    m.Evaporation_Rohwer.y[j][k] = 0.0;
+                    m.Evaporation.y[j][k]        = 0.0;
+                    if (i0 < 0 || i0 + 3 >= m.im - 1) continue;
+                    const double p_g   = m.p_stat.x[i0][j][k];                                  // [hPa]
+                    const double t_g   = std::max(180.0, m.t.x[i0][j][k] * m.t_0);              // [K]
+                    const double E_s   = (t_g >= m.t_0) ? m.hp * AtomUtils::exp_func(t_g, 17.2694, 35.86)
+                                                        : m.hp * AtomUtils::exp_func(t_g, 21.8746,  7.66);
+                    const double e_air = std::max(0.0, m.c.x[i0][j][k]) * p_g / m.ep;          // [hPa]
+                    const double sd    = std::max(0.0, E_s - e_air);
+                    const double vel   = sqrt((m.u.x[i0][j][k] * m.u.x[i0][j][k]
+                                             + m.v.x[i0][j][k] * m.v.x[i0][j][k]
+                                             + m.w.x[i0][j][k] * m.w.x[i0][j][k]) / 3.0) * m.u_0;   // [m/s]
+                    const double u_kmh = evap_speed(vel) * ms_to_kmh;
+                    const double cD = AtomUtils::C_Dalton(i0, j, k, m.coeff_Dalton, m.u_0, m.u, m.v, m.w);
+                    const double pot_D = std::max(0.0, cD) * 24.0 * sd;                         // potential rates [mm/d]
+                    const double pot_M = K_Meyer * hPa_to_mmHg * (1.0 + u_kmh / 16.0) / 30.0 * sd;
+                    const double pot_R = 0.771 * (1.465 - 0.000732 * p_g * hPa_to_mmHg)
+                                       * (0.44 + 0.0733 * u_kmh) * hPa_to_mmHg * sd;
+                    const double P_md  = std::max(0.0, conv_factor * m.Precipitation.x[0][j][k]);   // [mm/d]
+                    auto budyko = [P_md](double pot) {
+                        if (P_md <= 1.0e-9 || pot <= 0.0) return 0.0;
+                        const double phi = pot / P_md;
+                        return P_md * sqrt(phi * tanh(1.0 / phi) * (1.0 - exp(-phi))); };
+                    m.Evaporation_Dalton.y[j][k] = budyko(pot_D);
+                    m.Evaporation_Meyer.y[j][k]  = budyko(pot_M);
+                    m.Evaporation_Rohwer.y[j][k] = budyko(pot_R);
+                    const double E_md = (active == EvapModel::Meyer)  ? m.Evaporation_Meyer.y[j][k]
+                                      : (active == EvapModel::Rohwer) ? m.Evaporation_Rohwer.y[j][k]
+                                      :                                 m.Evaporation_Dalton.y[j][k];
+                    m.Evaporation.y[j][k] = E_md;
+                    const double E_mm = E_md / 8.64e4 * sec_per_iter;                           // [mm] this call
+                    double wtot = 0.0;
+                    for (int n = 0; n < 3; n++) wtot += std::exp(-(double)n);
+                    for (int n = 0; n < 3; n++) {
+                        const int i = i0 + n;
+                        double rho = m.r_humid.x[i][j][k];
+                        if (!AtomUtils::is_finite_safe(rho) || rho <= 0.0) rho = m.r_air;
+                        const double dz = m.get_layer_height(i+1) - m.get_layer_height(i);
+                        if (dz > 0.0) m.c.x[i][j][k] += E_mm * (std::exp(-(double)n) / wtot) / (rho * dz);
+                    }
+                    const double cw = sin(m.the.z[j]);
+                    le_wsum += cw; le_E += cw * E_md; le_P += cw * P_md;
+                    le_Ep += cw * ((active == EvapModel::Meyer) ? pot_M : (active == EvapModel::Rohwer) ? pot_R : pot_D);
                     continue;
                 }
 
@@ -566,6 +633,9 @@ public:
              << fixed << setprecision(2)
              << "   at the c_sat cap: " << (n_cell > 0 ? 100.0 * n_cap / n_cell : 0.0)
              << " % of " << n_cell << " ocean cells" << endl;
+        if (land_evap && le_wsum > 0.0)
+            printf("      AGCM: [LAND-EVAP] Budyko on the model rain: land P %.1f mm/a, potential %.1f, E %.1f (E/P %.2f)\n",
+                   365.0 * le_P / le_wsum, 365.0 * le_Ep / le_wsum, 365.0 * le_E / le_wsum, le_P > 0.0 ? le_E / le_P : 0.0);
         if (bucket_on && lb_wsum > 0.0) {
             const double to_mm_a = (sec_per_iter > 0.0) ? 365.0 * 8.64e4 / sec_per_iter / lb_wsum : 0.0;
             cout << "      ATOM: [LAND BUCKET] W_cap " << fixed << setprecision(1) << bucket_cap
