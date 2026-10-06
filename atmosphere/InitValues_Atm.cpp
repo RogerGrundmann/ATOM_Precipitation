@@ -1196,6 +1196,9 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
     const double rh_ocean_ml_s = knob::real(knob::ATM_RH_OCEAN_ML_STRENGTH);   // 0..1 partial mixing, default 1
+    const double rh_land_east_ml   = knob::real(knob::ATM_RH_LAND_EAST_ML);            // mixed-layer depth above ground [m], 0 = off
+    const double rh_land_east_ml_s = knob::real(knob::ATM_RH_LAND_EAST_ML_STRENGTH);   // 0..1 partial mixing, default 1
+    const double rh_land_east_ml_T = knob::real(knob::ATM_RH_LAND_EAST_ML_T);          // deg C, no mixed layer on ground at least this warm
     const double rh_ocean_sst     = knob::real(knob::ATM_RH_OCEAN_SST);       // 1/K, 0 = off
     const double rh_ocean_sst_ref = knob::real(knob::ATM_RH_OCEAN_SST_REF);   // deg C
     const double rh_ocean_sst_max = knob::real(knob::ATM_RH_OCEAN_SST_MAX);
@@ -1289,6 +1292,35 @@ void cAtmosphereModel::initWaterWapour() {
         const double east = m_east.empty() ? 1.0 : 1.0 - rh_land_east * m_east[(size_t)j * km + k];
         const double v = wet - (wet - rh_land_dry) * sdesc * (0.5 + 0.5 * c) * east;
         return (rh_land_east_max >= 0.0) ? std::min(v, wet + rh_land_east_max) : v; };
+    // ATM_RH_LAND_EAST_ML=<depth m> (2026-10-06, user: "option A, write the knob and screen it"), default 0 = off (weight exactly 0,
+    // block skipped, byte-identical). The land counterpart of ATM_RH_OCEAN_ML for the subtropical EAST sides that are too cool to convect.
+    // WHY (SUBTROP, python/eastside.py on wb49): at the cap ATM_RH_LAND_EAST_MAX every east-side cell starts with the same surface RH
+    // (0.83) and what it rains is set by the ground temperature -- at or above 24 C it convects and is on NASA (3.88 / 3.54 mm/d), below
+    // 24 C the convective rain is ZERO and 1.2-1.3 mm/d of stratiform rain stand against 3.0-3.3 (S China 19.3 C 1.43 / 4.47, SE US
+    // 18.6 C 1.66 / 3.93, S Brazil 22.3 C 1.09 / 4.71); the S China parcel at 28N misses buoyancy by 4.6 K (ML RH 0.71, needs 0.85).
+    // The real rain there is summer convection and fronts, which an annual-mean column has not; the one route this model has to rain
+    // in a cool column is the stratiform one (STORM: ATM_RH_OCEAN_ML made the storm-track rain reach the sea).
+    // Below <depth> above the GROUND the vapour moves toward the ground value carried upward (constant q, RH capped 0.98) by the weight
+    //   strength * m_east * lat(|lat|: 0 at <= 10, 1 from 20 to 30, 0 from 40) * cool(T_ground: 1 at <= T-2, 0 at >= T),
+    // m_east the ocean fetch to the east of ATM_RH_LAND_EAST (needs that knob > 0). ATM_RH_LAND_QCAP still caps the result at the
+    // zonal-mean ocean vapour at the same height above the surface. A scaffold, like ATM_RH_OCEAN_ML.
+    // KNOWN MISS, by construction: nothing local separates E Australia (NASA 1.86 mm/d) from S Brazil (4.55) -- same latitude,
+    // temperature and fetch -- so E Australia rises with the others.
+    auto rh_land_east_ml_w = [&](int j, int k) {
+        if (rh_land_east_ml <= 0.0 || m_east.empty() || i_topography[j][k] <= 0 || i_topography[j][k] >= im) return 0.0;
+        const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+        auto sstep = [](double x) { return (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x); };
+        const double T_g = t.x[i_topography[j][k]][j][k] * t_0 - 273.15;
+        return rh_land_east_ml_s * m_east[(size_t)j * km + k] * sstep((alat - 10.0) / 10.0) * (1.0 - sstep((alat - 30.0) / 10.0))
+               * sstep((rh_land_east_ml_T - T_g) / 2.0); };
+    if (rh_land_east_ml > 0.0 && !m_east.empty()) {
+        double sw = 0, ww = 0; long n = 0;
+        for (int j = 0; j < jm; j++) { const double al = fabs(90.0 - j * 180.0 / (jm - 1)); if (al < 15.0 || al >= 35.0) continue;
+            const double wt = cos((90.0 - j * 180.0 / (jm - 1)) * M_PI / 180.0);
+            for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) { const double v = rh_land_east_ml_w(j, k); sw += wt * v; ww += wt; if (v > 0.05) n++; } }
+        printf("      AGCM: [RH-LAND-EAST-ML] depth %.0f m, strength %.2f, T %.1f C: mean weight over 15-35 deg land %.3f, above 0.05 in %ld cells\n",
+               rh_land_east_ml, rh_land_east_ml_s, rh_land_east_ml_T, ww > 0 ? sw / ww : 0.0, n);
+    }
     if (rh_land_mode) {
         double s = 0, w = 0, dmax = 0; long n_dry = 0, n_land = 0;
         for (int j = 0; j < jm; j++) for (int k = 0; k < km - 1; k++) if (i_topography[j][k] > 0) {
@@ -1426,6 +1458,8 @@ void cAtmosphereModel::initWaterWapour() {
                 // 2984 / 9732 mm/a against NASA 1107); depth is too coarse a dose (one model level ~ +3 mm/d).
                 ml_w *= rh_ocean_ml_s;
             }
+            const double lml_w = rh_land_east_ml_w(j, k);            // ATM_RH_LAND_EAST_ML, see above rh_land_of's print
+            double q_lml0 = -1.0;
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];
@@ -1565,6 +1599,13 @@ void cAtmosphereModel::initWaterWapour() {
                     else if (q_ml0 >= 0.0 && get_layer_height(i) <= rh_ocean_ml) {
                         const double rh_ml = std::min(0.98, q_ml0 / q_sat);
                         if (rh_ml > rh_i) rh_i += ml_w * (rh_ml - rh_i);
+                    }
+                }
+                if (lml_w > 0.0 && i >= i_mount) {                   // ATM_RH_LAND_EAST_ML
+                    if (i == i_mount) q_lml0 = rh_i * q_sat;
+                    else if (q_lml0 >= 0.0 && get_layer_height(i) - get_layer_height(i_mount) <= rh_land_east_ml) {
+                        const double rh_ml = std::min(0.98, q_lml0 / q_sat);
+                        if (rh_ml > rh_i) rh_i += lml_w * (rh_ml - rh_i);
                     }
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;
