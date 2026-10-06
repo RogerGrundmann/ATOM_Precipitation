@@ -1619,6 +1619,34 @@ void cAtmosphereModel::initWaterWapour() {
                         if (rh_storm_polar > gs) { rh_i *= rh_storm_polar / gs; if (rh_i > 0.98) rh_i = 0.98; }
                     }
                 }
+                // ATM_RH_STORM_SST=<fraction per K> (2026-10-06, STORM-SHAPE), default 0 = OFF (block skipped, byte-identical).
+                // On extratropical OCEAN columns (weight 0 at |lat| <= ATM_RH_STORM_SST_LAT, smoothstep to 1 ten degrees poleward) the initial RH is multiplied by
+                //   1 - w * clamp(k * (T_sea - T_ref), -max, +max),   T_ref = ATM_RH_STORM_SST_REF (4 C), max = ATM_RH_STORM_SST_MAX (0.05).
+                // WHY (python/nrows.py on wb62b): poleward of 50 deg the model's ocean rain follows the SEA TEMPERATURE and the observed
+                // rain does not. Model / NASA by sea temperature, the same in both hemispheres: -6..-2 C 0.26-0.38, -2..1 C 0.66-0.72,
+                // 1..3 C 0.85-0.98, 3..5 C 1.00-1.31, 5..7 C 1.38, 7..9 C 1.42-1.57, 9..14 C 1.53-1.72 (model 170-290 -> 1600-2000 mm/a,
+                // NASA 670-750 -> 930-1310). So the warm North Atlantic drift rains 1870-2220 mm/a at 54-62N against 1250-1300 and the
+                // cold Atlantic / Indian sector of the Southern Ocean 520-930 against 980-1250; the "northern rows 45 % too wet" are
+                // simply the warmer rows. The user's rule for the tropics (ATM_RH_OCEAN_SST: "humidity must follow the surface
+                // temperature") applied to the storm track. Near the storm peak 0.01 in RH is ~11 % of the rain (wb62b vs c).
+                // Capped at 0.98. A scaffold: the observed rain is set by the storms, not by the water under them.
+                static const double rh_storm_sst     = [](){ return knob::real(knob::ATM_RH_STORM_SST); }();
+                static const double rh_storm_sst_ref = [](){ return knob::real(knob::ATM_RH_STORM_SST_REF); }();
+                static const double rh_storm_sst_max = [](){ return knob::real(knob::ATM_RH_STORM_SST_MAX); }();
+                // ATM_RH_STORM_SST_LAT (default 40): where the weight starts. wb64 (start 40): the rain-vs-temperature misfit holds
+                // poleward of ~50 deg only -- the rows at 40-54 deg (10-16 C) were on NASA and lost 20-40 % (46-50 deg 1214 / 1167 -> 857 / 766).
+                static const double rh_storm_sst_lat = [](){ return knob::real(knob::ATM_RH_STORM_SST_LAT); }();
+                if (rh_storm_sst > 0.0 && i_mount == 0) {
+                    const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
+                    const double x = (phi_deg - rh_storm_sst_lat) / 10.0;
+                    const double wl = (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
+                    if (wl > 0.0) {
+                        double d = rh_storm_sst * (t.x[0][j][k] * t_0 - 273.15 - rh_storm_sst_ref);
+                        d = std::max(-rh_storm_sst_max, std::min(rh_storm_sst_max, d));
+                        rh_i *= 1.0 - wl * d;
+                        if (rh_i > 0.98) rh_i = 0.98;
+                    }
+                }
                 if (ml_w > 0.0) {                                    // ATM_RH_OCEAN_ML, see above the loop
                     if (i == 0) q_ml0 = rh_i * q_sat;
                     else if (q_ml0 >= 0.0 && get_layer_height(i) <= rh_ocean_ml) {

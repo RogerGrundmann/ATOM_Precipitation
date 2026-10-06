@@ -155,6 +155,10 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_STORM_LAT, "55", Result, 'P', "ATM_RH_STORM: latitude of the factor's maximum, deg (also where ATM_RH_STORM_POLAR starts)") \
     X(ATM_RH_STORM_WIDTH, "15", Result, 'P', "ATM_RH_STORM: Gaussian width of the factor, deg") \
     X(ATM_RH_STORM_POLAR, "1.0", Result, 'R', "initial RH factor over OCEAN poleward of 55 deg: the ATM_RH_STORM factor does not fall below this toward the pole (1.0 = off, the Gaussian alone)") \
+    X(ATM_RH_STORM_SST, "0", Result, 'P', "extratropical ocean (taper in over 10 deg from ATM_RH_STORM_SST_LAT): the initial RH is lowered by this fraction per K of sea-surface temperature above ATM_RH_STORM_SST_REF and raised per K below it (0 = off)") \
+    X(ATM_RH_STORM_SST_LAT, "40", Result, 'P', "ATM_RH_STORM_SST: latitude where it starts, deg; full weight 10 deg poleward") \
+    X(ATM_RH_STORM_SST_REF, "4", Result, 'P', "ATM_RH_STORM_SST: reference sea-surface temperature, deg C") \
+    X(ATM_RH_STORM_SST_MAX, "0.05", Result, 'P', "ATM_RH_STORM_SST: largest relative RH change, either sign") \
     X(ATM_RK_SCALAR_SYNC, "0", Result, 'R', "forced by WATER_CLOSURE") \
     X(ATM_SATADJ_DIAG, "0", Diag, 'D', "print/dump only") \
     X(ATM_SATADJ_FADE, "0", Result, 'R', "mode 2 if ever flipped; forced by closure") \
