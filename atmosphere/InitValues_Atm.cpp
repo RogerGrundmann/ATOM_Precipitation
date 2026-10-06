@@ -1588,9 +1588,17 @@ void cAtmosphereModel::initWaterWapour() {
                 // moister makes the band rain from the start, the deficit is spin-up.
                 static const double rh_storm = [](){
                     return knob::real(knob::ATM_RH_STORM); }();
+                // ATM_RH_STORM_LAT / ATM_RH_STORM_WIDTH (2026-10-06, STORM-SHAPE), defaults 55 / 15 deg = shipped (the literal expression
+                // below is kept for the default, so it is byte-identical). WHY (python/socean.py on wb57): ocean rain by latitude is
+                // 424 mm/a at 34-38 deg (NASA 1000-1200), 1390 at 46-50 (1030-1230), 1540-1980 at 54-58 (1100-1160), 1280-1810 at 58-62
+                // (1050-1090) -- the observed storm-track rain is flat from 34 to 62 deg, the factor peaks at 55. Lowering the peak
+                // (wb60) fixes the shape (r .607 -> .617) and loses the band mean; the centre is the lever.
+                static const double rh_storm_lat = [](){ return knob::real(knob::ATM_RH_STORM_LAT); }();
+                static const double rh_storm_wid = [](){ return knob::real(knob::ATM_RH_STORM_WIDTH); }();
+                static const bool   rh_storm_shipped_shape = (rh_storm_lat == 55.0 && rh_storm_wid == 15.0);
                 if (rh_storm != 1.0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
-                    const double b = (phi_deg - 55.0) / 15.0;
+                    const double b = rh_storm_shipped_shape ? (phi_deg - 55.0) / 15.0 : (phi_deg - rh_storm_lat) / rh_storm_wid;
                     rh_i *= 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
                     if (rh_i > 0.98) rh_i = 0.98;
                 }
@@ -1605,8 +1613,8 @@ void cAtmosphereModel::initWaterWapour() {
                 static const double rh_storm_polar = [](){ return knob::real(knob::ATM_RH_STORM_POLAR); }();
                 if (rh_storm_polar > 1.0 && i_mount == 0) {
                     const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
-                    if (phi_deg > 55.0) {
-                        const double b = (phi_deg - 55.0) / 15.0;
+                    if (phi_deg > (rh_storm_shipped_shape ? 55.0 : rh_storm_lat)) {
+                        const double b = rh_storm_shipped_shape ? (phi_deg - 55.0) / 15.0 : (phi_deg - rh_storm_lat) / rh_storm_wid;
                         const double gs = 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
                         if (rh_storm_polar > gs) { rh_i *= rh_storm_polar / gs; if (rh_i > 0.98) rh_i = 0.98; }
                     }
