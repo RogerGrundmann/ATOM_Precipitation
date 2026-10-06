@@ -282,6 +282,19 @@ public:
         // ==================================================================
         static const double bucket_cap = [](){
             return knob::real(knob::ATM_LAND_BUCKET); }();
+        // ATM_EVAP_WIND=<0|1> and ATM_EVAP_GUST=<m/s> (2026-10-06, RC-RESID: P/E 1.80), defaults 0 / 0 = shipped (the original expression,
+        // byte-identical). The wind speed in the bulk formulas is sqrt((u2+v2+w2)/3) -- the RMS of the three components, i.e. the speed
+        // divided by sqrt(3). python/evapb.py on wb49: the formula sees 3.0-3.6 m/s in the tropics where the surface wind is 5.2-6.2,
+        // ocean E 752 mm/a (Earth ~1300), global 539 against P 970. =1 uses |V|: ocean E 973 with the same humidity deficit.
+        // ATM_EVAP_GUST: the surface wind here is an annual-mean VECTOR wind, which vanishes in the horse latitudes (25-35 deg: 1.6 m/s,
+        // real scalar wind ~6-7) -- the evaporation minimum sits where Earth has its maximum; W = sqrt(|V|^2 + g^2).
+        // On affordable runs E is a null on the rain: 540 mm/a is 0.002 mm in 120 s against a 32 mm column.
+        static const bool   evap_wind = [](){ return knob::on(knob::ATM_EVAP_WIND); }();
+        static const double evap_gust = [](){ return knob::real(knob::ATM_EVAP_GUST); }();
+        auto evap_speed = [&](double v_shipped) {     // [m/s]; the shipped value in, untouched when both knobs are off
+            if (!evap_wind && evap_gust <= 0.0) return v_shipped;
+            const double v = evap_wind ? v_shipped * sqrt(3.0) : v_shipped;
+            return (evap_gust > 0.0) ? sqrt(v * v + evap_gust * evap_gust) : v; };
         const bool bucket_on = water_closure && bucket_cap > 0.0;
         if (bucket_on && !LandBucket::initialised) {
             LandBucket::W.assign(static_cast<size_t>(m.jm) * m.km, 0.0);
@@ -315,7 +328,7 @@ public:
                     const double vel   = sqrt((m.u.x[i0][j][k] * m.u.x[i0][j][k]
                                              + m.v.x[i0][j][k] * m.v.x[i0][j][k]
                                              + m.w.x[i0][j][k] * m.w.x[i0][j][k]) / 3.0) * m.u_0;   // [m/s]
-                    const double u_kmh = vel * ms_to_kmh;
+                    const double u_kmh = evap_speed(vel) * ms_to_kmh;
                     const double cD = AtomUtils::C_Dalton(i0, j, k, m.coeff_Dalton, m.u_0, m.u, m.v, m.w);
                     const double coeff_D = std::max(0.0, cD) * 24.0;
                     const double coeff_M = K_Meyer * hPa_to_mmHg * (1.0 + u_kmh / 16.0) / 30.0;
@@ -372,7 +385,7 @@ public:
                 double vel_ms = sqrt((m.u.x[0][j][k] * m.u.x[0][j][k]
                                     + m.v.x[0][j][k] * m.v.x[0][j][k]
                                     + m.w.x[0][j][k] * m.w.x[0][j][k]) / 3.0) * m.u_0; // [m/s]
-                double u_kmh  = vel_ms * ms_to_kmh;                     // [km/h]
+                double u_kmh  = evap_speed(vel_ms) * ms_to_kmh;                     // [km/h]
                 double p_mmHg = p_stat_0jk * hPa_to_mmHg;               // [mmHg]
 
                 double E_sat  = (t_u_base >= m.t_0)                     // [hPa]

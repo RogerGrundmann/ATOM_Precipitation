@@ -64,6 +64,8 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_DAMP_T_VERT, "1", Result, 'R', "null alone (qvt_on)") \
     X(ATM_EPS_DRY, "0.684", Result, 'P', "0.684") \
     X(ATM_HADLEY_SL, "4.0", Result, 'P', "IC 4.0N/3.0S") \
+    X(ATM_EVAP_WIND, "0", Result, 'R', "bulk evaporation wind speed: 0 = shipped sqrt((u2+v2+w2)/3), the rms of the components = |V|/sqrt(3); 1 = the wind speed |V|") \
+    X(ATM_EVAP_GUST, "0", Result, 'P', "bulk evaporation: gustiness in m/s added in quadrature to the (annual-mean vector) wind speed, W = sqrt(|V|^2 + g^2); 0 = off") \
     X(ATM_LAND_BUCKET, "0.0", Result, 'R', "20-iter evidence only") \
     X(ATM_LENGTH_NDIM, "0", Result, 'R', "the 40x L_atm defect (item 4 pending)") \
     X(ATM_LONGAL_J, "62", Diag, 'I', "output slice latitude") \
