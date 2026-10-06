@@ -99,10 +99,14 @@ dnf install gcc-c++ python3-cython
 ## Build
 
 ```bash
-git clone https://github.com/atom-model/ATOM.git
-cd ATOM
+git clone https://github.com/RogerGrundmann/ATOM_Precipitation.git
+cd ATOM_Precipitation
+git checkout terrain-bc-and-checkerboard     # the current work is on this branch, not on main
 make all
 ```
+
+This tree was forked from the original ATOM project, <https://github.com/atom-model/ATOM>. The working branch,
+the knob registry and the run scripts described in this README exist only here.
 
 This produces two executables: `cli/atm` (atmosphere) and `cli/hyd` (hydrosphere).
 
