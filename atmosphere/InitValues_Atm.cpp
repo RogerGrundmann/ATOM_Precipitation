@@ -1594,6 +1594,23 @@ void cAtmosphereModel::initWaterWapour() {
                     rh_i *= 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
                     if (rh_i > 0.98) rh_i = 0.98;
                 }
+                // ATM_RH_STORM_POLAR=<factor> (2026-10-06, RC-RESID 65-90 band), default 1.0 = OFF (block skipped, byte-identical).
+                // Over OCEAN columns poleward of 55 deg the initial RH is multiplied by max(<factor>, the ATM_RH_STORM Gaussian) / the
+                // Gaussian, i.e. the storm-track factor does not fall below <factor> toward the pole (it is 1.15 at 55 deg and 1.01 at 80).
+                // WHY (python/polar.py on wb49): the 65-90 band rains 220 mm/a against NASA 364 and 85 % of the deficit is polar OCEAN
+                // (S 154 / 490, N 215 / 379; N land 235 / 418; Antarctica 267 / 204 is over). 87E, Arctic Ocean 78-88N: snow forms at
+                // 600-1000 m (0.28 mm/d) and 76 % of it sublimates in the cloud-free 600 m below, where the surface RH is 0.68-0.72
+                // against H_crit 0.74 (S Ocean 60-66S: snow 0.79 -> 0.29 mm/d). The same loss STORM had at 35-65 deg, where the storm
+                // factor and ATM_RH_OCEAN_ML closed it; the factor fades before it reaches the polar ocean. Capped at 0.98. A scaffold.
+                static const double rh_storm_polar = [](){ return knob::real(knob::ATM_RH_STORM_POLAR); }();
+                if (rh_storm_polar > 1.0 && i_mount == 0) {
+                    const double phi_deg = std::fabs((j / (double)(jm - 1) - 0.5) * 180.0);
+                    if (phi_deg > 55.0) {
+                        const double b = (phi_deg - 55.0) / 15.0;
+                        const double gs = 1.0 + (rh_storm - 1.0) * std::exp(-b * b);
+                        if (rh_storm_polar > gs) { rh_i *= rh_storm_polar / gs; if (rh_i > 0.98) rh_i = 0.98; }
+                    }
+                }
                 if (ml_w > 0.0) {                                    // ATM_RH_OCEAN_ML, see above the loop
                     if (i == 0) q_ml0 = rh_i * q_sat;
                     else if (q_ml0 >= 0.0 && get_layer_height(i) <= rh_ocean_ml) {
