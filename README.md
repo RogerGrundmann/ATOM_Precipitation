@@ -2,6 +2,65 @@
 
 ATOM (Atmospheric and Ocean Model) is a paleo-climate model implementing a finite-difference Navier-Stokes solver on a spherical shell with RK4 time integration. Vertical coordinate stretching in both models is applied. It includes atmosphere and hydrosphere components with optional turbulence closures (k-ε, k-ω, k-ω SST). Topography and bathymetry are greatfully supported by pygplates. Zero-, One-, Two- and Three-Category-Ice-Schemes (COSMO) by switch are available for precipitation computations. A Saturation-Adjustment-Scheme balances water vapour, cloud water and ice. The ocean model detects in the upper levels where Ekman flow is present upwelling and downwelling regions. The temperature and salinity distributions are controlled as well. In preparation is a deep ocean part as challenge counts here the thermohaline conveyor belt.
 
+## Current state (2026-10-06)
+
+This README is partly a dated research log: the sections from *Correctness fixes ported from ATHAD* onward
+describe the model as it was on the date in their heading, and several defaults they discuss have changed since.
+This section is the up-to-date summary. The full record, with every measurement, is in `CLAUDE.md`.
+
+**What the shipped model is now**
+
+- **Build:** `-O2` by default since 2026-09-27 (3.4-3.9x faster than the earlier `-O0`); byte checks are built at
+  `-O0` on both sides (`python/build_o0.sh`).
+- **Ice scheme:** only the two-category scheme (rain + snow, `CategoryIceScheme` = 2) remains; 0, 1 and 3 were
+  removed from the source on 2026-09-27 and are refused at config load.
+- **Runtime switches:** every `ATM_*` / `HYD_*` / `ATOM_*` knob is declared once in `lib/Knobs.h` (143 at present)
+  and printed in the `[RUN CONFIG]` banner of every run. 57 decided or refuted knobs were retired on 2026-09-30;
+  a retired name in the environment is ignored with a banner warning, in the XML it stops the run
+  (`docs/knob_inventory.md`).
+- **Ocean:** runs on the correct horizontal metric since 2026-09-30 (`HYD_METRIC_RADIUS` 6370 km, Neumann pressure
+  boundary, scaled biharmonic viscosity).
+- **Atmosphere defaults flipped since the sections below were written:** hydrostatic split (thermal wind) on,
+  radiation column on the terrain, consistent surface drag, mass-conserving convective evaporation, the
+  microphysics source coefficient, the saturation-adjustment phase split.
+
+**The working branch**
+
+The best verified configuration is not the compiled-in default. It is a set of 49 environment knobs in
+`python/working_branch.env`, each with its evidence in a comment. It makes the water budget conserve, repairs the
+convection scheme and prescribes the initial humidity (land, ocean, storm track, polar ocean).
+
+```bash
+cd python
+. ./working_branch.env
+OMP_NUM_THREADS=8 ../cli/atm config_wb7.xml      # 600 iterations from scratch, about 22 minutes
+```
+
+Verified at 600 iterations from scratch (`python/run_wb57.sh`), precipitation against the NASA field:
+
+| | model | NASA |
+|---|---|---|
+| global mean, mm/a | 975.0 (-0.3 %) | 978.3 |
+| pattern correlation r | 0.607 | |
+| sigma model / NASA | 1.23 | 1.00 |
+| \|lat\| 0-15 / 15-35 / 35-65 / 65-90, mm/a | 1766 / 504 / 1035 / 261 | 1487 / 761 / 981 / 364 |
+| land / ocean, mm/a | 648 / 1104 | 782 / 1056 |
+| evaporation, mm/a; P/E | 759; 1.29 | about 1000; 1.00 |
+
+No drift over iterations 100-600 (975.8 -> 975.0 mm/a), no cell above 11 mm/d. For comparison, the shipped
+default as last measured at the same length (September 2026, before the most recent default changes) gave r about
+0.46 and sigma about 2.3, with a tropical spike of more than twice the observed rain and almost none poleward of it.
+
+**What it does not do (recorded as structural, no knob reaches it)**
+
+- 600 iterations are 120 seconds of physical time. Rain is a local response of each column to its prescribed
+  humidity and temperature; nothing is transported far enough to matter, so there is no moisture convergence.
+- Tropical-ocean rain follows the sea-surface temperature too closely (r 0.85 against 0.60 observed): the
+  eastern-ocean dry zones and the narrow ITCZ lines are missing, and warm water rains uniformly.
+- Subtropical land rains too little (land 15-35 deg: 217 against 643 mm/a). East-side land cooler than 24 C cannot
+  convect in an annual-mean column, and plateaus carry a warm column of their own.
+- Land does not evaporate, and the Southern Ocean poleward of 65 deg is too dry (184 against 490 mm/a).
+
 ## Repository layout
 
 ```
@@ -54,6 +113,18 @@ make atm
 make hyd
 ```
 
+The default optimisation is `-O2`. For debugging, or for a byte-for-byte comparison of two source versions,
+build at `-O0`: with `-ffast-math`, `-O2` may reorder floating-point arithmetic, so only `-O0` binaries prove
+that a change left the logic identical.
+
+```bash
+make OPT=-O0 atm                       # debugging build
+python/build_o0.sh <rev|WORKTREE> <name>   # -O0 cli/<name>_atm and cli/<name>_hyd in a throw-away worktree
+```
+
+Every object depends on the `Makefile` on purpose; do not remove that dependency (a stale `cli/atm.o` once
+corrupted the stack after a class gained members).
+
 ## Running the CLI
 
 ### Atmosphere
@@ -68,11 +139,18 @@ make hyd
 ./cli/hyd cli/config_hyd.xml
 ```
 
+The model is memory-bandwidth bound: it gains nothing beyond about 8 threads (`OMP_NUM_THREADS=8`), and
+several runs sharing the machine slow each other. Results agree between thread counts to the last digits only.
+
+Note that `nm` means different things in the two models: in the atmosphere it is the TOTAL iteration count (a
+restart at 600 with `nm` = 100 runs nothing), in the hydrosphere it counts NEW iterations. The `[RUN CONFIG]`
+banner at the start of every log prints `nm`, the output path and every knob; read it before trusting a run.
+
 ### Both coupled
 
 Run the atmosphere first for an initial transfer file, then the hydrosphere, or follow whatever coupling sequence your configuration uses. Each executable reads its own XML config and writes output independently.
 
-Output lands in the `output/` directory organised by time slice.
+Output lands in the directory given by `output_path` in the config.
 
 ## Configuration
 
@@ -102,6 +180,19 @@ Key parameters for the atmosphere:
 | `n` | `200` | Number of time steps per slice |
 | `turb_model` | `k_omega_SST` | Turbulence closure (`k_epsilon`, `k_omega`, `k_omega_SST`) |
 | `dr` | `0.003` | Radial grid spacing |
+
+Runtime knobs can be set in the config as well as in the environment:
+
+```xml
+<atom>
+  <knobs>
+    <ATM_RH_STORM>1.15</ATM_RH_STORM>
+  </knobs>
+</atom>
+```
+
+Precedence is environment > XML > compiled default, and the banner marks the source of each value (`*` default,
+`+` XML, unmarked = environment). An unknown or retired name inside `<knobs>` stops the run.
 
 The full parameter set and documentation are in `param.py`. The build step auto-generates C++ and Python stubs from this file.
 
@@ -701,21 +792,25 @@ research/debugging aids aimed at the circulation spin-down problem (the trades a
 extratropical jet weakening over a run). All are **off / bit-identical by default** — set the
 environment variable before launching the atmosphere to change behaviour.
 
+**The table below is the record of 2026-09 and is no longer complete.** `lib/Knobs.h` is the authority: it
+declares every knob with its default and a one-line note, and `docs/knob_inventory.md` lists the 57 that were
+retired on 2026-09-30. Rows marked *retired* are no longer switches; the stated behaviour is now permanent.
+
 ### Environment A/B knobs
 
 | Env variable | Default | Effect |
 |---|---|---|
-| `ATM_METRIC_RADIUS` | `r_Earth` (on) | Planetary radius, in km, for the HORIZONTAL metric. Since 2026-07-28 the default is the configured `r_Earth`; `0` restores the old `rad.z ~ 1.5` metric for A/B work. It replaced `ATM_CORIOLIS_SCALE`, which was a multiplier compensating for the same length error: that error factorised as 397.5 (the metric, fixed by this knob) x 40 (`force_nd` dividing by `L_atm` = 400 m instead of the ~16023 m one `rad.z` unit represents, now fixed in RHS_Atm_Turb). With both corrected there is nothing left to sweep |
+| `ATM_METRIC_RADIUS` | *retired 2026-09-30: always the Earth radius* | Planetary radius, in km, for the HORIZONTAL metric. Since 2026-07-28 the default is the configured `r_Earth`; `0` restores the old `rad.z ~ 1.5` metric for A/B work. It replaced `ATM_CORIOLIS_SCALE`, which was a multiplier compensating for the same length error: that error factorised as 397.5 (the metric, fixed by this knob) x 40 (`force_nd` dividing by `L_atm` = 400 m instead of the ~16023 m one `rad.z` unit represents, now fixed in RHS_Atm_Turb). With both corrected there is nothing left to sweep |
 | `ATM_CONV_ADJ` | `0` (off) | Dry convective adjustment, Manabe-Strickler, ported from ATHAD 2026-08-27. **This tree had none**, so nothing could remove a superadiabatic layer; see the section below. `ATM_CONV_ADJ_LAPSE` scales the critical lapse (`0` = isothermal criterion, `>1` stricter than dry) and `ATM_CONV_ADJ_PASSES` caps the sweeps per column (default 64) |
-| `ATM_V_MASSBAL` | **`1` (ON since 2026-08-28)** | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section. **`0` restores the old unbalanced profile exactly** — every measurement in this file dated before 2026-08-28 was made on that branch |
+| `ATM_V_MASSBAL` | *retired 2026-09-30: always on* | Removes the column-mean mass flux from the prescribed initial `v`, so `INT(rho*v*dz) = 0` per column. The prescribed cell is a linear ramp in height and closes in neither volume nor mass; see the streamfunction section. **`0` restores the old unbalanced profile exactly** — every measurement in this file dated before 2026-08-28 was made on that branch |
 | `ATM_PROJECT_IN_LOOP` | `0` (off) | `<sweeps>`: a real velocity projection inside the time loop — seed `aux` from `u/v/w`, relax, apply `v <- v - grad(p)`, with `p_dyn` saved/restored. Distinct from the solver's own `run()`, which projects the momentum TENDENCY, not the velocity. Measured a null on `Psi(ground)` at 10 sweeps AND at 200 (-0.013 %) |
-| `ATM_ANELASTIC` | `0` (off) | Solves `div(rho_bar u) = 0` instead of `div(u) = 0`. Null on a full run (-0.006 %) because the time loop never applies the pressure to the velocity; measured **2.0x the volume projection** across the INITIAL projection, where it is applied |
-| `ATM_RAD_TOPO` | `0` (off) | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them. **It was flipped on 2026-08-28 and reverted the same day; the default is OFF and this row said otherwise until 2026-08-31.** The mechanism once claimed for it here — that level 0 collects a large share of the water-vapour optical depth because `BC_Atm` stuffs it with mountain-top humidity — is REFUTED: level 0 holds about 1.3 % of the column vapour path, and on the `=1` branch it is not in the column at all. The real driver is `cwp_cap_col`; see the cloud section below |
-| `ATM_RHIE_CHOW` | `0` (off) | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
-| `ATM_CLOUD_TAU_MAX` | **`2.0` (ON since 2026-08-28)** | Per-layer ceiling on the CLOUD optical depth, scaling `LWP_i` and `IWP_i` together so the LW (`tau_cloud`) and SW (albedo bump) stay balanced. `cwp_cap_col` bounds the COLUMN condensate path and does not bound a LAYER: without this the shipped branch reaches layer emissivity **0.99962** aloft with 1773 cells above 0.9 per latitude slice — the near-blackbody pathology the de-saturation split exists to prevent. Clear-sky OLR is bit-identical across the flip (180.33882 W/m2), cloudy OLR +0.053. `0` disables |
-| `ATM_CWP_CAP` | **DISABLED since 2026-08-31** (was 20.0) | Column condensate cap in g/m2. It was the single lever on the cloud longwave forcing only while the condensate was 20x too large — it divided the column path by ~79 — and it **inverts the geography**: normalising every column to the same 20 g/m2 divides a column by its own wetness, so the optically thickest cell on the planet came out over the East Antarctic plateau. With the sub-grid cloud scheme on it is no longer needed. `20` restores it |
+| `ATM_ANELASTIC` | *retired 2026-09-30: removed (measured null)* | Solves `div(rho_bar u) = 0` instead of `div(u) = 0`. Null on a full run (-0.006 %) because the time loop never applies the pressure to the velocity; measured **2.0x the volume projection** across the INITIAL projection, where it is applied |
+| `ATM_RAD_TOPO` | *default on 2026-09-24, retired 2026-09-30: always on* | Puts the radiation column on `i_topography` instead of level 0. Over topography the sub-surface cells carry a real `p_stat`, so they enter `sum_dp` and dilute every air layer above them. **It was flipped on 2026-08-28 and reverted the same day; the default is OFF and this row said otherwise until 2026-08-31.** The mechanism once claimed for it here — that level 0 collects a large share of the water-vapour optical depth because `BC_Atm` stuffs it with mountain-top humidity — is REFUTED: level 0 holds about 1.3 % of the column vapour path, and on the `=1` branch it is not in the column at all. The real driver is `cwp_cap_col`; see the cloud section below |
+| `ATM_RHIE_CHOW` | *retired 2026-09-30: removed (measured null)* | Fourth-difference pressure smoothing in the Poisson source, against the collocated-grid checkerboard. **Measured a null on `Psi(ground)` here (+0.005 %)** — it annihilates smooth fields by construction, so it cannot act on a domain-scale quantity |
+| `ATM_CLOUD_TAU_MAX` | *retired 2026-09-30: always 2.0* | Per-layer ceiling on the CLOUD optical depth, scaling `LWP_i` and `IWP_i` together so the LW (`tau_cloud`) and SW (albedo bump) stay balanced. `cwp_cap_col` bounds the COLUMN condensate path and does not bound a LAYER: without this the shipped branch reaches layer emissivity **0.99962** aloft with 1773 cells above 0.9 per latitude slice — the near-blackbody pathology the de-saturation split exists to prevent. Clear-sky OLR is bit-identical across the flip (180.33882 W/m2), cloudy OLR +0.053. `0` disables |
+| `ATM_CWP_CAP` | *retired 2026-09-30: the cap is gone* | Column condensate cap in g/m2. It was the single lever on the cloud longwave forcing only while the condensate was 20x too large — it divided the column path by ~79 — and it **inverts the geography**: normalising every column to the same 20 g/m2 divides a column by its own wetness, so the optically thickest cell on the planet came out over the East Antarctic plateau. With the sub-grid cloud scheme on it is no longer needed. `20` restores it |
 | `ATM_PSI_PROJ_DUMP` | `0` (off) | Writes the streamfunction either side of `project_initial_velocity`, as iterations `-1` and `-2`. Print/CSV only |
-| `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | Scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
+| `ATM_RADIAL_SHAPIRO_STRENGTH` | `1.0` | **Since 2026-09-12 this governs the radial velocity `u` only; the filter on `v` and `w` is off** (it was erasing the meridional cells and the jet, and with it off the atmosphere converges). Originally: scales the strength of the per-iteration radial (vertical) Shapiro filter applied to `u, v, w`. The column-integrated momentum budget identifies these passes as the dominant net sink of extratropical-jet momentum. Values `< 1` ease the filter to test whether that slows the jet spin-down; `0` disables it entirely (**risks** the radial 2Δ checkerboard / near-surface CFL blow-up the filter guards against) |
 
 Example — run the atmosphere with a stronger Coriolis and a gentler radial filter:
 
@@ -723,7 +818,7 @@ Example — run the atmosphere with a stronger Coriolis and a gentler radial fil
 ATM_RADIAL_SHAPIRO_STRENGTH=0.5 ./cli/atm cli/config_atm.xml
 ```
 
-Each knob is read once (first use) via `getenv`, so it applies to the whole run.
+Each knob is read through the registry in `lib/Knobs.h` (there is no `getenv` call left in the model sources) and applies to the whole run. To add one, add a row there and read it with `knob::on / integer / real / text`; it then appears in the banner by itself.
 
 ### Momentum-budget diagnostics
 
@@ -1297,10 +1392,17 @@ on `M_d` at all, so a downdraft that does not exist still evaporates. The strati
 
 ## Output
 
-Each run writes output files to `output/`:
+Each run writes its files to the `output_path` of its config:
 
 - **VTK files** — radial, zonal, and longitudinal slices readable by [ParaView](https://www.paraview.org/)
 - **XYZ grid files** — tab-separated gridded data for post-processing
+- **Budget and diagnostic CSVs** — momentum budgets, the meridional streamfunction, `convergence.csv`
+- **`RUN_CONFIG.txt`** — the banner: configuration and every knob value of the run
+- **Restart file** — `atm_restart_<Ma>Ma_<iter>.bin` / `hyd_restart_...`
+
+A VTK slice set is written every 5th checkpoint by default (`ATM_VTK_STRIDE`); the CSVs every checkpoint.
+In the zonal slice plot the vector field `uv_plot`, not `u-v-Cell` (the latter is in m/s on axes whose units
+differ by a factor of 555 and draws the cells turning the wrong way).
 
 ## Python interface
 
