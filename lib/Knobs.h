@@ -151,6 +151,8 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_OCEAN, "0.75", Result, 'R', "initial surface RH over tropical ocean (|lat|<=30, taper to 45); the marine BL keeps it on affordable runs") \
     X(ATM_RH_OCEAN_ML, "0", Result, 'R', "extratropical ocean (|lat| 30..40 taper): well-mixed initial boundary layer of this depth in m, constant q from the surface, RH capped 0.98 (0 = off)") \
     X(ATM_RH_OCEAN_ML_STRENGTH, "1", Result, 'P', "ATM_RH_OCEAN_ML: partial mixing, fraction (0..1) of the way from the Manabe-Wetherald RH to the well-mixed one") \
+    X(ATM_RH_OCEAN_ML_LAT0, "30", Result, 'P', "ATM_RH_OCEAN_ML: latitude where the weight starts, deg (0 equatorward of it)") \
+    X(ATM_RH_OCEAN_ML_LAT1, "40", Result, 'P', "ATM_RH_OCEAN_ML: latitude where the weight is full, deg (smoothstep from _LAT0)") \
     X(ATM_RH_STORM, "1.0", Result, 'R', "initial storm-track RH factor at 55 deg (working branch 1.15)") \
     X(ATM_RH_STORM_LAT, "55", Result, 'P', "ATM_RH_STORM: latitude of the factor's maximum, deg (also where ATM_RH_STORM_POLAR starts)") \
     X(ATM_RH_STORM_WIDTH, "15", Result, 'P', "ATM_RH_STORM: Gaussian width of the factor, deg") \

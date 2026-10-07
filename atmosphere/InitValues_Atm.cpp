@@ -1196,6 +1196,13 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean = knob::real(knob::ATM_RH_OCEAN);   // read once, outside the parallel region
     const double rh_ocean_ml = knob::real(knob::ATM_RH_OCEAN_ML);   // mixed-layer depth [m], 0 = off; read once, outside the parallel region
     const double rh_ocean_ml_s = knob::real(knob::ATM_RH_OCEAN_ML_STRENGTH);   // 0..1 partial mixing, default 1
+    // ATM_RH_OCEAN_ML_LAT0 / _LAT1 (2026-10-07, STORM-SHAPE), defaults 30 / 40 deg = shipped (the literal expression is kept for the
+    // default, so it is byte-identical). WHY (python/row36.py on wb66): ocean rows 22-38 deg rain at half of NASA in both hemispheres,
+    // all of it stratiform. At 87E the column makes 4.4-6.7 mm/d at ~2.2 km at 28-34S (NASA total 2.3-2.7) and 19-26 % reaches the sea;
+    // the fraction climbs 22 -> 43 -> 66 % from 32S to 36S to 40S, i.e. along this taper, as the lowest cloud level drops 1540 -> 819 m.
+    const double rh_ocean_ml_lat0 = knob::real(knob::ATM_RH_OCEAN_ML_LAT0);
+    const double rh_ocean_ml_lat1 = knob::real(knob::ATM_RH_OCEAN_ML_LAT1);
+    const bool   rh_ocean_ml_shipped_taper = (rh_ocean_ml_lat0 == 30.0 && rh_ocean_ml_lat1 == 40.0);
     const double rh_land_east_ml   = knob::real(knob::ATM_RH_LAND_EAST_ML);            // mixed-layer depth above ground [m], 0 = off
     const double rh_land_east_ml_s = knob::real(knob::ATM_RH_LAND_EAST_ML_STRENGTH);   // 0..1 partial mixing, default 1
     const double rh_land_east_ml_T = knob::real(knob::ATM_RH_LAND_EAST_ML_T);          // deg C, no mixed layer on ground at least this warm
@@ -1450,7 +1457,9 @@ void cAtmosphereModel::initWaterWapour() {
             double q_ml0 = -1.0, ml_w = 0.0;
             if (rh_ocean_ml > 0.0 && i_mount == 0) {
                 const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
-                const double x = (alat - 30.0) / 10.0;
+                const double x = rh_ocean_ml_shipped_taper ? (alat - 30.0) / 10.0
+                               : (rh_ocean_ml_lat1 > rh_ocean_ml_lat0) ? (alat - rh_ocean_ml_lat0) / (rh_ocean_ml_lat1 - rh_ocean_ml_lat0)
+                               : (alat >= rh_ocean_ml_lat0 ? 1.0 : 0.0);   // _LAT1 <= _LAT0: a step at _LAT0
                 ml_w = (x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
                 // ATM_RH_OCEAN_ML_STRENGTH=<0..1>, default 1 (x1.0, the ON branch unchanged bit for bit): PARTIAL mixing -- RH moves
                 // this fraction of the way from the Manabe-Wetherald value to the well-mixed one. Fully mixed (wb32a/b, 1000 / 1500 m)
