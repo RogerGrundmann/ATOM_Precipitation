@@ -26,7 +26,7 @@ This section is the up-to-date summary. The full record, with every measurement,
 
 **The working branch**
 
-The best verified configuration is not the compiled-in default. It is a set of 54 environment knobs in
+The best verified configuration is not the compiled-in default. It is a set of 56 environment knobs in
 `python/working_branch.env`, each with its evidence in a comment. It makes the water budget conserve, repairs the
 convection scheme, gives the surface a real evaporation (ocean and land) and prescribes the initial humidity
 (land, ocean, storm track, polar ocean).
@@ -37,18 +37,18 @@ cd python
 OMP_NUM_THREADS=8 ../cli/atm config_wb7.xml      # 600 iterations from scratch, about 22 minutes
 ```
 
-Verified at 600 iterations from scratch (`python/run_wb66.sh`), precipitation against the NASA field:
+Verified at 600 iterations from scratch (`python/run_wb68.sh`), precipitation against the NASA field:
 
 | | model | NASA |
 |---|---|---|
-| global mean, mm/a | 970.1 (-0.8 %) | 978.3 |
-| pattern correlation r | 0.631 | |
-| sigma model / NASA | 1.16 | 1.00 |
-| \|lat\| 0-15 / 15-35 / 35-65 / 65-90, mm/a | 1769 / 564 / 946 / 316 | 1487 / 761 / 981 / 364 |
-| land / ocean, mm/a | 644 / 1099 | 782 / 1056 |
-| evaporation, mm/a; P/E | 849; 1.14 | about 1000; 1.00 |
+| global mean, mm/a | 1016.9 (+4.0 %) | 978.3 |
+| pattern correlation r | 0.648 | |
+| sigma model / NASA | 1.14 | 1.00 |
+| \|lat\| 0-15 / 15-35 / 35-65 / 65-90, mm/a | 1769 / 649 / 1006 / 316 | 1487 / 761 / 981 / 364 |
+| land / ocean, mm/a | 644 / 1165 | 782 / 1056 |
+| evaporation, mm/a; P/E | 849; 1.20 | about 1000; 1.00 |
 
-No drift over iterations 100-600 (970.3 -> 970.1 mm/a), no cell above 11 mm/d. For comparison, the shipped
+No drift over iterations 100-600 (1017.3 -> 1016.9 mm/a), no cell above 11 mm/d. For comparison, the shipped
 default as last measured at the same length (September 2026, before the most recent default changes) gave r about
 0.46 and sigma about 2.3, with a tropical spike of more than twice the observed rain and almost none poleward of it.
 
