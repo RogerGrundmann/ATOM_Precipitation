@@ -11,6 +11,15 @@
 # 30-34 750-1050, 34-38 750-1000;   c -- 22-26 480-650, 26-30 700-1000, 30-34 950-1350, 34-38 800-1050.  Rows poleward of 40 deg within 2 % of wb66.
 # Global mean UP by 2-3 % (a), 3-6 % (b), 5-9 % (c): the rows hold ~18 % of the globe and nothing else comes down.
 # USABLE if r >= .631, no ocean row 22-38 above 1.25x NASA, convective rain in rows 22-30 up by < 20 %, 22-26N <= 1.2x NASA (765), E Austral <= 3.3.
+# RESULT (2026-10-07 09:25-09:30, NaN 0; global | r | sigma | ocean 15-35 / 35-65 | S rows 22-26 / 26-30 / 30-34 / 34-38 / 38-42 | N row 22-26 (conv) | E Austral):
+#   control (wb66):  -0.8 % | .631 | 1.16 | 693 / 1070 | 424 / 443 / 462 / 564 / 1074 | 697 (477) | 3.20      (NASA 809 / 1107 | 728 / 841 / 950 / 1001 / 1077 | 637 | 1.86)
+#   a 26 / 38:       +2.2 % | .644 | 1.15 | 740 / 1150 | 418 / 469 / 644 / 964 / 1184 | 684 (463) | 3.23
+#   b 22 / 38:       +4.0 % | .648 | 1.14 | 805 / 1161 | 437 / 552 / 831 / 1070 / 1187 | 716 (486) | 3.28
+#   c 18 / 36:       +7.7 % | .650 | 1.14 | 945 / 1178 | 546 / 737 / 1156 / 1230 / 1191 | 860 (588) | 3.36
+# a and b USABLE on every criterion; c fails three (22-26N 1.35x NASA, convective rain in the northern rows 22-30 +41 %, E Austral 3.36).
+# Pre-registered ranges met except row 34-38 in a and b (964 / 1070 against 700-950 / 750-1000: the low deck forms and adds generation) and row 38-42
+# (+10 %, it lies inside the new taper end at 38). Rows poleward of 42 deg, land, the tropics and the 65-90 band are unchanged to the digit.
+# At 87E the fraction reaching the sea at 32S / 36S goes 22 / 43 % -> a 33 / 60, b 43 / 61, c 57 / 63.
 set -u; cd "$(dirname "$0")"; rm -f WB67_DONE
 for t in wb67a wb67b wb67c; do
   mkdir output_$t || { touch WB67_DONE; exit 1; }
