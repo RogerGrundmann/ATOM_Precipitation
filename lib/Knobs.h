@@ -86,6 +86,7 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_MC_ED_AREA, "0", Result, 'R', "area-weight the convective downdraft evaporation (working branch 1)") \
     X(ATM_MC_MB_SAT_LAND, "0", Result, 'P', "land columns: cloud-base mass flux saturates, M_b -> M_s*tanh(M_b/M_s), M_s in kg/(m2 s) (0 = off)") \
     X(ATM_MC_MB_SAT_OCEAN, "0", Result, 'P', "ocean columns: cloud-base mass flux saturates, M_b -> M_s*tanh(M_b/M_s), M_s in kg/(m2 s) (0 = off)") \
+    X(ATM_MC_CMB_OCEAN, "1", Result, 'P', "ocean columns: factor on the cloud-base mass-flux coefficient c_mb (M_b = rho*c_mb*sqrt(2 CAPE)), applied before ATM_MC_MB_SAT_OCEAN (1 = off)") \
     X(ATM_MC_ML_LCL, "0", Result, 'R', "with ATM_MC_ML_PARCEL: convective base = the mixed-layer parcel's LCL (not the stratiform-cloud base)") \
     X(ATM_MC_ML_PARCEL, "0", Result, 'R', "deep-convection parcel from the 0-500 m mixed layer (1: dq = ATM_MC_Q_ADD, 2: dq = sub-grid sigma_q) instead of the saturated cloud-base env") \
     X(ATM_MC_Q_ADD, "1.0e-4", Result, 'P', "parcel moisture excess kg/kg (shipped constant q_v_u_add)") \

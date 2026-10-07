@@ -222,9 +222,17 @@ private:
     // tropical-ocean rain is far too peaked -- |lat| <= 30 ocean p50/p90/p99 2.1 / 18.3 / 28.6 mm/d against NASA 2.6 / 6.5 / 8.4;
     // 24 % of the area rains > 8 mm/d and carries 77 % of the rain (NASA 2 % / 7 %); ocean 0-15 3377 mm/a against 1440. Mean
     // M_b 0.032 at 5.6 mm/d, so M_s ~0.035-0.045 is a ceiling of ~6-8 mm/d. Separate from the land knob: the two surfaces differ.
+    // ATM_MC_CMB_OCEAN=<factor> (2026-10-07), default 1 = off (the multiplication is skipped, byte-identical): OCEAN columns only, the
+    // seed rho*c_mb*sqrt(2 CAPE) is multiplied by <factor> BEFORE the saturation, i.e. the approach to the ceiling is slower and the
+    // ceiling itself is unchanged. WHY (wb68, |lat| <= 30 ocean): convective rain is a fixed function of the sea temperature
+    // (r 0.886, NASA's rain 0.598; iteration 20 against 520 pattern r 0.9999) and at 87E the flux is 93-100 % of the ceiling from 9S
+    // to 15N. Medians by SST class 27-28 / 28-29 / 29-31 C: 3.2 / 5.5 / 6.3 mm/d against NASA 2.6 / 4.3 / 6.0 -- too wet below the
+    // warm pool, right at it. Moving the RH-SST relation instead (wb55) lost the warm-pool peak (p99 7.1-7.4 against 8.4).
     double mbSat(double M_b, int j, int k) const {
         static const double M_s = knob::real(knob::ATM_MC_MB_SAT_LAND);
         static const double M_o = knob::real(knob::ATM_MC_MB_SAT_OCEAN);
+        static const double c_o = knob::real(knob::ATM_MC_CMB_OCEAN);
+        if (c_o != 1.0 && m.i_topography[j][k] <= 0) M_b *= c_o;
         const double S = (m.i_topography[j][k] > 0) ? M_s : M_o;
         if (S <= 0.0) return M_b;
         return S * std::tanh(M_b / S); }
