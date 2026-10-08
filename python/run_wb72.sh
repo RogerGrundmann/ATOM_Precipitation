@@ -6,6 +6,12 @@
 #   global +0.2 to +1.0 % | r >= .648 | sigma 1.08-1.12 | ocean 0-15 / 15-35 1640-1690 / 740-770 | land 35-65 625-655 | land 65-90 250-280 | 65-90 band 315-340
 #   P/E 1.00-1.04 | N polar land 0-200 m 420-470, 1000-2000 m 440-500 | E Antarctica <= 160 | N Europe <= 1150 | no cell > 12 mm/d
 #   HOLDS if also: zero NaN, no drift (global mean within 0.5 % over 100-600), max |v| not growing (the new code touches no dynamics).
+# RESULT (2026-10-08 09:20, 8 threads, 2.2 s/iter; wb72.out) -- HOLDS, every pre-registered range met; ADOPTED into working_branch.env:
+#   984.9 mm/a (+0.7 %), r .650, sigma 1.09, bands 1676/612/1013/322, land/ocean 649/1118, ocean 0-15 / 15-35 1676 / 759, land 35-65 / 65-90 638 / 259,
+#   E 946.8 (ocean 1182, land 364, E/P 0.56), P/E 1.04, zero NaN, no drift (984.2 -> 984.9 over 100-600; 0-15 +9, 35-65 -8 mm/a), max |v| 2.47 m/s at 15S 71W
+#   (as wb68), converged 1, wettest cell 10.6 mm/d. Land poleward of 60 deg, N 0-200 / 200-500 / 500-1000 / 1000-2000 / > 2000 m 442 / 457 / 531 / 461 / 242
+#   (NASA 555 / 460 / 532 / 452 / 310), S 283 / 298 / 305 / 327 / 119 (367 / 384 / 375 / 296 / 91); N polar land 329 / 418, Antarctica 207 / 204,
+#   W Siberia 351 / 752, E Siberia 394 / 366, N Europe 1112 / 877, Canada 386 / 308, Greenland 250 / 392, E Antarctica 123 / 82, W Antarctica 333 / 392.
 set -u; cd "$(dirname "$0")"; rm -f WB72_DONE; t=wb72
 mkdir output_$t || { touch WB72_DONE; exit 1; }
 [ -e config_$t.xml ] && { touch WB72_DONE; exit 1; }

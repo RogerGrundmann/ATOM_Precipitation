@@ -48,10 +48,10 @@ for nm,(a,b,c,d) in R.items():
 # ---------- evaporation: true deficit under WIND=1 GUST=3
 V=np.sqrt(s['u-Component']**2+s['v-Component']**2+s['w-Component']**2)
 cM=lambda v: 11.0*0.750062*(1+3.6*v/16.)/30.
-W3=np.hypot(V,float(os.environ.get('G','3'))); sd=np.where(oc,E/cM(W3),0)
+G0=float(os.environ.get('G','3')); W3=np.hypot(V,G0); sd=np.where(oc,E/cM(W3),0)
 Es=np.where(T>=0,6.1078*np.exp(17.2694*T/(T+273.15-35.86)),6.1078*np.exp(21.8746*T/(T+273.15-7.66)))
-print(f'\n== EVAPORATION as run (WIND=1, GUST=3): global P {365*g(P,w>0):.0f} E {365*g(E,w>0):.0f}; ocean E {365*g(E,oc):.0f} P {365*g(P,oc):.0f}; land E {365*g(E,land):.0f} P {365*g(P,land):.0f} (E/P {g(E,land)/g(P,land):.2f})')
-print('ocean band | E | deficit hPa (% of E_sat) | |V| | W=hypot(V,3)')
+print(f'\n== EVAPORATION as run (WIND=1, GUST={G0:g}): global P {365*g(P,w>0):.0f} E {365*g(E,w>0):.0f}; ocean E {365*g(E,oc):.0f} P {365*g(P,oc):.0f}; land E {365*g(E,land):.0f} P {365*g(P,land):.0f} (E/P {g(E,land)/g(P,land):.2f})')
+print('ocean band | E | deficit hPa (% of E_sat) | |V| | W=hypot(V,G)')
 for lo,hi in[(0,15),(15,25),(25,35),(35,50),(50,65),(65,90)]:
     m=oc&(al>=lo)&(al<hi)
     print(f'  {lo:2d}-{hi:2d} | {365*g(E,m):5.0f} | {g(sd,m):5.2f} ({100*g(sd,m)/g(Es,m):3.0f} %) | {g(V,m):4.2f} | {g(W3,m):4.2f}')
