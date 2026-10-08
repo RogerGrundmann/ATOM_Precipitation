@@ -1,5 +1,5 @@
 #!/bin/bash
-# *** PROPOSAL, NOT RUN YET (2026-10-08). ***
+# RUN 2026-10-08 (user: "run wb73 and record part B as structural").
 # wb73a / b / c = working branch (wb72 stack, 60 knobs) with the high-latitude ocean humidity re-set -- EXISTING knobs only (working branch:
 # ATM_RH_STORM_SST=0.005, _MAX 0.04, _REF 4, ATM_RH_STORM_POLAR=1.08):
 #   a  ATM_RH_STORM_SST=0.009, _MAX 0.10, _REF 3, ATM_RH_STORM_POLAR=1.0 (the polar floor off)
@@ -18,6 +18,13 @@
 #   c   | .651  | 0.89 0.99 1.00 0.83 0.74 | 0.91 1.02 0.94 0.80 0.96 1.06 | 418 / 367 | 0.129
 # USABLE if the row misfit falls below 0.17, ocean 65-90 S >= 360 and N within 330-430, no ocean row between 46 and 74 deg above 1.25x NASA,
 # global r >= .650, global mean within 2 % of NASA; land and everything equatorward of 48 deg unchanged (to 0.5 %).
+# RESULT (2026-10-08 09:32, nm 60, 3 x 6 threads; wb73.out). global | r | S rows 54-58 58-62 62-66 66-70 70-74 | N rows 54-58 58-62 62-66 66-70 70-74 74-82 | ocean 65-90 S / N | row misfit
+#   a | +0.2 % | .649 | 0.97 1.14 1.27 1.11 0.87 | 0.93 1.12 1.05 0.87 1.03 1.09 | 533 / 386 | 0.134 -> fails r >= .650 and row 62-66S (923 / 725 = 1.27x): the cold-water lift is too strong
+#   b | -0.1 % | .652 | 0.99 1.11 1.10 0.86 0.67 | 1.02 1.17 1.06 0.84 0.92 0.88 | 419 / 337 | 0.138 -> USABLE, every criterion met
+#   c | -0.9 % | .649 | 0.88 1.03 1.15 1.05 0.86 | 0.83 0.99 0.94 0.79 0.96 1.05 | 508 / 362 | 0.126 -> fails r >= .650: the warm North Atlantic drift is dried too far (9-14 C north 914 / 1314)
+# b by sea temperature at 50-66 deg, S / N: -6..-2 C 0.83 / 0.60 (was 0.65 / 0.47), 3..5 C 1.00 / 1.31, 9..14 C 1.50 / 0.91 (was 1.57 / 1.12); sigma 1.08, P/E 1.01.
+# The offline estimate was right for b (r .652, N 354 -> 337, misfit 0.153 -> 0.138) and UNDER-estimated the cold-water lift (S ocean 65-90: a 435 est. -> 533, b 368 -> 419).
+# Land and everything equatorward of 48 deg unchanged in all three. b goes to the 600 (run_wb74.sh).
 set -u; cd "$(dirname "$0")"; rm -f WB73_DONE
 for t in wb73a wb73b wb73c; do
   mkdir output_$t || { touch WB73_DONE; exit 1; }
