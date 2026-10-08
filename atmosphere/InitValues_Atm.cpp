@@ -1203,6 +1203,18 @@ void cAtmosphereModel::initWaterWapour() {
     const double rh_ocean_ml_lat0 = knob::real(knob::ATM_RH_OCEAN_ML_LAT0);
     const double rh_ocean_ml_lat1 = knob::real(knob::ATM_RH_OCEAN_ML_LAT1);
     const bool   rh_ocean_ml_shipped_taper = (rh_ocean_ml_lat0 == 30.0 && rh_ocean_ml_lat1 == 40.0);
+    // ATM_RH_LAND_ML=<depth m> (2026-10-08, RC-RESID: polar land), default 0 = off (weight exactly 0, block skipped, byte-identical),
+    // with ATM_RH_LAND_ML_STRENGTH (0.4), ATM_RH_LAND_ML_LAT0 / _LAT1 (55 / 65 deg, smoothstep). The land twin of ATM_RH_OCEAN_ML:
+    // below <depth> above the GROUND the vapour moves the fraction <strength> of the way toward the ground value carried upward
+    // (constant q, RH capped 0.98). WHY (read-only on wb68): high-latitude LOWLAND is starved -- land poleward of 60 deg below 200 m
+    // rains 106 mm/a in the north against NASA 555 (W Siberia 62 / 752), 91 / 367 in the south; at 87E, 66-74N, snow forms at
+    // 1-3 km (0.144 mm/d at 2.2 km) and 0.009 mm/d reaches the ground through the cloud-free layer below, where the RH is 0.61-0.67
+    // against H_crit 0.61-0.74. The loss ATM_RH_OCEAN_ML and ATM_RH_STORM_POLAR closed over the sea; both are ocean-only.
+    // Meant to be used with ATM_HCRIT_SFC_POLAR (elevated ground). ATM_RH_LAND_QCAP still caps the result. A scaffold.
+    const double rh_land_ml      = knob::real(knob::ATM_RH_LAND_ML);
+    const double rh_land_ml_s    = knob::real(knob::ATM_RH_LAND_ML_STRENGTH);
+    const double rh_land_ml_lat0 = knob::real(knob::ATM_RH_LAND_ML_LAT0);
+    const double rh_land_ml_lat1 = knob::real(knob::ATM_RH_LAND_ML_LAT1);
     const double rh_land_east_ml   = knob::real(knob::ATM_RH_LAND_EAST_ML);            // mixed-layer depth above ground [m], 0 = off
     const double rh_land_east_ml_s = knob::real(knob::ATM_RH_LAND_EAST_ML_STRENGTH);   // 0..1 partial mixing, default 1
     const double rh_land_east_ml_T = knob::real(knob::ATM_RH_LAND_EAST_ML_T);          // deg C, no mixed layer on ground at least this warm
@@ -1469,6 +1481,13 @@ void cAtmosphereModel::initWaterWapour() {
             }
             const double lml_w = rh_land_east_ml_w(j, k);            // ATM_RH_LAND_EAST_ML, see above rh_land_of's print
             double q_lml0 = -1.0;
+            double pml_w = 0.0, q_pml0 = -1.0;                       // ATM_RH_LAND_ML, see where the knob is read
+            if (rh_land_ml > 0.0 && i_mount > 0 && i_mount < im) {
+                const double alat = fabs(90.0 - j * 180.0 / (double)(jm - 1));
+                const double x = (rh_land_ml_lat1 > rh_land_ml_lat0) ? (alat - rh_land_ml_lat0) / (rh_land_ml_lat1 - rh_land_ml_lat0)
+                               : (alat >= rh_land_ml_lat0 ? 1.0 : 0.0);
+                pml_w = rh_land_ml_s * ((x <= 0.0) ? 0.0 : (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x));
+            }
             for (int i = 0; i < im; i++) {
                 double t_u = t.x[i][j][k] * t_0;
                 double p_u = p_stat.x[i][j][k];
@@ -1668,6 +1687,13 @@ void cAtmosphereModel::initWaterWapour() {
                     else if (q_lml0 >= 0.0 && get_layer_height(i) - get_layer_height(i_mount) <= rh_land_east_ml) {
                         const double rh_ml = std::min(0.98, q_lml0 / q_sat);
                         if (rh_ml > rh_i) rh_i += lml_w * (rh_ml - rh_i);
+                    }
+                }
+                if (pml_w > 0.0 && i >= i_mount) {                   // ATM_RH_LAND_ML
+                    if (i == i_mount) q_pml0 = rh_i * q_sat;
+                    else if (q_pml0 >= 0.0 && get_layer_height(i) - get_layer_height(i_mount) <= rh_land_ml) {
+                        const double rh_ml = std::min(0.98, q_pml0 / q_sat);
+                        if (rh_ml > rh_i) rh_i += pml_w * (rh_ml - rh_i);
                     }
                 }
                 c.x[i][j][k]     = (i >= i_mount) ? rh_i * q_sat : 0.0;

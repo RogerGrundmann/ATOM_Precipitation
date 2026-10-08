@@ -108,7 +108,7 @@ namespace CloudFraction {
     // cloud fraction, which must share one curve. MoistConvection's four uses (parcel spread, cloud-base test) are NOT changed.
     // Ocean columns (i_topography == 0) are never touched: their surface pressure follows T_s (cold columns ~905 hPa).
     template <class Model>
-    inline double pEff(const Model &m, double p_hPa, int j, int k){
+    inline double pEffSfc(const Model &m, double p_hPa, int j, int k){
         static const bool   on  = [](){ return knob::on(knob::ATM_HCRIT_SFC); }();
         if (!on) return p_hPa;
         static const double lim = [](){ return knob::real(knob::ATM_HCRIT_SFC_LAT); }();
@@ -127,6 +127,34 @@ namespace CloudFraction {
         if (!(p_g > 0.0) || p_g >= 1000.0) return p_hPa;
         const double p_s = 1000.0 * std::min(1.0, p_hPa / p_g);
         return p_hPa + w * (p_s - p_hPa);
+    }
+
+    // ATM_HCRIT_SFC_POLAR=<0|1> (2026-10-08, RC-RESID: polar land), default 0 = off (pEff returns pEffSfc untouched, byte-identical),
+    // with ATM_HCRIT_SFC_POLAR_LAT=<deg> (default 55: no weight equatorward of it, smoothstep to full weight 10 deg poleward).
+    // On LAND columns the pressure handed to hCrit() becomes p x p_sea / p_ground, p_sea the column's own sea-level pressure
+    // (p_stat at level 1, the barometric value kept inside the rock), so elevated ground gets the threshold a lowland ground has
+    // in the same column. NOT the 1000 hPa of ATM_HCRIT_SFC: a cold column stands at 780-920 hPa at sea level, and lifting its
+    // ground to 1000 hPa removes the high-latitude land rain altogether (wb39b: land 35-65 628 -> 18).
+    // WHY (read-only on wb68, land poleward of 60 deg, model / NASA mm/a by ground height): N 0-200 m 106 / 555, 200-500 m 250 / 460,
+    // 500-1000 m 743 / 532, 1000-2000 m 1174 / 452, above 2000 m 765 / 310; S 91 / 367, 199 / 384, 377 / 375, 525 / 296, 192 / 91
+    // (W Siberia 62 / 752, Greenland 661 / 392, E Antarctica 194 / 82). hCrit is a function of pressure alone, 0.30 above 550 hPa,
+    // while the initial RH profile is terrain-following there (ATM_RH_SIGMA_LAT): elevated ground carries cloud AT the ground.
+    // The lowland half of the defect (snow formed at 1-3 km sublimates below) is ATM_RH_LAND_ML. Same scope as ATM_HCRIT_SFC.
+    template <class Model>
+    inline double pEff(const Model &m, double p_hPa, int j, int k){
+        const double p_t = pEffSfc(m, p_hPa, j, k);
+        static const bool pol = [](){ return knob::on(knob::ATM_HCRIT_SFC_POLAR); }();
+        if (!pol) return p_t;
+        static const double lat0 = [](){ return knob::real(knob::ATM_HCRIT_SFC_POLAR_LAT); }();
+        const int i_g = m.i_topography[j][k];
+        if (i_g <= 1 || i_g >= m.im) return p_t;
+        const double x = (std::fabs(90.0 - j * 180.0 / (double)(m.jm - 1)) - lat0) / 10.0;
+        if (x <= 0.0) return p_t;
+        const double w = (x >= 1.0) ? 1.0 : x * x * (3.0 - 2.0 * x);
+        const double p_g = m.p_stat.x[i_g][j][k], p_sea = m.p_stat.x[1][j][k];
+        if (!(p_g > 0.0) || !(p_sea > p_g)) return p_t;
+        const double p_s = p_sea * std::min(1.0, p_t / p_g);
+        return p_t + w * (p_s - p_t);
     }
 
     // Cloudy area fraction of the cell, from TOTAL water q_t = q_v + q_c + q_i.

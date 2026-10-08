@@ -140,6 +140,8 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_SIGMA_SFC, "0", Result, 'R', "initial RH profile sigma = p / local ground pressure on land (was p/p_0: elevated ground starts drier)") \
     X(ATM_HCRIT_SFC, "0", Result, 'P', "land columns: the stratiform cloud threshold H_crit is evaluated at sigma = p / the column's own surface pressure (H_crit -> 1 at the ground on a plateau as at sea level); not the convection scheme") \
     X(ATM_HCRIT_SFC_LAT, "0", Result, 'P', "ATM_HCRIT_SFC: full weight equatorward of this latitude, none from 10 deg poleward of it (deg; 0 = every latitude)") \
+    X(ATM_HCRIT_SFC_POLAR, "0", Result, 'R', "high-latitude land columns: the stratiform cloud threshold H_crit is evaluated at p x (the column's own sea-level pressure) / (its ground pressure), so elevated ground gets the threshold lowland has in the same column (0 = off)") \
+    X(ATM_HCRIT_SFC_POLAR_LAT, "55", Result, 'P', "ATM_HCRIT_SFC_POLAR: no weight equatorward of this latitude, full weight from 10 deg poleward of it (deg)") \
     X(ATM_RH_SIGMA_LAT, "0", Result, 'R', "poleward of this latitude (deg, 10 deg taper) the initial RH profile uses sigma = p / the column's own surface pressure, land columns (0 = off)") \
     X(ATM_RH_SIGMA_LAT_OCEAN, "0", Result, 'R', "ATM_RH_SIGMA_LAT also on ocean columns") \
     X(ATM_RH_LAND_EAST, "0", Result, 'P', "ATM_RH_LAND: strength (0..1) by which open ocean to the EAST (trade-wind fetch, 2000 km) cancels the subtropical descent drying") \
@@ -150,6 +152,10 @@ enum Kind { Result, Diag };   // Diag = print, dump or output cadence only; cann
     X(ATM_RH_LAND_DRY, "0.35", Result, 'P', "ATM_RH_LAND: driest land surface RH (descent core, far inland)") \
     X(ATM_RH_LAND_L, "1500", Result, 'P', "ATM_RH_LAND: continentality e-folding distance from the ocean, km") \
     X(ATM_RH_OCEAN, "0.75", Result, 'R', "initial surface RH over tropical ocean (|lat|<=30, taper to 45); the marine BL keeps it on affordable runs") \
+    X(ATM_RH_LAND_ML, "0", Result, 'R', "high-latitude land (|lat| taper ATM_RH_LAND_ML_LAT0..LAT1): well-mixed initial boundary layer of this depth above the GROUND in m, constant q from the ground, RH capped 0.98 (0 = off)") \
+    X(ATM_RH_LAND_ML_STRENGTH, "0.4", Result, 'P', "ATM_RH_LAND_ML: partial mixing, fraction (0..1) of the way from the prescribed RH to the well-mixed one") \
+    X(ATM_RH_LAND_ML_LAT0, "55", Result, 'P', "ATM_RH_LAND_ML: latitude where the weight starts, deg (0 equatorward of it)") \
+    X(ATM_RH_LAND_ML_LAT1, "65", Result, 'P', "ATM_RH_LAND_ML: latitude where the weight is full, deg (smoothstep from _LAT0)") \
     X(ATM_RH_OCEAN_ML, "0", Result, 'R', "extratropical ocean (|lat| 30..40 taper): well-mixed initial boundary layer of this depth in m, constant q from the surface, RH capped 0.98 (0 = off)") \
     X(ATM_RH_OCEAN_ML_STRENGTH, "1", Result, 'P', "ATM_RH_OCEAN_ML: partial mixing, fraction (0..1) of the way from the Manabe-Wetherald RH to the well-mixed one") \
     X(ATM_RH_OCEAN_ML_LAT0, "30", Result, 'P', "ATM_RH_OCEAN_ML: latitude where the weight starts, deg (0 equatorward of it)") \
