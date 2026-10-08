@@ -1,11 +1,17 @@
 #!/bin/bash
-# *** PROPOSAL, NOT RUN YET (2026-10-08). ***
+# RUN 2026-10-08 (user: "run wb74, adopt and push when it holds").
 # wb74 = wb73b at 600 from scratch = working branch (wb72 stack, 60 knobs) with ATM_RH_STORM_SST 0.005 -> 0.007, _MAX 0.04 -> 0.08, _REF 4 -> 3 and
 # ATM_RH_STORM_POLAR 1.08 -> 1.0 (the polar floor off). cli/atm_plm (-O2, = HEAD, md5 fe6987f6), 8 threads.
 # PRE-REGISTERED from the nm 60 screen wb73b (977.4 mm/a, r .652, sigma 1.08, bands 1666/608/1002/322, ocean 35-65 / 65-90 1137 / 374, P/E 1.01):
 #   global -0.5 to +0.5 % | r >= .650 | sigma 1.06-1.10 | ocean 35-65 1120-1155 | ocean 65-90 S 400-440, N 320-355 | no ocean row 46-74 deg above 1.25x NASA
 #   row misfit (stormfit.py) <= 0.15 | land 35-65 / 65-90 625-655 / 250-280 | P/E 1.00-1.05 | no cell > 12 mm/d
 #   HOLDS if also: zero NaN, no drift (global mean within 0.5 % over 100-600), max |v| not growing.
+# RESULT (2026-10-08 09:56, 8 threads, 2.15 s/iter; wb74.out) -- HOLDS, every pre-registered range met; ADOPTED into working_branch.env:
+#   978.0 mm/a (-0.0 %), r .652, sigma 1.08, bands 1676/612/994/318, land/ocean 649/1108, ocean 35-65 / 65-90 1128 / 372 (Southern 417 / 490, Arctic 335 / 379),
+#   ocean rows 50-54 .. 74-82, model / NASA: S 1.07 0.98 1.10 1.09 0.85 0.67 0.92, N 0.96 1.01 1.16 1.05 0.83 0.91 0.88; row misfit 0.137 (wb72 0.234);
+#   50-66 deg by sea temperature S / N: -6..-2 C 0.83 / 0.59, 3..5 C 0.99 / 1.29, 9..14 C 1.49 / 0.91; land 35-65 / 65-90 637 / 261; E 947.5, P/E 1.03;
+#   zero NaN, no drift (977.2 -> 978.0), max |v| 2.47 m/s at 15S 71W (as wb72), converged 1, wettest cell 10.6 mm/d.
+#   LEFT: S Pacific sector 150E-75W at 50-66S 1.25-1.40x (S Indian / S Atlantic 0.78-0.91x), row 70-74S 0.67x, N Pacific 54-62N 1.20-1.31x.
 set -u; cd "$(dirname "$0")"; rm -f WB74_DONE; t=wb74
 mkdir output_$t || { touch WB74_DONE; exit 1; }
 [ -e config_$t.xml ] && { touch WB74_DONE; exit 1; }

@@ -29,7 +29,7 @@ This section is the up-to-date summary. The full record, with every measurement,
 The best verified configuration is not the compiled-in default. It is a set of 60 environment knobs in
 `python/working_branch.env`, each with its evidence in a comment. It makes the water budget conserve, repairs the
 convection scheme, gives the surface a real evaporation (ocean and land) and prescribes the initial humidity
-(land, ocean, storm track, polar ocean and polar land).
+(land, ocean, storm track, high-latitude ocean and polar land).
 
 ```bash
 cd python
@@ -37,18 +37,18 @@ cd python
 OMP_NUM_THREADS=8 ../cli/atm config_wb7.xml      # 600 iterations from scratch, about 22 minutes
 ```
 
-Verified at 600 iterations from scratch (`python/run_wb72.sh`), precipitation against the NASA field:
+Verified at 600 iterations from scratch (`python/run_wb74.sh`), precipitation against the NASA field:
 
 | | model | NASA |
 |---|---|---|
-| global mean, mm/a | 984.9 (+0.7 %) | 978.3 |
-| pattern correlation r | 0.650 | |
-| sigma model / NASA | 1.09 | 1.00 |
-| \|lat\| 0-15 / 15-35 / 35-65 / 65-90, mm/a | 1676 / 612 / 1013 / 322 | 1487 / 761 / 981 / 364 |
-| land / ocean, mm/a | 649 / 1118 | 782 / 1056 |
-| evaporation, mm/a; P/E | 947; 1.04 | about 1000; 1.00 |
+| global mean, mm/a | 978.0 (-0.0 %) | 978.3 |
+| pattern correlation r | 0.652 | |
+| sigma model / NASA | 1.08 | 1.00 |
+| \|lat\| 0-15 / 15-35 / 35-65 / 65-90, mm/a | 1676 / 612 / 994 / 318 | 1487 / 761 / 981 / 364 |
+| land / ocean, mm/a | 649 / 1108 | 782 / 1056 |
+| evaporation, mm/a; P/E | 948; 1.03 | about 1000; 1.00 |
 
-No drift over iterations 100-600 (984.2 -> 984.9 mm/a), no cell above 11 mm/d. For comparison, the shipped
+No drift over iterations 100-600 (977.2 -> 978.0 mm/a), no cell above 11 mm/d. For comparison, the shipped
 default as last measured at the same length (September 2026, before the most recent default changes) gave r about
 0.46 and sigma about 2.3, with a tropical spike of more than twice the observed rain and almost none poleward of it.
 
@@ -60,8 +60,8 @@ default as last measured at the same length (September 2026, before the most rec
   eastern-ocean dry zones and the narrow ITCZ lines are missing, and warm water rains uniformly.
 - Subtropical land rains too little (land 15-35 deg: 242 against 643 mm/a). East-side land cooler than 24 C cannot
   convect in an annual-mean column, and plateaus carry a warm column of their own.
-- The Southern Ocean poleward of 65 deg is too dry (316 against 490 mm/a): its rain is imported by the circumpolar
-  storms. Eastern Australia is too wet (3.3 against 1.9 mm/d), and the northern ocean at 54-62 deg by about a quarter.
+- The Southern Ocean poleward of 65 deg is too dry (417 against 490 mm/a): its rain is imported by the circumpolar
+  storms. Eastern Australia is too wet (3.3 against 1.9 mm/d), and the south-east Pacific sector at 50-66 deg by a quarter to 40 %.
 
 ## Repository layout
 
