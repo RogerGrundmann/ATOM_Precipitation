@@ -1,5 +1,5 @@
 #!/bin/bash
-# *** PROPOSAL, NOT RUN YET (2026-10-08). Dose screen after wb71: the wb71 header below is the evidence. ***
+# RUN 2026-10-08 (user: "run wb71, then the 600, adopt and push when it holds"). Dose screen after wb71: the wb71 header below is the evidence.
 # wb71a / b / c = wb69a stack + ATM_HCRIT_SFC_POLAR=1 + ATM_RH_LAND_ML=1500 with   a strength 0.45;   b 0.5;   c 0.5 and the taper 50..60 deg (both knobs).
 # wb71a / b / c = wb69a stack (working branch + ATM_MC_CMB_OCEAN=0.85 + ATM_EVAP_GUST=5) + the two new polar-land knobs (run_vplm.sh byte check):
 # SCREENING AT nm 60 from scratch, cli/atm_plm (-O2, HEAD + the knobs), 3 x 6 threads.
@@ -16,6 +16,12 @@
 #   b 0.5 : 440-510 | 460-540 | 120-140 | 640-670 | 260-300 | >= .645
 #   c 0.5, 50..60 deg: as b poleward of 60; land rows 50-60N below 300 m 284 / 388 rise toward 754 / 731; land 35-65 680-760 (NASA 643) -- may overshoot
 # USABLE if land 65-90 within 250-330 (NASA 295), E Antarctica <= 160, N Europe <= 1150, land 35-65 within 560-720, global r >= .648, no cell > 12 mm/d.
+# RESULT (2026-10-08 08:57, nm 60, 3 x 6 threads; wb71.out). Land poleward of 60 deg, N 0-200 / 200-500 / 500-1000 / 1000-2000 / > 2000 m | S 0-200 / 1000-2000 / > 2000 m:
+#   NASA      555 / 460 / 532 / 452 / 310 | 367 / 296 /  91
+#   a 0.45    444 / 460 / 540 / 473 / 248 | 287 / 338 / 123   global +0.6 %, r .650, land 35-65 / 65-90 641 / 264, N Europe 1124 (877), E Antarctica 127  -> USABLE, every range met
+#   b 0.5     530 / 552 / 641 / 545 / 279 | 324 / 377 / 133   global +1.0 %, r .648, land 35-65 / 65-90 658 / 310, N Europe 1276 -> fails N Europe <= 1150 (Canada 469 / 308, E Siberia 484 / 366)
+#   c 0.5, 50..60 deg: land rows 55-60N / 60-65N below 300 m 1108 / 1061 (NASA 731 / 640), land 35-65 743, r .644 -> fails
+# a goes to the 600 (run_wb72.sh).
 set -u; cd "$(dirname "$0")"; rm -f WB71_DONE
 for t in wb71a wb71b wb71c; do
   mkdir output_$t || { touch WB71_DONE; exit 1; }
