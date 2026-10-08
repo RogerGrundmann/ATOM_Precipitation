@@ -1,5 +1,5 @@
 #!/bin/bash
-# *** PROPOSAL, NOT RUN YET (2026-10-08). ***
+# RUN 2026-10-08 (user: "run wb70 and accept wb69a as the base").
 # wb70a / b / c = wb69a stack (working branch + ATM_MC_CMB_OCEAN=0.85 + ATM_EVAP_GUST=5) + the two new polar-land knobs (run_vplm.sh byte check):
 #   a  ATM_HCRIT_SFC_POLAR=1 + ATM_RH_LAND_ML=1500, strength 0.4 (the ocean's values), taper 55..65 deg
 #   b  the same, strength 0.25
@@ -11,6 +11,15 @@
 # EXPECTED (no offline estimate exists; direction only): the threshold lowers ground above ~500 m toward the lowland value, the mixed layer raises ground
 # below ~500 m; rain equatorward of 55 deg and all ocean unchanged to 0.5 %. The dose is unknown: the ocean needed 0.4 AND the polar RH floor.
 # USABLE if N polar land below 200 m >= 300 and above 1000 m <= 700, Antarctica 150-300, Greenland <= 550, land 35-65 within 560-720, global r >= .645.
+# RESULT (2026-10-08 08:50, nm 60, 3 x 6 threads; wb70.out). Land poleward of 60 deg by ground height 0-200 / 200-500 / 500-1000 / 1000-2000 / > 2000 m, mm/a:
+#   NASA           N 555 / 460 / 532 / 452 / 310     S 367 / 384 / 375 / 296 / 91
+#   wb69a control  N 106 / 249 / 748 / 1191 / 781    S  91 / 199 / 377 / 525 / 192
+#   a both, 0.4    N 371 / 381 / 452 / 408 / 219     S 253 / 264 / 273 / 302 / 114   global +0.3 %, r .651, sigma 1.10, land 35-65 / 65-90 626 / 224, 65-90 band 306
+#   b both, 0.25   N 209 / 206 / 256 / 257 / 146     S 167 / 172 / 179 / 212 /  89   global -0.5 %, r .653, land 35-65 / 65-90 590 / 134
+#   c ML alone     N 466 / 862 / 1786 / 2277 / 1258  S 288 / 504 / 801 / 958 / 295   global +3.3 %, r .622, land 65-90 612 -- the mixed layer needs the threshold
+# a: W Siberia 62 -> 283 (NASA 752), E Siberia 325 (366), N Europe 985 (877), Canada 319 (308), Greenland 672 -> 222 (392), E Antarctica 198 -> 116 (82),
+# W Antarctica 305 (392). The rain no longer depends on the ground height; a is USABLE (N lowland 371 >= 300, high ground <= 700, Greenland <= 550, r .651),
+# every height class at 0.7-0.9x NASA in the north -> the dose can rise. Rain equatorward of 55 deg and all ocean unchanged.
 set -u; cd "$(dirname "$0")"; rm -f WB70_DONE
 for t in wb70a wb70b wb70c; do
   mkdir output_$t || { touch WB70_DONE; exit 1; }
